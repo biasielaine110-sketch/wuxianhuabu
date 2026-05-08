@@ -26,3 +26,6 @@ Node 后端部署要点（Docker）
 
 5) Vertex 联调（可选）
    - 部署后浏览器 Network 确认 Vertex 相关请求指向你的后端；WebSocket 走 wss://后端/ws-proxy。
+
+6) Git 推送到 GitHub 失败（连接 reset / 443 超时）
+   - 见仓库根目录 GIT_PUSH.txt；或在根目录执行 .\scripts\push-github.ps1
