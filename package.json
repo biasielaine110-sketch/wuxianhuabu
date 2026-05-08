@@ -5,11 +5,15 @@
     "backend"
   ],
   "scripts": {
+    "build": "npm run build --prefix frontend",
     "dev-frontend": "npm run dev --prefix frontend",
     "dev-backend": "npm run dev --prefix backend",
     "dev-video-proxy": "npm run dev:video-proxy --prefix backend",
     "start:video-proxy": "npm run start:video-proxy --prefix backend",
     "dev": "concurrently -n web,api,video -c cyan,green,yellow \"npm run dev-frontend\" \"npm run dev-backend\" \"npm run dev-video-proxy\""
+  },
+  "engines": {
+    "node": ">=20"
   },
   "devDependencies": {
     "concurrently": "latest"

@@ -1,0 +1,4 @@
+# 不上传本地/大目录，缩短 Vercel 构建上传（勿忽略 backend 目录本身，否则 workspace 的 package.json 解析可能异常）
+backend/.doubao-rpa-profile
+backend/node_modules
+**/*.log

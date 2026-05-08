@@ -14,6 +14,14 @@
       ? String(import.meta.env.VITE_BACKEND_ORIGIN).replace(/\/$/, '')
       : '';
 
+  /** 须与 Node 后端环境变量 PROXY_HEADER 完全一致；生产请在 Vercel 设置 VITE_PROXY_HEADER */
+  const PROXY_HEADER_VALUE =
+    typeof import.meta !== 'undefined' &&
+    import.meta.env &&
+    import.meta.env.VITE_PROXY_HEADER
+      ? String(import.meta.env.VITE_PROXY_HEADER)
+      : 'Ea4-HmKSQpKIWcUwr400DRi9oZ2yr7Cy';
+
   function apiProxyHref() {
     return `${BACKEND_ORIGIN}/api-proxy`;
   }
@@ -167,7 +175,7 @@
           headers: {
             'Content-Type': 'application/json',
             // Add a random header to identify these proxied requests on the Node.js backend.
-            'X-App-Proxy': 'Ea4-HmKSQpKIWcUwr400DRi9oZ2yr7Cy',
+            'X-App-Proxy': PROXY_HEADER_VALUE,
           },
           body: JSON.stringify(requestDetails),
         };

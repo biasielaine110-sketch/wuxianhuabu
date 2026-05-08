@@ -1,8 +1,28 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "npm install",
-  "buildCommand": "npm run build --prefix frontend",
+  "installCommand": "npm install --workspace=ai-frontend",
+  "buildCommand": "npm run build",
   "outputDirectory": "frontend/dist",
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/index.html",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    }
+  ],
   "rewrites": [
     {
       "source": "/cdn-files-toapis/:path*",
@@ -11,6 +31,11 @@
     {
       "source": "/cdn-files-dashlyai/:path*",
       "destination": "https://files.dashlyai.cc/:path*"
+    },
+    { "handle": "filesystem" },
+    {
+      "source": "/:path*",
+      "destination": "/index.html"
     }
   ]
 }

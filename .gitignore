@@ -17,6 +17,9 @@ backend/.env.local
 .DS_Store
 Thumbs.db
 
+# Vercel CLI 本地关联（含 .vercel/project.json，勿提交）
+.vercel/
+
 # IDE
 .idea/
 .vscode/
