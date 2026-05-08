@@ -14,10 +14,8 @@ function timingSafeEqualStr(a: string, b: string): boolean {
  * 密码写入 Vercel 环境变量或 frontend/.env.local（勿提交），每次刷新页面都需重新输入。
  */
 export default function SiteAccessGate({ children }: { children: React.ReactNode }) {
-  const required =
-    typeof import.meta.env.VITE_SITE_PASSWORD === 'string'
-      ? import.meta.env.VITE_SITE_PASSWORD
-      : '';
+  const raw = import.meta.env.VITE_SITE_PASSWORD;
+  const required = raw != null && String(raw).trim() !== '' ? String(raw) : '';
 
   const [unlocked, setUnlocked] = useState(() => !required.trim());
   const [input, setInput] = useState('');

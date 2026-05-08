@@ -19,12 +19,22 @@ const toapisFileCdnProxy = {
 } as const;
 
 export default defineConfig(({ mode }) => {
-    const env = loadEnv(mode, process.cwd(), '');
+    // 必须从 frontend 目录读 .env*；从仓库根执行 workspace build 时 process.cwd() 常在根目录，会漏掉 frontend/.env.local
+    const envDir = path.resolve(__dirname);
+    const env = loadEnv(mode, envDir, '');
+    const sitePassword =
+      (process.env.VITE_SITE_PASSWORD && String(process.env.VITE_SITE_PASSWORD)) ||
+      (env.VITE_SITE_PASSWORD && String(env.VITE_SITE_PASSWORD)) ||
+      '';
     return {
+      root: envDir,
+      envDir,
       define: {
         // This is just generic value for the GEMINI API key.
         // This is not used at all, and can be ignored!
         'process.env.API_KEY' : JSON.stringify('api-key-this-is-not-used-can-be-ignored!'),
+        // 显式注入：保证 Vercel / monorepo 构建时 process.env 能进包（仅靠默认 loadEnv 在 cwd 不对时会丢）
+        'import.meta.env.VITE_SITE_PASSWORD': JSON.stringify(sitePassword),
       },
       server: {
         // 纯前端开发：仅 CDN 反代。若需 Vertex，另开终端 `npm run dev-backend` 并设 frontend/.env.development：
