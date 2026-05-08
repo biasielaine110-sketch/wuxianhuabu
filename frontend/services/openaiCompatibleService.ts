@@ -6,6 +6,25 @@ function normalizeBaseUrl(url: string): string {
   return u.replace(/\/+$/, '');
 }
 
+/** 生产站点常为 HTTPS，若 API Base 为 http 会被浏览器拦截（混合内容） */
+function assertHttpsNotCallingHttpApiBase(apiBaseRaw: string): void {
+  if (typeof window === 'undefined') return;
+  if (window.location.protocol !== 'https:') return;
+  const raw = apiBaseRaw.trim();
+  if (!raw) return;
+  try {
+    const href = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    const u = new URL(href);
+    if (u.protocol === 'http:') {
+      throw new Error(
+        '当前页面为 HTTPS，API Base URL 不能使用 http://（浏览器会拦截混合内容）。请将 Base URL 改为 https:// 端点，或在本地 http 环境调试。'
+      );
+    }
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('混合内容')) throw e;
+  }
+}
+
 function isToApisHost(baseNormalized: string): boolean {
   try {
     const host = new URL(baseNormalized).hostname.toLowerCase();
@@ -123,28 +142,40 @@ function rewriteKnownImageCdnToSameOrigin(imageUrl: string): string {
 }
 
 async function fetchUrlAsBase64(imageUrl: string, signal?: AbortSignal): Promise<string> {
-  const fetchUrl = rewriteKnownImageCdnToSameOrigin(imageUrl);
-  const res = await fetch(fetchUrl, { mode: 'cors', credentials: 'omit', signal });
-  if (!res.ok) {
+  const proxied = rewriteKnownImageCdnToSameOrigin(imageUrl);
+  const candidates = proxied === imageUrl ? [imageUrl] : [proxied, imageUrl];
+  let lastStatus = 0;
+  for (const url of candidates) {
+    try {
+      const res = await fetch(url, { mode: 'cors', credentials: 'omit', signal });
+      if (res.ok) {
+        const blob = await res.blob();
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const s = reader.result as string;
+            const i = s.indexOf(',');
+            resolve(i >= 0 ? s.slice(i + 1) : s);
+          };
+          reader.onerror = () => reject(new Error('读取生成图二进制失败'));
+          reader.readAsDataURL(blob);
+        });
+      }
+      lastStatus = res.status;
+    } catch {
+      /* 尝试下一候选 URL */
+    }
+  }
+  {
+    const triedProxy = candidates[0] !== imageUrl;
     throw new Error(
-      `无法下载生成图 (${res.status})。` +
-        (fetchUrl !== imageUrl
-          ? '若已部署生产环境，请为 /cdn-files-toapis 与 /cdn-files-dashlyai 配置反向代理到对应 CDN 域名。原始链接：'
+      `无法下载生成图${lastStatus ? ` (${lastStatus})` : ''}。` +
+        (triedProxy
+          ? '已尝试同源代理与直连 CDN。若在生产环境，请确认 vercel.json 中 /cdn-files-toapis、/cdn-files-dashlyai 反代仍生效。原始链接：'
           : '若为跨域限制，请直接打开链接保存：') +
         imageUrl.slice(0, 200)
     );
   }
-  const blob = await res.blob();
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const s = reader.result as string;
-      const i = s.indexOf(',');
-      resolve(i >= 0 ? s.slice(i + 1) : s);
-    };
-    reader.onerror = () => reject(new Error('读取生成图二进制失败'));
-    reader.readAsDataURL(blob);
-  });
 }
 
 function sniffMimeFromBase64(raw: string): string {
@@ -187,6 +218,8 @@ async function toApisUploadImageBlob(blob: Blob, filename: string, signal?: Abor
   form.append('file', blob, filename);
   const res = await fetch(`${base}/uploads/images`, {
     method: 'POST',
+    mode: 'cors',
+    credentials: 'omit',
     headers: { Authorization: `Bearer ${apiKey}` },
     body: form,
     signal,
@@ -258,6 +291,8 @@ async function toApisSubmitGeneration(body: Record<string, unknown>, signal?: Ab
   const base = normalizeBaseUrl(getOpenAiBaseUrl());
   const res = await fetch(`${base}/images/generations`, {
     method: 'POST',
+    mode: 'cors',
+    credentials: 'omit',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
@@ -287,6 +322,8 @@ async function toApisPollTaskToBase64(taskId: string, signal?: AbortSignal): Pro
   while (Date.now() < deadline) {
     assertNotAborted(signal);
     const res = await fetch(`${base}/images/generations/${encodeURIComponent(taskId)}`, {
+      mode: 'cors',
+      credentials: 'omit',
       headers: { Authorization: `Bearer ${apiKey}` },
       signal,
     });
@@ -750,6 +787,8 @@ async function postJsonAtBase<T>(base: string, path: string, body: unknown, apiK
   if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key，请在设置中选择「OpenAI 兼容」并填写密钥。');
   const res = await fetch(`${base}${path}`, {
     method: 'POST',
+    mode: 'cors',
+    credentials: 'omit',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
@@ -782,6 +821,7 @@ export async function openAiGenerateNewImage(
   nodeResolution?: string,
   signal?: AbortSignal
 ): Promise<string[]> {
+  assertHttpsNotCallingHttpApiBase(getOpenAiBaseUrl());
   const base = normalizeBaseUrl(getOpenAiBaseUrl());
   if (isToApisHost(base)) {
     return toApisGenerateNewImage(prompt, aspectRatio, numberOfImages, modelName, nodeResolution, signal);
@@ -832,6 +872,7 @@ export async function openAiEditImage(
   nodeResolution?: string,
   signal?: AbortSignal
 ): Promise<string[]> {
+  assertHttpsNotCallingHttpApiBase(getOpenAiBaseUrl());
   if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
   if (isToApisHost(normalizeBaseUrl(getOpenAiBaseUrl()))) {
     return toApisEditImage(base64Images, prompt, numberOfImages, modelName, aspectRatio, nodeResolution, signal);
@@ -860,6 +901,8 @@ export async function openAiEditImage(
 
     const res = await fetch(`${base}/images/edits`, {
       method: 'POST',
+      mode: 'cors',
+      credentials: 'omit',
       headers: { Authorization: `Bearer ${apiKey}` },
       body: form,
     });
@@ -884,6 +927,7 @@ export async function chatCompletionAtBase(
   prompt: string,
   base64Image?: string
 ): Promise<string> {
+  assertHttpsNotCallingHttpApiBase(baseUrlRaw);
   const key = apiKey.trim();
   if (!key) throw new Error('未配置对话 API Key。');
   const base = normalizeBaseUrl(baseUrlRaw);

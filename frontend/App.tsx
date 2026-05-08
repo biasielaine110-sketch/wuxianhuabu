@@ -530,6 +530,39 @@ export default function App() {
         ]
       };
     }
+    if (msg.includes('按域名隔离') || msg.includes('localstorage') || msg.includes('尚未保存 openai')) {
+      return {
+        title: '需在本站配置 API',
+        reason: '不同网址（线上域名与本地 localhost）的密钥与接口设置互不共享。',
+        fixes: [
+          {
+            label: '打开 API 设置',
+            action: () => {
+              setSettingsTab('api');
+              setShowSettingsModal(true);
+              handleUpdateNode(node.id, { error: undefined });
+            },
+          },
+          { label: '清除报错', action: () => handleUpdateNode(node.id, { error: undefined }) },
+        ],
+      };
+    }
+    if (msg.includes('混合内容')) {
+      return {
+        title: 'HTTPS 与接口地址冲突',
+        reason: '线上页面为 HTTPS 时，API Base URL 必须使用 https://，不能用 http://。',
+        fixes: [
+          {
+            label: '打开 API 设置',
+            action: () => {
+              setSettingsTab('api');
+              setShowSettingsModal(true);
+              handleUpdateNode(node.id, { error: undefined });
+            },
+          },
+        ],
+      };
+    }
     if (msg.includes('invalid') || msg.includes('unsupported') || msg.includes('bad request') || msg.includes('400') || msg.includes('参数')) {
       return {
         title: '参数无效',
@@ -558,7 +591,7 @@ export default function App() {
         { label: '切换备用模型', action: () => handleUpdateNode(node.id, { model: node.type === 'chat' ? 'gemini-2.5-flash' : 'gemini-3.1-flash-image-preview', error: undefined }) },
       ]
     };
-  }, [handleUpdateNode]);
+  }, [handleUpdateNode, setSettingsTab, setShowSettingsModal]);
 
   const renderNodeErrorPanel = useCallback((node: CanvasNode) => {
     if (!node.error) return null;
@@ -4179,7 +4212,8 @@ export default function App() {
               {settingsTab === 'api' && (
                 <div>
                   <p className="text-gray-400 text-sm mb-3">
-                    选择接口类型：Google Gemini 使用 <span className="text-gray-300">AIza...</span> 密钥；OpenAI 兼容通道使用 <span className="text-gray-300">sk-...</span> 密钥（需填写服务商提供的 Base URL，默认可用官方 <span className="text-gray-300">https://api.openai.com/v1</span>）。对话节点可选 DeepSeek 模型，需在下方填写 DeepSeek 密钥（或与 OpenAI 兼容配置为同一 DeepSeek 端点）。
+                    选择接口类型：<span className="text-gray-300">OpenAI 兼容</span>通道优先：使用 <span className="text-gray-300">sk-...</span> 密钥，并填写服务商 Base URL（默认可用官方 <span className="text-gray-300">https://api.openai.com/v1</span>）。若选 <span className="text-gray-300">Google Gemini</span>，请使用 <span className="text-gray-300">AIza...</span> 密钥。对话节点可选 DeepSeek 模型，需在下方填写 DeepSeek 密钥（或与 OpenAI 兼容配置为同一 DeepSeek 端点）。
+                    <span className="block mt-2 text-amber-600/90">部署域名与 localhost 的 API 配置相互独立：换用线上地址后需在本页重新保存密钥；HTTPS 站点请勿填写 http:// 的 Base URL。</span>
                   </p>
                   <label className="text-xs text-gray-500 block mb-1">接口类型</label>
                   <select
@@ -4192,8 +4226,8 @@ export default function App() {
                     }}
                     className="w-full mb-4 bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
                   >
-                    <option value="gemini">Google Gemini</option>
                     <option value="openai-compatible">OpenAI 兼容（Bearer / sk-）</option>
+                    <option value="gemini">Google Gemini</option>
                   </select>
                   {aiProvider === 'openai-compatible' && (
                     <>
