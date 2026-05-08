@@ -10,14 +10,12 @@
   },
   "dependencies": {
     "@google/genai": "^1.50.1",
+    "@types/node": "latest",
     "@types/three": "^0.184.0",
+    "@vitejs/plugin-react": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "three": "^0.184.0"
-  },
-  "devDependencies": {
-    "@types/node": "latest",
-    "@vitejs/plugin-react": "latest",
+    "three": "^0.184.0",
     "typescript": "latest",
     "vite": "latest"
   }
