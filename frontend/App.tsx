@@ -1047,6 +1047,12 @@ export default function App() {
     await handleExportProjectJson(projectSnapshotForJsonExport(active));
   }, [handleExportProjectJson, projectSnapshotForJsonExport]);
 
+  /** 先写入浏览器本地存档，再保存/下载 JSON 到电脑（完整项目备份） */
+  const handleSaveProjectToComputer = useCallback(async () => {
+    saveCurrentProject();
+    await handleExportCurrentAsJson();
+  }, [saveCurrentProject, handleExportCurrentAsJson]);
+
   const handleImportProjectJson = useCallback((file: File) => {
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -3939,15 +3945,27 @@ export default function App() {
       <button
         onClick={() => setShowProjectModal(true)}
         className="absolute top-6 left-[200px] bg-[#1e1e1e]/90 backdrop-blur-md p-2.5 rounded-xl shadow-2xl border border-[#333] z-40 hover:bg-[#333] transition-colors flex items-center gap-2"
-        title="项目管理"
+        title="项目管理：多项目、导入/导出 JSON、保存到浏览器"
       >
         <GridIcon size={18} />
         <span className="text-gray-400 text-xs font-medium">项目</span>
       </button>
 
       <button
+        type="button"
+        onClick={() => {
+          void handleSaveProjectToComputer();
+        }}
+        className="absolute top-6 left-[296px] bg-[#1e1e1e]/90 backdrop-blur-md p-2.5 rounded-xl shadow-2xl border border-[#333] z-40 hover:bg-[#333] transition-colors flex items-center gap-2"
+        title="先保存到浏览器，再将当前项目导出为 JSON 文件到电脑（含节点、连线、图片等，可备份与换机）"
+      >
+        <DownloadIcon size={18} />
+        <span className="text-gray-400 text-xs font-medium whitespace-nowrap">存到电脑</span>
+      </button>
+
+      <button
         onClick={handleClearProjectCache}
-        className="absolute top-6 left-[336px] bg-[#1e1e1e]/90 backdrop-blur-md p-2.5 rounded-xl shadow-2xl border border-[#333] z-40 hover:bg-[#333] transition-colors flex items-center gap-2"
+        className="absolute top-6 left-[432px] bg-[#1e1e1e]/90 backdrop-blur-md p-2.5 rounded-xl shadow-2xl border border-[#333] z-40 hover:bg-[#333] transition-colors flex items-center gap-2"
         title="清理本地存档中的大图，减小占用（先自动导出备份 JSON）"
       >
         <TrashIcon size={18} />
@@ -3957,7 +3975,7 @@ export default function App() {
       <button
         type="button"
         onClick={handleClearCanvas}
-        className="absolute top-6 left-[452px] bg-[#1e1e1e]/90 backdrop-blur-md px-2.5 py-2.5 rounded-xl shadow-2xl border border-[#333] z-40 hover:bg-[#333] transition-colors flex items-center gap-1.5"
+        className="absolute top-6 left-[548px] bg-[#1e1e1e]/90 backdrop-blur-md px-2.5 py-2.5 rounded-xl shadow-2xl border border-[#333] z-40 hover:bg-[#333] transition-colors flex items-center gap-1.5"
         title="删除所有节点与连线，并放入一个空白文生图节点（与「清缓存」不同：不处理本地项目文件）"
       >
         <span className="text-gray-400 text-xs font-medium whitespace-nowrap">清空画布</span>
@@ -3966,14 +3984,14 @@ export default function App() {
       <button
         type="button"
         onClick={handleClearCanvasPreviewCache}
-        className="absolute top-6 left-[560px] bg-[#1e1e1e]/90 backdrop-blur-md px-2.5 py-2.5 rounded-xl shadow-2xl border border-amber-900/50 z-40 hover:bg-[#333] transition-colors flex items-center gap-1.5"
+        className="absolute top-6 left-[656px] bg-[#1e1e1e]/90 backdrop-blur-md px-2.5 py-2.5 rounded-xl shadow-2xl border border-amber-900/50 z-40 hover:bg-[#333] transition-colors flex items-center gap-1.5"
         title="仅清理内存中的图片缩略图缓存，缓解卡顿；节点内数据与项目存档不变"
       >
         <span className="text-amber-500/90 text-xs font-medium whitespace-nowrap">清预览缓存</span>
       </button>
 
       {activeProjectId && (
-        <div className="absolute top-6 left-[700px] bg-[#1e1e1e]/90 backdrop-blur-md px-3 py-2.5 rounded-xl shadow-2xl border border-[#333] z-40 text-xs text-gray-300 max-w-[220px] truncate">
+        <div className="absolute top-6 left-[796px] bg-[#1e1e1e]/90 backdrop-blur-md px-3 py-2.5 rounded-xl shadow-2xl border border-[#333] z-40 text-xs text-gray-300 max-w-[220px] truncate">
           当前: {projects.find(p => p.id === activeProjectId)?.name || '未命名项目'}
         </div>
       )}
@@ -3988,7 +4006,7 @@ export default function App() {
             className="bg-[#1e1e1e] rounded-2xl p-6 w-[640px] max-h-[80vh] overflow-hidden flex flex-col shadow-2xl border border-[#333]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-2">
               <h2 className="text-lg font-bold text-white">项目管理</h2>
               <button
                 onClick={() => setShowProjectModal(false)}
@@ -3997,6 +4015,9 @@ export default function App() {
                 <XIcon size={20} />
               </button>
             </div>
+            <p className="text-[11px] text-gray-500 mb-3 leading-relaxed">
+              左上角「存到电脑」= 浏览器存档 + 导出 JSON 文件备份；「保存当前画布」仅写入本浏览器。换电脑请用 JSON 导出/导入。
+            </p>
             <div className="flex gap-2 mb-3">
               <button
                 onClick={() => {
