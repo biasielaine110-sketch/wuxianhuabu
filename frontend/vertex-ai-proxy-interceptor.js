@@ -181,7 +181,8 @@
         };
 
         console.log('[Vertex AI Proxy Shim] Fetching from Node backend:', apiProxyHref());
-        const proxyResponse = await fetch(apiProxyHref(), proxyFetchOptions);
+        // 必须用 originalFetch：此处若写 fetch，打包后可能指向尚未完成的局部绑定（TDZ: Cannot access before initialization），且会误走当前 shim。
+        const proxyResponse = await originalFetch(apiProxyHref(), proxyFetchOptions);
 
         if (proxyResponse.status === 401) {
             console.error('[Vertex Proxy Shim] Local Node.js backend returned 401. Authentication may be needed.');
