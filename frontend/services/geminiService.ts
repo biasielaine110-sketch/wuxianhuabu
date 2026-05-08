@@ -102,11 +102,6 @@ export const generateNewImage = async (
 ): Promise<string[]> => {
   try {
     if (getAiProvider() === 'openai-compatible') {
-      if (!getOpenAiSavedKey().trim()) {
-        throw new Error(
-          '本站域名下尚未保存 OpenAI 兼容 API 密钥：浏览器 localStorage 按域名隔离，线上站点与 localhost 不共享。请打开「设置 → API」，选择 OpenAI 兼容，填写 sk- 与 Base URL 后点「确认并保存」。'
-        );
-      }
       return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, modelName, outputResolution, signal);
     }
 
@@ -190,11 +185,6 @@ export const editExistingImage = async (
 ): Promise<string[]> => {
   try {
     if (getAiProvider() === 'openai-compatible') {
-      if (!getOpenAiSavedKey().trim()) {
-        throw new Error(
-          '本站域名下尚未保存 OpenAI 兼容 API 密钥：浏览器 localStorage 按域名隔离，线上站点与 localhost 不共享。请打开「设置 → API」，选择 OpenAI 兼容，填写 sk- 与 Base URL 后点「确认并保存」。'
-        );
-      }
       return openAiEditImage(base64Images, prompt, numberOfImages, modelName, aspectRatio, outputResolution, signal);
     }
 
@@ -277,11 +267,6 @@ export const callGeminiChat = async (prompt: string, base64Image?: string, model
     }
 
     if (getAiProvider() === 'openai-compatible') {
-      if (!getOpenAiSavedKey().trim()) {
-        throw new Error(
-          '本站域名下尚未保存 OpenAI 兼容 API 密钥：浏览器按域名隔离存储，线上与 localhost 不共享。请在「设置 → API」中填写并保存。'
-        );
-      }
       return openAiChatCompletion(prompt, base64Image, modelName);
     }
 

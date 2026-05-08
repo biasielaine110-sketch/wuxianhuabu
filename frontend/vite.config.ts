@@ -42,6 +42,19 @@ export default defineConfig(({ mode }) => {
     return {
       root: envDir,
       envDir,
+      build: {
+        rollupOptions: {
+          output: {
+            /** Vertex 拦截器单独 chunk，避免与 React 同文件压缩产生 TDZ（Cannot access before initialization） */
+            manualChunks(id) {
+              if (id.replace(/\\/g, '/').includes('vertex-ai-proxy-interceptor')) {
+                return 'vertex-shim';
+              }
+              return undefined;
+            },
+          },
+        },
+      },
       define: {
         // This is just generic value for the GEMINI API key.
         // This is not used at all, and can be ignored!

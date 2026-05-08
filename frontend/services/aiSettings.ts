@@ -7,7 +7,6 @@ const OPENAI_BASE_URL_STORAGE_KEY = 'openai-compatible-base-url-v1';
 const DEEPSEEK_API_KEY_STORAGE_KEY = 'deepseek-api-key-v1';
 const DEEPSEEK_BASE_URL_STORAGE_KEY = 'deepseek-base-url-v1';
 
-/** OpenAI 兼容通道默认 Base URL（ToAPIs） */
 export const DEFAULT_OPENAI_BASE_URL = 'https://toapis.com/v1';
 /** DeepSeek 官方 OpenAI 兼容入口 */
 export const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1';
