@@ -1,0 +1,38 @@
+Git 推送到 GitHub 失败时的排查与修正（本仓库）
+
+一、常见现象
+  fatal: Failed to connect to github.com port 443
+  fatal: Recv failure: Connection was reset
+  fatal: Empty reply from server
+
+  原因通常是：本机或当前网络无法稳定访问 GitHub（防火墙、运营商、公司网络、DNS、代理未配置或配置错误），
+  不是 remote URL 写错。
+
+二、本仓库推荐（在仓库根目录执行一次）
+  git config http.version HTTP/1.1
+  git config http.postBuffer 524288000
+
+  说明：部分环境对 HTTP/2 或大包推送不稳定，强制 HTTP/1.1 与增大缓冲区有时可缓解。
+
+三、自检命令（PowerShell）
+  curl.exe -I https://github.com
+  git ls-remote origin HEAD
+
+  若此处即超时/失败，需先解决网络或代理，再执行 git push。
+
+四、使用系统/代理（若你本机用 Clash、V2 等）
+  在「能正常打开 https://github.com 的终端」里执行 push，或设置：
+  $env:HTTPS_PROXY = "http://127.0.0.1:7890"   # 端口按你本地代理为准
+  git push origin main
+
+  或为 Git 单独设置（仅 GitHub）：
+  git config http.https://github.com.proxy http://127.0.0.1:7890
+
+五、改用 SSH（HTTPS 长期不通时）
+  1) 在 GitHub 账号添加本机 SSH 公钥
+  2) 执行：
+     git remote set-url origin git@github.com:biasielaine110-sketch/wuxianhuabu.git
+     git push origin main
+
+六、一键脚本
+  可在仓库根目录执行：  .\scripts\push-github.ps1
