@@ -1,6 +1,19 @@
 import path from 'path';
+import type { Plugin } from 'vite';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
+
+/** 把密码写进 index.html，避免生产包内 import.meta.env 替换异常导致 SiteAccessGate 读不到 */
+function injectSitePasswordPlugin(password: string): Plugin {
+  return {
+    name: 'inject-site-password-runtime',
+    transformIndexHtml(html) {
+      if (!password.trim()) return html;
+      const payload = JSON.stringify(password);
+      return html.replace(/<head>/i, `<head><script>window.__INFINITE_AI_CANVAS_PW__=${payload}</script>`);
+    },
+  };
+}
 
 /** ToAPIs 等返回的图片 CDN 常未对浏览器开放 CORS，经同源路径代理后可正常读图 */
 const toapisFileCdnProxy = {
@@ -44,7 +57,7 @@ export default defineConfig(({ mode }) => {
       preview: {
         proxy: { ...toapisFileCdnProxy },
       },
-      plugins: react(),
+      plugins: [react(), injectSitePasswordPlugin(sitePassword)],
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),

@@ -1,5 +1,22 @@
 import React, { useCallback, useState } from 'react';
 
+declare global {
+  interface Window {
+    /** 由 vite transformIndexHtml 在构建/开发时注入（见 vite.config.ts） */
+    __INFINITE_AI_CANVAS_PW__?: string;
+  }
+}
+
+function readConfiguredSitePassword(): string {
+  if (typeof window !== 'undefined') {
+    const w = window.__INFINITE_AI_CANVAS_PW__;
+    if (typeof w === 'string' && w.trim() !== '') return w;
+  }
+  const raw = import.meta.env.VITE_SITE_PASSWORD;
+  if (raw != null && String(raw).trim() !== '') return String(raw);
+  return '';
+}
+
 function timingSafeEqualStr(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let r = 0;
@@ -14,10 +31,8 @@ function timingSafeEqualStr(a: string, b: string): boolean {
  * 密码写入 Vercel 环境变量或 frontend/.env.local（勿提交），每次刷新页面都需重新输入。
  */
 export default function SiteAccessGate({ children }: { children: React.ReactNode }) {
-  const raw = import.meta.env.VITE_SITE_PASSWORD;
-  const required = raw != null && String(raw).trim() !== '' ? String(raw) : '';
-
-  const [unlocked, setUnlocked] = useState(() => !required.trim());
+  const required = readConfiguredSitePassword();
+  const [unlocked, setUnlocked] = useState(() => !readConfiguredSitePassword().trim());
   const [input, setInput] = useState('');
   const [error, setError] = useState('');
 
