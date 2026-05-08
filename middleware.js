@@ -55,10 +55,11 @@ export default function middleware(request) {
     return next();
   }
 
+  // realm 必须为 ASCII（Vercel 等平台会拒绝含中文等非 ASCII 的 WWW-Authenticate 值）
   return new Response('需要登录', {
     status: 401,
     headers: {
-      'WWW-Authenticate': 'Basic realm="站点访问"',
+      'WWW-Authenticate': 'Basic realm="Wuxianhuabu"',
       'Content-Type': 'text/plain; charset=utf-8',
     },
   });
