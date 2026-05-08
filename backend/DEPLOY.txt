@@ -18,9 +18,9 @@ Node 后端部署要点（Docker）
 
 4) Vercel 部署本仓库前端（根目录已有 vercel.json）
    - New Project → 导入本 Git 仓库；Root Directory 必须留空（仓库根），勿设为 frontend。
-     若误设为 frontend，将读不到根目录的 vercel.json 与 middleware.js，易导致构建/路由错误。
+     若误设为 frontend，将读不到根目录的 vercel.json，易导致构建/路由错误。
    - Framework Preset 选「Other」；不要在面板里覆盖 Install / Build / Output（与 vercel.json 冲突时易失败）。
-   - Environment Variables（按需）：VITE_SITE_PASSWORD、BASIC_AUTH_PASSWORD、VITE_BACKEND_ORIGIN、VITE_PROXY_HEADER 等；改后需 Redeploy。
+   - Environment Variables（按需）：VITE_SITE_PASSWORD（站内密码框）、VITE_BACKEND_ORIGIN、VITE_PROXY_HEADER 等；改后需 Redeploy。
    - 构建失败排查：下载 Build Log 全文；本地可「vercel link」后执行「vercel build --prod」复现。
    - Cursor 的 Vercel MCP（mcp.vercel.com）需在设置中连接并完成 OAuth 后，才能在对话里拉取部署/日志（只读）。
 
