@@ -18,7 +18,7 @@ Node 后端部署要点（Docker）
 
 4) Vercel 部署本仓库前端（根目录已有 vercel.json）
    - New Project → 导入本 Git 仓库；Root Directory 留空（仓库根）。
-   - Framework Preset 选「Other」或让 Vercel 读取 vercel.json 即可；Build 会使用 npm install --workspace=ai-frontend（仅装前端 workspace，不装 backend 的 Playwright 等）。
+   - Framework Preset 选「Other」或让 Vercel 读取 vercel.json 即可。
    - Output：frontend/dist；安装/构建命令勿在面板里覆盖，除非你有意修改。
    - Environment Variables（Production / Preview 按需）：
        VITE_BACKEND_ORIGIN = 上述后端 HTTPS 根地址（无尾斜杠）

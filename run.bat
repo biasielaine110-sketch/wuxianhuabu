@@ -2,18 +2,13 @@
 setlocal
 
 set "ROOT_DIR=%~dp0"
-cd /d "%ROOT_DIR%"
+cd /d "%ROOT_DIR%frontend"
 
-echo [1/2] 启动豆包本地代理...
-start "Doubao Proxy" cmd /k "cd /d "%ROOT_DIR%backend" && npm run dev:doubao"
-
-echo [2/2] 启动前端...
+echo 启动前端（纯前端，默认 http://localhost:5173/）...
+echo 若需 Vertex 代理，另开终端在项目根执行: npm run dev:vertex
+echo.
 start "Frontend" cmd /k "cd /d "%ROOT_DIR%frontend" && npm run dev"
 
 echo.
-echo 已启动：
-echo - 前端: http://localhost:5173/
-echo - 豆包代理: http://127.0.0.1:5100/health
-echo.
-echo 提示：请保持两个新终端窗口运行。
+echo 已启动前端开发服务器。
 pause

@@ -27,12 +27,9 @@ export default defineConfig(({ mode }) => {
         'process.env.API_KEY' : JSON.stringify('api-key-this-is-not-used-can-be-ignored!'),
       },
       server: {
-        proxy: {
-          //Target your Node.js backend
-          '/api-proxy': 'http://localhost:5000',
-          '/ws-proxy': {target: 'ws://localhost:5000', ws: true},
-          ...toapisFileCdnProxy,
-        },
+        // 纯前端开发：仅 CDN 反代。若需 Vertex，另开终端 `npm run dev-backend` 并设 frontend/.env.development：
+        //   VITE_BACKEND_ORIGIN=http://127.0.0.1:5000
+        proxy: { ...toapisFileCdnProxy },
       },
       preview: {
         proxy: { ...toapisFileCdnProxy },
