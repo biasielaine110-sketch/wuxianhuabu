@@ -1,0 +1,30 @@
+# 依赖
+node_modules/
+**/node_modules/
+
+# 构建产物
+frontend/dist/
+dist/
+
+# 环境变量与密钥（切勿提交）
+.env
+.env.*
+!.env.example
+backend/.env.local
+
+# 日志与系统文件
+*.log
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 本地/缓存
+.cache/
+*.local
+
+# Playwright / 豆包 RPA 浏览器用户数据（勿提交）
+backend/.doubao-rpa-profile/

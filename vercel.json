@@ -1,0 +1,16 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "npm install",
+  "buildCommand": "npm run build --prefix frontend",
+  "outputDirectory": "frontend/dist",
+  "rewrites": [
+    {
+      "source": "/cdn-files-toapis/:path*",
+      "destination": "https://files.toapis.com/:path*"
+    },
+    {
+      "source": "/cdn-files-dashlyai/:path*",
+      "destination": "https://files.dashlyai.cc/:path*"
+    }
+  ]
+}

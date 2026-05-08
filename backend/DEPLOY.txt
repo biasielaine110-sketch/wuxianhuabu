@@ -1,0 +1,16 @@
+Node 后端部署要点（Docker）
+
+1) Railway（示例）
+   - 新建 Project → Deploy from GitHub → 选本仓库。
+   - Service → Settings → Root Directory 设为：backend
+   - Settings → 生成域名（Generate Domain），记下 HTTPS 根地址，例如 https://xxx.up.railway.app
+   - Variables：把本地 backend/.env.local 里同类变量全部拷贝进去（GOOGLE_CLOUD_PROJECT、GOOGLE_CLOUD_LOCATION、PROXY_HEADER 等）。
+   - Railway 会注入 PORT；本仓库 server.js 已优先读取 process.env.PORT。
+   - 构建使用 backend/Dockerfile，健康检查路径：GET /health
+
+2) 本地仍只监听本机时
+   - 在 backend/.env.local 增加：API_BACKEND_HOST=127.0.0.1
+
+3) 与 Vercel 前端联调
+   - 在 Vercel 前端环境变量设置：VITE_BACKEND_ORIGIN=https://你的Railway域名（无末尾斜杠）
+   - 保存后重新 Deploy 前端。
