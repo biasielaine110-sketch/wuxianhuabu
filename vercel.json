@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "npm install --workspace=ai-frontend",
+  "installCommand": "npm install",
   "buildCommand": "npm run build",
   "outputDirectory": "frontend/dist",
   "headers": [
@@ -32,9 +32,8 @@
       "source": "/cdn-files-dashlyai/:path*",
       "destination": "https://files.dashlyai.cc/:path*"
     },
-    { "handle": "filesystem" },
     {
-      "source": "/:path*",
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ]
