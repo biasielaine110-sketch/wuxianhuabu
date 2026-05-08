@@ -1,4 +1,4 @@
-import { next } from '@vercel/edge';
+import { next } from '@vercel/functions';
 
 /**
  * 整站 HTTP Basic 认证。在 Vercel → Environment Variables 配置（勿提交到 Git）：

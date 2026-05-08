@@ -18,6 +18,6 @@
     "concurrently": "latest"
   },
   "dependencies": {
-    "@vercel/edge": "^1.3.0"
+    "@vercel/functions": "^3.5.0"
   }
 }
