@@ -4212,7 +4212,7 @@ export default function App() {
               {settingsTab === 'api' && (
                 <div>
                   <p className="text-gray-400 text-sm mb-3">
-                    选择接口类型：<span className="text-gray-300">OpenAI 兼容</span>通道优先：使用 <span className="text-gray-300">sk-...</span> 密钥，并填写服务商 Base URL（默认可用官方 <span className="text-gray-300">https://api.openai.com/v1</span>）。若选 <span className="text-gray-300">Google Gemini</span>，请使用 <span className="text-gray-300">AIza...</span> 密钥。对话节点可选 DeepSeek 模型，需在下方填写 DeepSeek 密钥（或与 OpenAI 兼容配置为同一 DeepSeek 端点）。
+                    选择接口类型：<span className="text-gray-300">OpenAI 兼容</span>通道优先：使用 <span className="text-gray-300">sk-...</span> 密钥，并填写服务商 Base URL（默认 <span className="text-gray-300">{DEFAULT_OPENAI_BASE_URL}</span>，ToAPIs；亦可改为其他兼容端点）。若选 <span className="text-gray-300">Google Gemini</span>，请使用 <span className="text-gray-300">AIza...</span> 密钥。对话节点可选 DeepSeek 模型，需在下方填写 DeepSeek 密钥（或与 OpenAI 兼容配置为同一 DeepSeek 端点）。
                     <span className="block mt-2 text-amber-600/90">部署域名与 localhost 的 API 配置相互独立：换用线上地址后需在本页重新保存密钥；HTTPS 站点请勿填写 http:// 的 Base URL。</span>
                   </p>
                   <label className="text-xs text-gray-500 block mb-1">接口类型</label>

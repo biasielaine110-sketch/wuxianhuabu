@@ -1,4 +1,4 @@
-export type AiProvider = 'gemini' | 'openai-compatible';
+export type AiProvider = 'openai-compatible' | 'gemini';
 
 const PROVIDER_KEY = 'ai-provider-v1';
 const GEMINI_API_KEY_STORAGE_KEY = 'gemini-api-key-v1';
@@ -7,17 +7,21 @@ const OPENAI_BASE_URL_STORAGE_KEY = 'openai-compatible-base-url-v1';
 const DEEPSEEK_API_KEY_STORAGE_KEY = 'deepseek-api-key-v1';
 const DEEPSEEK_BASE_URL_STORAGE_KEY = 'deepseek-base-url-v1';
 
-export const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
+/** OpenAI 兼容通道默认 Base URL（ToAPIs） */
+export const DEFAULT_OPENAI_BASE_URL = 'https://toapis.com/v1';
 /** DeepSeek 官方 OpenAI 兼容入口 */
 export const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1';
 
 export function getAiProvider(): AiProvider {
   try {
-    if (localStorage.getItem(PROVIDER_KEY) === 'openai-compatible') return 'openai-compatible';
+    const v = localStorage.getItem(PROVIDER_KEY);
+    if (v === 'gemini') return 'gemini';
+    if (v === 'openai-compatible') return 'openai-compatible';
   } catch {
     /* ignore */
   }
-  return 'gemini';
+  // 未选择过时默认 OpenAI 兼容（下拉列表亦置顶）
+  return 'openai-compatible';
 }
 
 export function setAiProvider(provider: AiProvider): void {
