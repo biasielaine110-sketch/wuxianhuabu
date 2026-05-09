@@ -504,16 +504,18 @@ export default function App() {
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [projectExportMenuOpen, setProjectExportMenuOpen] = useState(false);
   const [projectStoreReady, setProjectStoreReady] = useState(false);
-  const [autosaveIntervalMin, setAutosaveIntervalMin] = useState<0 | 5 | 10 | 30>(() => {
+  const [autosaveIntervalMin, setAutosaveIntervalMin] = useState<0 | 5 | 10 | 20 | 30>(() => {
     try {
       const v = localStorage.getItem('wxcanvas-autosave-interval-min');
-      if (v === '5' || v === '10' || v === '30') return Number(v) as 5 | 10 | 30;
+      if (v === '0') return 0;
+      if (v === '5' || v === '10' || v === '20' || v === '30') return Number(v) as 5 | 10 | 20 | 30;
     } catch {
       /* ignore */
     }
-    return 0;
+    return 20;
   });
   const [draftNameInput, setDraftNameInput] = useState('');
+  const [draftStoragePathInput, setDraftStoragePathInput] = useState('');
   const [centerTitleEditValue, setCenterTitleEditValue] = useState<string | null>(null);
   const skipCenterRenameBlurRef = useRef(false);
   const persistWarningShownRef = useRef(false);
@@ -539,7 +541,10 @@ export default function App() {
   useEffect(() => {
     if (!showProjectModal) return;
     const p = projects.find((x) => x.id === activeProjectId);
-    if (p) setDraftNameInput((p.draftTitle?.trim() || p.name || '').trim() || '');
+    if (p) {
+      setDraftNameInput((p.draftTitle?.trim() || p.name || '').trim() || '');
+      setDraftStoragePathInput((p.draftStoragePathNote || '').trim());
+    }
   }, [showProjectModal, activeProjectId]);
 
   // Fullscreen Image Modal
@@ -1150,7 +1155,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, [projectStoreReady, autosaveIntervalMin]);
 
-  const handleAutosaveIntervalChange = useCallback((v: 0 | 5 | 10 | 30) => {
+  const handleAutosaveIntervalChange = useCallback((v: 0 | 5 | 10 | 20 | 30) => {
     setAutosaveIntervalMin(v);
     try {
       if (v === 0) localStorage.removeItem('wxcanvas-autosave-interval-min');
@@ -1182,6 +1187,24 @@ export default function App() {
       return next;
     });
   }, [draftNameInput]);
+
+  const handleApplyDraftStoragePath = useCallback(() => {
+    const pid = activeProjectIdRef.current;
+    if (!pid) return;
+    const trimmed = draftStoragePathInput.trim();
+    setProjects((prev) => {
+      const next = prev.map((p) =>
+        p.id === pid
+          ? { ...p, draftStoragePathNote: trimmed || undefined, updatedAt: Date.now() }
+          : p
+      );
+      projectsRef.current = next;
+      void saveProjectLibrary(next, pid).then((ok) => {
+        if (!ok) alert('草稿存储位置已更新，但写入草稿库失败，请重试。');
+      });
+      return next;
+    });
+  }, [draftStoragePathInput]);
 
   const commitCenterProjectRename = useCallback((raw: string) => {
     setCenterTitleEditValue(null);
@@ -1274,21 +1297,44 @@ export default function App() {
     [saveJsonToDisk]
   );
 
-  /** 项目管理「打开位置」：草稿仅存 IndexedDB，用系统提示给出库名（无应用内弹窗） */
-  const showDraftStorageLocation = useCallback(() => {
-    const { database, objectStore, documentKey } = CANVAS_LIBRARY_IDB_LABELS;
-    window.alert(
-      [
-        '画布草稿与定时自动保存在本机浏览器的 IndexedDB 中（没有 D:\\… 这类普通文件夹路径）。',
-        '所有项目的草稿都写在该库的同一文档中。',
-        '',
+  /** 项目管理「打开位置」：需已填「草稿存储位置」或已绑定另存为 JSON；再提示 IndexedDB 与参考路径 */
+  const openProjectLocationInfo = useCallback((project: CanvasProject) => {
+    void (async () => {
+      const manual = project.draftStoragePathNote?.trim() || '';
+      const jsonHandle = await getProjectBackupFileHandle(project.id);
+      if (!manual && !jsonHandle) {
+        window.alert(
+          [
+            '尚未设置可展示的本地参考路径。',
+            '',
+            '请先在本窗口上方填写「草稿存储位置」（您本机用于存放草稿/备份的文件夹路径，仅作记录），',
+            '或先通过「保存当前画布 / 导出 JSON」使用系统「另存为」绑定 JSON 文件后再点「打开位置」。',
+            '若与草稿说明为同一路径，只需在「草稿存储位置」中填写即可。',
+          ].join('\n')
+        );
+        return;
+      }
+      const { database, objectStore, documentKey } = CANVAS_LIBRARY_IDB_LABELS;
+      const lines: string[] = [
+        '【浏览器内实际草稿】保存在 IndexedDB（无 D:\\… 普通文件夹路径）：',
         `数据库：${database}`,
         `对象库：${objectStore}`,
         `键：${documentKey}`,
         '',
-        'Chrome / Edge：按 F12 →「应用程序」(Application) →「IndexedDB」→ 展开上述「数据库」即可查看。',
-      ].join('\n')
-    );
+      ];
+      if (manual) {
+        lines.push('【您填写的本机草稿/备份参考路径】');
+        lines.push(manual);
+        lines.push('');
+      }
+      if (jsonHandle) {
+        lines.push('【已绑定的另存为 JSON 文件名】');
+        lines.push(jsonHandle.name);
+        lines.push('');
+      }
+      lines.push('Chrome / Edge：按 F12 →「应用程序」(Application) →「IndexedDB」可查看库内数据。');
+      window.alert(lines.join('\n'));
+    })();
   }, []);
 
   /** 导出 JSON 时：若目标即当前打开的项目，附带内存中最新的画布（无需先点保存） */
@@ -1418,6 +1464,10 @@ export default function App() {
             edges: impEdges,
             transform: (imported.transform || { x: 0, y: 0, scale: 1 }) as Transform,
             diskSaveEstablished: false,
+            draftStoragePathNote:
+              typeof imported.draftStoragePathNote === 'string' && imported.draftStoragePathNote.trim()
+                ? imported.draftStoragePathNote.trim()
+                : undefined,
           };
           finishImportNewProject(newProject);
         } catch (err) {
@@ -4639,16 +4689,40 @@ export default function App() {
                   填入项目名
                 </button>
               </div>
+              <div className="flex flex-wrap items-end gap-2">
+                <label className="flex-1 min-w-[200px]">
+                  <span className="block text-[10px] text-gray-500 mb-0.5">
+                    草稿存储位置（本机参考路径，自行填写；浏览器草稿仍在 IndexedDB）
+                  </span>
+                  <input
+                    type="text"
+                    value={draftStoragePathInput}
+                    onChange={(e) => setDraftStoragePathInput(e.target.value)}
+                    className="w-full rounded-md border border-[#444] bg-[#0d0d0d] px-2 py-1.5 text-xs text-gray-100 outline-none focus:border-cyan-600"
+                    placeholder="例如 D:\备份\无限画布草稿"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => handleApplyDraftStoragePath()}
+                  className="shrink-0 rounded-md bg-[#333] px-2.5 py-1.5 text-[11px] text-gray-100 hover:bg-[#444]"
+                >
+                  应用存储位置
+                </button>
+              </div>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[10px] text-gray-500 shrink-0">定时自动保存草稿</span>
                 <select
                   value={autosaveIntervalMin}
-                  onChange={(e) => handleAutosaveIntervalChange(Number(e.target.value) as 0 | 5 | 10 | 30)}
+                  onChange={(e) =>
+                    handleAutosaveIntervalChange(Number(e.target.value) as 0 | 5 | 10 | 20 | 30)
+                  }
                   className="rounded-md border border-[#444] bg-[#0d0d0d] px-2 py-1 text-[11px] text-gray-200 outline-none focus:border-blue-600"
                 >
                   <option value={0}>关闭</option>
                   <option value={5}>每 5 分钟</option>
                   <option value={10}>每 10 分钟</option>
+                  <option value={20}>每 20 分钟</option>
                   <option value={30}>每 30 分钟</option>
                 </select>
                 <span className="text-[10px] text-gray-600 leading-snug">
@@ -4749,6 +4823,11 @@ export default function App() {
                         className="text-left flex-1"
                       >
                         <div className="text-sm text-gray-100">{projectDraftDisplayName(project)}</div>
+                        {project.draftStoragePathNote?.trim() ? (
+                          <div className="text-[10px] text-cyan-500/95 mt-0.5 leading-snug">
+                            草稿位置：{project.draftStoragePathNote.trim()}
+                          </div>
+                        ) : null}
                         {project.draftTitle?.trim() && project.draftTitle.trim() !== (project.name || '').trim() ? (
                           <div className="text-[10px] text-gray-600">项目名：{project.name}</div>
                         ) : null}
@@ -4758,9 +4837,9 @@ export default function App() {
                       </button>
                       <button
                         type="button"
-                        onClick={showDraftStorageLocation}
+                        onClick={() => openProjectLocationInfo(project)}
                         className="shrink-0 px-2 py-1 text-[10px] rounded bg-slate-700 hover:bg-slate-600 text-gray-100"
-                        title="草稿保存在浏览器 IndexedDB 的库名与键；点击在系统提示框中查看"
+                        title="需已填写「草稿存储位置」或已另存为 JSON；点击查看 IndexedDB 与本机参考路径"
                       >
                         打开位置
                       </button>

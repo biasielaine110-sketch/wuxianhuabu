@@ -13,6 +13,8 @@ export type CanvasProjectSnapshot = {
   draftTitle?: string;
   /** 是否已为本项目完成过本地备份（另存为 JSON / 导出 ZIP 等）；仅存在草稿库，不写入导出的 project.json */
   diskSaveEstablished?: boolean;
+  /** 用户自填的本机草稿/备份参考路径（仅展示与「打开位置」校验；应用无法写入该路径） */
+  draftStoragePathNote?: string;
 };
 
 const DB_NAME = 'infinite-ai-canvas-db';
@@ -227,5 +229,7 @@ export async function parseProjectFromZipFile(file: File): Promise<CanvasProject
     nodes: imported.nodes as CanvasNode[],
     edges: imported.edges as Edge[],
     transform: (imported.transform || { x: 0, y: 0, scale: 1 }) as Transform,
+    draftStoragePathNote:
+      typeof imported.draftStoragePathNote === 'string' ? imported.draftStoragePathNote : undefined,
   };
 }
