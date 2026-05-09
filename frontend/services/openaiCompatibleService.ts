@@ -336,6 +336,12 @@ function toApisSora2VvipAspectRatio(aspectRatio: string): '16:9' | '9:16' {
   return aspectRatio === '9:16' ? '9:16' : '16:9';
 }
 
+/** ToAPIs `veo3.1-fast`：`aspect_ratio` 仅 16:9 / 9:16；其它画幅按横屏提交 */
+function toApisVeo31FastAspectRatio(aspectRatio: string): '16:9' | '9:16' {
+  if (aspectRatio === '9:16') return '9:16';
+  return '16:9';
+}
+
 async function toApisUploadVideoReferenceImageUrls(
   refs: string[],
   filePrefix: string,
@@ -353,7 +359,7 @@ async function toApisUploadVideoReferenceImageUrls(
   return imageUrls;
 }
 
-export type ToApisVideoModelId = 'grok-video-3' | 'sora-2-vvip';
+export type ToApisVideoModelId = 'grok-video-3' | 'sora-2-vvip' | 'veo3.1-fast';
 
 function isHttpUrlString(v: unknown): v is string {
   return typeof v === 'string' && /^https?:\/\//i.test(v.trim());
@@ -605,21 +611,85 @@ export async function toApisSora2VvipVideoGenerate(params: {
   return toApisPollVideoTaskToPlayableUrl(id, params.signal);
 }
 
+/**
+ * ToAPIs：`veo3.1-fast`（Veo3 视频生成）。
+ * 文档：https://docs.toapis.com/docs/cn/api-reference/videos/veo3/generation
+ * - `duration` 文档为固定 8；`aspect_ratio`：16:9 / 9:16；`metadata.resolution`：720p / 1080p / 4k
+ * - 参考图需先 `/uploads/images` 得到 URL，写入 `image_urls`
+ */
+async function toApisVeo31FastVideoGenerate(params: {
+  prompt: string;
+  aspectRatio: string;
+  resolution: '720p' | '1080p' | '4k';
+  referenceImagesBase64?: string[];
+  signal?: AbortSignal;
+}): Promise<string> {
+  if (getAiProvider() !== 'openai-compatible') {
+    throw new Error(
+      '视频生成需在「设置 → API」中选择「OpenAI 兼容」，并将 Base URL 设为 ToAPIs（https://toapis.com/v1）。'
+    );
+  }
+  const base = normalizeBaseUrl(getOpenAiBaseUrl());
+  if (!isToApisHost(base)) {
+    throw new Error('视频生成当前仅支持 ToAPIs：请将 Base URL 设为 https://toapis.com/v1');
+  }
+  const apiKey = getOpenAiSavedKey();
+  if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key。');
+
+  const aspect_ratio = toApisVeo31FastAspectRatio(params.aspectRatio);
+  const resolution =
+    params.resolution === '1080p' ? '1080p' : params.resolution === '4k' ? '4k' : '720p';
+
+  const imageUrls = await toApisUploadVideoReferenceImageUrls(
+    params.referenceImagesBase64 || [],
+    'veo-video-ref',
+    params.signal
+  );
+
+  const body: Record<string, unknown> = {
+    model: 'veo3.1-fast',
+    prompt: params.prompt,
+    duration: 8,
+    aspect_ratio,
+    metadata: {
+      resolution,
+      enable_gif: false,
+    },
+  };
+  if (imageUrls.length) body.image_urls = imageUrls;
+
+  const { id } = await toApisSubmitVideoGeneration(body, params.signal);
+  return toApisPollVideoTaskToPlayableUrl(id, params.signal);
+}
+
 export async function toApisCanvasVideoGenerate(params: {
   prompt: string;
   videoModel: ToApisVideoModelId;
   durationSeconds: number;
   aspectRatio: string;
-  resolution: '480p' | '720p';
+  resolution: '480p' | '720p' | '1080p' | '4k';
   referenceImagesBase64?: string[];
   signal?: AbortSignal;
 }): Promise<string> {
+  if (params.videoModel === 'veo3.1-fast') {
+    const res =
+      params.resolution === '1080p' || params.resolution === '4k'
+        ? params.resolution
+        : '720p';
+    return toApisVeo31FastVideoGenerate({
+      prompt: params.prompt,
+      aspectRatio: params.aspectRatio,
+      resolution: res,
+      referenceImagesBase64: params.referenceImagesBase64,
+      signal: params.signal,
+    });
+  }
   if (params.videoModel === 'sora-2-vvip') {
     return toApisSora2VvipVideoGenerate({
       prompt: params.prompt,
       durationSeconds: params.durationSeconds,
       aspectRatio: params.aspectRatio,
-      resolution: params.resolution,
+      resolution: params.resolution === '480p' ? '480p' : '720p',
       referenceImagesBase64: params.referenceImagesBase64,
       signal: params.signal,
     });
@@ -628,7 +698,7 @@ export async function toApisCanvasVideoGenerate(params: {
     prompt: params.prompt,
     durationSeconds: params.durationSeconds,
     aspectRatio: params.aspectRatio,
-    resolution: params.resolution,
+    resolution: params.resolution === '480p' ? '480p' : '720p',
     referenceImagesBase64: params.referenceImagesBase64,
     signal: params.signal,
   });

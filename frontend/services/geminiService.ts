@@ -14,6 +14,7 @@ import {
   openAiEditImage,
   openAiGenerateNewImage,
   toApisCanvasVideoGenerate,
+  type ToApisVideoModelId,
 } from './openaiCompatibleService';
 
 function isDeepSeekChatModelId(modelName: string): boolean {
@@ -313,14 +314,14 @@ export const callGeminiChat = async (prompt: string, base64Image?: string, model
 /** 供设置页等读取 OpenAI 兼容 Base URL（历史导入名兼容） */
 export { getOpenAiBaseUrl as getOpenAICompatBaseUrlForSettings } from './aiSettings';
 
-/** 画布「视频生成」节点：ToAPIs（grok-video-3 / sora-2-vvip，逻辑见 openaiCompatibleService） */
+/** 画布「视频生成」节点：ToAPIs（grok-video-3 / sora-2-vvip / veo3.1-fast，逻辑见 openaiCompatibleService） */
 export async function generateCanvasVideoViaToApis(
   prompt: string,
   opts: {
-    videoModel: 'grok-video-3' | 'sora-2-vvip';
+    videoModel: ToApisVideoModelId;
     durationSeconds: number;
     aspectRatio: string;
-    resolution: '480p' | '720p';
+    resolution: '480p' | '720p' | '1080p' | '4k';
     referenceImagesBase64?: string[];
     signal?: AbortSignal;
   }

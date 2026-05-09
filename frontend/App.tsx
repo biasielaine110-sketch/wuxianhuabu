@@ -7,7 +7,33 @@ import {
   getAiSettingsSnapshot,
   persistAiSettings,
 } from './services/aiSettings';
-import { generateNewImage, editExistingImage, callGeminiChat, initGeminiClientFromStorage, generateCanvasVideoViaToApis } from './services/geminiService';
+import {
+  loadProjectLibrary,
+  saveProjectLibrary,
+  exportProjectToZipDownload,
+  parseProjectFromZipFile,
+  sanitizeFilename,
+} from './services/projectPersistence';
+import type { CanvasProjectSnapshot } from './services/projectPersistence';
+import {
+  callGeminiChat,
+  editExistingImage,
+  generateCanvasVideoViaToApis,
+  generateNewImage,
+  initGeminiClientFromStorage,
+} from './services/geminiService';
+import type { DownloadPathPersisted } from './services/downloadPathSettings';
+import {
+  clearStoredDownloadDirectory,
+  getDownloadHandleCacheSnapshot,
+  hydrateDownloadDirectoryHandlesFromIDB,
+  loadDownloadPathSettings,
+  pickAndStoreDownloadDirectory,
+  saveDownloadPathSettings,
+  saveImageDownload,
+  saveVideoDownloadFromUrl,
+  supportsFileSystemAccess,
+} from './services/downloadPathSettings';
 import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 
@@ -62,6 +88,11 @@ function sniffImageMimeFromBase64(raw: string): string {
     /* ignore */
   }
   return 'image/jpeg';
+}
+
+/** 视频节点 Veo：当前存 `veo3.1-fast`；旧工程可能仍为 `veo3.1-fast-official` */
+function isVeo31FastVideoModel(m?: string): boolean {
+  return m === 'veo3.1-fast' || m === 'veo3.1-fast-official';
 }
 
 function base64ToImageDataUrl(raw: string): string {
@@ -181,29 +212,8 @@ function OptimizedImage({
 }
 
 const INPUT_NODE_TYPES: NodeType[] = ['t2i', 'i2i', 'image', 'panorama', 'annotation', 'gridSplit', 'gridMerge', 'panoramaT2i', 'director3d', 'chat', 'video'];
-const PROJECTS_STORAGE_KEY = 'ai-canvas-projects-v1';
-const ACTIVE_PROJECT_STORAGE_KEY = 'ai-canvas-active-project-id-v1';
-const MAX_BOOTSTRAP_STORAGE_CHARS = 4_000_000;
 
-type CanvasProject = {
-  id: string;
-  name: string;
-  updatedAt: number;
-  nodes: CanvasNode[];
-  edges: Edge[];
-  transform: Transform;
-};
-
-function tryWriteProjectsToLocalStorage(projects: CanvasProject[], activeId: string): boolean {
-  try {
-    localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
-    localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, activeId);
-    return true;
-  } catch (error) {
-    console.error('写入项目存档失败:', error);
-    return false;
-  }
-}
+type CanvasProject = CanvasProjectSnapshot;
 
 function cloneCanvasForProject(nodes: CanvasNode[], edges: Edge[], transform: Transform) {
   let nodesClone: CanvasNode[];
@@ -236,18 +246,34 @@ function mergeCurrentCanvasIntoProjectList(
   return projects.map((p) => (p.id === activeId ? { ...p, nodes: nc, edges: ec, transform: tc, updatedAt: now } : p));
 }
 
+function projectDraftDisplayName(p: CanvasProject): string {
+  const s = (p.draftTitle?.trim() || p.name?.trim() || '').trim();
+  return s || '未命名草稿';
+}
+
+/** 与顶栏展示一致的实际存名字符串（无双击占位文案），用于行内重命名初始值 */
+function projectDraftEditSeed(p: CanvasProject): string {
+  return (p.draftTitle?.trim() || p.name?.trim() || '').trim();
+}
+
+function projectExportBasename(p: CanvasProject): string {
+  const raw = (p.draftTitle?.trim() || p.name?.trim() || 'project').trim() || 'project';
+  return sanitizeFilename(raw);
+}
+
 type CanvasHistoryEntry = {
   nodes: CanvasNode[];
   edges: Edge[];
   selectedIds: string[];
 };
 
-/** 图生图预设：按「角色 / 场景 / 其他」分类，供下拉选择 */
-type I2iPresetCategoryId = 'character' | 'scene' | 'other';
+/** 图生图预设：按「角色 / 场景 / 道具 / 其他」分类，供下拉选择 */
+type I2iPresetCategoryId = 'character' | 'scene' | 'props' | 'other';
 
 const I2I_PRESET_CATEGORY_OPTIONS: { id: I2iPresetCategoryId; label: string }[] = [
   { id: 'character', label: '角色' },
   { id: 'scene', label: '场景' },
+  { id: 'props', label: '道具' },
   { id: 'other', label: '其他' },
 ];
 
@@ -264,38 +290,103 @@ const I2I_PRESETS_BY_CATEGORY: Record<I2iPresetCategoryId, { key: string; label:
     { key: '场景9视图', label: '场景9视图' },
     { key: '场景九视图', label: '场景九视图' },
   ],
+  props: [
+    { key: '道具拆分', label: '道具拆分' },
+    { key: '道具5视图', label: '道具5视图' },
+    { key: '道具转线稿色块', label: '道具转线稿色块' },
+    { key: '道具转超写实', label: '道具转超写实' },
+    { key: '道具转白模', label: '道具转白模' },
+  ],
   other: [
     { key: '故事九宫格', label: '故事九宫格' },
     { key: '高清放大4K', label: '高清放大' },
   ],
 };
 
+const I2I_PRESET_FLAT = (Object.keys(I2I_PRESETS_BY_CATEGORY) as I2iPresetCategoryId[]).flatMap(
+  (id) => I2I_PRESETS_BY_CATEGORY[id]
+);
+
 function i2iCategoryForPreset(preset: string | undefined): I2iPresetCategoryId {
   if (!preset) return 'character';
-  for (const id of ['character', 'scene', 'other'] as const) {
+  for (const id of Object.keys(I2I_PRESETS_BY_CATEGORY) as I2iPresetCategoryId[]) {
     if (I2I_PRESETS_BY_CATEGORY[id].some((p) => p.key === preset)) return id;
   }
   return 'other';
 }
 
+/** 设置页预设分类：内置名走图生图规则，用户可覆盖 */
+function settingsPresetCategory(
+  name: string,
+  overrides: Record<string, I2iPresetCategoryId>
+): I2iPresetCategoryId {
+  return overrides[name] ?? i2iCategoryForPreset(name);
+}
+
+/** 图生图下拉：与设置共用 promptPresets，按分类（含设置里覆盖）列出 */
+function i2iPresetListForCategory(
+  cat: I2iPresetCategoryId,
+  promptPresets: Record<string, string>,
+  overrides: Record<string, I2iPresetCategoryId>
+): { key: string; label: string }[] {
+  return Object.keys(promptPresets)
+    .filter((name) => settingsPresetCategory(name, overrides) === cat)
+    .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
+    .map((name) => ({
+      key: name,
+      label: I2I_PRESET_FLAT.find((p) => p.key === name)?.label ?? name,
+    }));
+}
+
+/** 设置 → 预设：复制 / 编辑内容 / 改分类 / 重命名 / 删除 / 添加 均需校验 */
+const PRESET_SETTINGS_GUARD_PASSWORD = 'zhangbiwen666';
+
+type SettingsPresetPwdIntent =
+  | { type: 'copy'; content: string }
+  | { type: 'rename'; name: string }
+  | { type: 'delete'; name: string }
+  | { type: 'add' };
+
+function settingsPresetPwdIntentLabel(intent: SettingsPresetPwdIntent): string {
+  switch (intent.type) {
+    case 'copy':
+      return '复制预设全文到剪贴板';
+    case 'rename':
+      return `重命名预设「${intent.name}」`;
+    case 'delete':
+      return `删除预设「${intent.name}」`;
+    case 'add':
+      return '添加新预设';
+  }
+}
+
 function I2iPresetCategorySelect({
   nodeId,
   activePreset,
+  promptPresets,
+  presetCategoryOverrides,
   onApplyPreset,
   onClearPreset,
 }: {
   nodeId: string;
   activePreset?: string;
+  promptPresets: Record<string, string>;
+  presetCategoryOverrides: Record<string, I2iPresetCategoryId>;
   onApplyPreset: (nodeId: string, presetKey: string) => void;
   onClearPreset: (nodeId: string) => void;
 }) {
-  const [category, setCategory] = React.useState<I2iPresetCategoryId>(() => i2iCategoryForPreset(activePreset));
+  const [category, setCategory] = React.useState<I2iPresetCategoryId>(() =>
+    settingsPresetCategory(activePreset ?? '', presetCategoryOverrides)
+  );
 
   React.useEffect(() => {
-    setCategory(i2iCategoryForPreset(activePreset));
-  }, [activePreset]);
+    setCategory(settingsPresetCategory(activePreset ?? '', presetCategoryOverrides));
+  }, [activePreset, presetCategoryOverrides]);
 
-  const list = I2I_PRESETS_BY_CATEGORY[category];
+  const list = React.useMemo(
+    () => i2iPresetListForCategory(category, promptPresets, presetCategoryOverrides),
+    [category, promptPresets, presetCategoryOverrides]
+  );
   const presetSelectValue =
     activePreset && list.some((p) => p.key === activePreset) ? activePreset : '';
 
@@ -305,7 +396,7 @@ function I2iPresetCategorySelect({
         <div className="flex items-center gap-2 px-2 py-1 bg-gradient-to-r from-cyan-900/40 to-blue-900/40 rounded border border-cyan-600/50">
           <span className="text-[10px] text-cyan-400 font-medium">预设:</span>
           <span className="text-xs text-white font-bold">
-            {I2I_PRESETS_BY_CATEGORY.character.concat(I2I_PRESETS_BY_CATEGORY.scene, I2I_PRESETS_BY_CATEGORY.other).find((p) => p.key === activePreset)?.label || activePreset}
+            {I2I_PRESET_FLAT.find((p) => p.key === activePreset)?.label || activePreset}
           </span>
           <button
             type="button"
@@ -399,7 +490,20 @@ export default function App() {
   const [projects, setProjects] = useState<CanvasProject[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string>('');
   const [showProjectModal, setShowProjectModal] = useState(false);
+  const [projectExportMenuOpen, setProjectExportMenuOpen] = useState(false);
   const [projectStoreReady, setProjectStoreReady] = useState(false);
+  const [autosaveIntervalMin, setAutosaveIntervalMin] = useState<0 | 5 | 10 | 30>(() => {
+    try {
+      const v = localStorage.getItem('wxcanvas-autosave-interval-min');
+      if (v === '5' || v === '10' || v === '30') return Number(v) as 5 | 10 | 30;
+    } catch {
+      /* ignore */
+    }
+    return 0;
+  });
+  const [draftNameInput, setDraftNameInput] = useState('');
+  const [centerTitleEditValue, setCenterTitleEditValue] = useState<string | null>(null);
+  const skipCenterRenameBlurRef = useRef(false);
   const persistWarningShownRef = useRef(false);
   const lastJsonFileHandleRef = useRef<any>(null);
   const [lastJsonFilename, setLastJsonFilename] = useState<string>('');
@@ -415,6 +519,16 @@ export default function App() {
   useEffect(() => { transformRef.current = transform; }, [transform]);
   useEffect(() => { nodesRef.current = nodes; }, [nodes]);
   useEffect(() => { edgesRef.current = edges; }, [edges]);
+
+  useEffect(() => {
+    setCenterTitleEditValue(null);
+  }, [activeProjectId]);
+
+  useEffect(() => {
+    if (!showProjectModal) return;
+    const p = projects.find((x) => x.id === activeProjectId);
+    if (p) setDraftNameInput((p.draftTitle?.trim() || p.name || '').trim() || '');
+  }, [showProjectModal, activeProjectId]);
 
   // Fullscreen Image Modal
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
@@ -637,7 +751,7 @@ export default function App() {
     'panoramaT2i': { width: 480, height: 560 },
     'annotation': { width: 560, height: 480 },
     'director3d': { width: 600, height: 520 },
-    'chat': { width: 400, height: 480 },
+    'chat': { width: 320, height: 880 },
     'text': { width: 280, height: 200 },
     'image': { width: 320, height: 300 },
     'gridSplit': { width: 420, height: 300 },
@@ -753,7 +867,34 @@ export default function App() {
 
   // Unified Settings (API + Presets)
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'api' | 'presets'>('api');
+  const [settingsTab, setSettingsTab] = useState<'api' | 'presets' | 'downloads'>('api');
+  /** 设置 → 预设：当前查看的分类（一次只显示一类） */
+  const [settingsPresetCategoryTab, setSettingsPresetCategoryTab] = useState<I2iPresetCategoryId>('character');
+  /** 设置 → 预设：密码验证通过后的本会话内可自由编辑、复制/重命名/删除不再弹密码 */
+  const [settingsPresetAuthSession, setSettingsPresetAuthSession] = useState(false);
+  /** 设置 → 预设：密码校验弹层（复制 / 重命名 / 删除 / 解锁 / 添加 前弹出） */
+  const [settingsPresetPwdModal, setSettingsPresetPwdModal] = useState<{
+    intent: SettingsPresetPwdIntent | null;
+    input: string;
+  }>({ intent: null, input: '' });
+  const [downloadPathSettings, setDownloadPathSettings] = useState<DownloadPathPersisted>(() =>
+    loadDownloadPathSettings()
+  );
+  const [downloadDirLabels, setDownloadDirLabels] = useState<{
+    combined?: string;
+    image?: string;
+    video?: string;
+  }>({});
+
+  const refreshDownloadDirLabels = useCallback(() => {
+    const c = getDownloadHandleCacheSnapshot();
+    setDownloadDirLabels({
+      combined: c.combined?.name,
+      image: c.image?.name,
+      video: c.video?.name,
+    });
+  }, []);
+
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [aiProvider, setAiProvider] = useState<AiProvider>(() => getAiSettingsSnapshot().provider);
   const [openAiBaseInput, setOpenAiBaseInput] = useState(() => getAiSettingsSnapshot().openAiBaseUrl);
@@ -770,43 +911,82 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!showSettingsModal) return;
+    void (async () => {
+      await hydrateDownloadDirectoryHandlesFromIDB();
+      refreshDownloadDirLabels();
+    })();
+  }, [refreshDownloadDirLabels]);
+
+  useEffect(() => {
+    if (!showSettingsModal) {
+      setSettingsPresetAuthSession(false);
+      setSettingsPresetPwdModal({ intent: null, input: '' });
+      return;
+    }
     const s = getAiSettingsSnapshot();
     setAiProvider(s.provider);
     setOpenAiBaseInput(s.openAiBaseUrl);
     setApiKeyInput(s.provider === 'gemini' ? s.geminiKey : s.openAiKey);
     setDeepSeekKeyInput(s.deepSeekKey);
     setDeepSeekBaseInput(s.deepSeekBaseUrl);
-  }, [showSettingsModal]);
+    setDownloadPathSettings(loadDownloadPathSettings());
+    void hydrateDownloadDirectoryHandlesFromIDB().then(() => refreshDownloadDirLabels());
+  }, [showSettingsModal, refreshDownloadDirLabels]);
+
+  useEffect(() => {
+    if (settingsTab !== 'presets') {
+      setSettingsPresetPwdModal({ intent: null, input: '' });
+      setSettingsPresetAuthSession(false);
+    }
+  }, [settingsTab]);
+
+  /** 保存 JSON 到本机；支持 File System Access API 时弹出「另存为」选择路径。saved=已写入或已触发下载；aborted=用户取消另存为 */
+  const saveJsonToDisk = useCallback(async (filename: string, data: unknown): Promise<'saved' | 'aborted'> => {
+    const json = JSON.stringify(data, null, 2);
+    const hasPicker = typeof (window as any).showSaveFilePicker === 'function';
+    if (hasPicker) {
+      try {
+        const handle = await (window as any).showSaveFilePicker({
+          suggestedName: filename,
+          types: [{
+            description: 'JSON 文件',
+            accept: { 'application/json': ['.json'] },
+          }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(json);
+        await writable.close();
+        lastJsonFileHandleRef.current = handle;
+        setLastJsonFilename(handle?.name || filename);
+        return 'saved';
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return 'aborted';
+        console.warn('文件保存器失败，回退为浏览器下载：', err);
+      }
+    }
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    setLastJsonFilename(filename);
+    URL.revokeObjectURL(url);
+    return 'saved';
+  }, []);
 
   // --- Project Management ---
   /**
    * 本地存档策略（简要）：
    * - 画布上的 nodes / edges / transform 只在内存中实时变化；
-   * - 「保存当前项目」：把当前画布合并进当前项目并写入 localStorage；
-   * - 「新建 / 导入 / 删除 / 重命名」：会同步更新项目列表并写盘（新建/导入前会先合并当前画布到原项目，避免丢编辑）；
-   * - 「切换项目」：先保存当前画布到原项目，再载入目标项目的存档。
+   * - 「保存当前画布 / Ctrl+S」：合并进当前项目并写入 **IndexedDB**；若该项目尚未在本机完成过「本地 JSON 备份路径」选择，会先弹出另存为（支持 File System Access API 的浏览器），成功后立即写入草稿；取消则仍写入草稿库、下次手动保存会再次询问；
+   * - 「定时自动保存」：可在项目管理里设为每 5 / 10 / 30 分钟静默覆盖草稿（IndexedDB），仅在**已完成首次本地备份路径**后生效，不会弹出另存为；
+   * - 「草稿名称」：可选 `draftTitle`，默认同项目名；用于顶栏展示与导出 JSON/ZIP 默认文件名；
+   * - 「导出 JSON / ZIP」成功也会标记已选过本地备份，避免与首次另存为重复弹窗；
+   * - 首次打开会从旧版 **localStorage** 自动迁移到 IndexedDB，迁移后删除旧键；
+   * - 「新建 / 导入 / 删除 / 重命名」：会更新草稿库；可 **导出 .wxcanvas.zip** 或 JSON 作可移植备份；
+   * - 「切换项目」：先保存当前画布到原项目，再载入目标项目。
    */
-  const stripProjectHeavyMedia = useCallback((project: CanvasProject): CanvasProject => {
-    const strippedNodes = project.nodes.map((n) => {
-      const base = { ...n } as CanvasNode;
-      if ('images' in base && Array.isArray(base.images)) base.images = [];
-      if ('panoramaImage' in base) (base as any).panoramaImage = '';
-      if ('sourceImage' in base) (base as any).sourceImage = '';
-      if ('backgroundImage' in base) (base as any).backgroundImage = '';
-      if ('inputImage' in base) (base as any).inputImage = '';
-      if ('inputImages' in base && Array.isArray((base as any).inputImages)) (base as any).inputImages = [];
-      if ('outputImage' in base) (base as any).outputImage = '';
-      if ('outputImages' in base && Array.isArray((base as any).outputImages)) (base as any).outputImages = [];
-      if ('videos' in base && Array.isArray((base as any).videos)) (base as any).videos = [];
-      if ('messages' in base && Array.isArray((base as any).messages)) {
-        (base as any).messages = (base as any).messages.map((m: ChatMessage) => ({ ...m, image: undefined }));
-      }
-      return base;
-    });
-    return { ...project, nodes: strippedNodes, updatedAt: Date.now() };
-  }, []);
-
   const createNewProject = useCallback((name?: string) => {
     const projectId = `project-${Date.now()}`;
     const prevList = projectsRef.current;
@@ -849,18 +1029,20 @@ export default function App() {
     setNodes(newProject.nodes);
     setEdges(newProject.edges);
     setTransform(newProject.transform);
-    if (!tryWriteProjectsToLocalStorage(nextList, projectId)) {
-      alert('新建项目已生效，但写入本地存档失败（空间不足？）。请先点击「清缓存」后再试。');
-    } else {
-      persistWarningShownRef.current = false;
-    }
+    void saveProjectLibrary(nextList, projectId).then((ok) => {
+      if (!ok) {
+        alert('新建项目已生效，但写入本地草稿库（IndexedDB）失败。请检查浏览器存储权限或磁盘空间。');
+      } else {
+        persistWarningShownRef.current = false;
+      }
+    });
   }, []);
 
-  const saveCurrentProject = useCallback(() => {
+  const saveCurrentProject = useCallback((options?: { skipDiskPrompt?: boolean }): Promise<boolean> => {
     const pid = activeProjectIdRef.current;
     if (!pid) {
       alert('项目数据仍在加载，请稍后再试保存。');
-      return;
+      return Promise.resolve(false);
     }
     const nextProjects = mergeCurrentCanvasIntoProjectList(
       projectsRef.current,
@@ -869,63 +1051,116 @@ export default function App() {
       edgesRef.current,
       transformRef.current
     );
-    setProjects(nextProjects);
-    projectsRef.current = nextProjects;
-    if (!tryWriteProjectsToLocalStorage(nextProjects, pid)) {
-      alert('保存失败：本地缓存空间不足，请先点击「清缓存」按钮。');
-      return;
+    const cur = nextProjects.find((p) => p.id === pid);
+    const needsDiskPrompt = !options?.skipDiskPrompt && cur != null && !cur.diskSaveEstablished;
+
+    const commitToIdb = (list: CanvasProject[]): Promise<boolean> => {
+      setProjects(list);
+      projectsRef.current = list;
+      return saveProjectLibrary(list, pid).then((ok) => {
+        if (!ok) {
+          alert('保存失败：无法写入 IndexedDB 草稿库。请检查存储权限或尝试导出 ZIP/JSON 备份。');
+        } else {
+          persistWarningShownRef.current = false;
+        }
+        return ok;
+      });
+    };
+
+    if (!needsDiskPrompt) {
+      return commitToIdb(nextProjects);
     }
-    persistWarningShownRef.current = false;
+
+    return (async () => {
+      const snapshot = cur as CanvasProject;
+      const filename = `${projectExportBasename(snapshot)}.json`;
+      const payload = { ...snapshot };
+      delete (payload as { diskSaveEstablished?: boolean }).diskSaveEstablished;
+      const diskResult = await saveJsonToDisk(filename, payload);
+      const listAfterDisk =
+        diskResult === 'saved'
+          ? nextProjects.map((p) => (p.id === pid ? { ...p, diskSaveEstablished: true as const } : p))
+          : nextProjects;
+      return commitToIdb(listAfterDisk);
+    })();
+  }, [saveJsonToDisk]);
+
+  const saveCurrentProjectRef = useRef(saveCurrentProject);
+  useEffect(() => {
+    saveCurrentProjectRef.current = saveCurrentProject;
+  }, [saveCurrentProject]);
+
+  useEffect(() => {
+    if (!projectStoreReady || autosaveIntervalMin <= 0) return;
+    const ms = autosaveIntervalMin * 60 * 1000;
+    const timer = window.setInterval(() => {
+      const pid = activeProjectIdRef.current;
+      if (!pid) return;
+      const p = projectsRef.current.find((x) => x.id === pid);
+      if (!p?.diskSaveEstablished) return;
+      void saveCurrentProjectRef.current({ skipDiskPrompt: true });
+    }, ms);
+    return () => clearInterval(timer);
+  }, [projectStoreReady, autosaveIntervalMin]);
+
+  const handleAutosaveIntervalChange = useCallback((v: 0 | 5 | 10 | 30) => {
+    setAutosaveIntervalMin(v);
+    try {
+      if (v === 0) localStorage.removeItem('wxcanvas-autosave-interval-min');
+      else localStorage.setItem('wxcanvas-autosave-interval-min', String(v));
+    } catch {
+      /* ignore */
+    }
   }, []);
 
-  const handleClearProjectCache = useCallback(() => {
-    const current = projects.find(p => p.id === activeProjectId);
-    if (!current) return;
-    const ok = confirm('清缓存会从本地存档中移除图片等大媒体数据（节点可能显示为空）。继续前将自动导出完整备份JSON。是否继续？');
-    if (!ok) return;
-    try {
-      const fullSnapshot: CanvasProject = {
-        ...current,
-        nodes,
-        edges,
-        transform,
-        updatedAt: Date.now(),
-      };
-      // 先导出完整备份，避免误清理后无法恢复
-      const backupProject = {
-        ...fullSnapshot,
-        name: `${fullSnapshot.name || 'project'}-backup-before-clear`
-      };
-      const backupBlob = new Blob([JSON.stringify(backupProject, null, 2)], { type: 'application/json' });
-      const backupUrl = URL.createObjectURL(backupBlob);
-      const backupLink = document.createElement('a');
-      backupLink.href = backupUrl;
-      backupLink.download = `${backupProject.name}.json`;
-      backupLink.click();
-      URL.revokeObjectURL(backupUrl);
-
-      const stripped = stripProjectHeavyMedia({
-        ...current,
-        nodes,
-        edges,
-        transform,
-        updatedAt: Date.now(),
+  const handleApplyDraftTitle = useCallback(() => {
+    const pid = activeProjectIdRef.current;
+    if (!pid) return;
+    const trimmed = draftNameInput.trim();
+    const nameRef = projectsRef.current.find((x) => x.id === pid)?.name?.trim() || '';
+    const useCustom = trimmed.length > 0 && trimmed !== nameRef;
+    setProjects((prev) => {
+      const next = prev.map((p) => {
+        if (p.id !== pid) return p;
+        return {
+          ...p,
+          draftTitle: useCustom ? trimmed : undefined,
+          updatedAt: Date.now(),
+        };
       });
-      localStorage.removeItem(PROJECTS_STORAGE_KEY);
-      localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
-      if (!tryWriteProjectsToLocalStorage([stripped], stripped.id)) {
-        throw new Error('写入清理后的存档失败');
-      }
-      setProjects([stripped]);
-      projectsRef.current = [stripped];
-      setActiveProjectId(stripped.id);
-      persistWarningShownRef.current = false;
-      alert('已导出完整备份JSON，并清理缓存大图（本地仅保留轻量存档）。');
-    } catch (error) {
-      console.error('清理缓存失败:', error);
-      alert('清理失败，请重试。');
-    }
-  }, [projects, activeProjectId, stripProjectHeavyMedia, nodes, edges, transform]);
+      projectsRef.current = next;
+      void saveProjectLibrary(next, pid).then((ok) => {
+        if (!ok) alert('草稿名称已更新，但写入草稿库失败，请重试。');
+      });
+      return next;
+    });
+  }, [draftNameInput]);
+
+  const commitCenterProjectRename = useCallback((raw: string) => {
+    setCenterTitleEditValue(null);
+    const trimmed = raw.trim();
+    if (!trimmed) return;
+    const pid = activeProjectIdRef.current;
+    if (!pid) return;
+    const merged = mergeCurrentCanvasIntoProjectList(
+      projectsRef.current,
+      pid,
+      nodesRef.current,
+      edgesRef.current,
+      transformRef.current
+    );
+    const next = merged.map((p) =>
+      p.id === pid
+        ? { ...p, name: trimmed, draftTitle: undefined, updatedAt: Date.now() }
+        : p
+    );
+    setProjects(next);
+    projectsRef.current = next;
+    setDraftNameInput(trimmed);
+    void saveProjectLibrary(next, pid).then((ok) => {
+      if (!ok) alert('名称已更新，但写入草稿库失败，请重试。');
+    });
+  }, []);
 
   const switchProject = useCallback((projectId: string) => {
     const target = projectsRef.current.find((p) => p.id === projectId);
@@ -952,56 +1187,36 @@ export default function App() {
       setNodes(fallback.nodes);
       setEdges(fallback.edges);
       setTransform(fallback.transform);
-      if (!tryWriteProjectsToLocalStorage(remained, fallback.id)) {
-        alert('项目已删除，但更新本地存档失败，请尝试「清缓存」或导出备份。');
-      }
+      void saveProjectLibrary(remained, fallback.id).then((ok) => {
+        if (!ok) alert('项目已删除，但更新草稿库失败，请尝试导出 ZIP/JSON 备份。');
+      });
       return;
     }
 
     setProjects(remained);
     projectsRef.current = remained;
-    if (!tryWriteProjectsToLocalStorage(remained, curActive)) {
-      alert('项目已删除，但更新本地存档失败，请尝试「清缓存」或导出备份。');
-    }
+    void saveProjectLibrary(remained, curActive).then((ok) => {
+      if (!ok) alert('项目已删除，但更新草稿库失败，请尝试导出 ZIP/JSON 备份。');
+    });
   }, []);
 
-  const saveJsonToDisk = useCallback(async (filename: string, data: unknown) => {
-    const json = JSON.stringify(data, null, 2);
-    const hasPicker = typeof (window as any).showSaveFilePicker === 'function';
-    if (hasPicker) {
-      try {
-        const handle = await (window as any).showSaveFilePicker({
-          suggestedName: filename,
-          types: [{
-            description: 'JSON 文件',
-            accept: { 'application/json': ['.json'] },
-          }],
-        });
-        const writable = await handle.createWritable();
-        await writable.write(json);
-        await writable.close();
-        lastJsonFileHandleRef.current = handle;
-        setLastJsonFilename(handle?.name || filename);
-        return;
-      } catch (err: any) {
-        if (err?.name === 'AbortError') return;
-        console.warn('文件保存器失败，回退为浏览器下载：', err);
-      }
-    }
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.click();
-    setLastJsonFilename(filename);
-    URL.revokeObjectURL(url);
-  }, []);
-
-  const handleExportProjectJson = useCallback(async (project: CanvasProject) => {
-    const filename = `${project.name || 'project'}.json`;
-    await saveJsonToDisk(filename, project);
-  }, [saveJsonToDisk]);
+  const handleExportProjectJson = useCallback(
+    async (project: CanvasProject) => {
+      const filename = `${projectExportBasename(project)}.json`;
+      const payload = { ...project };
+      delete (payload as { diskSaveEstablished?: boolean }).diskSaveEstablished;
+      const r = await saveJsonToDisk(filename, payload);
+      if (r !== 'saved') return;
+      const pid = project.id;
+      setProjects((prev) => {
+        const next = prev.map((p) => (p.id === pid ? { ...p, diskSaveEstablished: true as const } : p));
+        projectsRef.current = next;
+        void saveProjectLibrary(next, activeProjectIdRef.current);
+        return next;
+      });
+    },
+    [saveJsonToDisk]
+  );
 
   /** 导出 JSON 时：若目标即当前打开的项目，附带内存中最新的画布（无需先点保存） */
   const projectSnapshotForJsonExport = useCallback((project: CanvasProject): CanvasProject => {
@@ -1021,7 +1236,9 @@ export default function App() {
       return;
     }
     const snapshot = projectSnapshotForJsonExport(active);
-    const json = JSON.stringify(snapshot, null, 2);
+    const forWrite = { ...snapshot };
+    delete (forWrite as { diskSaveEstablished?: boolean }).diskSaveEstablished;
+    const json = JSON.stringify(forWrite, null, 2);
     const handle = lastJsonFileHandleRef.current;
     if (handle) {
       try {
@@ -1038,90 +1255,119 @@ export default function App() {
     alert('还没有可覆盖的上次JSON文件，请先点“另存为 JSON”选择一个文件。');
   }, [lastJsonFilename, projectSnapshotForJsonExport]);
 
-  const handleExportCurrentAsJson = useCallback(async () => {
-    const active = projectsRef.current.find((p) => p.id === activeProjectIdRef.current);
-    if (!active) {
-      alert('未找到当前项目');
-      return;
-    }
-    await handleExportProjectJson(projectSnapshotForJsonExport(active));
-  }, [handleExportProjectJson, projectSnapshotForJsonExport]);
-
-  /** 先写入浏览器本地存档，再保存/下载 JSON 到电脑（完整项目备份） */
-  const handleSaveProjectToComputer = useCallback(async () => {
-    saveCurrentProject();
-    await handleExportCurrentAsJson();
-  }, [saveCurrentProject, handleExportCurrentAsJson]);
-
-  const handleImportProjectJson = useCallback((file: File) => {
-    const reader = new FileReader();
-    reader.onload = (event) => {
+  const handleExportProjectZip = useCallback(
+    async (project: CanvasProject) => {
       try {
-        const raw = event.target?.result as string;
-        const imported = JSON.parse(raw) as Partial<CanvasProject>;
-        if (!imported || !Array.isArray(imported.nodes) || !Array.isArray(imported.edges)) {
-          alert('导入失败：JSON 格式不正确。');
-          return;
-        }
-        const impNodes = imported.nodes as CanvasNode[];
-        const impEdges = imported.edges as Edge[];
-        const newProject: CanvasProject = {
-          id: `project-${Date.now()}`,
-          name: (imported.name || file.name.replace(/\.json$/i, '') || '导入项目').toString(),
-          updatedAt: Date.now(),
-          nodes: impNodes,
-          edges: impEdges,
-          transform: (imported.transform || { x: 0, y: 0, scale: 1 }) as Transform,
-        };
-        const merged = mergeCurrentCanvasIntoProjectList(
-          projectsRef.current,
-          activeProjectIdRef.current,
-          nodesRef.current,
-          edgesRef.current,
-          transformRef.current
-        );
-        const nextList = [newProject, ...merged];
-        setProjects(nextList);
-        projectsRef.current = nextList;
-        setActiveProjectId(newProject.id);
-        setNodes(impNodes);
-        setEdges(impEdges);
-        setTransform(newProject.transform);
-        if (!tryWriteProjectsToLocalStorage(nextList, newProject.id)) {
-          alert('导入已生效，但写入本地存档失败（空间不足？）。请先「清缓存」或导出 JSON 备份。');
-        } else {
-          persistWarningShownRef.current = false;
-        }
-      } catch (err) {
-        console.error('导入项目失败:', err);
-        alert('导入失败：无法解析 JSON。');
+        await exportProjectToZipDownload(projectSnapshotForJsonExport(project));
+        const pid = project.id;
+        setProjects((prev) => {
+          const next = prev.map((p) => (p.id === pid ? { ...p, diskSaveEstablished: true as const } : p));
+          projectsRef.current = next;
+          void saveProjectLibrary(next, activeProjectIdRef.current);
+          return next;
+        });
+      } catch (e) {
+        console.error(e);
+        alert('导出 ZIP 失败，请重试。');
       }
-    };
-    reader.readAsText(file);
+    },
+    [projectSnapshotForJsonExport]
+  );
+
+  const finishImportNewProject = useCallback((newProject: CanvasProject) => {
+    const merged = mergeCurrentCanvasIntoProjectList(
+      projectsRef.current,
+      activeProjectIdRef.current,
+      nodesRef.current,
+      edgesRef.current,
+      transformRef.current
+    );
+    const nextList = [newProject, ...merged];
+    setProjects(nextList);
+    projectsRef.current = nextList;
+    setActiveProjectId(newProject.id);
+    setNodes(newProject.nodes);
+    setEdges(newProject.edges);
+    setTransform(newProject.transform);
+    void saveProjectLibrary(nextList, newProject.id).then((ok) => {
+      if (!ok) {
+        alert('导入已生效，但写入草稿库失败。请导出 ZIP/JSON 备份后重试。');
+      } else {
+        persistWarningShownRef.current = false;
+      }
+    });
   }, []);
 
-  // 初始化项目数据
-  useEffect(() => {
-    try {
-      const savedRaw = localStorage.getItem(PROJECTS_STORAGE_KEY);
-      const savedActive = localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY);
-      if (savedRaw) {
-        if (savedRaw.length > MAX_BOOTSTRAP_STORAGE_CHARS) {
-          console.warn('项目缓存过大，已跳过加载并清理本地缓存。');
-          localStorage.removeItem(PROJECTS_STORAGE_KEY);
-          localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
-          throw new Error('项目缓存过大');
+  const handleImportProjectFile = useCallback(
+    (file: File) => {
+      const lower = file.name.toLowerCase();
+      const isZip =
+        lower.endsWith('.zip') ||
+        lower.endsWith('.wxcanvas.zip') ||
+        file.type === 'application/zip' ||
+        file.type === 'application/x-zip-compressed';
+
+      if (isZip) {
+        void parseProjectFromZipFile(file)
+          .then((parsed) => {
+            const newProject: CanvasProject = {
+              ...parsed,
+              id: `project-${Date.now()}`,
+              name: parsed.name || file.name.replace(/\.(wxcanvas\.)?zip$/i, '') || '导入项目',
+              updatedAt: Date.now(),
+              diskSaveEstablished: false,
+            };
+            finishImportNewProject(newProject);
+          })
+          .catch((err) => {
+            console.error(err);
+            alert(err instanceof Error ? err.message : '导入 ZIP 失败');
+          });
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const raw = event.target?.result as string;
+          const imported = JSON.parse(raw) as Partial<CanvasProject>;
+          if (!imported || !Array.isArray(imported.nodes) || !Array.isArray(imported.edges)) {
+            alert('导入失败：JSON 格式不正确。');
+            return;
+          }
+          const impNodes = imported.nodes as CanvasNode[];
+          const impEdges = imported.edges as Edge[];
+          const newProject: CanvasProject = {
+            id: `project-${Date.now()}`,
+            name: (imported.name || file.name.replace(/\.json$/i, '') || '导入项目').toString(),
+            updatedAt: Date.now(),
+            nodes: impNodes,
+            edges: impEdges,
+            transform: (imported.transform || { x: 0, y: 0, scale: 1 }) as Transform,
+            diskSaveEstablished: false,
+          };
+          finishImportNewProject(newProject);
+        } catch (err) {
+          console.error('导入项目失败:', err);
+          alert('导入失败：无法解析 JSON。');
         }
-        const parsed = JSON.parse(savedRaw) as CanvasProject[];
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const sanitized = parsed.map((p) => ({
-            ...p,
-            nodes: p.nodes || [],
-            edges: p.edges || [],
-          }));
-          setProjects(sanitized);
-          projectsRef.current = sanitized;
-          const initial = sanitized.find(p => p.id === savedActive) || sanitized[0];
+      };
+      reader.readAsText(file);
+    },
+    [finishImportNewProject]
+  );
+
+  // 初始化项目数据：IndexedDB 草稿库；首次启动时从旧 localStorage 迁移
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const lib = await loadProjectLibrary();
+        if (cancelled) return;
+        if (lib && lib.projects.length > 0) {
+          const initial = lib.projects.find((p) => p.id === lib.activeProjectId) || lib.projects[0];
+          setProjects(lib.projects);
+          projectsRef.current = lib.projects;
           setActiveProjectId(initial.id);
           setNodes(initial.nodes || []);
           setEdges(initial.edges || []);
@@ -1129,26 +1375,31 @@ export default function App() {
           setProjectStoreReady(true);
           return;
         }
+      } catch (err) {
+        console.error('读取项目存档失败:', err);
       }
-    } catch (err) {
-      console.error('读取项目存档失败:', err);
-    }
-    const defaultProject: CanvasProject = {
-      id: `project-${Date.now()}`,
-      name: '默认项目',
-      updatedAt: Date.now(),
-      nodes,
-      edges,
-      transform
+      if (cancelled) return;
+      const defaultProject: CanvasProject = {
+        id: `project-${Date.now()}`,
+        name: '默认项目',
+        updatedAt: Date.now(),
+        nodes,
+        edges,
+        transform,
+      };
+      setProjects([defaultProject]);
+      projectsRef.current = [defaultProject];
+      setActiveProjectId(defaultProject.id);
+      await saveProjectLibrary([defaultProject], defaultProject.id);
+      setProjectStoreReady(true);
+    })();
+    return () => {
+      cancelled = true;
     };
-    setProjects([defaultProject]);
-    projectsRef.current = [defaultProject];
-    setActiveProjectId(defaultProject.id);
-    setProjectStoreReady(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 画布编辑不自动写盘；显式「保存当前项目」与列表操作（新建/导入/删除/重命名/切换项目）会按上文注释写 localStorage
+  // 画布编辑不自动写盘；显式「保存当前项目」与列表操作会写入 IndexedDB 草稿库
 
   const [promptPresets, setPromptPresets] = useState<Record<string, string>>({
     '角色4视图': '电影级古风写实摄影、ARRI Alexa 65实拍、中式古典美学、真实物理材质、自然光影，一张2x2的四宫格人物设定图。左上角：从头到脚完整全身的正面站立；右上角：从头到脚完整全身的侧面站立；左下角：从头到脚完整全身的背面站立；右下角：面部特写。所有视角的人物发型、服装细节和配饰必须保持绝对一致。纯白背景，无多余杂物。皮肤毛孔细节、胶片颗粒感、非CG、Raw photo、极致高清8K。 --ar 9:16',
@@ -1161,8 +1412,117 @@ export default function App() {
     '场景九视图': '请根据提供的图片做出这个场景的不同角度图片，创作一个由九个画面组成的九宫格3*3排列画幅16:9。每个画面需精心设计以体现不同的景别和技术手法，包括但不限于特写、远景、俯拍、仰拍和运动镜头。场景中没有人物，用不同镜头角度展现。每个宫格标注1-9的数字。',
     '故事九宫格': '请根据提供的图片内容及前面叙述的故事背景，创作一个由九个画面构成的写实风格九宫格故事3*3排列画幅16:9。每个画面精心设计以体现不同的景别和技术手法，包括但不限于特写、远景、俯拍、仰拍和运动镜头等，以此强化故事的紧张氛围和视觉表现力。具体要求如下：整体一致性：所有画面应保持与上传图片相同的写实风格；故事连贯性：九宫格中的每幅画都应当紧密围绕一个完整的故事线展开，确保故事逻辑清晰且连贯；景别多样性：至少包含一个特写镜头，用于捕捉角色的表情或关键物品的细节；加入至少一个远景镜头，展示环境全貌或大规模的动作场景；运用俯拍或仰拍来增强特定场景的情感表达或戏剧效果；考虑使用运动镜头（如跟随角色移动）以增加动态感和紧张气氛；视觉与情感深度：利用光影对比、色彩调配以及构图技巧来加强故事的情感层次和视觉吸引力。请务必让每一张图像都能够独立讲述一部分故事，同时作为整个九宫格的一部分共同编织出一个引人入胜的整体叙事。按照要求生成图片。',
     '全景图生成': '等柱状投影720°×360°全景图,严格遵循提供的网格模板:网格从左到右依次对应东、南、西、北四个方位,场景布局与方位一一对应;所有场景主体与元素必须严格按照网格的相对变形规律摆放,透视、比例与网格曲率完全贴合画面上下空白区域为天空/屋顶或地面的延伸部分,填充对应场景的环境内容;全景无接缝、无拉伸畸变,整体画面连贯自然,符合真实空间透视逻辑;最终生成的成品画面中,绝对禁止出现任何参考网格、辅助线条、定位线、结构标记等所有参考类元素,仅呈现纯净、完整的符合要求的全景场景内容',
-    '高清放大4K': '高清放大到4K，极致清晰，保留原始细节，无噪点，无模糊，超高质量，完美画质'
+    '高清放大4K': '高清放大到4K，极致清晰，保留原始细节，无噪点，无模糊，超高质量，完美画质',
+    道具拆分:
+      '识别主要物体，并将其拆分成 合适数量的 逻辑部件。\n使用干净的 Quixel 风格资产网格进行排布。\n必须满足：输出图像的**完整背景**为纯白色 (#FFFFFF)。\n物体部分的风格必须保持一致（100% 风格一致性）。',
+    道具5视图:
+      '生成 5 个视图（45 度透视、正面、背面、侧面、顶部）。在所有视图中保持完美的结构逻辑、比例尺度与物体身份一致。保持原始尺寸不变。',
+    道具转线稿色块: '将图片转换为线稿色块图：在灰色背景上使用扁平色块呈现线稿风格。保持与原图相同的构图与比例。',
+    道具转超写实: '识别图片中的物体，quixel资产库效果，灰色背景。',
+    道具转白模: '将图片转成传统3D游戏影视流程中的白模效果图，灰色背景。',
   });
+
+  /** 设置里对预设「角色/场景/道具/其他」的手动覆盖（键为预设名） */
+  const [promptPresetCategoryOverrides, setPromptPresetCategoryOverrides] = useState<
+    Record<string, I2iPresetCategoryId>
+  >({});
+
+  const executePresetCopy = (content: string) => {
+    void navigator.clipboard
+      .writeText(content)
+      .then(() => window.alert('已复制到剪贴板'))
+      .catch(() => window.alert('复制失败，请检查浏览器权限'));
+  };
+
+  const executePresetAdd = () => {
+    const name = window.prompt('新预设名称:');
+    if (name && !promptPresets[name]) {
+      setPromptPresets((prev) => ({ ...prev, [name]: '' }));
+      setSettingsPresetCategoryTab('other');
+    } else if (name && promptPresets[name]) {
+      window.alert('已存在同名预设');
+    }
+  };
+
+  const executePresetRename = (name: string) => {
+    const newName = window.prompt(`重命名预设 "${name}" 为:`);
+    if (newName && newName !== name) {
+      if (promptPresets[newName]) {
+        window.alert('已存在同名预设');
+        return;
+      }
+      setPromptPresets((prev) => {
+        const next = { ...prev };
+        next[newName] = next[name];
+        delete next[name];
+        return next;
+      });
+      setPromptPresetCategoryOverrides((prev) => {
+        const o = { ...prev };
+        const cat = o[name];
+        delete o[name];
+        if (cat !== undefined) {
+          const defNew = i2iCategoryForPreset(newName);
+          if (cat !== defNew) o[newName] = cat;
+        }
+        return o;
+      });
+    }
+  };
+
+  const executePresetDelete = (name: string) => {
+    if (!window.confirm(`确定删除预设 "${name}" 吗?`)) return;
+    setPromptPresets((prev) => {
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
+    setPromptPresetCategoryOverrides((prev) => {
+      const o = { ...prev };
+      delete o[name];
+      return o;
+    });
+  };
+
+  /** 设置 → 预设密码弹层：校验通过后开启本会话，并执行触发的操作 */
+  const confirmSettingsPresetPassword = () => {
+    const { intent, input } = settingsPresetPwdModal;
+    if (!intent) return;
+    if (input.trim() !== PRESET_SETTINGS_GUARD_PASSWORD) {
+      window.alert('密码错误');
+      setSettingsPresetPwdModal((p) => ({ ...p, input: '' }));
+      return;
+    }
+    setSettingsPresetPwdModal({ intent: null, input: '' });
+    setSettingsPresetAuthSession(true);
+
+    if (intent.type === 'copy') {
+      executePresetCopy(intent.content);
+      return;
+    }
+    if (intent.type === 'add') {
+      executePresetAdd();
+      return;
+    }
+    if (intent.type === 'rename') {
+      executePresetRename(intent.name);
+      return;
+    }
+    if (intent.type === 'delete') {
+      executePresetDelete(intent.name);
+    }
+  };
+
+  useEffect(() => {
+    if (!settingsPresetPwdModal.intent) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSettingsPresetPwdModal({ intent: null, input: '' });
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [settingsPresetPwdModal.intent]);
 
   // --- Apply Preset Prompt ---
   const handleApplyPreset = useCallback((nodeId: string, presetKey: string) => {
@@ -1627,6 +1987,9 @@ export default function App() {
         }
       } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV' && !isInput) {
         // 交给 paste 事件统一处理（优先粘贴外部图片）
+      } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyS' && !isInput && !(e.target as HTMLElement).isContentEditable) {
+        e.preventDefault();
+        void saveCurrentProject();
       } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.code === 'KeyZ' && !isInput && !fullscreenImage) {
         e.preventDefault();
         undoCanvasState();
@@ -1683,7 +2046,7 @@ export default function App() {
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('paste', handlePaste);
     };
-  }, [selectedIds, nodes, clipboard, fullscreenImage, createImageNodeFromBase64, undoCanvasState]);
+  }, [selectedIds, nodes, clipboard, fullscreenImage, createImageNodeFromBase64, undoCanvasState, saveCurrentProject]);
 
   // --- Fullscreen Modal Handlers ---
   useEffect(() => {
@@ -2017,9 +2380,9 @@ export default function App() {
         ? {
             videos: [],
             currentVideoIndex: 0,
-            videoDuration: 10,
+            videoDuration: 8,
             videoResolution: '720p' as const,
-            model: 'grok-video-3',
+            model: 'veo3.1-fast',
           }
         : {}),
     };
@@ -2301,26 +2664,24 @@ export default function App() {
     });
   }, [edges, nodes]);
 
-  const downloadImage = (base64: string) => {
-    const link = document.createElement('a');
-    link.href = `data:image/jpeg;base64,${base64}`;
-    link.download = `generated-${Date.now()}.jpg`;
-    link.click();
-  };
+  const downloadImage = useCallback(async (base64: string) => {
+    const mime = sniffImageMimeFromBase64(base64);
+    try {
+      const r = await saveImageDownload(base64, mime);
+      if (!r.ok && r.message) window.alert(r.message);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '下载失败';
+      window.alert(`${msg}。可尝试右键图片另存为。`);
+    }
+  }, []);
 
   const downloadVideoFromUrl = useCallback(async (url: string) => {
     try {
-      const res = await fetch(url, { mode: 'cors', credentials: 'omit' });
-      if (!res.ok) throw new Error(`下载失败 (${res.status})`);
-      const blob = await res.blob();
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `generated-video-${Date.now()}.mp4`;
-      a.click();
-      URL.revokeObjectURL(a.href);
+      const r = await saveVideoDownloadFromUrl(url);
+      if (!r.ok && r.message) window.alert(r.message);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '下载失败';
-      alert(`${msg}。可直接右键视频「另存为」或复制链接。`);
+      window.alert(`${msg}。可直接右键视频「另存为」或复制链接。`);
     }
   }, []);
 
@@ -2344,16 +2705,29 @@ export default function App() {
       const combinedPrompt = [node.prompt, ...textInputs].filter(Boolean).join('\n').trim();
       if (!combinedPrompt) throw new Error('请输入提示词或连接文本节点');
 
-      const videoModel = node.model === 'sora-2-vvip' ? 'sora-2-vvip' : 'grok-video-3';
+      const videoModel: 'grok-video-3' | 'sora-2-vvip' | 'veo3.1-fast' =
+        node.model === 'sora-2-vvip'
+          ? 'sora-2-vvip'
+          : isVeo31FastVideoModel(node.model)
+            ? 'veo3.1-fast'
+            : 'grok-video-3';
+
+      const resolution: '480p' | '720p' | '1080p' | '4k' =
+        videoModel === 'veo3.1-fast'
+          ? (['1080p', '4k'].includes(node.videoResolution || '') ? (node.videoResolution as '1080p' | '4k') : '720p')
+          : videoModel === 'sora-2-vvip'
+            ? '720p'
+            : node.videoResolution === '480p'
+              ? '480p'
+              : '720p';
+
       const videoUrl = await generateCanvasVideoViaToApis(combinedPrompt, {
         videoModel,
         durationSeconds:
-          node.videoDuration ?? (videoModel === 'sora-2-vvip' ? 8 : 10),
+          node.videoDuration ??
+          (videoModel === 'sora-2-vvip' || videoModel === 'veo3.1-fast' ? 8 : 10),
         aspectRatio: node.aspectRatio || '16:9',
-        resolution:
-          videoModel === 'sora-2-vvip'
-            ? '720p'
-            : ((node.videoResolution === '480p' ? '480p' : '720p') as '480p' | '720p'),
+        resolution,
         referenceImagesBase64: imageInputs.slice(0, 3),
         signal: ac.signal,
       });
@@ -2769,6 +3143,13 @@ export default function App() {
 
         {node.type === 'video' && (() => {
           const isSora = node.model === 'sora-2-vvip';
+          const isVeo = isVeo31FastVideoModel(node.model);
+          const modelSelectValue =
+            node.model === 'sora-2-vvip'
+              ? 'sora-2-vvip'
+              : isVeo31FastVideoModel(node.model)
+                ? 'veo3.1-fast'
+                : 'grok-video-3';
           return (
           <div className="flex flex-col gap-1.5 p-2 bg-[#252525] border-b border-[#333] text-xs shrink-0">
             {(() => {
@@ -2825,17 +3206,21 @@ export default function App() {
             })()}
             <div className="text-[10px] text-gray-500 px-1">
               需 OpenAI 兼容 + ToAPIs Base URL · 最多 3 张参考图 ·
-              {isSora ? ' Sora2 VVIP：4/8/12 秒、16:9 或 9:16、720p' : ' Grok：多档秒数与画幅'}
+              {isVeo
+                ? ' Veo3.1 Fast（veo3.1-fast）：ToAPIs 固定 8 秒；画幅 16:9 或 9:16（其它按横屏）；720p/1080p/4k'
+                : isSora
+                  ? ' Sora2 VVIP：4/8/12 秒、16:9 或 9:16、720p'
+                  : ' Grok：多档秒数与画幅'}
             </div>
-            {!isSora && (
+            {!isSora && !isVeo && (
               <div className="text-[9px] text-amber-600/95 px-1 leading-snug">
                 分辨率：Grok 路径已随请求发送 resolution；若成品仍为 480p，多为上游默认。
               </div>
             )}
             <div className="flex flex-wrap items-center gap-1.5">
               <select
-                className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500 min-w-[120px]"
-                value={node.model === 'sora-2-vvip' ? 'sora-2-vvip' : 'grok-video-3'}
+                className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500 min-w-[140px]"
+                value={modelSelectValue}
                 onChange={(e) => {
                   const m = e.target.value;
                   const updates: Partial<CanvasNode> = { model: m };
@@ -2845,18 +3230,34 @@ export default function App() {
                     updates.videoDuration = d === 4 || d === 8 || d === 12 ? d : 8;
                     const ar = node.aspectRatio || '16:9';
                     if (ar !== '16:9' && ar !== '9:16') updates.aspectRatio = '16:9';
+                  } else if (m === 'veo3.1-fast') {
+                    updates.videoDuration = 8;
+                    updates.videoResolution =
+                      node.videoResolution === '1080p' || node.videoResolution === '4k'
+                        ? node.videoResolution
+                        : '720p';
+                    const ar = node.aspectRatio || '16:9';
+                    if (!['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].includes(ar)) updates.aspectRatio = '16:9';
                   } else {
                     const d = node.videoDuration ?? 8;
                     if (d === 4 || d === 8 || d === 12) updates.videoDuration = 10;
+                    if (node.videoResolution === '1080p' || node.videoResolution === '4k') {
+                      updates.videoResolution = '720p';
+                    }
                   }
                   handleUpdateNode(node.id, updates);
                 }}
                 onPointerDown={e => e.stopPropagation()}
               >
+                <option value="veo3.1-fast">Veo 3.1 Fast</option>
                 <option value="grok-video-3">Grok Video 3</option>
                 <option value="sora-2-vvip">Sora2 VVIP</option>
               </select>
-              {isSora ? (
+              {isVeo ? (
+                <span className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-400 text-xs whitespace-nowrap">
+                  8 秒（ToAPIs 固定）
+                </span>
+              ) : isSora ? (
                 <select
                   className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
                   value={[4, 8, 12].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 8}
@@ -2882,7 +3283,22 @@ export default function App() {
                   <option value={30}>30 秒</option>
                 </select>
               )}
-              {isSora ? (
+              {isVeo ? (
+                <select
+                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  value={node.aspectRatio || '16:9'}
+                  onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })}
+                  onPointerDown={e => e.stopPropagation()}
+                >
+                  <option value="16:9">16:9</option>
+                  <option value="9:16">9:16</option>
+                  <option value="1:1">1:1（按 16:9 提交）</option>
+                  <option value="4:3">4:3（按 16:9 提交）</option>
+                  <option value="3:4">3:4（按 16:9 提交）</option>
+                  <option value="3:2">3:2（按 16:9 提交）</option>
+                  <option value="2:3">2:3（按 16:9 提交）</option>
+                </select>
+              ) : isSora ? (
                 <select
                   className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
                   value={node.aspectRatio === '9:16' ? '9:16' : '16:9'}
@@ -2910,10 +3326,29 @@ export default function App() {
               )}
               {isSora ? (
                 <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#121212]">720p</span>
+              ) : isVeo ? (
+                <select
+                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  value={
+                    node.videoResolution === '1080p' || node.videoResolution === '4k'
+                      ? node.videoResolution
+                      : '720p'
+                  }
+                  onChange={(e) =>
+                    handleUpdateNode(node.id, {
+                      videoResolution: e.target.value as '720p' | '1080p' | '4k',
+                    })
+                  }
+                  onPointerDown={e => e.stopPropagation()}
+                >
+                  <option value="720p">720p</option>
+                  <option value="1080p">1080p</option>
+                  <option value="4k">4K</option>
+                </select>
               ) : (
                 <select
                   className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={node.videoResolution || '720p'}
+                  value={node.videoResolution === '480p' ? '480p' : '720p'}
                   onChange={(e) => handleUpdateNode(node.id, { videoResolution: e.target.value as '480p' | '720p' })}
                   onPointerDown={e => e.stopPropagation()}
                 >
@@ -3423,6 +3858,8 @@ export default function App() {
                 <I2iPresetCategorySelect
                   nodeId={node.id}
                   activePreset={node.activePreset}
+                  promptPresets={promptPresets}
+                  presetCategoryOverrides={promptPresetCategoryOverrides}
                   onApplyPreset={handleApplyPreset}
                   onClearPreset={handleClearPreset}
                 />
@@ -3928,79 +4365,123 @@ export default function App() {
         </button>
       </div>
 
-      {/* Settings Button */}
-      <button
-        onClick={() => {
-          setSettingsTab('api');
-          setShowSettingsModal(true);
-        }}
-        className="absolute top-6 left-24 bg-[#1e1e1e]/90 backdrop-blur-md p-2.5 rounded-xl shadow-2xl border border-[#333] z-40 hover:bg-[#333] transition-colors flex items-center gap-2"
-        title="设置（API 与预设）"
-      >
-        <SettingsIcon size={18} />
-        <span className="text-gray-400 text-xs font-medium">设置</span>
-      </button>
+      {/* Settings + project actions (top left, single row) */}
+      <div className="absolute top-6 left-24 z-40 flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => {
+            setSettingsTab('api');
+            setShowSettingsModal(true);
+          }}
+          className="bg-[#1e1e1e]/90 backdrop-blur-md p-2.5 rounded-xl shadow-2xl border border-[#333] hover:bg-[#333] transition-colors flex items-center gap-2"
+          title="设置（API、预设、下载路径）"
+        >
+          <SettingsIcon size={18} />
+          <span className="text-gray-400 text-xs font-medium">设置</span>
+        </button>
 
-      {/* Project Button */}
-      <button
-        onClick={() => setShowProjectModal(true)}
-        className="absolute top-6 left-[200px] bg-[#1e1e1e]/90 backdrop-blur-md p-2.5 rounded-xl shadow-2xl border border-[#333] z-40 hover:bg-[#333] transition-colors flex items-center gap-2"
-        title="项目管理：多项目、导入/导出 JSON、保存到浏览器"
-      >
-        <GridIcon size={18} />
-        <span className="text-gray-400 text-xs font-medium">项目</span>
-      </button>
+        <button
+          onClick={() => setShowProjectModal(true)}
+          className="bg-[#1e1e1e]/90 backdrop-blur-md p-2.5 rounded-xl shadow-2xl border border-[#333] hover:bg-[#333] transition-colors flex items-center gap-2"
+          title="项目管理：IndexedDB 草稿库、JSON / ZIP 导入导出"
+        >
+          <GridIcon size={18} />
+          <span className="text-gray-400 text-xs font-medium">项目</span>
+        </button>
 
-      <button
-        type="button"
-        onClick={() => {
-          void handleSaveProjectToComputer();
-        }}
-        className="absolute top-6 left-[296px] bg-[#1e1e1e]/90 backdrop-blur-md p-2.5 rounded-xl shadow-2xl border border-[#333] z-40 hover:bg-[#333] transition-colors flex items-center gap-2"
-        title="先保存到浏览器，再将当前项目导出为 JSON 文件到电脑（含节点、连线、图片等，可备份与换机）"
-      >
-        <DownloadIcon size={18} />
-        <span className="text-gray-400 text-xs font-medium whitespace-nowrap">存到电脑</span>
-      </button>
+        <button
+          type="button"
+          onClick={handleClearCanvas}
+          className="bg-[#1e1e1e]/90 backdrop-blur-md px-3 py-2.5 rounded-xl shadow-2xl border border-[#333] hover:bg-[#333] transition-colors"
+          title="删除所有节点与连线，并放入一个空白文生图节点"
+        >
+          <span className="text-gray-400 text-xs font-medium whitespace-nowrap">清空画布</span>
+        </button>
 
-      <button
-        onClick={handleClearProjectCache}
-        className="absolute top-6 left-[432px] bg-[#1e1e1e]/90 backdrop-blur-md p-2.5 rounded-xl shadow-2xl border border-[#333] z-40 hover:bg-[#333] transition-colors flex items-center gap-2"
-        title="清理本地存档中的大图，减小占用（先自动导出备份 JSON）"
-      >
-        <TrashIcon size={18} />
-        <span className="text-gray-400 text-xs font-medium">清缓存</span>
-      </button>
+        <button
+          type="button"
+          onClick={handleClearCanvasPreviewCache}
+          className="bg-[#1e1e1e]/90 backdrop-blur-md px-3 py-2.5 rounded-xl shadow-2xl border border-amber-900/50 hover:bg-[#333] transition-colors"
+          title="仅清理内存里为节点缩略图生成的缓存（不删节点里的图片、不改 IndexedDB 草稿）；可缓解内存占用，缩略图会按需重新生成"
+        >
+          <span className="text-amber-500/90 text-xs font-medium whitespace-nowrap">清预览缓存</span>
+        </button>
+      </div>
 
-      <button
-        type="button"
-        onClick={handleClearCanvas}
-        className="absolute top-6 left-[548px] bg-[#1e1e1e]/90 backdrop-blur-md px-2.5 py-2.5 rounded-xl shadow-2xl border border-[#333] z-40 hover:bg-[#333] transition-colors flex items-center gap-1.5"
-        title="删除所有节点与连线，并放入一个空白文生图节点（与「清缓存」不同：不处理本地项目文件）"
-      >
-        <span className="text-gray-400 text-xs font-medium whitespace-nowrap">清空画布</span>
-      </button>
-
-      <button
-        type="button"
-        onClick={handleClearCanvasPreviewCache}
-        className="absolute top-6 left-[656px] bg-[#1e1e1e]/90 backdrop-blur-md px-2.5 py-2.5 rounded-xl shadow-2xl border border-amber-900/50 z-40 hover:bg-[#333] transition-colors flex items-center gap-1.5"
-        title="仅清理内存中的图片缩略图缓存，缓解卡顿；节点内数据与项目存档不变"
-      >
-        <span className="text-amber-500/90 text-xs font-medium whitespace-nowrap">清预览缓存</span>
-      </button>
-
-      {activeProjectId && (
-        <div className="absolute top-6 left-[796px] bg-[#1e1e1e]/90 backdrop-blur-md px-3 py-2.5 rounded-xl shadow-2xl border border-[#333] z-40 text-xs text-gray-300 max-w-[220px] truncate">
-          当前: {projects.find(p => p.id === activeProjectId)?.name || '未命名项目'}
-        </div>
-      )}
+      {/* Center — current draft / project title（双击改项目名，与草稿展示同步并写回 IndexedDB） */}
+      {activeProjectId ? (() => {
+        const curProj = projects.find((p) => p.id === activeProjectId);
+        if (!curProj) return null;
+        const editing = centerTitleEditValue !== null;
+        return (
+          <div
+            className="absolute top-5 left-1/2 z-[35] max-w-[min(640px,calc(100vw-14rem))] -translate-x-1/2 px-4 text-center"
+            title={editing ? undefined : `${projectDraftDisplayName(curProj)} — 双击修改项目名（与草稿名同步）`}
+            onPointerDown={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              if (centerTitleEditValue !== null) return;
+              const seed = projectDraftEditSeed(curProj);
+              window.setTimeout(() => {
+                setCenterTitleEditValue(seed);
+              }, 16);
+            }}
+          >
+            {editing ? (
+              <input
+                type="text"
+                autoFocus
+                className="w-full min-w-[12rem] rounded-lg border border-blue-500/70 bg-[#141414]/95 px-3 py-2 text-center text-xl font-semibold tracking-tight text-white outline-none ring-2 ring-blue-500/30 sm:text-2xl"
+                value={centerTitleEditValue ?? ''}
+                onChange={(e) => setCenterTitleEditValue(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                onFocus={(ev) => {
+                  const el = ev.currentTarget;
+                  const len = el.value.length;
+                  requestAnimationFrame(() => {
+                    try {
+                      el.setSelectionRange(len, len);
+                    } catch {
+                      /* ignore */
+                    }
+                  });
+                }}
+                onBlur={(e) => {
+                  if (skipCenterRenameBlurRef.current) {
+                    skipCenterRenameBlurRef.current = false;
+                    return;
+                  }
+                  commitCenterProjectRename(e.currentTarget.value);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    skipCenterRenameBlurRef.current = true;
+                    setCenterTitleEditValue(null);
+                  } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    (e.target as HTMLInputElement).blur();
+                  }
+                }}
+              />
+            ) : (
+              <div className="cursor-text truncate text-xl font-semibold tracking-tight text-gray-50 drop-shadow-md sm:text-2xl">
+                {projectDraftDisplayName(curProj)}
+              </div>
+            )}
+          </div>
+        );
+      })() : null}
 
       {/* Projects Modal */}
       {showProjectModal && (
         <div
           className="fixed inset-0 z-[210] bg-black/80 flex items-center justify-center"
-          onClick={() => setShowProjectModal(false)}
+          onClick={() => {
+            setShowProjectModal(false);
+            setProjectExportMenuOpen(false);
+          }}
         >
           <div
             className="bg-[#1e1e1e] rounded-2xl p-6 w-[640px] max-h-[80vh] overflow-hidden flex flex-col shadow-2xl border border-[#333]"
@@ -4009,69 +4490,141 @@ export default function App() {
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-lg font-bold text-white">项目管理</h2>
               <button
-                onClick={() => setShowProjectModal(false)}
+                onClick={() => {
+                  setShowProjectModal(false);
+                  setProjectExportMenuOpen(false);
+                }}
                 className="text-gray-400 hover:text-white transition-colors"
               >
                 <XIcon size={20} />
               </button>
             </div>
-            <p className="text-[11px] text-gray-500 mb-3 leading-relaxed">
-              左上角「存到电脑」= 浏览器存档 + 导出 JSON 文件备份；「保存当前画布」仅写入本浏览器。换电脑请用 JSON 导出/导入。
+            <p className="text-[11px] text-gray-500 mb-2 leading-relaxed">
+              草稿保存在本机 <span className="text-gray-400">IndexedDB</span>。换机请用下方「导出」下载 ZIP 或 JSON 备份后，在另一台电脑「导入」。
+              <span className="text-cyan-600/90"> Ctrl+S（或 ⌘+S）</span>
+              可在画布上快速保存（焦点在输入框内时不触发）。新建或导入的项目、以及从未在本机备份过的项目，首次保存会先弹出选择 JSON 保存位置（浏览器支持「另存为」时），确认后<strong className="text-gray-400">立即写入草稿</strong>。
             </p>
-            <div className="flex gap-2 mb-3">
+            <div className="mb-3 rounded-lg border border-[#333] bg-[#141414] p-3 space-y-2">
+              <div className="flex flex-wrap items-end gap-2">
+                <label className="flex-1 min-w-[200px]">
+                  <span className="block text-[10px] text-gray-500 mb-0.5">草稿名称（留空或与项目名相同则自动跟项目名）</span>
+                  <input
+                    type="text"
+                    value={draftNameInput}
+                    onChange={(e) => setDraftNameInput(e.target.value)}
+                    className="w-full rounded-md border border-[#444] bg-[#0d0d0d] px-2 py-1.5 text-xs text-gray-100 outline-none focus:border-blue-600"
+                    placeholder={projects.find((p) => p.id === activeProjectId)?.name || '未命名项目'}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => handleApplyDraftTitle()}
+                  className="shrink-0 rounded-md bg-[#333] px-2.5 py-1.5 text-[11px] text-gray-100 hover:bg-[#444]"
+                >
+                  应用草稿名
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const n = projects.find((p) => p.id === activeProjectId)?.name || '';
+                    setDraftNameInput(n);
+                  }}
+                  className="shrink-0 rounded-md border border-[#444] px-2.5 py-1.5 text-[11px] text-gray-400 hover:bg-[#222]"
+                >
+                  填入项目名
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[10px] text-gray-500 shrink-0">定时自动保存草稿</span>
+                <select
+                  value={autosaveIntervalMin}
+                  onChange={(e) => handleAutosaveIntervalChange(Number(e.target.value) as 0 | 5 | 10 | 30)}
+                  className="rounded-md border border-[#444] bg-[#0d0d0d] px-2 py-1 text-[11px] text-gray-200 outline-none focus:border-blue-600"
+                >
+                  <option value={0}>关闭</option>
+                  <option value={5}>每 5 分钟</option>
+                  <option value={10}>每 10 分钟</option>
+                  <option value={30}>每 30 分钟</option>
+                </select>
+                <span className="text-[10px] text-gray-600 leading-snug">
+                  仅在本项目已完成「首次另存为 JSON」后生效，静默覆盖 IndexedDB，不弹窗。
+                </span>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 mb-3 sm:grid-cols-4">
               <button
+                type="button"
                 onClick={() => {
                   const name = prompt('新项目名称:');
                   createNewProject(name || undefined);
                 }}
-                className="px-3 py-2 text-xs rounded bg-blue-600 hover:bg-blue-500 text-white"
+                className="px-3 py-2.5 text-xs rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium"
               >
-                + 新建项目
+                新建项目
               </button>
               <button
-                onClick={saveCurrentProject}
-                className="px-3 py-2 text-xs rounded bg-emerald-700 hover:bg-emerald-600 text-white"
-                title="将当前画布的节点、连线、缩放与平移写入当前项目并保存到浏览器本地"
+                type="button"
+                onClick={() => void saveCurrentProject()}
+                className="px-3 py-2.5 text-xs rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white font-medium"
+                title="合并画布后写入 IndexedDB；未完成首次本地备份时会先另存为 JSON。快捷键 Ctrl+S / ⌘+S"
               >
                 保存当前画布
               </button>
               <button
-                onClick={() => {
-                  const current = projects.find((p) => p.id === activeProjectId);
-                  if (current) handleExportProjectJson(projectSnapshotForJsonExport(current));
-                }}
-                className="px-3 py-2 text-xs rounded bg-indigo-700 hover:bg-indigo-600 text-white"
-                title="导出当前项目；若即正在编辑的项目，会包含画布上最新内容"
-              >
-                导出 JSON
-              </button>
-              <button
-                onClick={handleExportCurrentAsJson}
-                className="px-3 py-2 text-xs rounded bg-violet-700 hover:bg-violet-600 text-white"
-              >
-                另存为 JSON
-              </button>
-              <button
-                onClick={handleOverwriteLastJson}
-                className="px-3 py-2 text-xs rounded bg-fuchsia-700 hover:bg-fuchsia-600 text-white"
-                title={lastJsonFilename ? `覆盖保存到：${lastJsonFilename}` : '先另存为 JSON 后可覆盖'}
-              >
-                覆盖保存到上次JSON
-              </button>
-              <button
+                type="button"
                 onClick={() => projectImportInputRef.current?.click()}
-                className="px-3 py-2 text-xs rounded bg-amber-700 hover:bg-amber-600 text-white"
+                className="px-3 py-2.5 text-xs rounded-lg bg-amber-700 hover:bg-amber-600 text-white font-medium"
+                title="支持 .json 与 .wxcanvas.zip / .zip"
               >
-                导入 JSON
+                导入 JSON / ZIP
               </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setProjectExportMenuOpen((o) => !o)}
+                  className="w-full px-3 py-2.5 text-xs rounded-lg bg-indigo-700 hover:bg-indigo-600 text-white font-medium"
+                  title="下载到本机"
+                >
+                  导出 JSON / ZIP ▾
+                </button>
+                {projectExportMenuOpen ? (
+                  <div
+                    className="absolute right-0 z-[300] mt-1 min-w-[160px] rounded-lg border border-[#444] bg-[#1a1a1a] py-1 shadow-xl"
+                    onClick={(ev) => ev.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      className="block w-full px-3 py-2 text-left text-xs text-gray-100 hover:bg-[#2a2a2a]"
+                      onClick={() => {
+                        const current = projects.find((p) => p.id === activeProjectId);
+                        if (current) void handleExportProjectJson(projectSnapshotForJsonExport(current));
+                        setProjectExportMenuOpen(false);
+                      }}
+                    >
+                      导出 JSON…
+                    </button>
+                    <button
+                      type="button"
+                      className="block w-full px-3 py-2 text-left text-xs text-gray-100 hover:bg-[#2a2a2a]"
+                      onClick={() => {
+                        const current = projects.find((p) => p.id === activeProjectId);
+                        if (current) void handleExportProjectZip(projectSnapshotForJsonExport(current));
+                        setProjectExportMenuOpen(false);
+                      }}
+                    >
+                      导出 ZIP…
+                    </button>
+                  </div>
+                ) : null}
+              </div>
               <input
                 ref={projectImportInputRef}
                 type="file"
-                accept=".json,application/json"
+                accept=".json,.zip,.wxcanvas.zip,application/json,application/zip,application/x-zip-compressed"
                 className="hidden"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
-                  if (file) handleImportProjectJson(file);
+                  if (file) handleImportProjectFile(file);
                   e.currentTarget.value = '';
                 }}
               />
@@ -4090,7 +4643,10 @@ export default function App() {
                         onClick={() => switchProject(project.id)}
                         className="text-left flex-1"
                       >
-                        <div className="text-sm text-gray-100">{project.name}</div>
+                        <div className="text-sm text-gray-100">{projectDraftDisplayName(project)}</div>
+                        {project.draftTitle?.trim() && project.draftTitle.trim() !== (project.name || '').trim() ? (
+                          <div className="text-[10px] text-gray-600">项目名：{project.name}</div>
+                        ) : null}
                         <div className="text-[10px] text-gray-500">
                           节点 {project.nodes.length} | 连线 {project.edges.length} | 更新时间 {new Date(project.updatedAt).toLocaleString()}
                         </div>
@@ -4105,9 +4661,9 @@ export default function App() {
                               p.id === project.id ? { ...p, name: trimmed, updatedAt: Date.now() } : p
                             );
                             projectsRef.current = next;
-                            if (!tryWriteProjectsToLocalStorage(next, activeProjectIdRef.current)) {
-                              alert('名称已更新，但写入本地失败，请尝试「清缓存」后重试。');
-                            }
+                            void saveProjectLibrary(next, activeProjectIdRef.current).then((ok) => {
+                              if (!ok) alert('名称已更新，但写入草稿库失败，请重试。');
+                            });
                             return next;
                           });
                         }}
@@ -4147,27 +4703,47 @@ export default function App() {
           onClick={() => setShowSettingsModal(false)}
         >
           <div
-            className="bg-[#1e1e1e] rounded-2xl p-0 w-[900px] max-h-[82vh] overflow-hidden flex shadow-2xl border border-[#333]"
+            className="bg-[#1e1e1e] rounded-2xl p-0 w-[900px] h-[82vh] max-h-[82vh] overflow-hidden flex shadow-2xl border border-[#333]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="w-[180px] bg-[#171717] border-r border-[#333] p-3 flex flex-col gap-2">
+            <div className="w-[200px] shrink-0 bg-[#171717] border-r border-[#333] p-3 flex flex-col gap-2">
               <div className="text-xs text-gray-500 px-2 py-1">设置</div>
               <button
-                onClick={() => setSettingsTab('api')}
+                onClick={() => {
+                  setSettingsPresetAuthSession(false);
+                  setSettingsPresetPwdModal({ intent: null, input: '' });
+                  setSettingsTab('api');
+                }}
                 className={`text-left px-3 py-2 rounded text-sm ${settingsTab === 'api' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-[#2a2a2a]'}`}
               >
                 API
               </button>
               <button
-                onClick={() => setSettingsTab('presets')}
+                onClick={() => {
+                  setSettingsPresetAuthSession(false);
+                  setSettingsPresetPwdModal({ intent: null, input: '' });
+                  setSettingsTab('presets');
+                }}
                 className={`text-left px-3 py-2 rounded text-sm ${settingsTab === 'presets' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-[#2a2a2a]'}`}
               >
                 预设
               </button>
+              <button
+                onClick={() => {
+                  setSettingsPresetAuthSession(false);
+                  setSettingsPresetPwdModal({ intent: null, input: '' });
+                  setSettingsTab('downloads');
+                }}
+                className={`text-left px-3 py-2 rounded text-sm ${settingsTab === 'downloads' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-[#2a2a2a]'}`}
+              >
+                下载路径
+              </button>
             </div>
-            <div className="flex-1 p-6 overflow-y-auto">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-bold text-white">{settingsTab === 'api' ? 'API 设置' : '提示词预设'}</h2>
+            <div className="flex flex-1 flex-col min-h-0 min-w-0 p-6">
+              <div className="flex shrink-0 items-center justify-between mb-4">
+                <h2 className="text-lg font-bold text-white">
+                  {settingsTab === 'api' ? 'API 设置' : settingsTab === 'presets' ? '提示词预设' : '下载路径'}
+                </h2>
                 <button
                   onClick={() => setShowSettingsModal(false)}
                   className="text-gray-400 hover:text-white transition-colors"
@@ -4176,6 +4752,7 @@ export default function App() {
                 </button>
               </div>
 
+              <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1 -mr-1">
               {settingsTab === 'api' && (
                 <div>
                   <p className="text-gray-400 text-sm mb-3">
@@ -4285,62 +4862,413 @@ export default function App() {
               )}
 
               {settingsTab === 'presets' && (
-                <div className="space-y-3">
-                  {Object.entries(promptPresets).map(([name, content]) => (
-                    <div key={name} className="flex gap-3">
-                      <div className="flex-1">
-                        <label className="text-xs text-gray-400 mb-1 block">{name}</label>
-                        <textarea
-                          className="w-full h-20 bg-[#121212] text-gray-200 text-sm p-2 rounded border border-[#333] focus:outline-none focus:border-blue-500 resize-none"
-                          value={content}
-                          onChange={(e) => setPromptPresets(prev => ({ ...prev, [name]: e.target.value }))}
-                        />
+                <div className="space-y-4">
+                  <p className="text-[11px] text-gray-500 leading-relaxed">
+                    与图生图节点分类一致；每次只编辑一类。未出现在图生图内置列表中的名称默认在「其他」，可用每行「分类」移到其它类。
+                    <span className="text-gray-600"> 此处增删改的名称会立刻出现在图生图节点的预设下拉里（按分类一致）。</span>
+                    <span className="block mt-1 text-amber-600/90">
+                      {settingsPresetAuthSession
+                        ? '已通过密码验证：当前可编辑提示词，复制/重命名/删除不再弹密码。完成后可点下方「恢复密码保护」。'
+                        : '提示词默认灰色只读；首次点「复制 / 重命名 / 删除 / 添加」会弹出密码框，验证通过后本会话内可直接编辑且上述按钮不再要求密码。'}
+                    </span>
+                  </p>
+                  {settingsPresetAuthSession && (
+                    <button
+                      type="button"
+                      onClick={() => setSettingsPresetAuthSession(false)}
+                      className="w-full rounded-lg border border-amber-700/50 bg-amber-950/40 px-3 py-2 text-xs font-medium text-amber-100 hover:bg-amber-900/50"
+                    >
+                      恢复密码保护（重新锁定预设编辑）
+                    </button>
+                  )}
+                  <div className="flex flex-wrap gap-1.5 rounded-lg border border-[#333] bg-[#141414] p-1.5">
+                    {I2I_PRESET_CATEGORY_OPTIONS.map((cat) => {
+                      const count = Object.entries(promptPresets).filter(
+                        ([name]) => settingsPresetCategory(name, promptPresetCategoryOverrides) === cat.id
+                      ).length;
+                      const active = settingsPresetCategoryTab === cat.id;
+                      return (
+                        <button
+                          key={cat.id}
+                          type="button"
+                          onClick={() => {
+                            setSettingsPresetPwdModal({ intent: null, input: '' });
+                            setSettingsPresetCategoryTab(cat.id);
+                          }}
+                          className={`flex-1 min-w-[4.5rem] rounded-md px-2.5 py-2 text-xs font-medium transition-colors ${
+                            active
+                              ? 'bg-blue-600 text-white shadow-sm'
+                              : 'text-gray-400 hover:bg-[#2a2a2a] hover:text-gray-200'
+                          }`}
+                        >
+                          {cat.label}
+                          <span className={`ml-1 tabular-nums ${active ? 'text-blue-100' : 'text-gray-600'}`}>
+                            ({count})
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {(() => {
+                    const entries = Object.entries(promptPresets).filter(
+                      ([name]) =>
+                        settingsPresetCategory(name, promptPresetCategoryOverrides) === settingsPresetCategoryTab
+                    );
+                    entries.sort(([a], [b]) => a.localeCompare(b, 'zh-Hans-CN'));
+                    const catLabel =
+                      I2I_PRESET_CATEGORY_OPTIONS.find((c) => c.id === settingsPresetCategoryTab)?.label ?? '';
+                    return (
+                      <div className="rounded-lg border border-[#333] bg-[#141414] p-3 space-y-2 min-h-[120px]">
+                        <div className="text-xs text-gray-500 pb-2 border-b border-[#2a2a2a]">
+                          当前：<span className="text-amber-400/95 font-semibold">{catLabel}</span>
+                          <span className="ml-2 text-gray-600">{entries.length} 项</span>
+                        </div>
+                        {entries.length === 0 ? (
+                          <p className="text-[11px] text-gray-600 py-4 text-center">该分类下暂无预设</p>
+                        ) : (
+                          entries.map(([name, content]) => {
+                            const resolvedCat = settingsPresetCategory(name, promptPresetCategoryOverrides);
+                            const defaultCat = i2iCategoryForPreset(name);
+                            return (
+                              <div
+                                key={name}
+                                className="flex flex-wrap gap-2 items-start border-b border-[#2a2a2a] last:border-0 pb-3 last:pb-0"
+                              >
+                                <div className="flex-1 min-w-[200px]">
+                                  <label className="text-xs text-gray-400 mb-1 block">{name}</label>
+                                  {settingsPresetAuthSession ? (
+                                    <textarea
+                                      className="w-full h-20 bg-[#121212] text-gray-200 text-sm p-2 rounded border border-[#333] focus:outline-none focus:border-blue-500 resize-none overflow-y-auto"
+                                      value={content}
+                                      onChange={(e) =>
+                                        setPromptPresets((prev) => ({ ...prev, [name]: e.target.value }))
+                                      }
+                                    />
+                                  ) : (
+                                    <div
+                                      className="w-full h-20 select-none rounded border border-[#2a2a2a] bg-[#0a0a0a] p-2 text-xs leading-snug text-gray-500 pointer-events-none overflow-hidden whitespace-pre-wrap break-words shadow-[inset_0_0_0_1px_rgba(0,0,0,0.35)]"
+                                      title="已锁定：请先通过密码验证（点复制/重命名/删除/添加之一）"
+                                    >
+                                      {content || '（无内容）'}
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="flex flex-col gap-1 shrink-0 w-[88px]">
+                                  <span className="text-[10px] text-gray-500">分类</span>
+                                  <select
+                                    disabled={!settingsPresetAuthSession}
+                                    className="w-full bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-[11px] text-gray-300 outline-none focus:border-amber-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    value={resolvedCat}
+                                    onChange={(e) => {
+                                      if (!settingsPresetAuthSession) return;
+                                      const val = e.target.value as I2iPresetCategoryId;
+                                      setPromptPresetCategoryOverrides((prev) => {
+                                        const o = { ...prev };
+                                        if (val === defaultCat) delete o[name];
+                                        else o[name] = val;
+                                        return o;
+                                      });
+                                    }}
+                                  >
+                                    {I2I_PRESET_CATEGORY_OPTIONS.map((o) => (
+                                      <option key={o.id} value={o.id}>
+                                        {o.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                                <div className="flex flex-col gap-1 shrink-0 justify-end min-w-[4.5rem]">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (settingsPresetAuthSession) {
+                                        executePresetCopy(content);
+                                        return;
+                                      }
+                                      setSettingsPresetPwdModal({
+                                        intent: { type: 'copy', content },
+                                        input: '',
+                                      });
+                                    }}
+                                    className="px-2 py-1.5 text-[11px] bg-[#2a3f5c] hover:bg-[#334d6e] text-gray-200 rounded transition-colors whitespace-nowrap"
+                                  >
+                                    复制
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (settingsPresetAuthSession) {
+                                        executePresetRename(name);
+                                        return;
+                                      }
+                                      setSettingsPresetPwdModal({
+                                        intent: { type: 'rename', name },
+                                        input: '',
+                                      });
+                                    }}
+                                    className="px-2 py-1.5 text-[11px] bg-[#333] hover:bg-[#444] text-gray-300 rounded transition-colors whitespace-nowrap"
+                                  >
+                                    重命名
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (settingsPresetAuthSession) {
+                                        executePresetDelete(name);
+                                        return;
+                                      }
+                                      setSettingsPresetPwdModal({
+                                        intent: { type: 'delete', name },
+                                        input: '',
+                                      });
+                                    }}
+                                    className="px-2 py-1.5 text-[11px] bg-red-900/50 hover:bg-red-800/50 text-red-300 rounded transition-colors whitespace-nowrap"
+                                  >
+                                    删除
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
                       </div>
-                      <button
-                        onClick={() => {
-                          const newName = prompt(`重命名预设 "${name}" 为:`);
-                          if (newName && newName !== name) {
-                            setPromptPresets(prev => {
-                              const newPresets = { ...prev };
-                              newPresets[newName] = newPresets[name];
-                              delete newPresets[name];
-                              return newPresets;
-                            });
-                          }
-                        }}
-                        className="self-end mb-1 px-3 py-1.5 text-xs bg-[#333] hover:bg-[#444] text-gray-300 rounded transition-colors"
-                      >
-                        重命名
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (confirm(`确定删除预设 "${name}" 吗?`)) {
-                            setPromptPresets(prev => {
-                              const newPresets = { ...prev };
-                              delete newPresets[name];
-                              return newPresets;
-                            });
-                          }
-                        }}
-                        className="self-end mb-1 px-3 py-1.5 text-xs bg-red-900/50 hover:bg-red-800/50 text-red-300 rounded transition-colors"
-                      >
-                        删除
-                      </button>
-                    </div>
-                  ))}
+                    );
+                  })()}
                   <button
+                    type="button"
                     onClick={() => {
-                      const name = prompt('新预设名称:');
-                      if (name && !promptPresets[name]) {
-                        setPromptPresets(prev => ({ ...prev, [name]: '' }));
+                      if (settingsPresetAuthSession) {
+                        executePresetAdd();
+                        return;
                       }
+                      setSettingsPresetPwdModal({ intent: { type: 'add' }, input: '' });
                     }}
-                    className="w-full py-2 bg-[#333] hover:bg-[#444] text-gray-300 rounded transition-colors"
+                    className="w-full py-2 bg-[#333] hover:bg-[#444] text-gray-300 rounded transition-colors text-sm"
                   >
                     + 添加新预设
                   </button>
                 </div>
               )}
+
+              {settingsTab === 'downloads' && (
+                <div className="space-y-4 text-sm text-gray-300">
+                  <p className="text-[11px] text-gray-500 leading-relaxed">
+                    使用浏览器 <span className="text-gray-400">File System Access API</span>（推荐 Chrome / Edge，页面为 HTTPS 或 localhost）。
+                    勾选「固定目录」并选择文件夹后，画布内下载图片/视频将自动写入该目录；不勾选时每次下载会弹出「另存为」由您选择路径（若浏览器支持）。
+                  </p>
+                  {!supportsFileSystemAccess() && (
+                    <p className="text-xs text-amber-600/95 rounded border border-amber-800/50 bg-amber-950/30 px-3 py-2">
+                      当前环境不支持目录选择 API，无法保存固定文件夹；下载将尽量使用「另存为」或浏览器默认下载。
+                    </p>
+                  )}
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="mt-1 rounded border-gray-600"
+                      checked={downloadPathSettings.enabled}
+                      onChange={(e) => {
+                        const enabled = e.target.checked;
+                        const next = { ...downloadPathSettings, enabled };
+                        setDownloadPathSettings(next);
+                        saveDownloadPathSettings(next);
+                      }}
+                    />
+                    <span>
+                      <span className="font-medium text-gray-200">启用固定下载目录</span>
+                      <span className="block text-[11px] text-gray-500 mt-0.5">
+                        勾选后请先点击下方按钮选择保存文件夹；下载图片/视频时自动保存到该路径（若权限被拒绝会回退为另存为）。
+                      </span>
+                    </span>
+                  </label>
+                  <label className={`flex items-start gap-2 ${downloadPathSettings.enabled ? 'cursor-pointer' : 'opacity-40 pointer-events-none'}`}>
+                    <input
+                      type="checkbox"
+                      className="mt-1 rounded border-gray-600"
+                      checked={downloadPathSettings.separateImageVideo}
+                      disabled={!downloadPathSettings.enabled}
+                      onChange={(e) => {
+                        const separateImageVideo = e.target.checked;
+                        const next = { ...downloadPathSettings, separateImageVideo };
+                        setDownloadPathSettings(next);
+                        saveDownloadPathSettings(next);
+                      }}
+                    />
+                    <span>
+                      <span className="font-medium text-gray-200">图片与视频使用不同文件夹</span>
+                      <span className="block text-[11px] text-gray-500 mt-0.5">
+                        不勾选则图片与视频共用同一个目录；勾选后需分别选择「图片目录」与「视频目录」。
+                      </span>
+                    </span>
+                  </label>
+
+                  <div className="rounded-lg border border-[#333] bg-[#141414] p-4 space-y-3">
+                    {!downloadPathSettings.separateImageVideo ? (
+                      <div>
+                        <div className="text-xs text-gray-400 mb-2">统一目录（图片 + 视频）</div>
+                        <div className="text-[11px] text-gray-500 mb-2 min-h-[1.25rem]">
+                          {downloadDirLabels.combined ? (
+                            <span className="text-cyan-400/90">已选：{downloadDirLabels.combined}</span>
+                          ) : (
+                            <span>未选择</span>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            disabled={!downloadPathSettings.enabled || !supportsFileSystemAccess()}
+                            onClick={async () => {
+                              const h = await pickAndStoreDownloadDirectory('combined');
+                              if (h) refreshDownloadDirLabels();
+                            }}
+                            className="rounded-md bg-blue-600 px-3 py-2 text-xs text-white hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            选择文件夹…
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!downloadDirLabels.combined}
+                            onClick={async () => {
+                              await clearStoredDownloadDirectory('combined');
+                              refreshDownloadDirLabels();
+                            }}
+                            className="rounded-md border border-[#555] px-3 py-2 text-xs text-gray-400 hover:bg-[#2a2a2a]"
+                          >
+                            清除
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <div>
+                          <div className="text-xs text-gray-400 mb-2">图片目录</div>
+                          <div className="text-[11px] text-gray-500 mb-2">
+                            {downloadDirLabels.image ? (
+                              <span className="text-cyan-400/90">已选：{downloadDirLabels.image}</span>
+                            ) : (
+                              <span>未选择</span>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              disabled={!downloadPathSettings.enabled || !supportsFileSystemAccess()}
+                              onClick={async () => {
+                                const h = await pickAndStoreDownloadDirectory('image');
+                                if (h) refreshDownloadDirLabels();
+                              }}
+                              className="rounded-md bg-blue-600 px-3 py-2 text-xs text-white hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              选择图片文件夹…
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!downloadDirLabels.image}
+                              onClick={async () => {
+                                await clearStoredDownloadDirectory('image');
+                                refreshDownloadDirLabels();
+                              }}
+                              className="rounded-md border border-[#555] px-3 py-2 text-xs text-gray-400 hover:bg-[#2a2a2a]"
+                            >
+                              清除
+                            </button>
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-400 mb-2">视频目录</div>
+                          <div className="text-[11px] text-gray-500 mb-2">
+                            {downloadDirLabels.video ? (
+                              <span className="text-cyan-400/90">已选：{downloadDirLabels.video}</span>
+                            ) : (
+                              <span>未选择</span>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              disabled={!downloadPathSettings.enabled || !supportsFileSystemAccess()}
+                              onClick={async () => {
+                                const h = await pickAndStoreDownloadDirectory('video');
+                                if (h) refreshDownloadDirLabels();
+                              }}
+                              className="rounded-md bg-blue-600 px-3 py-2 text-xs text-white hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              选择视频文件夹…
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!downloadDirLabels.video}
+                              onClick={async () => {
+                                await clearStoredDownloadDirectory('video');
+                                refreshDownloadDirLabels();
+                              }}
+                              className="rounded-md border border-[#555] px-3 py-2 text-xs text-gray-400 hover:bg-[#2a2a2a]"
+                            >
+                              清除
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <p className="text-[11px] text-gray-600 leading-relaxed">
+                    未勾选「启用固定下载目录」时：每次点击下载会弹出系统「另存为」对话框（若浏览器支持）；不支持时则使用浏览器默认下载行为。
+                  </p>
+                </div>
+              )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {settingsPresetPwdModal.intent && (
+        <div
+          className="fixed inset-0 z-[230] flex items-center justify-center bg-black/75 px-4"
+          onClick={() => setSettingsPresetPwdModal({ intent: null, input: '' })}
+          role="presentation"
+        >
+          <div
+            className="w-full max-w-[400px] rounded-xl border border-amber-700/45 bg-[#1a1a1a] p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-semibold text-white mb-1">请输入预设操作密码</h3>
+            <p className="text-[11px] text-amber-200/80 mb-3 leading-relaxed">
+              {settingsPresetPwdIntentLabel(settingsPresetPwdModal.intent)}
+            </p>
+            <label className="text-[10px] text-gray-500 block mb-1">密码</label>
+            <input
+              type="password"
+              autoComplete="off"
+              autoFocus
+              className="w-full rounded-lg border border-[#444] bg-[#0d0d0d] px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+              value={settingsPresetPwdModal.input}
+              onChange={(e) =>
+                setSettingsPresetPwdModal((p) => (p.intent ? { ...p, input: e.target.value } : p))
+              }
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  confirmSettingsPresetPassword();
+                }
+              }}
+              placeholder="输入密码后点确定"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-[#444] px-3 py-2 text-xs text-gray-300 hover:bg-[#2a2a2a]"
+                onClick={() => setSettingsPresetPwdModal({ intent: null, input: '' })}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-medium text-white hover:bg-amber-500"
+                onClick={confirmSettingsPresetPassword}
+              >
+                确定
+              </button>
             </div>
           </div>
         </div>
@@ -4356,7 +5284,7 @@ export default function App() {
         <p><strong className="text-gray-300">拖拽外部图片</strong> 到画布直接导入</p>
         <p><strong className="text-gray-300">Ctrl+C / Ctrl+V</strong> 复制粘贴节点</p>
         <p>选中节点按 <strong className="text-gray-300">Delete</strong> 删除</p>
-        <p>点击左上角 <strong className="text-gray-300">设置</strong> 按钮管理 API 与预设</p>
+        <p>点击左上角 <strong className="text-gray-300">设置</strong> 管理 API、预设与下载路径</p>
       </div>
 
 

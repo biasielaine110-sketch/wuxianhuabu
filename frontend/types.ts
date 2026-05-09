@@ -93,9 +93,9 @@ export interface CanvasNode {
   /** 视频生成节点：成品 mp4 等 URL（ToAPIs 返回，24h 内有效） */
   videos?: string[];
   currentVideoIndex?: number;
-  /** 视频时长（秒）：grok-video-3 为 5–30 档；sora-2-vvip 仅 4 / 8 / 12 */
+  /** 视频时长（秒）：grok-video-3 为 5–30 档；sora-2-vvip 仅 4 / 8 / 12；veo3.1-fast 在 ToAPIs 文档为固定 8 秒 */
   videoDuration?: number;
-  videoResolution?: '480p' | '720p';
+  videoResolution?: '480p' | '720p' | '1080p' | '4k';
 }
 
 export interface Edge {
