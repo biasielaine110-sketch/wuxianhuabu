@@ -946,6 +946,59 @@ export async function openAiEditImage(
   return results;
 }
 
+/** 多轮对话：OpenAI / DeepSeek 兼容 /chat/completions */
+export type ChatCompletionHistoryTurn = {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  /** 仅 user：可选单张参考图 */
+  imageBase64?: string;
+};
+
+export async function chatCompletionHistoryAtBase(
+  baseUrlRaw: string,
+  apiKey: string,
+  modelName: string,
+  turns: ChatCompletionHistoryTurn[]
+): Promise<string> {
+  const key = apiKey.trim();
+  if (!key) throw new Error('未配置对话 API Key。');
+  if (!turns.length) throw new Error('对话内容为空。');
+  const base = normalizeBaseUrl(baseUrlRaw);
+  const model = resolveChatModelForBase(base, modelName);
+
+  const messages = turns.map((turn) => {
+    if (turn.role === 'assistant') {
+      return { role: 'assistant' as const, content: turn.content };
+    }
+    if (turn.role === 'system') {
+      return { role: 'system' as const, content: turn.content };
+    }
+    if (turn.imageBase64) {
+      return {
+        role: 'user' as const,
+        content: [
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${turn.imageBase64}` } },
+          { type: 'text', text: turn.content },
+        ],
+      };
+    }
+    return { role: 'user' as const, content: turn.content };
+  });
+
+  const json = await postJsonAtBase<{ choices?: { message?: { content?: string } }[] }>(
+    base,
+    '/chat/completions',
+    {
+      model,
+      messages,
+    },
+    key
+  );
+  const text = json.choices?.[0]?.message?.content?.trim();
+  if (!text) throw new Error('对话接口未返回文本内容。');
+  return text;
+}
+
 /** 指定 Base URL 与密钥的对话（用于 DeepSeek 等与全局 OpenAI 兼容配置分离的场景） */
 export async function chatCompletionAtBase(
   baseUrlRaw: string,
@@ -954,31 +1007,9 @@ export async function chatCompletionAtBase(
   prompt: string,
   base64Image?: string
 ): Promise<string> {
-  const key = apiKey.trim();
-  if (!key) throw new Error('未配置对话 API Key。');
-  const base = normalizeBaseUrl(baseUrlRaw);
-  const model = resolveChatModelForBase(base, modelName);
-  const content: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
-  if (base64Image) {
-    content.push({
-      type: 'image_url',
-      image_url: { url: `data:image/jpeg;base64,${base64Image}` },
-    });
-  }
-  content.push({ type: 'text', text: prompt });
-
-  const json = await postJsonAtBase<{ choices?: { message?: { content?: string } }[] }>(
-    base,
-    '/chat/completions',
-    {
-      model,
-      messages: [{ role: 'user', content }],
-    },
-    key
-  );
-  const text = json.choices?.[0]?.message?.content?.trim();
-  if (!text) throw new Error('对话接口未返回文本内容。');
-  return text;
+  return chatCompletionHistoryAtBase(baseUrlRaw, apiKey, modelName, [
+    { role: 'user', content: prompt, imageBase64: base64Image },
+  ]);
 }
 
 export async function openAiChatCompletion(

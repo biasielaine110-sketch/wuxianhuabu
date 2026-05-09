@@ -24,7 +24,7 @@ import {
 } from './services/projectBackupHandleStore';
 import type { CanvasProjectSnapshot } from './services/projectPersistence';
 import {
-  callGeminiChat,
+  callGeminiChatWithHistory,
   editExistingImage,
   generateCanvasVideoViaToApis,
   generateNewImage,
@@ -797,7 +797,7 @@ export default function App() {
     'panoramaT2i': { width: 480, height: 560 },
     'annotation': { width: 560, height: 480 },
     'director3d': { width: 600, height: 520 },
-    'chat': { width: 320, height: 880 },
+    'chat': { width: 360, height: 720 },
     'text': { width: 280, height: 200 },
     'image': { width: 320, height: 300 },
     'gridSplit': { width: 420, height: 300 },
@@ -810,6 +810,7 @@ export default function App() {
     image: { width: 280, height: 260 },
     gridSplit: { width: 360, height: 280 },
     gridMerge: { width: 360, height: 280 },
+    chat: { width: 300, height: 560 },
   };
 
   // 重置节点大小
@@ -1151,7 +1152,7 @@ export default function App() {
         if (!ok) {
           alert('保存失败：无法写入 IndexedDB 草稿库。请检查存储权限或尝试导出 ZIP/JSON 备份。');
         } else {
-          persistWarningShownRef.current = false;
+      persistWarningShownRef.current = false;
         }
         return ok;
       });
@@ -1215,8 +1216,8 @@ export default function App() {
         return {
           ...p,
           draftTitle: useCustom ? trimmed : undefined,
-          updatedAt: Date.now(),
-        };
+        updatedAt: Date.now(),
+      };
       });
       projectsRef.current = next;
       void saveProjectLibrary(next, pid).then((ok) => {
@@ -1328,10 +1329,10 @@ export default function App() {
       if (!fallback) return;
       setProjects(remained);
       projectsRef.current = remained;
-      setActiveProjectId(fallback.id);
-      setNodes(fallback.nodes);
-      setEdges(fallback.edges);
-      setTransform(fallback.transform);
+        setActiveProjectId(fallback.id);
+        setNodes(fallback.nodes);
+        setEdges(fallback.edges);
+        setTransform(fallback.transform);
       void getProjectBackupFileHandle(fallback.id).then((h) => {
         lastJsonFileHandleRef.current = h ?? null;
         lastZipFileHandleRef.current = null;
@@ -1544,7 +1545,7 @@ export default function App() {
               ...parsed,
               id: `project-${Date.now()}`,
               name: parsed.name || file.name.replace(/\.(wxcanvas\.)?zip$/i, '') || '导入项目',
-              updatedAt: Date.now(),
+      updatedAt: Date.now(),
               diskSaveEstablished: false,
             };
             finishImportNewProject(newProject);
@@ -1556,24 +1557,24 @@ export default function App() {
         return;
       }
 
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        try {
-          const raw = event.target?.result as string;
-          const imported = JSON.parse(raw) as Partial<CanvasProject>;
-          if (!imported || !Array.isArray(imported.nodes) || !Array.isArray(imported.edges)) {
-            alert('导入失败：JSON 格式不正确。');
-            return;
-          }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const raw = event.target?.result as string;
+        const imported = JSON.parse(raw) as Partial<CanvasProject>;
+        if (!imported || !Array.isArray(imported.nodes) || !Array.isArray(imported.edges)) {
+          alert('导入失败：JSON 格式不正确。');
+          return;
+        }
           const impNodes = imported.nodes as CanvasNode[];
           const impEdges = imported.edges as Edge[];
-          const newProject: CanvasProject = {
-            id: `project-${Date.now()}`,
-            name: (imported.name || file.name.replace(/\.json$/i, '') || '导入项目').toString(),
-            updatedAt: Date.now(),
+        const newProject: CanvasProject = {
+          id: `project-${Date.now()}`,
+          name: (imported.name || file.name.replace(/\.json$/i, '') || '导入项目').toString(),
+          updatedAt: Date.now(),
             nodes: impNodes,
             edges: impEdges,
-            transform: (imported.transform || { x: 0, y: 0, scale: 1 }) as Transform,
+          transform: (imported.transform || { x: 0, y: 0, scale: 1 }) as Transform,
             diskSaveEstablished: false,
             draftStoragePathNote:
               typeof imported.draftStoragePathNote === 'string' && imported.draftStoragePathNote.trim()
@@ -1581,12 +1582,12 @@ export default function App() {
                 : undefined,
           };
           finishImportNewProject(newProject);
-        } catch (err) {
-          console.error('导入项目失败:', err);
-          alert('导入失败：无法解析 JSON。');
-        }
-      };
-      reader.readAsText(file);
+      } catch (err) {
+        console.error('导入项目失败:', err);
+        alert('导入失败：无法解析 JSON。');
+      }
+    };
+    reader.readAsText(file);
     },
     [finishImportNewProject]
   );
@@ -1615,24 +1616,24 @@ export default function App() {
             setLastJsonFilename(h?.name ?? '');
           });
           return;
-        }
-      } catch (err) {
-        console.error('读取项目存档失败:', err);
       }
+    } catch (err) {
+      console.error('读取项目存档失败:', err);
+    }
       if (cancelled) return;
-      const defaultProject: CanvasProject = {
-        id: `project-${Date.now()}`,
-        name: '默认项目',
-        updatedAt: Date.now(),
-        nodes,
-        edges,
+    const defaultProject: CanvasProject = {
+      id: `project-${Date.now()}`,
+      name: '默认项目',
+      updatedAt: Date.now(),
+      nodes,
+      edges,
         transform,
-      };
-      setProjects([defaultProject]);
+    };
+    setProjects([defaultProject]);
       projectsRef.current = [defaultProject];
-      setActiveProjectId(defaultProject.id);
+    setActiveProjectId(defaultProject.id);
       await saveProjectLibrary([defaultProject], defaultProject.id);
-      setProjectStoreReady(true);
+    setProjectStoreReady(true);
       void getProjectBackupFileHandle(defaultProject.id).then((h) => {
         if (cancelled) return;
         lastJsonFileHandleRef.current = h ?? null;
@@ -2648,7 +2649,7 @@ export default function App() {
       // 3D导演台节点特有属性
       ...(type === 'director3d' ? { backgroundImage: '', yaw: 0, pitch: 0, fov: 75, figures: [], selectedFigureId: undefined } : {}),
       // 对话节点特有属性
-      ...(type === 'chat' ? { messages: [], model: 'deepseek-chat', isGenerating: false } : {}),
+      ...(type === 'chat' ? { messages: [], model: 'deepseek-chat', isGenerating: false, chatInputHeight: 152 } : {}),
       ...(type === 'video'
         ? {
             videos: [],
@@ -2790,18 +2791,18 @@ export default function App() {
         );
       }
 
-      // Upscale images if 2k or 4k is selected
+        // Upscale images if 2k or 4k is selected
       const upscaledImages = await Promise.all(base64DataArray.map(img => upscaleImage(img, node.resolution || '4k')));
 
-      // Append new images to existing ones
-      const newImages = [...(node.images || []), ...upscaledImages];
-      
-      setNodes(prev => prev.map(n => n.id === nodeId ? { 
-        ...n, 
-        isGenerating: false, 
-        images: newImages,
-        currentImageIndex: (node.images || []).length // Point to the first newly generated image
-      } : n));
+        // Append new images to existing ones
+        const newImages = [...(node.images || []), ...upscaledImages];
+        
+        setNodes(prev => prev.map(n => n.id === nodeId ? { 
+          ...n, 
+          isGenerating: false, 
+          images: newImages,
+          currentImageIndex: (node.images || []).length // Point to the first newly generated image
+        } : n));
 
     } catch (err: any) {
       if (err?.name === 'AbortError') {
@@ -2821,39 +2822,31 @@ export default function App() {
     }
   };
 
-  // 处理对话节点发送消息
-  const handleSendMessage = async (nodeId: string) => {
+  // 处理对话节点发送消息（支持多轮上下文；可选 baseMessages + prompt 用于「编辑历史后重发」）
+  const handleSendMessage = async (
+    nodeId: string,
+    opts?: { baseMessages?: ChatMessage[]; promptText?: string }
+  ) => {
     const node = nodes.find(n => n.id === nodeId) as (CanvasNode & ChatNode) | undefined;
     if (!node || node.type !== 'chat') return;
 
-    const inputText = node.prompt?.trim();
+    const inputText = (opts?.promptText ?? node.prompt)?.trim();
     if (!inputText) return;
 
-    // 获取连接的图片节点图片
     const incomingEdges = edges.filter(e => e.targetId === nodeId);
     const inputNodes = incomingEdges.map(e => nodes.find(n => n.id === e.sourceId)).filter(Boolean) as CanvasNode[];
     const imageInputs = inputNodes.flatMap(n => n.images || []).filter(Boolean);
     const textInputs = inputNodes.map(n => n.prompt).filter(Boolean);
 
-    // 添加用户消息
+    const baseMessages = opts?.baseMessages ?? (node.messages || []);
+
     const userMessage: ChatMessage = {
       id: `msg-${Date.now()}-user`,
       role: 'user',
       content: inputText,
-      image: imageInputs[0]
+      image: imageInputs[0],
     };
 
-    generationStartedAtRef.current.set(nodeId, Date.now());
-    setNodes(prev => prev.map(n => n.id === nodeId ? {
-      ...n,
-      messages: [...(n.messages || []), userMessage],
-      prompt: '',
-      isGenerating: true,
-      error: undefined
-    } as CanvasNode : n));
-
-    try {
-      // 构建提示词
       const contextParts: string[] = [];
       if (imageInputs.length > 0) {
         contextParts.push('用户上传了一张图片，请根据图片内容回答。');
@@ -2862,33 +2855,71 @@ export default function App() {
         contextParts.push('相关背景信息：' + textInputs.join('\n'));
       }
       contextParts.push('用户问题：' + inputText);
-
       const fullPrompt = contextParts.join('\n\n');
 
-      // 调用 Gemini API（使用对话模型）
-      const response = await callGeminiChat(fullPrompt, imageInputs[0], node.model || 'deepseek-chat');
+    const historyForApi = baseMessages.filter(
+      (m) => (m.content && m.content.trim().length > 0) || (m.role === 'user' && m.image)
+    );
 
-      // 添加助手回复
+    generationStartedAtRef.current.set(nodeId, Date.now());
+    setNodes((prev) =>
+      prev.map((n) =>
+        n.id === nodeId
+          ? ({
+              ...n,
+              messages: [...baseMessages, userMessage],
+              prompt: '',
+              isGenerating: true,
+              error: undefined,
+            } as CanvasNode)
+          : n
+      )
+    );
+
+    try {
+      const apiTurns = [
+        ...historyForApi.map((m) => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+          imageBase64: m.role === 'user' ? m.image : undefined,
+        })),
+        {
+          role: 'user' as const,
+          content: fullPrompt,
+          imageBase64: imageInputs[0],
+        },
+      ];
+
+      const response = await callGeminiChatWithHistory(apiTurns, node.model || 'deepseek-chat');
+
       const assistantMessage: ChatMessage = {
         id: `msg-${Date.now()}-assistant`,
         role: 'assistant',
-        content: response
+        content: response,
       };
 
-      setNodes(prev => prev.map(n => n.id === nodeId ? {
-        ...n,
-        messages: [...(n.messages || []), assistantMessage],
-        isGenerating: false
-      } as CanvasNode : n));
+      setNodes((prev) =>
+        prev.map((n) => {
+          if (n.id !== nodeId) return n;
+          const ch = n as ChatNode;
+          const msgs = ch.messages || [];
+          return { ...ch, messages: [...msgs, assistantMessage], isGenerating: false } as CanvasNode;
+        })
+      );
       generationStartedAtRef.current.delete(nodeId);
-
     } catch (err: any) {
       generationStartedAtRef.current.delete(nodeId);
-      setNodes(prev => prev.map(n => n.id === nodeId ? {
+      setNodes((prev) =>
+        prev.map((n) =>
+          n.id === nodeId
+            ? ({
         ...n,
         isGenerating: false,
-        error: err.message || "生成失败"
-      } as CanvasNode : n));
+                error: err.message || '生成失败',
+              } as CanvasNode)
+            : n
+        )
+      );
     }
   };
 
@@ -3491,7 +3522,7 @@ export default function App() {
               </div>
             )}
             <div className="flex flex-wrap items-center gap-1.5">
-              <select
+            <select
                 className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500 min-w-[140px]"
                 value={modelSelectValue}
                 onChange={(e) => {
@@ -3520,29 +3551,29 @@ export default function App() {
                   }
                   handleUpdateNode(node.id, updates);
                 }}
-                onPointerDown={e => e.stopPropagation()}
-              >
+              onPointerDown={e => e.stopPropagation()}
+            >
                 <option value="veo3.1-fast">Veo 3.1 Fast</option>
                 <option value="grok-video-3">Grok Video 3</option>
                 <option value="sora-2-vvip">Sora2 VVIP</option>
-              </select>
+            </select>
               {isVeo ? (
                 <span className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-400 text-xs whitespace-nowrap">
                   8 秒（ToAPIs 固定）
                 </span>
               ) : isSora ? (
-                <select
+            <select
                   className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
                   value={[4, 8, 12].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 8}
-                  onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
-                  onPointerDown={e => e.stopPropagation()}
-                >
+              onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
+              onPointerDown={e => e.stopPropagation()}
+            >
                   <option value={4}>4 秒</option>
                   <option value={8}>8 秒</option>
                   <option value={12}>12 秒</option>
-                </select>
+            </select>
               ) : (
-                <select
+            <select
                   className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
                   value={node.videoDuration ?? 10}
                   onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
@@ -3559,12 +3590,12 @@ export default function App() {
               {isVeo ? (
                 <select
                   className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={node.aspectRatio || '16:9'}
-                  onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })}
-                  onPointerDown={e => e.stopPropagation()}
-                >
-                  <option value="16:9">16:9</option>
-                  <option value="9:16">9:16</option>
+              value={node.aspectRatio || '16:9'}
+              onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })}
+              onPointerDown={e => e.stopPropagation()}
+            >
+              <option value="16:9">16:9</option>
+              <option value="9:16">9:16</option>
                   <option value="1:1">1:1（按 16:9 提交）</option>
                   <option value="4:3">4:3（按 16:9 提交）</option>
                   <option value="3:4">3:4（按 16:9 提交）</option>
@@ -3592,10 +3623,10 @@ export default function App() {
                   <option value="9:16">9:16</option>
                   <option value="3:2">3:2</option>
                   <option value="2:3">2:3</option>
-                  <option value="1:1">1:1</option>
-                  <option value="4:3">4:3</option>
-                  <option value="3:4">3:4</option>
-                </select>
+              <option value="1:1">1:1</option>
+              <option value="4:3">4:3</option>
+              <option value="3:4">3:4</option>
+            </select>
               )}
               {isSora ? (
                 <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#121212]">720p</span>
@@ -3897,10 +3928,10 @@ export default function App() {
             <div className="w-full h-[240px] shrink-0 bg-black relative border-b border-[#333] overflow-hidden group">
               {videoUrls.length > 0 ? (
                 <>
-                  <video
+                <video
                     key={videoUrls[currentVideoIdx] || 'v'}
                     src={videoUrls[currentVideoIdx]}
-                    controls
+                  controls
                     className="w-full h-full object-contain bg-black"
                   />
                   <div className="absolute top-2 right-2 z-10 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -4113,7 +4144,8 @@ export default function App() {
               onEyedropperSelect={() => setEyedropperTargetNodeId(node.id)}
               onDeleteEdge={handleDeleteEdge}
               onUpdate={(updates) => handleUpdateNode(node.id, updates)}
-              onSendMessage={() => handleSendMessage(node.id)}
+              onSendMessage={() => void handleSendMessage(node.id)}
+              onResendWithHistory={(base, prompt) => void handleSendMessage(node.id, { baseMessages: base, promptText: prompt })}
               onOpenApiSettings={() => {
                 setSettingsTab('api');
                 setShowSettingsModal(true);
@@ -4157,10 +4189,10 @@ export default function App() {
               </div>
               {(node.type === 't2i' || node.type === 'i2i') && (
                 <div className="flex gap-2 w-full shrink-0">
-                  <button
+                <button
                     type="button"
-                    onPointerDown={(e) => { e.stopPropagation(); handleGenerate(node.id); }}
-                    disabled={node.isGenerating}
+                  onPointerDown={(e) => { e.stopPropagation(); handleGenerate(node.id); }}
+                  disabled={node.isGenerating}
                     className={`flex-1 min-w-0 py-2 rounded text-sm font-bold flex justify-center items-center gap-2 transition-all
                       ${node.isGenerating ? 'bg-[#333] text-gray-500 cursor-not-allowed' : node.type === 't2i' ? 'bg-purple-600 hover:bg-purple-500 text-white' : 'bg-blue-600 hover:bg-blue-500 text-white'}`}
                   >
@@ -4182,7 +4214,7 @@ export default function App() {
                       className="shrink-0 px-3 py-2 rounded text-sm font-medium bg-[#444] hover:bg-[#555] text-gray-200 border border-[#555]"
                     >
                       取消生成
-                    </button>
+                </button>
                   )}
                 </div>
               )}
@@ -4335,13 +4367,13 @@ export default function App() {
                 />
               </div>
               <div className="flex gap-2 w-full shrink-0 px-2 pb-2">
-                <button
+              <button
                   type="button"
-                  onPointerDown={(e) => { e.stopPropagation(); handleGenerate(node.id); }}
-                  disabled={node.isGenerating}
+                onPointerDown={(e) => { e.stopPropagation(); handleGenerate(node.id); }}
+                disabled={node.isGenerating}
                   className={`flex-1 min-w-0 py-2 rounded text-sm font-bold flex justify-center items-center gap-2 transition-all
-                    ${node.isGenerating ? 'bg-[#333] text-gray-500 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-500 text-white'}`}
-                >
+                  ${node.isGenerating ? 'bg-[#333] text-gray-500 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-500 text-white'}`}
+              >
                   {node.isGenerating ? (
                     <span className="flex items-center gap-2">
                       <LoaderIcon size={14} />
@@ -4351,7 +4383,7 @@ export default function App() {
                   ) : (
                     '生成全景图'
                   )}
-                </button>
+              </button>
                 {node.isGenerating && (
                   <button
                     type="button"
@@ -4640,44 +4672,44 @@ export default function App() {
 
       {/* Settings + project actions (top left, single row) */}
       <div className="absolute top-6 left-24 z-40 flex flex-wrap items-center gap-2">
-        <button
-          onClick={() => {
-            setSettingsTab('api');
-            setShowSettingsModal(true);
-          }}
+      <button
+        onClick={() => {
+          setSettingsTab('api');
+          setShowSettingsModal(true);
+        }}
           className="bg-[#1e1e1e]/90 backdrop-blur-md p-2.5 rounded-xl shadow-2xl border border-[#333] hover:bg-[#333] transition-colors flex items-center gap-2"
           title="设置（API、预设、下载路径、积分消耗）"
-        >
-          <SettingsIcon size={18} />
-          <span className="text-gray-400 text-xs font-medium">设置</span>
-        </button>
+      >
+        <SettingsIcon size={18} />
+        <span className="text-gray-400 text-xs font-medium">设置</span>
+      </button>
 
-        <button
+      <button
           onClick={() => setShowProjectModal(true)}
           className="bg-[#1e1e1e]/90 backdrop-blur-md p-2.5 rounded-xl shadow-2xl border border-[#333] hover:bg-[#333] transition-colors flex items-center gap-2"
           title="项目管理：IndexedDB 草稿库、JSON / ZIP 导入导出"
         >
           <GridIcon size={18} />
           <span className="text-gray-400 text-xs font-medium">项目</span>
-        </button>
+      </button>
 
-        <button
+      <button
           type="button"
           onClick={handleClearCanvas}
           className="bg-[#1e1e1e]/90 backdrop-blur-md px-3 py-2.5 rounded-xl shadow-2xl border border-[#333] hover:bg-[#333] transition-colors"
           title="删除所有节点与连线，并放入一个空白文生图节点"
         >
           <span className="text-gray-400 text-xs font-medium whitespace-nowrap">清空画布</span>
-        </button>
+      </button>
 
-        <button
+      <button
           type="button"
           onClick={handleClearCanvasPreviewCache}
           className="bg-[#1e1e1e]/90 backdrop-blur-md px-3 py-2.5 rounded-xl shadow-2xl border border-amber-900/50 hover:bg-[#333] transition-colors"
           title="仅清理内存里为节点缩略图生成的缓存（不删节点里的图片、不改 IndexedDB 草稿）；可缓解内存占用，缩略图会按需重新生成"
         >
           <span className="text-amber-500/90 text-xs font-medium whitespace-nowrap">清预览缓存</span>
-        </button>
+      </button>
       </div>
 
       {/* Center — current draft / project title（双击改项目名，与草稿展示同步并写回 IndexedDB） */}
@@ -4741,8 +4773,8 @@ export default function App() {
             ) : (
               <div className="cursor-text truncate text-xl font-semibold tracking-tight text-gray-50 drop-shadow-md sm:text-2xl">
                 {projectDraftDisplayName(curProj)}
-              </div>
-            )}
+        </div>
+      )}
           </div>
         );
       })() : null}
@@ -4784,7 +4816,7 @@ export default function App() {
                     placeholder={projects.find((p) => p.id === activeProjectId)?.name || '未命名项目'}
                   />
                 </label>
-                <button
+              <button
                   type="button"
                   onClick={() => handleApplyDraftTitle()}
                   className="shrink-0 rounded-md bg-[#333] px-2.5 py-1.5 text-[11px] text-gray-100 hover:bg-[#444]"
@@ -4793,14 +4825,14 @@ export default function App() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
+                onClick={() => {
                     const n = projects.find((p) => p.id === activeProjectId)?.name || '';
                     setDraftNameInput(n);
-                  }}
+                }}
                   className="shrink-0 rounded-md border border-[#444] px-2.5 py-1.5 text-[11px] text-gray-400 hover:bg-[#222]"
-                >
+              >
                   填入项目名
-                </button>
+              </button>
               </div>
               <div className="flex flex-wrap items-end gap-2">
                 <label className="flex-1 min-w-[200px]">
@@ -4813,14 +4845,14 @@ export default function App() {
                     placeholder="例如 D:\备份\无限画布草稿"
                   />
                 </label>
-                <button
+              <button
                   type="button"
                   onClick={() => void handleApplyDraftStoragePath()}
                   className="shrink-0 rounded-md bg-cyan-900/60 px-2.5 py-1.5 text-[11px] text-cyan-50 hover:bg-cyan-800/70"
                   title="支持时弹出系统「选择文件夹」窗口；不支持时改为手动输入路径"
                 >
                   应用存储位置
-                </button>
+              </button>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[10px] text-gray-500 shrink-0">定时自动保存草稿</span>
@@ -4867,14 +4899,14 @@ export default function App() {
                 导入 JSON / ZIP
               </button>
               <div className="relative">
-                <button
+              <button
                   type="button"
                   onClick={() => setProjectExportMenuOpen((o) => !o)}
                   className="w-full px-3 py-2.5 text-xs rounded-lg bg-indigo-700 hover:bg-indigo-600 text-white font-medium"
                   title="下载到本机"
                 >
                   导出 JSON / ZIP ▾
-                </button>
+              </button>
                 {projectExportMenuOpen ? (
                   <div
                     className="absolute right-0 z-[300] mt-1 min-w-[160px] rounded-lg border border-[#444] bg-[#1a1a1a] py-1 shadow-xl"
@@ -5177,7 +5209,7 @@ export default function App() {
                           deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
                         });
                         initGeminiClientFromStorage();
-                        setShowSettingsModal(false);
+                          setShowSettingsModal(false);
                       }}
                       className="flex-1 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors flex items-center justify-center gap-2"
                     >
@@ -5261,11 +5293,11 @@ export default function App() {
                                 className="flex flex-wrap gap-2 items-start border-b border-[#2a2a2a] last:border-0 pb-3 last:pb-0"
                               >
                                 <div className="flex-1 min-w-[200px]">
-                                  <label className="text-xs text-gray-400 mb-1 block">{name}</label>
+                        <label className="text-xs text-gray-400 mb-1 block">{name}</label>
                                   {settingsPresetAuthSession ? (
-                                    <textarea
+                        <textarea
                                       className="w-full h-20 bg-[#121212] text-gray-200 text-sm p-2 rounded border border-[#333] focus:outline-none focus:border-blue-500 resize-none overflow-y-auto"
-                                      value={content}
+                          value={content}
                                       onChange={(e) =>
                                         setPromptPresets((prev) => ({ ...prev, [name]: e.target.value }))
                                       }
@@ -5276,7 +5308,7 @@ export default function App() {
                                       title="已锁定：请先通过密码验证（点复制/重命名/删除/添加之一）"
                                     >
                                       {content || '（无内容）'}
-                                    </div>
+                      </div>
                                   )}
                                 </div>
                                 <div className="flex flex-col gap-1 shrink-0 w-[88px]">
@@ -5304,9 +5336,9 @@ export default function App() {
                                   </select>
                                 </div>
                                 <div className="flex flex-col gap-1 shrink-0 justify-end min-w-[4.5rem]">
-                                  <button
+                      <button
                                     type="button"
-                                    onClick={() => {
+                        onClick={() => {
                                       if (settingsPresetAuthSession) {
                                         executePresetCopy(content);
                                         return;
@@ -5333,12 +5365,12 @@ export default function App() {
                                       });
                                     }}
                                     className="px-2 py-1.5 text-[11px] bg-[#333] hover:bg-[#444] text-gray-300 rounded transition-colors whitespace-nowrap"
-                                  >
-                                    重命名
-                                  </button>
-                                  <button
+                      >
+                        重命名
+                      </button>
+                      <button
                                     type="button"
-                                    onClick={() => {
+                        onClick={() => {
                                       if (settingsPresetAuthSession) {
                                         executePresetDelete(name);
                                         return;
@@ -5349,10 +5381,10 @@ export default function App() {
                                       });
                                     }}
                                     className="px-2 py-1.5 text-[11px] bg-red-900/50 hover:bg-red-800/50 text-red-300 rounded transition-colors whitespace-nowrap"
-                                  >
-                                    删除
-                                  </button>
-                                </div>
+                      >
+                        删除
+                      </button>
+                    </div>
                               </div>
                             );
                           })
@@ -5436,8 +5468,8 @@ export default function App() {
                             <span className="text-cyan-400/90">已选：{downloadDirLabels.combined}</span>
                           ) : (
                             <span>未选择</span>
-                          )}
-                        </div>
+              )}
+            </div>
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
@@ -5461,8 +5493,8 @@ export default function App() {
                           >
                             清除
                           </button>
-                        </div>
-                      </div>
+          </div>
+        </div>
                     ) : (
                       <div className="space-y-4">
                         <div>
@@ -5540,7 +5572,7 @@ export default function App() {
                   <p className="text-[11px] text-gray-600 leading-relaxed">
                     未勾选「启用固定下载目录」时：每次点击下载会弹出系统「另存为」对话框（若浏览器支持）；不支持时则使用浏览器默认下载行为。
                   </p>
-                </div>
+      </div>
               )}
 
               {settingsTab === 'credits' && (
@@ -8572,6 +8604,8 @@ interface ChatNodeContentProps {
   onDeleteEdge: (edgeId: string) => void;
   onUpdate: (updates: Partial<ChatNode>) => void;
   onSendMessage: () => void;
+  /** 截断历史后携带新提问重新请求（用于编辑过往提问） */
+  onResendWithHistory: (baseMessages: ChatMessage[], promptText: string) => void;
   onOpenApiSettings: () => void;
   generationMmSs?: string;
   generationSeconds?: number;
@@ -8586,11 +8620,14 @@ function ChatNodeContent({
   onDeleteEdge,
   onUpdate,
   onSendMessage,
+  onResendWithHistory,
   onOpenApiSettings,
   generationMmSs,
   generationSeconds,
 }: ChatNodeContentProps) {
   const [showAllRefs, setShowAllRefs] = useState(false);
+  const [editingUserMessageId, setEditingUserMessageId] = useState<string | null>(null);
+  const [editUserDraft, setEditUserDraft] = useState('');
   const [chatFontPx, setChatFontPx] = useState(readStoredChatFontPx);
   const persistChatFontPx = useCallback((px: number) => {
     const v = clampChatFontPx(px);
@@ -8601,6 +8638,11 @@ function ChatNodeContent({
       /* ignore */
     }
   }, []);
+
+  useEffect(() => {
+    if (node.isGenerating) setEditingUserMessageId(null);
+  }, [node.isGenerating]);
+
   // 获取连接的图片
   const incomingEdges = edges.filter(e => e.targetId === node.id);
   const sourceNodes = incomingEdges
@@ -8754,9 +8796,9 @@ function ChatNodeContent({
           <optgroup label="Google Gemini / ToAPIs">
             <option value="gemini-2.0-flash-official">Gemini 2.0 Flash（official · ToAPIs）</option>
             <option value="gemini-3.1-flash-lite-preview-official">Gemini 3.1 Flash Lite（official · ToAPIs）</option>
-            <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-            <option value="gemini-3.1-flash-preview">Gemini 3.1 Flash</option>
-            <option value="gemini-3-pro-preview">Gemini 3 Pro</option>
+          <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+          <option value="gemini-3.1-flash-preview">Gemini 3.1 Flash</option>
+          <option value="gemini-3-pro-preview">Gemini 3 Pro</option>
           </optgroup>
         </select>
         <label className="flex items-center gap-1 shrink-0 text-[10px] text-gray-500">
@@ -8817,19 +8859,21 @@ function ChatNodeContent({
             )}
           </div>
         )}
-        {messages.map((msg) => (
+        {messages.map((msg) => {
+          const editingThis = msg.role === 'user' && editingUserMessageId === msg.id;
+          return (
           <div
             key={msg.id}
             className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
             onPointerDown={(e) => e.stopPropagation()}
           >
             <div
-              className={`max-w-[85%] rounded-lg p-2.5 ${
+                className={`max-w-[92%] rounded-lg p-2.5 ${
                 msg.role === 'user'
                   ? 'bg-blue-600 text-white'
                   : 'bg-[#2a2a2a] text-gray-200'
               }`}
-              style={{ fontSize: chatFontPx }}
+                style={{ fontSize: chatFontPx }}
               onPointerDown={(e) => e.stopPropagation()}
             >
               {msg.image && (
@@ -8841,21 +8885,104 @@ function ChatNodeContent({
                   className="w-16 h-16 object-cover rounded mb-2"
                 />
               )}
-              <div className="whitespace-pre-wrap break-words" style={{ userSelect: 'text' }}>{msg.content}</div>
+                {editingThis ? (
+                  <>
+                    <textarea
+                      value={editUserDraft}
+                      onChange={(e) => setEditUserDraft(e.target.value)}
+                      rows={5}
+                      className="w-full min-h-[120px] rounded-md bg-black/25 border border-white/35 px-2 py-1.5 text-white outline-none focus:border-white/60"
+                      style={{ fontSize: chatFontPx }}
+                      onPointerDown={(e) => e.stopPropagation()}
+                    />
+                    <div className="mt-2 flex flex-wrap justify-end gap-2">
               <button
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                  navigator.clipboard.writeText(msg.content);
-                }}
-                className="mt-1 opacity-50 hover:opacity-100 transition-opacity"
-                style={{ fontSize: Math.max(10, chatFontPx - 2) }}
-                title="复制"
-              >
-                复制
-              </button>
-            </div>
+                        type="button"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingUserMessageId(null);
+                        }}
+                        className="rounded bg-white/15 px-2 py-1 hover:bg-white/25"
+                        style={{ fontSize: Math.max(10, chatFontPx - 2) }}
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="button"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const idx = messages.findIndex((m) => m.id === msg.id);
+                          const t = editUserDraft.trim();
+                          if (idx < 0 || !t) return;
+                          onResendWithHistory(messages.slice(0, idx), t);
+                          setEditingUserMessageId(null);
+                        }}
+                        className="rounded bg-white/90 px-2 py-1 font-medium text-blue-800 hover:bg-white"
+                        style={{ fontSize: Math.max(10, chatFontPx - 2) }}
+                      >
+                        保存并重新生成
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div
+                      className={`whitespace-pre-wrap break-words rounded-sm px-0.5 -mx-0.5 ${
+                        msg.role === 'user' && !node.isGenerating ? 'cursor-text hover:bg-white/10' : ''
+                      }`}
+                      style={{ userSelect: 'text' }}
+                      title={msg.role === 'user' && !node.isGenerating ? '双击可修改本条提问' : undefined}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        if (msg.role !== 'user' || node.isGenerating) return;
+                        setEditingUserMessageId(msg.id);
+                        setEditUserDraft(msg.content);
+                      }}
+                    >
+                      {msg.content}
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          navigator.clipboard.writeText(msg.content);
+                        }}
+                        className={
+                          msg.role === 'user'
+                            ? 'rounded border border-white/25 bg-white/10 px-2 py-0.5 opacity-90 hover:bg-white/20'
+                            : 'rounded px-2 py-0.5 opacity-50 hover:opacity-100'
+                        }
+                        style={{ fontSize: Math.max(10, chatFontPx - 2) }}
+                        title="复制"
+                      >
+                        复制
+                      </button>
+                      {msg.role === 'user' && !node.isGenerating ? (
+                        <button
+                          type="button"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingUserMessageId(msg.id);
+                            setEditUserDraft(msg.content);
+                          }}
+                          className="rounded border border-white/40 bg-white/15 px-2 py-0.5 font-medium hover:bg-white/25"
+                          style={{ fontSize: Math.max(10, chatFontPx - 2) }}
+                          title="修改本条提问并重新生成之后的回复"
+                        >
+                          编辑
+                        </button>
+                      ) : null}
+                    </div>
+                  </>
+                )}
           </div>
-        ))}
+            </div>
+          );
+        })}
         {node.isGenerating && (
           <div className="flex justify-start">
             <div
@@ -8903,8 +9030,8 @@ function ChatNodeContent({
       <div className="p-2 bg-[#252525] border-t border-[#333] shrink-0">
         <div className="flex gap-2">
           <textarea
-            className="flex-1 bg-[#121212] text-gray-200 p-2 rounded border border-[#444] focus:outline-none focus:border-rose-500 resize-y min-h-[64px]"
-            style={{ fontSize: chatFontPx }}
+            className="flex-1 min-h-[108px] bg-[#121212] text-gray-200 p-2.5 rounded border border-[#444] focus:outline-none focus:border-rose-500 resize-y"
+            style={{ fontSize: chatFontPx, height: node.chatInputHeight || 152 }}
             value={node.prompt || ''}
             onChange={(e) => onUpdate({ prompt: e.target.value })}
             onKeyDown={handleKeyDown}
@@ -8912,12 +9039,11 @@ function ChatNodeContent({
             onPointerDown={(e) => e.stopPropagation()}
             onPointerUp={(e) => {
               e.stopPropagation();
-              const nextHeight = Math.max(64, Math.round((e.currentTarget as HTMLTextAreaElement).offsetHeight));
-              if (nextHeight !== (node.chatInputHeight || 96)) {
+              const nextHeight = Math.max(108, Math.round((e.currentTarget as HTMLTextAreaElement).offsetHeight));
+              if (nextHeight !== (node.chatInputHeight || 152)) {
                 onUpdate({ chatInputHeight: nextHeight });
               }
             }}
-            style={{ height: node.chatInputHeight || 96 }}
           />
           <button
             onPointerDown={(e) => {
@@ -9979,7 +10105,7 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
     let raf = 0;
 
     const tryLayout = () => {
-      const canvas = fsCanvasRef.current;
+    const canvas = fsCanvasRef.current;
       const parent = canvas?.parentElement;
       if (!canvas || !parent || parent.clientWidth < 1) {
         raf = requestAnimationFrame(tryLayout);
@@ -10165,9 +10291,9 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
 
       if (toAdd) {
         const newAnnotations = [...fullscreenAnnotations, toAdd];
-        setFullscreenAnnotations(newAnnotations);
-        fsAnnotationsRef.current = newAnnotations;
-        fsSaveToHistory(newAnnotations);
+      setFullscreenAnnotations(newAnnotations);
+      fsAnnotationsRef.current = newAnnotations;
+      fsSaveToHistory(newAnnotations);
       }
     }
     fsIsDrawingRef.current = false;
@@ -10284,7 +10410,7 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
           const start = toImageCoords(ann.x, ann.y);
           const end = toImageCoords(ann.endX ?? ann.x, ann.endY ?? ann.y);
           scaledAnn = {
-            ...ann,
+          ...ann,
             x: start.x,
             y: start.y,
             endX: end.x,
@@ -10303,7 +10429,7 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
           const scaledPoints = ann.points.map((pt) => toImageCoords(pt.x, pt.y));
           scaledAnn = {
             ...ann,
-            points: scaledPoints,
+          points: scaledPoints,
             x: scaledPoints[0].x,
             y: scaledPoints[0].y,
             strokeWidth: Math.max(1, (ann.strokeWidth || 3) / displayScale),
