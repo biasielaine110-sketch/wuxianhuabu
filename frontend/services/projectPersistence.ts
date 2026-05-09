@@ -205,6 +205,59 @@ export async function exportProjectToZipDownload(project: CanvasProjectSnapshot)
   downloadBlob(blob, `${base}${WXCANVAS_ZIP_EXTENSION}`);
 }
 
+export type ExportZipDiskResult =
+  | { kind: 'handle'; handle: FileSystemFileHandle }
+  | { kind: 'download' }
+  | { kind: 'aborted' };
+
+/**
+ * 导出 ZIP：优先用系统「另存为」拿到可反复覆盖写入的文件句柄；不支持或失败时回退为浏览器下载。
+ */
+export async function exportProjectZipToDisk(project: CanvasProjectSnapshot): Promise<ExportZipDiskResult> {
+  const blob = await buildProjectZipBlob(project);
+  const base = sanitizeFilename((project.draftTitle || project.name || 'project').trim() || 'project');
+  const filename = `${base}${WXCANVAS_ZIP_EXTENSION}`;
+  const w = window as unknown as {
+    showSaveFilePicker?: (opts: {
+      suggestedName?: string;
+      types?: { description: string; accept: Record<string, string[]> }[];
+    }) => Promise<FileSystemFileHandle>;
+  };
+  if (typeof w.showSaveFilePicker === 'function') {
+    try {
+      const handle = await w.showSaveFilePicker({
+        suggestedName: filename,
+        types: [
+          {
+            description: '画布备份 ZIP',
+            accept: { 'application/zip': ['.wxcanvas.zip', '.zip'] },
+          },
+        ],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return { kind: 'handle', handle };
+    } catch (err: unknown) {
+      if ((err as { name?: string })?.name === 'AbortError') return { kind: 'aborted' };
+      console.warn('ZIP 另存为失败，回退为浏览器下载：', err);
+    }
+  }
+  downloadBlob(blob, filename);
+  return { kind: 'download' };
+}
+
+/** 将项目快照覆盖写入已持有的 ZIP 文件句柄 */
+export async function overwriteProjectZipFileHandle(
+  fileHandle: FileSystemFileHandle,
+  project: CanvasProjectSnapshot
+): Promise<void> {
+  const blob = await buildProjectZipBlob(project);
+  const writable = await fileHandle.createWritable();
+  await writable.write(blob);
+  await writable.close();
+}
+
 /** 从 .wxcanvas.zip 或普通 .zip（内含 project.json）解析项目 */
 export async function parseProjectFromZipFile(file: File): Promise<CanvasProjectSnapshot> {
   const buf = await file.arrayBuffer();

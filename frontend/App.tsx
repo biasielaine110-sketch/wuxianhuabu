@@ -11,7 +11,8 @@ import {
 import {
   loadProjectLibrary,
   saveProjectLibrary,
-  exportProjectToZipDownload,
+  exportProjectZipToDisk,
+  overwriteProjectZipFileHandle,
   parseProjectFromZipFile,
   sanitizeFilename,
   CANVAS_LIBRARY_IDB_LABELS,
@@ -532,6 +533,10 @@ export default function App() {
   const skipCenterRenameBlurRef = useRef(false);
   const persistWarningShownRef = useRef(false);
   const lastJsonFileHandleRef = useRef<any>(null);
+  /** 最近一次通过「另存为」成功绑定的 ZIP 句柄（仅内存，切换项目会清空） */
+  const lastZipFileHandleRef = useRef<FileSystemFileHandle | null>(null);
+  /** 最近一次用户选择的磁盘覆盖目标：JSON 另存为 或 ZIP 另存为 */
+  const lastDiskWriteFormatRef = useRef<'json' | 'zip' | null>(null);
   const [lastJsonFilename, setLastJsonFilename] = useState<string>('');
 
   /** 与画布/项目 state 同步，供保存与列表操作读取「最新」快照，避免闭包滞后 */
@@ -1032,6 +1037,7 @@ export default function App() {
         await writable.write(json);
         await writable.close();
         lastJsonFileHandleRef.current = handle;
+        lastDiskWriteFormatRef.current = 'json';
         const backupPid = opts?.backupProjectId ?? activeProjectIdRef.current;
         if (backupPid) {
           void persistProjectBackupFileHandle(backupPid, handle as FileSystemFileHandle).catch((e) =>
@@ -1063,6 +1069,7 @@ export default function App() {
    * 本地存档策略（简要）：
    * - 画布上的 nodes / edges / transform 只在内存中实时变化；
    * - 「保存当前画布 / Ctrl+S」：合并进当前项目并写入 **IndexedDB**；若该项目尚未在本机完成过「本地 JSON 备份路径」选择，会先弹出另存为（支持 File System Access API 的浏览器），成功后立即写入草稿；取消则仍写入草稿库、下次手动保存会再次询问；
+   * - **Ctrl+Alt+S（⌘+⌥+S）**：若最近一次通过系统选择器保存的是 **JSON** 或 **ZIP**，则覆盖写入该文件；仅 ZIP 在支持 `showSaveFilePicker` 时绑定句柄，纯浏览器下载的 ZIP 无法覆盖；
    * - 「定时自动保存」：可在项目管理里设为每 5 / 10 / 30 分钟静默覆盖草稿（IndexedDB），仅在**已完成首次本地备份路径**后生效，不会弹出另存为；
    * - 「草稿名称」：可选 `draftTitle`，默认同项目名；用于顶栏展示与导出 JSON/ZIP 默认文件名；
    * - 「导出 JSON / ZIP」成功也会标记已选过本地备份，避免与首次另存为重复弹窗；
@@ -1303,6 +1310,8 @@ export default function App() {
     setTransform(target.transform);
     void getProjectBackupFileHandle(projectId).then((h) => {
       lastJsonFileHandleRef.current = h ?? null;
+      lastZipFileHandleRef.current = null;
+      lastDiskWriteFormatRef.current = h ? 'json' : null;
       setLastJsonFilename(h?.name ?? '');
     });
   }, [saveCurrentProject]);
@@ -1325,6 +1334,8 @@ export default function App() {
       setTransform(fallback.transform);
       void getProjectBackupFileHandle(fallback.id).then((h) => {
         lastJsonFileHandleRef.current = h ?? null;
+        lastZipFileHandleRef.current = null;
+        lastDiskWriteFormatRef.current = h ? 'json' : null;
         setLastJsonFilename(h?.name ?? '');
       });
       void saveProjectLibrary(remained, fallback.id).then((ok) => {
@@ -1410,36 +1421,74 @@ export default function App() {
     return { ...project, nodes: nc, edges: ec, transform: tc, updatedAt: Date.now() };
   }, []);
 
-  const handleOverwriteLastJson = useCallback(async () => {
+  /** Ctrl+Alt+S：按「上次另存为」类型覆盖写入 JSON 或 ZIP（须此前用系统选择器保存过对应格式） */
+  const handleOverwriteLastDiskExport = useCallback(async () => {
     const active = projectsRef.current.find((p) => p.id === activeProjectIdRef.current);
     if (!active) {
       alert('未找到当前项目');
       return;
     }
     const snapshot = projectSnapshotForJsonExport(active);
-    const forWrite = { ...snapshot };
-    delete (forWrite as { diskSaveEstablished?: boolean }).diskSaveEstablished;
-    const json = JSON.stringify(forWrite, null, 2);
-    const handle = lastJsonFileHandleRef.current;
-    if (handle) {
+    const fmt = lastDiskWriteFormatRef.current;
+    const jsonHandle = lastJsonFileHandleRef.current;
+    const zipHandle = lastZipFileHandleRef.current;
+
+    const tryOverwriteJson = async (): Promise<boolean> => {
+      if (!jsonHandle) return false;
+      const forWrite = { ...snapshot };
+      delete (forWrite as { diskSaveEstablished?: boolean }).diskSaveEstablished;
+      const json = JSON.stringify(forWrite, null, 2);
       try {
-        const writable = await handle.createWritable();
+        const writable = await jsonHandle.createWritable();
         await writable.write(json);
         await writable.close();
-        setLastJsonFilename(handle?.name || lastJsonFilename || `${snapshot.name || 'project'}.json`);
+        setLastJsonFilename(jsonHandle.name || lastJsonFilename || `${snapshot.name || 'project'}.json`);
         alert('已覆盖保存到上次 JSON 文件。');
-        return;
+        return true;
       } catch (error) {
-        console.error('覆盖保存失败:', error);
+        console.error('JSON 覆盖保存失败:', error);
+        alert('覆盖 JSON 失败：可能无写入权限或文件已被移动。');
+        return false;
       }
+    };
+
+    const tryOverwriteZip = async (): Promise<boolean> => {
+      if (!zipHandle) return false;
+      try {
+        await overwriteProjectZipFileHandle(zipHandle, snapshot);
+        alert(`已覆盖保存到上次 ZIP 文件：${zipHandle.name || '备份.zip'}`);
+        return true;
+      } catch (error) {
+        console.error('ZIP 覆盖保存失败:', error);
+        alert('覆盖 ZIP 失败：可能无写入权限或文件已被移动。');
+        return false;
+      }
+    };
+
+    if (fmt === 'zip') {
+      if (await tryOverwriteZip()) return;
+      alert('无法覆盖上次的 ZIP：请先在项目管理中「导出 ZIP」并用系统对话框选择保存位置（不支持时无法覆盖）。');
+      return;
     }
-    alert('还没有可覆盖的上次JSON文件，请先点“另存为 JSON”选择一个文件。');
+    if (fmt === 'json') {
+      if (await tryOverwriteJson()) return;
+      alert('还没有可覆盖的上次 JSON 文件，请先通过「另存为 JSON」或保存画布时选择 JSON 路径。');
+      return;
+    }
+    if (await tryOverwriteJson()) return;
+    if (await tryOverwriteZip()) return;
+    alert('暂无可覆盖的本地文件。请先用「另存为 JSON」或「导出 ZIP」（浏览器支持文件选择器时）选择保存路径。');
   }, [lastJsonFilename, projectSnapshotForJsonExport]);
 
   const handleExportProjectZip = useCallback(
     async (project: CanvasProject) => {
       try {
-        await exportProjectToZipDownload(projectSnapshotForJsonExport(project));
+        const r = await exportProjectZipToDisk(projectSnapshotForJsonExport(project));
+        if (r.kind === 'aborted') return;
+        if (r.kind === 'handle') {
+          lastZipFileHandleRef.current = r.handle;
+          lastDiskWriteFormatRef.current = 'zip';
+        }
         const pid = project.id;
         setProjects((prev) => {
           const next = prev.map((p) => (p.id === pid ? { ...p, diskSaveEstablished: true as const } : p));
@@ -1561,6 +1610,8 @@ export default function App() {
           void getProjectBackupFileHandle(initial.id).then((h) => {
             if (cancelled) return;
             lastJsonFileHandleRef.current = h ?? null;
+            lastZipFileHandleRef.current = null;
+            lastDiskWriteFormatRef.current = h ? 'json' : null;
             setLastJsonFilename(h?.name ?? '');
           });
           return;
@@ -1585,6 +1636,8 @@ export default function App() {
       void getProjectBackupFileHandle(defaultProject.id).then((h) => {
         if (cancelled) return;
         lastJsonFileHandleRef.current = h ?? null;
+        lastZipFileHandleRef.current = null;
+        lastDiskWriteFormatRef.current = h ? 'json' : null;
         setLastJsonFilename(h?.name ?? '');
       });
     })();
@@ -2204,7 +2257,10 @@ export default function App() {
         }
       } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV' && !isInput) {
         // 交给 paste 事件统一处理（优先粘贴外部图片）
-      } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyS' && !isInput && !(e.target as HTMLElement).isContentEditable) {
+      } else if ((e.ctrlKey || e.metaKey) && e.altKey && e.code === 'KeyS' && !isInput && !(e.target as HTMLElement).isContentEditable) {
+        e.preventDefault();
+        void handleOverwriteLastDiskExport();
+      } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyS' && !e.altKey && !isInput && !(e.target as HTMLElement).isContentEditable) {
         e.preventDefault();
         void saveCurrentProject();
       } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.code === 'KeyZ' && !isInput && !fullscreenImage) {
@@ -2263,7 +2319,7 @@ export default function App() {
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('paste', handlePaste);
     };
-  }, [selectedIds, nodes, clipboard, fullscreenImage, createImageNodeFromBase64, undoCanvasState, saveCurrentProject]);
+  }, [selectedIds, nodes, clipboard, fullscreenImage, createImageNodeFromBase64, undoCanvasState, saveCurrentProject, handleOverwriteLastDiskExport]);
 
   // --- Fullscreen Modal Handlers ---
   useEffect(() => {
@@ -5734,20 +5790,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Instructions Overlay (Bottom Right) */}
-      <div className="absolute bottom-6 right-6 text-right text-xs text-gray-500 pointer-events-none flex flex-col gap-1.5 bg-[#1e1e1e]/80 backdrop-blur-sm p-3 rounded-xl border border-[#333] z-40">
-        <p>按 <strong className="text-gray-300">Q</strong> 或点击图标使用 <strong className="text-gray-300">框选工具</strong></p>
-        <p><strong className="text-gray-300">右键点击</strong> 空白处新建节点</p>
-        <p>拖拽节点右侧蓝点进行 <strong className="text-gray-300">连线</strong></p>
-        <p><strong className="text-gray-300">双击连线</strong> 即可删除</p>
-        <p>点击图片右上角 <strong className="text-gray-300">放大图标</strong> 查看大图</p>
-        <p><strong className="text-gray-300">拖拽外部图片</strong> 到画布直接导入</p>
-        <p><strong className="text-gray-300">Ctrl+C / Ctrl+V</strong> 复制粘贴节点</p>
-        <p>选中节点按 <strong className="text-gray-300">Delete</strong> 删除</p>
-        <p>点击左上角 <strong className="text-gray-300">设置</strong> 管理 API、预设、下载路径与积分消耗</p>
-      </div>
-
-
       {/* Fullscreen Image Modal */}
       {fullscreenImage && (
         <div 
@@ -8505,6 +8547,22 @@ function GridMergeNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEy
 }
 
 // ==================== 对话节点组件 ====================
+const CHAT_FONT_LS_KEY = 'wxcanvas-chat-font-px';
+function clampChatFontPx(n: number): number {
+  if (!Number.isFinite(n)) return 14;
+  return Math.min(22, Math.max(11, Math.round(n)));
+}
+function readStoredChatFontPx(): number {
+  if (typeof window === 'undefined') return 14;
+  try {
+    const raw = localStorage.getItem(CHAT_FONT_LS_KEY);
+    if (raw == null || raw === '') return 14;
+    return clampChatFontPx(parseInt(raw, 10));
+  } catch {
+    return 14;
+  }
+}
+
 interface ChatNodeContentProps {
   node: ChatNode;
   nodes: CanvasNode[];
@@ -8533,6 +8591,16 @@ function ChatNodeContent({
   generationSeconds,
 }: ChatNodeContentProps) {
   const [showAllRefs, setShowAllRefs] = useState(false);
+  const [chatFontPx, setChatFontPx] = useState(readStoredChatFontPx);
+  const persistChatFontPx = useCallback((px: number) => {
+    const v = clampChatFontPx(px);
+    setChatFontPx(v);
+    try {
+      localStorage.setItem(CHAT_FONT_LS_KEY, String(v));
+    } catch {
+      /* ignore */
+    }
+  }, []);
   // 获取连接的图片
   const incomingEdges = edges.filter(e => e.targetId === node.id);
   const sourceNodes = incomingEdges
@@ -8691,6 +8759,22 @@ function ChatNodeContent({
             <option value="gemini-3-pro-preview">Gemini 3 Pro</option>
           </optgroup>
         </select>
+        <label className="flex items-center gap-1 shrink-0 text-[10px] text-gray-500">
+          <span className="whitespace-nowrap">字号</span>
+          <select
+            className="max-w-[76px] rounded border border-[#444] bg-[#121212] px-1 py-0.5 text-[10px] text-gray-200 outline-none focus:border-rose-500"
+            value={chatFontPx}
+            onChange={(e) => persistChatFontPx(Number(e.target.value))}
+            onPointerDown={(e) => e.stopPropagation()}
+            title="对话区与输入框字体大小（本机记忆）"
+          >
+            {[11, 12, 13, 14, 15, 16, 18, 20, 22].map((px) => (
+              <option key={px} value={px}>
+                {px}px
+              </option>
+            ))}
+          </select>
+        </label>
         <button
           onPointerDown={(e) => { e.stopPropagation(); onUpdate({ messages: [] }); }}
           disabled={messages.length === 0}
@@ -8724,9 +8808,13 @@ function ChatNodeContent({
           }
         `}</style>
         {messages.length === 0 && (
-          <div className="text-center text-gray-500 text-xs py-8">
+          <div className="text-center text-gray-500 py-8" style={{ fontSize: chatFontPx }}>
             输入问题，AI将为你解答
-            {sourceImages.length > 0 && <div className="mt-2 text-cyan-400">已加载 {sourceImages.length} 张参考图</div>}
+            {sourceImages.length > 0 && (
+              <div className="mt-2 text-cyan-400" style={{ fontSize: Math.max(11, chatFontPx - 1) }}>
+                已加载 {sourceImages.length} 张参考图
+              </div>
+            )}
           </div>
         )}
         {messages.map((msg) => (
@@ -8736,11 +8824,12 @@ function ChatNodeContent({
             onPointerDown={(e) => e.stopPropagation()}
           >
             <div
-              className={`max-w-[85%] rounded-lg p-2.5 text-xs ${
+              className={`max-w-[85%] rounded-lg p-2.5 ${
                 msg.role === 'user'
                   ? 'bg-blue-600 text-white'
                   : 'bg-[#2a2a2a] text-gray-200'
               }`}
+              style={{ fontSize: chatFontPx }}
               onPointerDown={(e) => e.stopPropagation()}
             >
               {msg.image && (
@@ -8758,7 +8847,8 @@ function ChatNodeContent({
                   e.stopPropagation();
                   navigator.clipboard.writeText(msg.content);
                 }}
-                className="mt-1 text-[10px] opacity-50 hover:opacity-100 transition-opacity"
+                className="mt-1 opacity-50 hover:opacity-100 transition-opacity"
+                style={{ fontSize: Math.max(10, chatFontPx - 2) }}
                 title="复制"
               >
                 复制
@@ -8768,12 +8858,15 @@ function ChatNodeContent({
         ))}
         {node.isGenerating && (
           <div className="flex justify-start">
-            <div className="bg-[#2a2a2a] rounded-lg p-3 text-xs text-gray-400 flex flex-col gap-1">
+            <div
+              className="bg-[#2a2a2a] rounded-lg p-3 text-gray-400 flex flex-col gap-1"
+              style={{ fontSize: chatFontPx }}
+            >
               <span className="flex items-center gap-2">
                 <LoaderIcon size={14} /> 思考中…
               </span>
               {generationMmSs != null && (
-                <span className="tabular-nums text-[11px] text-gray-500">
+                <span className="tabular-nums text-gray-500" style={{ fontSize: Math.max(10, chatFontPx - 1) }}>
                   已用时 {generationMmSs}
                   {generationSeconds != null ? ` · ${generationSeconds} 秒` : ''}
                 </span>
@@ -8783,7 +8876,10 @@ function ChatNodeContent({
         )}
         {node.error && chatErrorDiagnosis && (
           <div className="flex justify-start">
-            <div className="bg-red-950/90 rounded-lg p-2.5 text-xs text-red-200 border border-red-900/60 max-w-[92%]">
+            <div
+              className="bg-red-950/90 rounded-lg p-2.5 text-red-200 border border-red-900/60 max-w-[92%]"
+              style={{ fontSize: chatFontPx }}
+            >
               <div className="font-bold mb-1">{chatErrorDiagnosis.title}</div>
               <div className="text-red-100/90 mb-1">{chatErrorDiagnosis.reason}</div>
               <div className="text-red-300 mb-2">{node.error}</div>
@@ -8807,7 +8903,8 @@ function ChatNodeContent({
       <div className="p-2 bg-[#252525] border-t border-[#333] shrink-0">
         <div className="flex gap-2">
           <textarea
-            className="flex-1 bg-[#121212] text-gray-200 text-xs p-2 rounded border border-[#444] focus:outline-none focus:border-rose-500 resize-y min-h-[64px]"
+            className="flex-1 bg-[#121212] text-gray-200 p-2 rounded border border-[#444] focus:outline-none focus:border-rose-500 resize-y min-h-[64px]"
+            style={{ fontSize: chatFontPx }}
             value={node.prompt || ''}
             onChange={(e) => onUpdate({ prompt: e.target.value })}
             onKeyDown={handleKeyDown}
