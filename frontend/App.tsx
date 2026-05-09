@@ -13,7 +13,13 @@ import {
   exportProjectToZipDownload,
   parseProjectFromZipFile,
   sanitizeFilename,
+  CANVAS_LIBRARY_IDB_LABELS,
 } from './services/projectPersistence';
+import {
+  getProjectBackupFileHandle,
+  persistProjectBackupFileHandle,
+  removeProjectBackupFileHandle,
+} from './services/projectBackupHandleStore';
 import type { CanvasProjectSnapshot } from './services/projectPersistence';
 import {
   callGeminiChat,
@@ -34,6 +40,12 @@ import {
   saveVideoDownloadFromUrl,
   supportsFileSystemAccess,
 } from './services/downloadPathSettings';
+import type { CreditPricingRow } from './services/creditPricingSettings';
+import {
+  loadCreditPricingRows,
+  newCreditPricingRow,
+  saveCreditPricingRows,
+} from './services/creditPricingSettings';
 import * as THREE from 'three';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 
@@ -338,7 +350,7 @@ function i2iPresetListForCategory(
     }));
 }
 
-/** 设置 → 预设：复制 / 编辑内容 / 改分类 / 重命名 / 删除 / 添加 均需校验 */
+/** 设置 → 预设 / 积分消耗：敏感操作与解锁编辑使用同一校验密码 */
 const PRESET_SETTINGS_GUARD_PASSWORD = 'zhangbiwen666';
 
 type SettingsPresetPwdIntent =
@@ -867,7 +879,7 @@ export default function App() {
 
   // Unified Settings (API + Presets)
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'api' | 'presets' | 'downloads'>('api');
+  const [settingsTab, setSettingsTab] = useState<'api' | 'presets' | 'downloads' | 'credits'>('api');
   /** 设置 → 预设：当前查看的分类（一次只显示一类） */
   const [settingsPresetCategoryTab, setSettingsPresetCategoryTab] = useState<I2iPresetCategoryId>('character');
   /** 设置 → 预设：密码验证通过后的本会话内可自由编辑、复制/重命名/删除不再弹密码 */
@@ -885,6 +897,14 @@ export default function App() {
     image?: string;
     video?: string;
   }>({});
+
+  /** 设置 → 积分消耗：密码通过后本会话内可增删改 */
+  const [settingsCreditsAuthSession, setSettingsCreditsAuthSession] = useState(false);
+  const [settingsCreditsPwdModal, setSettingsCreditsPwdModal] = useState<{ open: boolean; input: string }>({
+    open: false,
+    input: '',
+  });
+  const [creditPricingRows, setCreditPricingRows] = useState<CreditPricingRow[]>(() => loadCreditPricingRows());
 
   const refreshDownloadDirLabels = useCallback(() => {
     const c = getDownloadHandleCacheSnapshot();
@@ -921,6 +941,8 @@ export default function App() {
     if (!showSettingsModal) {
       setSettingsPresetAuthSession(false);
       setSettingsPresetPwdModal({ intent: null, input: '' });
+      setSettingsCreditsAuthSession(false);
+      setSettingsCreditsPwdModal({ open: false, input: '' });
       return;
     }
     const s = getAiSettingsSnapshot();
@@ -930,6 +952,7 @@ export default function App() {
     setDeepSeekKeyInput(s.deepSeekKey);
     setDeepSeekBaseInput(s.deepSeekBaseUrl);
     setDownloadPathSettings(loadDownloadPathSettings());
+    setCreditPricingRows(loadCreditPricingRows());
     void hydrateDownloadDirectoryHandlesFromIDB().then(() => refreshDownloadDirLabels());
   }, [showSettingsModal, refreshDownloadDirLabels]);
 
@@ -940,8 +963,24 @@ export default function App() {
     }
   }, [settingsTab]);
 
+  useEffect(() => {
+    if (settingsTab !== 'credits') {
+      setSettingsCreditsPwdModal({ open: false, input: '' });
+      setSettingsCreditsAuthSession(false);
+    }
+  }, [settingsTab]);
+
+  useEffect(() => {
+    saveCreditPricingRows(creditPricingRows);
+  }, [creditPricingRows]);
+
   /** 保存 JSON 到本机；支持 File System Access API 时弹出「另存为」选择路径。saved=已写入或已触发下载；aborted=用户取消另存为 */
-  const saveJsonToDisk = useCallback(async (filename: string, data: unknown): Promise<'saved' | 'aborted'> => {
+  const saveJsonToDisk = useCallback(
+    async (
+      filename: string,
+      data: unknown,
+      opts?: { backupProjectId?: string }
+    ): Promise<'saved' | 'aborted'> => {
     const json = JSON.stringify(data, null, 2);
     const hasPicker = typeof (window as any).showSaveFilePicker === 'function';
     if (hasPicker) {
@@ -957,6 +996,12 @@ export default function App() {
         await writable.write(json);
         await writable.close();
         lastJsonFileHandleRef.current = handle;
+        const backupPid = opts?.backupProjectId ?? activeProjectIdRef.current;
+        if (backupPid) {
+          void persistProjectBackupFileHandle(backupPid, handle as FileSystemFileHandle).catch((e) =>
+            console.warn('持久化项目 JSON 句柄失败', e)
+          );
+        }
         setLastJsonFilename(handle?.name || filename);
         return 'saved';
       } catch (err: any) {
@@ -973,7 +1018,9 @@ export default function App() {
     setLastJsonFilename(filename);
     URL.revokeObjectURL(url);
     return 'saved';
-  }, []);
+  },
+  []
+);
 
   // --- Project Management ---
   /**
@@ -1076,7 +1123,7 @@ export default function App() {
       const filename = `${projectExportBasename(snapshot)}.json`;
       const payload = { ...snapshot };
       delete (payload as { diskSaveEstablished?: boolean }).diskSaveEstablished;
-      const diskResult = await saveJsonToDisk(filename, payload);
+      const diskResult = await saveJsonToDisk(filename, payload, { backupProjectId: pid });
       const listAfterDisk =
         diskResult === 'saved'
           ? nextProjects.map((p) => (p.id === pid ? { ...p, diskSaveEstablished: true as const } : p))
@@ -1170,9 +1217,14 @@ export default function App() {
     setNodes(target.nodes);
     setEdges(target.edges);
     setTransform(target.transform);
+    void getProjectBackupFileHandle(projectId).then((h) => {
+      lastJsonFileHandleRef.current = h ?? null;
+      setLastJsonFilename(h?.name ?? '');
+    });
   }, [saveCurrentProject]);
 
   const deleteProject = useCallback((projectId: string) => {
+    void removeProjectBackupFileHandle(projectId);
     const prev = projectsRef.current;
     if (prev.length <= 1) return;
     const remained = prev.filter((p) => p.id !== projectId);
@@ -1187,6 +1239,10 @@ export default function App() {
       setNodes(fallback.nodes);
       setEdges(fallback.edges);
       setTransform(fallback.transform);
+      void getProjectBackupFileHandle(fallback.id).then((h) => {
+        lastJsonFileHandleRef.current = h ?? null;
+        setLastJsonFilename(h?.name ?? '');
+      });
       void saveProjectLibrary(remained, fallback.id).then((ok) => {
         if (!ok) alert('项目已删除，但更新草稿库失败，请尝试导出 ZIP/JSON 备份。');
       });
@@ -1205,7 +1261,7 @@ export default function App() {
       const filename = `${projectExportBasename(project)}.json`;
       const payload = { ...project };
       delete (payload as { diskSaveEstablished?: boolean }).diskSaveEstablished;
-      const r = await saveJsonToDisk(filename, payload);
+      const r = await saveJsonToDisk(filename, payload, { backupProjectId: project.id });
       if (r !== 'saved') return;
       const pid = project.id;
       setProjects((prev) => {
@@ -1217,6 +1273,23 @@ export default function App() {
     },
     [saveJsonToDisk]
   );
+
+  /** 项目管理「打开位置」：草稿仅存 IndexedDB，用系统提示给出库名（无应用内弹窗） */
+  const showDraftStorageLocation = useCallback(() => {
+    const { database, objectStore, documentKey } = CANVAS_LIBRARY_IDB_LABELS;
+    window.alert(
+      [
+        '画布草稿与定时自动保存在本机浏览器的 IndexedDB 中（没有 D:\\… 这类普通文件夹路径）。',
+        '所有项目的草稿都写在该库的同一文档中。',
+        '',
+        `数据库：${database}`,
+        `对象库：${objectStore}`,
+        `键：${documentKey}`,
+        '',
+        'Chrome / Edge：按 F12 →「应用程序」(Application) →「IndexedDB」→ 展开上述「数据库」即可查看。',
+      ].join('\n')
+    );
+  }, []);
 
   /** 导出 JSON 时：若目标即当前打开的项目，附带内存中最新的画布（无需先点保存） */
   const projectSnapshotForJsonExport = useCallback((project: CanvasProject): CanvasProject => {
@@ -1373,6 +1446,11 @@ export default function App() {
           setEdges(initial.edges || []);
           setTransform(initial.transform || { x: 0, y: 0, scale: 1 });
           setProjectStoreReady(true);
+          void getProjectBackupFileHandle(initial.id).then((h) => {
+            if (cancelled) return;
+            lastJsonFileHandleRef.current = h ?? null;
+            setLastJsonFilename(h?.name ?? '');
+          });
           return;
         }
       } catch (err) {
@@ -1392,6 +1470,11 @@ export default function App() {
       setActiveProjectId(defaultProject.id);
       await saveProjectLibrary([defaultProject], defaultProject.id);
       setProjectStoreReady(true);
+      void getProjectBackupFileHandle(defaultProject.id).then((h) => {
+        if (cancelled) return;
+        lastJsonFileHandleRef.current = h ?? null;
+        setLastJsonFilename(h?.name ?? '');
+      });
     })();
     return () => {
       cancelled = true;
@@ -1513,6 +1596,17 @@ export default function App() {
     }
   };
 
+  const confirmSettingsCreditsPassword = () => {
+    if (!settingsCreditsPwdModal.open) return;
+    if (settingsCreditsPwdModal.input.trim() !== PRESET_SETTINGS_GUARD_PASSWORD) {
+      window.alert('密码错误');
+      setSettingsCreditsPwdModal((p) => ({ ...p, input: '' }));
+      return;
+    }
+    setSettingsCreditsPwdModal({ open: false, input: '' });
+    setSettingsCreditsAuthSession(true);
+  };
+
   useEffect(() => {
     if (!settingsPresetPwdModal.intent) return;
     const onKey = (e: KeyboardEvent) => {
@@ -1523,6 +1617,17 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [settingsPresetPwdModal.intent]);
+
+  useEffect(() => {
+    if (!settingsCreditsPwdModal.open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSettingsCreditsPwdModal({ open: false, input: '' });
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [settingsCreditsPwdModal.open]);
 
   // --- Apply Preset Prompt ---
   const handleApplyPreset = useCallback((nodeId: string, presetKey: string) => {
@@ -4373,7 +4478,7 @@ export default function App() {
             setShowSettingsModal(true);
           }}
           className="bg-[#1e1e1e]/90 backdrop-blur-md p-2.5 rounded-xl shadow-2xl border border-[#333] hover:bg-[#333] transition-colors flex items-center gap-2"
-          title="设置（API、预设、下载路径）"
+          title="设置（API、预设、下载路径、积分消耗）"
         >
           <SettingsIcon size={18} />
           <span className="text-gray-400 text-xs font-medium">设置</span>
@@ -4652,6 +4757,14 @@ export default function App() {
                         </div>
                       </button>
                       <button
+                        type="button"
+                        onClick={showDraftStorageLocation}
+                        className="shrink-0 px-2 py-1 text-[10px] rounded bg-slate-700 hover:bg-slate-600 text-gray-100"
+                        title="草稿保存在浏览器 IndexedDB 的库名与键；点击在系统提示框中查看"
+                      >
+                        打开位置
+                      </button>
+                      <button
                         onClick={() => {
                           const nextName = prompt('重命名项目:', project.name);
                           const trimmed = nextName?.trim();
@@ -4712,6 +4825,8 @@ export default function App() {
                 onClick={() => {
                   setSettingsPresetAuthSession(false);
                   setSettingsPresetPwdModal({ intent: null, input: '' });
+                  setSettingsCreditsPwdModal({ open: false, input: '' });
+                  setSettingsCreditsAuthSession(false);
                   setSettingsTab('api');
                 }}
                 className={`text-left px-3 py-2 rounded text-sm ${settingsTab === 'api' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-[#2a2a2a]'}`}
@@ -4722,6 +4837,8 @@ export default function App() {
                 onClick={() => {
                   setSettingsPresetAuthSession(false);
                   setSettingsPresetPwdModal({ intent: null, input: '' });
+                  setSettingsCreditsPwdModal({ open: false, input: '' });
+                  setSettingsCreditsAuthSession(false);
                   setSettingsTab('presets');
                 }}
                 className={`text-left px-3 py-2 rounded text-sm ${settingsTab === 'presets' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-[#2a2a2a]'}`}
@@ -4732,17 +4849,35 @@ export default function App() {
                 onClick={() => {
                   setSettingsPresetAuthSession(false);
                   setSettingsPresetPwdModal({ intent: null, input: '' });
+                  setSettingsCreditsPwdModal({ open: false, input: '' });
+                  setSettingsCreditsAuthSession(false);
                   setSettingsTab('downloads');
                 }}
                 className={`text-left px-3 py-2 rounded text-sm ${settingsTab === 'downloads' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-[#2a2a2a]'}`}
               >
                 下载路径
               </button>
+              <button
+                onClick={() => {
+                  setSettingsPresetAuthSession(false);
+                  setSettingsPresetPwdModal({ intent: null, input: '' });
+                  setSettingsTab('credits');
+                }}
+                className={`text-left px-3 py-2 rounded text-sm ${settingsTab === 'credits' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-[#2a2a2a]'}`}
+              >
+                积分消耗
+              </button>
             </div>
             <div className="flex flex-1 flex-col min-h-0 min-w-0 p-6">
               <div className="flex shrink-0 items-center justify-between mb-4">
                 <h2 className="text-lg font-bold text-white">
-                  {settingsTab === 'api' ? 'API 设置' : settingsTab === 'presets' ? '提示词预设' : '下载路径'}
+                  {settingsTab === 'api'
+                    ? 'API 设置'
+                    : settingsTab === 'presets'
+                      ? '提示词预设'
+                      : settingsTab === 'downloads'
+                        ? '下载路径'
+                        : '积分消耗'}
                 </h2>
                 <button
                   onClick={() => setShowSettingsModal(false)}
@@ -5216,6 +5351,144 @@ export default function App() {
                   </p>
                 </div>
               )}
+
+              {settingsTab === 'credits' && (
+                <div className="space-y-4">
+                  <p className="text-[11px] text-gray-500 leading-relaxed">
+                    在此维护各模型与分辨率档位的<strong className="text-gray-400">积分标价</strong>（默认已填入图生图常用项）。数据保存在本机浏览器。
+                    <span className="block mt-1 text-amber-600/90">
+                      {settingsCreditsAuthSession
+                        ? '当前已解锁：可编辑表格、添加或删除行。完成后请点「恢复锁定」。'
+                        : '表格默认锁定为只读；请先点「解锁编辑（需密码）」，密码与「预设」页的管理密码相同。'}
+                    </span>
+                  </p>
+                  {settingsCreditsAuthSession ? (
+                    <button
+                      type="button"
+                      onClick={() => setSettingsCreditsAuthSession(false)}
+                      className="w-full rounded-lg border border-amber-700/50 bg-amber-950/40 px-3 py-2 text-xs font-medium text-amber-100 hover:bg-amber-900/50"
+                    >
+                      恢复锁定
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setSettingsCreditsPwdModal({ open: true, input: '' })}
+                      className="w-full rounded-lg bg-amber-700 hover:bg-amber-600 px-3 py-2 text-xs font-medium text-white"
+                    >
+                      解锁编辑（需密码）
+                    </button>
+                  )}
+
+                  <div className="rounded-lg border border-[#333] overflow-x-auto">
+                    <table className="w-full min-w-[520px] text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-[#333] bg-[#252525] text-gray-400">
+                          <th className="px-2 py-2 font-medium w-[88px]">分类</th>
+                          <th className="px-2 py-2 font-medium min-w-[140px]">模型名称</th>
+                          <th className="px-2 py-2 font-medium min-w-[100px]">分辨率/规格</th>
+                          <th className="px-2 py-2 font-medium w-[72px]">积分</th>
+                          <th className="px-2 py-2 font-medium w-[56px]" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {creditPricingRows.map((row) => (
+                          <tr key={row.id} className="border-b border-[#2a2a2a] last:border-0">
+                            <td className="p-1 align-middle">
+                              <input
+                                disabled={!settingsCreditsAuthSession}
+                                title={!settingsCreditsAuthSession ? '请先解锁编辑' : undefined}
+                                value={row.category}
+                                onChange={(e) =>
+                                  setCreditPricingRows((prev) =>
+                                    prev.map((r) =>
+                                      r.id === row.id ? { ...r, category: e.target.value } : r
+                                    )
+                                  )
+                                }
+                                className="w-full rounded border border-[#444] bg-[#121212] px-2 py-1.5 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                              />
+                            </td>
+                            <td className="p-1 align-middle">
+                              <input
+                                disabled={!settingsCreditsAuthSession}
+                                title={!settingsCreditsAuthSession ? '请先解锁编辑' : undefined}
+                                value={row.modelName}
+                                onChange={(e) =>
+                                  setCreditPricingRows((prev) =>
+                                    prev.map((r) =>
+                                      r.id === row.id ? { ...r, modelName: e.target.value } : r
+                                    )
+                                  )
+                                }
+                                className="w-full rounded border border-[#444] bg-[#121212] px-2 py-1.5 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                              />
+                            </td>
+                            <td className="p-1 align-middle">
+                              <input
+                                disabled={!settingsCreditsAuthSession}
+                                title={!settingsCreditsAuthSession ? '请先解锁编辑' : undefined}
+                                value={row.specLabel}
+                                onChange={(e) =>
+                                  setCreditPricingRows((prev) =>
+                                    prev.map((r) =>
+                                      r.id === row.id ? { ...r, specLabel: e.target.value } : r
+                                    )
+                                  )
+                                }
+                                placeholder="如 2k/4k"
+                                className="w-full rounded border border-[#444] bg-[#121212] px-2 py-1.5 text-white placeholder-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                              />
+                            </td>
+                            <td className="p-1 align-middle">
+                              <input
+                                type="number"
+                                min={0}
+                                step={1}
+                                disabled={!settingsCreditsAuthSession}
+                                title={!settingsCreditsAuthSession ? '请先解锁编辑' : undefined}
+                                value={Number.isFinite(row.credits) ? row.credits : 0}
+                                onChange={(e) => {
+                                  const v = Math.max(0, Math.round(Number(e.target.value) || 0));
+                                  setCreditPricingRows((prev) =>
+                                    prev.map((r) => (r.id === row.id ? { ...r, credits: v } : r))
+                                  );
+                                }}
+                                className="w-full rounded border border-[#444] bg-[#121212] px-2 py-1.5 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                              />
+                            </td>
+                            <td className="p-1 align-middle text-center">
+                              <button
+                                type="button"
+                                disabled={!settingsCreditsAuthSession}
+                                title={!settingsCreditsAuthSession ? '请先解锁编辑' : '删除此行'}
+                                onClick={() => {
+                                  if (!window.confirm('确定删除这一行吗？')) return;
+                                  setCreditPricingRows((prev) => prev.filter((r) => r.id !== row.id));
+                                }}
+                                className="rounded bg-red-900/70 px-2 py-1 text-[10px] text-red-100 hover:bg-red-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                删除
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={!settingsCreditsAuthSession}
+                    onClick={() =>
+                      setCreditPricingRows((prev) => [...prev, newCreditPricingRow({ category: '图生图' })])
+                    }
+                    className="rounded-lg border border-cyan-700/50 bg-cyan-950/30 px-3 py-2 text-xs font-medium text-cyan-100 hover:bg-cyan-900/40 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    添加一行
+                  </button>
+                </div>
+              )}
               </div>
             </div>
           </div>
@@ -5274,6 +5547,58 @@ export default function App() {
         </div>
       )}
 
+      {settingsCreditsPwdModal.open && (
+        <div
+          className="fixed inset-0 z-[230] flex items-center justify-center bg-black/75 px-4"
+          onClick={() => setSettingsCreditsPwdModal({ open: false, input: '' })}
+          role="presentation"
+        >
+          <div
+            className="w-full max-w-[400px] rounded-xl border border-amber-700/45 bg-[#1a1a1a] p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-semibold text-white mb-1">解锁积分消耗编辑</h3>
+            <p className="text-[11px] text-amber-200/80 mb-3 leading-relaxed">
+              验证通过后可编辑模型名称、分辨率说明与积分，并可添加或删除行。密码与「预设」页相同。
+            </p>
+            <label className="text-[10px] text-gray-500 block mb-1">密码</label>
+            <input
+              type="password"
+              autoComplete="off"
+              autoFocus
+              className="w-full rounded-lg border border-[#444] bg-[#0d0d0d] px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+              value={settingsCreditsPwdModal.input}
+              onChange={(e) =>
+                setSettingsCreditsPwdModal((p) => (p.open ? { ...p, input: e.target.value } : p))
+              }
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  confirmSettingsCreditsPassword();
+                }
+              }}
+              placeholder="输入密码后点确定"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-[#444] px-3 py-2 text-xs text-gray-300 hover:bg-[#2a2a2a]"
+                onClick={() => setSettingsCreditsPwdModal({ open: false, input: '' })}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-medium text-white hover:bg-amber-500"
+                onClick={confirmSettingsCreditsPassword}
+              >
+                确定
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Instructions Overlay (Bottom Right) */}
       <div className="absolute bottom-6 right-6 text-right text-xs text-gray-500 pointer-events-none flex flex-col gap-1.5 bg-[#1e1e1e]/80 backdrop-blur-sm p-3 rounded-xl border border-[#333] z-40">
         <p>按 <strong className="text-gray-300">Q</strong> 或点击图标使用 <strong className="text-gray-300">框选工具</strong></p>
@@ -5284,7 +5609,7 @@ export default function App() {
         <p><strong className="text-gray-300">拖拽外部图片</strong> 到画布直接导入</p>
         <p><strong className="text-gray-300">Ctrl+C / Ctrl+V</strong> 复制粘贴节点</p>
         <p>选中节点按 <strong className="text-gray-300">Delete</strong> 删除</p>
-        <p>点击左上角 <strong className="text-gray-300">设置</strong> 管理 API、预设与下载路径</p>
+        <p>点击左上角 <strong className="text-gray-300">设置</strong> 管理 API、预设、下载路径与积分消耗</p>
       </div>
 
 

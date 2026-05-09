@@ -20,6 +20,13 @@ const DB_VERSION = 1;
 const STORE = 'library';
 const DOC_KEY = 'default';
 
+/** 供「存储位置」说明：草稿库在 IndexedDB 中的名称（无磁盘路径，仅能在开发者工具中查看） */
+export const CANVAS_LIBRARY_IDB_LABELS = {
+  database: DB_NAME,
+  objectStore: STORE,
+  documentKey: DOC_KEY,
+} as const;
+
 /** 旧版 localStorage 键（迁移后删除） */
 const LEGACY_PROJECTS_KEY = 'ai-canvas-projects-v1';
 const LEGACY_ACTIVE_KEY = 'ai-canvas-active-project-id-v1';
