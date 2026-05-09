@@ -5,6 +5,7 @@ import {
   DEFAULT_DEEPSEEK_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
   getAiSettingsSnapshot,
+  migrateAiSettingsIfLegacy,
   persistAiSettings,
 } from './services/aiSettings';
 import {
@@ -516,6 +517,8 @@ export default function App() {
   });
   const [draftNameInput, setDraftNameInput] = useState('');
   const [draftStoragePathInput, setDraftStoragePathInput] = useState('');
+  /** 当前项目另存为 JSON 绑定文件名提示（项目管理窗内展示） */
+  const [projectJsonBackupHint, setProjectJsonBackupHint] = useState('');
   const [centerTitleEditValue, setCenterTitleEditValue] = useState<string | null>(null);
   const skipCenterRenameBlurRef = useRef(false);
   const persistWarningShownRef = useRef(false);
@@ -546,6 +549,25 @@ export default function App() {
       setDraftStoragePathInput((p.draftStoragePathNote || '').trim());
     }
   }, [showProjectModal, activeProjectId]);
+
+  useEffect(() => {
+    if (!showProjectModal || !activeProjectId) {
+      setProjectJsonBackupHint('');
+      return;
+    }
+    let cancelled = false;
+    void getProjectBackupFileHandle(activeProjectId).then((h) => {
+      if (cancelled) return;
+      setProjectJsonBackupHint(
+        h?.name
+          ? `已绑定另存为 JSON 文件「${h.name}」（浏览器不提供完整磁盘路径）`
+          : '未绑定另存为 JSON（保存画布或导出 JSON 并选择「另存为」后可显示文件名）'
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [showProjectModal, activeProjectId, projects]);
 
   // Fullscreen Image Modal
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
@@ -921,8 +943,14 @@ export default function App() {
   }, []);
 
   const [apiKeyInput, setApiKeyInput] = useState('');
-  const [aiProvider, setAiProvider] = useState<AiProvider>(() => getAiSettingsSnapshot().provider);
-  const [openAiBaseInput, setOpenAiBaseInput] = useState(() => getAiSettingsSnapshot().openAiBaseUrl);
+  const [aiProvider, setAiProvider] = useState<AiProvider>(() => {
+    migrateAiSettingsIfLegacy();
+    return getAiSettingsSnapshot().provider;
+  });
+  const [openAiBaseInput, setOpenAiBaseInput] = useState(() => {
+    migrateAiSettingsIfLegacy();
+    return getAiSettingsSnapshot().openAiBaseUrl;
+  });
   const [deepSeekKeyInput, setDeepSeekKeyInput] = useState(() => getAiSettingsSnapshot().deepSeekKey);
   const [deepSeekBaseInput, setDeepSeekBaseInput] = useState(() => getAiSettingsSnapshot().deepSeekBaseUrl);
 
@@ -950,6 +978,7 @@ export default function App() {
       setSettingsCreditsPwdModal({ open: false, input: '' });
       return;
     }
+    migrateAiSettingsIfLegacy();
     const s = getAiSettingsSnapshot();
     setAiProvider(s.provider);
     setOpenAiBaseInput(s.openAiBaseUrl);
@@ -1191,7 +1220,14 @@ export default function App() {
   const handleApplyDraftStoragePath = useCallback(() => {
     const pid = activeProjectIdRef.current;
     if (!pid) return;
-    const trimmed = draftStoragePathInput.trim();
+    const suggestion = draftStoragePathInput.trim();
+    const entered = window.prompt(
+      '请手动输入或粘贴本机「草稿 / 项目备份」所在文件夹的完整路径（例如 D:\\备份\\画布）：',
+      suggestion
+    );
+    if (entered === null) return;
+    const trimmed = entered.trim();
+    setDraftStoragePathInput(trimmed);
     setProjects((prev) => {
       const next = prev.map((p) =>
         p.id === pid
@@ -4705,10 +4741,23 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => handleApplyDraftStoragePath()}
-                  className="shrink-0 rounded-md bg-[#333] px-2.5 py-1.5 text-[11px] text-gray-100 hover:bg-[#444]"
+                  className="shrink-0 rounded-md bg-cyan-900/60 px-2.5 py-1.5 text-[11px] text-cyan-50 hover:bg-cyan-800/70"
+                  title="弹出系统输入框，手动填写或粘贴本机路径后保存"
                 >
                   应用存储位置
                 </button>
+              </div>
+              <div className="rounded-md border border-cyan-900/35 bg-[#0a1618] px-2.5 py-2 space-y-1.5 text-[10px] leading-relaxed text-gray-300">
+                <div>
+                  <span className="text-gray-500">当前项目 · 已保存草稿路径（参考）：</span>
+                  <span className="text-cyan-200/95 break-all">
+                    {projects.find((p) => p.id === activeProjectId)?.draftStoragePathNote?.trim() || '未设置'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-500">当前项目 · 项目 JSON 备份参考：</span>
+                  <span className="text-cyan-200/95 break-all">{projectJsonBackupHint}</span>
+                </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[10px] text-gray-500 shrink-0">定时自动保存草稿</span>

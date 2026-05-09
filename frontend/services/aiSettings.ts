@@ -11,6 +11,34 @@ export const DEFAULT_OPENAI_BASE_URL = 'https://toapis.com/v1';
 /** DeepSeek 官方 OpenAI 兼容入口 */
 export const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1';
 
+let aiSettingsLegacyMigrated = false;
+
+/**
+ * 首次会话内执行一次：接口类型缺省或异常时固定为 OpenAI 兼容；
+ * Base URL 未配置或仍为官方 OpenAI 默认时，写入 ToAPIs 默认网关。
+ */
+export function migrateAiSettingsIfLegacy(): void {
+  if (aiSettingsLegacyMigrated) return;
+  aiSettingsLegacyMigrated = true;
+  try {
+    const p = localStorage.getItem(PROVIDER_KEY);
+    if (p !== 'gemini' && p !== 'openai-compatible') {
+      localStorage.setItem(PROVIDER_KEY, 'openai-compatible');
+    }
+    const raw = localStorage.getItem(OPENAI_BASE_URL_STORAGE_KEY)?.trim() ?? '';
+    if (!raw) {
+      localStorage.setItem(OPENAI_BASE_URL_STORAGE_KEY, DEFAULT_OPENAI_BASE_URL);
+      return;
+    }
+    const u = raw.replace(/\/+$/, '').toLowerCase();
+    if (u === 'https://api.openai.com/v1' || u === 'http://api.openai.com/v1') {
+      localStorage.setItem(OPENAI_BASE_URL_STORAGE_KEY, DEFAULT_OPENAI_BASE_URL);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 export function getAiProvider(): AiProvider {
   try {
     const v = localStorage.getItem(PROVIDER_KEY);
