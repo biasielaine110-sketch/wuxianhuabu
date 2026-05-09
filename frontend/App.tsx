@@ -274,6 +274,17 @@ function projectExportBasename(p: CanvasProject): string {
   return sanitizeFilename(raw);
 }
 
+/** 去掉旧版「（系统选择器…」等说明尾缀，仅保留路径展示用主文案 */
+function sanitizeDraftStoragePathNote(raw: string | undefined): string {
+  if (!raw?.trim()) return '';
+  const s = raw.trim();
+  const iFull = s.indexOf('（');
+  const iHalf = s.indexOf('(');
+  const candidates = [iFull, iHalf].filter((i) => i > 0);
+  const cut = candidates.length ? Math.min(...candidates) : -1;
+  return cut > 0 ? s.slice(0, cut).trim() : s;
+}
+
 type CanvasHistoryEntry = {
   nodes: CanvasNode[];
   edges: Edge[];
@@ -517,8 +528,6 @@ export default function App() {
   });
   const [draftNameInput, setDraftNameInput] = useState('');
   const [draftStoragePathInput, setDraftStoragePathInput] = useState('');
-  /** 当前项目另存为 JSON 绑定文件名提示（项目管理窗内展示） */
-  const [projectJsonBackupHint, setProjectJsonBackupHint] = useState('');
   const [centerTitleEditValue, setCenterTitleEditValue] = useState<string | null>(null);
   const skipCenterRenameBlurRef = useRef(false);
   const persistWarningShownRef = useRef(false);
@@ -543,31 +552,24 @@ export default function App() {
 
   useEffect(() => {
     if (!showProjectModal) return;
-    const p = projects.find((x) => x.id === activeProjectId);
-    if (p) {
-      setDraftNameInput((p.draftTitle?.trim() || p.name || '').trim() || '');
-      setDraftStoragePathInput((p.draftStoragePathNote || '').trim());
+    const p = projectsRef.current.find((x) => x.id === activeProjectId);
+    if (!p) return;
+    setDraftNameInput((p.draftTitle?.trim() || p.name || '').trim() || '');
+    const raw = (p.draftStoragePathNote || '').trim();
+    const cleaned = sanitizeDraftStoragePathNote(raw);
+    setDraftStoragePathInput(cleaned);
+    if (cleaned !== raw) {
+      const pid = p.id;
+      setProjects((prev) => {
+        const next = prev.map((x) =>
+          x.id === pid ? { ...x, draftStoragePathNote: cleaned || undefined, updatedAt: Date.now() } : x
+        );
+        projectsRef.current = next;
+        void saveProjectLibrary(next, pid);
+        return next;
+      });
     }
   }, [showProjectModal, activeProjectId]);
-
-  useEffect(() => {
-    if (!showProjectModal || !activeProjectId) {
-      setProjectJsonBackupHint('');
-      return;
-    }
-    let cancelled = false;
-    void getProjectBackupFileHandle(activeProjectId).then((h) => {
-      if (cancelled) return;
-      setProjectJsonBackupHint(
-        h?.name
-          ? `已绑定另存为 JSON 文件「${h.name}」（浏览器不提供完整磁盘路径）`
-          : '未绑定另存为 JSON（保存画布或导出 JSON 并选择「另存为」后可显示文件名）'
-      );
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [showProjectModal, activeProjectId, projects]);
 
   // Fullscreen Image Modal
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
@@ -1217,29 +1219,52 @@ export default function App() {
     });
   }, [draftNameInput]);
 
-  const handleApplyDraftStoragePath = useCallback(() => {
+  const handleApplyDraftStoragePath = useCallback(async () => {
     const pid = activeProjectIdRef.current;
     if (!pid) return;
+
+    const persistPath = (raw: string) => {
+      const cleaned = sanitizeDraftStoragePathNote(raw) || raw.trim();
+      setDraftStoragePathInput(cleaned);
+      setProjects((prev) => {
+        const next = prev.map((p) =>
+          p.id === pid
+            ? { ...p, draftStoragePathNote: cleaned || undefined, updatedAt: Date.now() }
+            : p
+        );
+        projectsRef.current = next;
+        void saveProjectLibrary(next, pid).then((ok) => {
+          if (!ok) alert('草稿存储位置已更新，但写入草稿库失败，请重试。');
+        });
+        return next;
+      });
+    };
+
+    if (supportsFileSystemAccess()) {
+      try {
+        const w = window as unknown as {
+          showDirectoryPicker?: (opts?: { mode?: 'read' | 'readwrite' }) => Promise<FileSystemDirectoryHandle>;
+        };
+        const dirHandle = await w.showDirectoryPicker?.({ mode: 'read' });
+        if (!dirHandle) {
+          throw new Error('no handle');
+        }
+        const folderName = (dirHandle.name || '').trim();
+        persistPath(folderName);
+        return;
+      } catch (e: unknown) {
+        if ((e as { name?: string })?.name === 'AbortError') return;
+        console.warn('showDirectoryPicker 失败', e);
+      }
+    }
+
     const suggestion = draftStoragePathInput.trim();
     const entered = window.prompt(
-      '请手动输入或粘贴本机「草稿 / 项目备份」所在文件夹的完整路径（例如 D:\\备份\\画布）：',
+      '当前环境不支持文件夹选择器（请使用 Chrome / Edge 且为 HTTPS 或 localhost），或您已取消选择。请手动输入本机草稿所在完整路径：',
       suggestion
     );
     if (entered === null) return;
-    const trimmed = entered.trim();
-    setDraftStoragePathInput(trimmed);
-    setProjects((prev) => {
-      const next = prev.map((p) =>
-        p.id === pid
-          ? { ...p, draftStoragePathNote: trimmed || undefined, updatedAt: Date.now() }
-          : p
-      );
-      projectsRef.current = next;
-      void saveProjectLibrary(next, pid).then((ok) => {
-        if (!ok) alert('草稿存储位置已更新，但写入草稿库失败，请重试。');
-      });
-      return next;
-    });
+    persistPath(entered.trim());
   }, [draftStoragePathInput]);
 
   const commitCenterProjectRename = useCallback((raw: string) => {
@@ -1336,7 +1361,8 @@ export default function App() {
   /** 项目管理「打开位置」：需已填「草稿存储位置」或已绑定另存为 JSON；再提示 IndexedDB 与参考路径 */
   const openProjectLocationInfo = useCallback((project: CanvasProject) => {
     void (async () => {
-      const manual = project.draftStoragePathNote?.trim() || '';
+      const manualRaw = project.draftStoragePathNote?.trim() || '';
+      const manual = manualRaw ? sanitizeDraftStoragePathNote(manualRaw) || manualRaw : '';
       const jsonHandle = await getProjectBackupFileHandle(project.id);
       if (!manual && !jsonHandle) {
         window.alert(
@@ -4690,11 +4716,6 @@ export default function App() {
                 <XIcon size={20} />
               </button>
             </div>
-            <p className="text-[11px] text-gray-500 mb-2 leading-relaxed">
-              草稿保存在本机 <span className="text-gray-400">IndexedDB</span>。换机请用下方「导出」下载 ZIP 或 JSON 备份后，在另一台电脑「导入」。
-              <span className="text-cyan-600/90"> Ctrl+S（或 ⌘+S）</span>
-              可在画布上快速保存（焦点在输入框内时不触发）。新建或导入的项目、以及从未在本机备份过的项目，首次保存会先弹出选择 JSON 保存位置（浏览器支持「另存为」时），确认后<strong className="text-gray-400">立即写入草稿</strong>。
-            </p>
             <div className="mb-3 rounded-lg border border-[#333] bg-[#141414] p-3 space-y-2">
               <div className="flex flex-wrap items-end gap-2">
                 <label className="flex-1 min-w-[200px]">
@@ -4727,9 +4748,7 @@ export default function App() {
               </div>
               <div className="flex flex-wrap items-end gap-2">
                 <label className="flex-1 min-w-[200px]">
-                  <span className="block text-[10px] text-gray-500 mb-0.5">
-                    草稿存储位置（本机参考路径，自行填写；浏览器草稿仍在 IndexedDB）
-                  </span>
+                  <span className="block text-[10px] text-gray-500 mb-0.5">草稿存储位置</span>
                   <input
                     type="text"
                     value={draftStoragePathInput}
@@ -4740,24 +4759,12 @@ export default function App() {
                 </label>
                 <button
                   type="button"
-                  onClick={() => handleApplyDraftStoragePath()}
+                  onClick={() => void handleApplyDraftStoragePath()}
                   className="shrink-0 rounded-md bg-cyan-900/60 px-2.5 py-1.5 text-[11px] text-cyan-50 hover:bg-cyan-800/70"
-                  title="弹出系统输入框，手动填写或粘贴本机路径后保存"
+                  title="支持时弹出系统「选择文件夹」窗口；不支持时改为手动输入路径"
                 >
                   应用存储位置
                 </button>
-              </div>
-              <div className="rounded-md border border-cyan-900/35 bg-[#0a1618] px-2.5 py-2 space-y-1.5 text-[10px] leading-relaxed text-gray-300">
-                <div>
-                  <span className="text-gray-500">当前项目 · 已保存草稿路径（参考）：</span>
-                  <span className="text-cyan-200/95 break-all">
-                    {projects.find((p) => p.id === activeProjectId)?.draftStoragePathNote?.trim() || '未设置'}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-gray-500">当前项目 · 项目 JSON 备份参考：</span>
-                  <span className="text-cyan-200/95 break-all">{projectJsonBackupHint}</span>
-                </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[10px] text-gray-500 shrink-0">定时自动保存草稿</span>
@@ -4774,9 +4781,6 @@ export default function App() {
                   <option value={20}>每 20 分钟</option>
                   <option value={30}>每 30 分钟</option>
                 </select>
-                <span className="text-[10px] text-gray-600 leading-snug">
-                  仅在本项目已完成「首次另存为 JSON」后生效，静默覆盖 IndexedDB，不弹窗。
-                </span>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2 mb-3 sm:grid-cols-4">
@@ -4861,7 +4865,9 @@ export default function App() {
               {projects
                 .slice()
                 .sort((a, b) => b.updatedAt - a.updatedAt)
-                .map(project => (
+                .map((project) => {
+                  const draftLocDisplay = sanitizeDraftStoragePathNote(project.draftStoragePathNote);
+                  return (
                   <div
                     key={project.id}
                     className={`p-3 rounded-lg border ${project.id === activeProjectId ? 'border-blue-500 bg-blue-900/20' : 'border-[#333] bg-[#121212]'}`}
@@ -4872,9 +4878,9 @@ export default function App() {
                         className="text-left flex-1"
                       >
                         <div className="text-sm text-gray-100">{projectDraftDisplayName(project)}</div>
-                        {project.draftStoragePathNote?.trim() ? (
+                        {draftLocDisplay ? (
                           <div className="text-[10px] text-cyan-500/95 mt-0.5 leading-snug">
-                            草稿位置：{project.draftStoragePathNote.trim()}
+                            草稿位置：{draftLocDisplay}
                           </div>
                         ) : null}
                         {project.draftTitle?.trim() && project.draftTitle.trim() !== (project.name || '').trim() ? (
@@ -4931,7 +4937,8 @@ export default function App() {
                       </button>
                     </div>
                   </div>
-                ))}
+                );
+                })}
             </div>
           </div>
         </div>
