@@ -647,12 +647,15 @@ function I2iPresetCategorySelect({
   );
 }
 
+/** 文生图 / 图生图 / 360 全景生成节点默认模型（君澜 GPT Image 2，与 ToAPIs 模型 id 区分） */
+const DEFAULT_T2I_I2I_IMAGE_MODEL = 'gpt-image-2-junlan';
+
 // --- Main App Component ---
 
 export default function App() {
   // --- State ---
   const [nodes, setNodes] = useState<CanvasNode[]>([
-    { id: `t2i-initial`, type: 't2i', x: window.innerWidth / 2 - 160, y: window.innerHeight / 2 - 280, width: 320, height: 560, prompt: '', images: [], aspectRatio: '16:9', resolution: '4k', imageCount: 1, model: 'gpt-image-2', viewMode: 'single', currentImageIndex: 0 }
+    { id: `t2i-initial`, type: 't2i', x: window.innerWidth / 2 - 160, y: window.innerHeight / 2 - 280, width: 320, height: 560, prompt: '', images: [], aspectRatio: '16:9', resolution: '4k', imageCount: 1, model: DEFAULT_T2I_I2I_IMAGE_MODEL, viewMode: 'single', currentImageIndex: 0 }
   ]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: 1 });
@@ -836,7 +839,7 @@ export default function App() {
       aspectRatio: '16:9',
       resolution: '4k',
       imageCount: 1,
-      model: 'gpt-image-2',
+      model: DEFAULT_T2I_I2I_IMAGE_MODEL,
       viewMode: 'single',
       currentImageIndex: 0,
     };
@@ -891,7 +894,7 @@ export default function App() {
                 aspectRatio: node.type === 'panoramaT2i' ? '2:1' : '16:9',
                 imageCount: 1,
                 resolution: '4k',
-                ...(node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' ? { model: 'gpt-image-2' } : {}),
+                ...(node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' ? { model: DEFAULT_T2I_I2I_IMAGE_MODEL } : {}),
                 error: undefined,
               }),
           },
@@ -1284,7 +1287,7 @@ export default function App() {
       aspectRatio: '16:9',
       resolution: '4k',
       imageCount: 1,
-      model: 'gpt-image-2',
+      model: DEFAULT_T2I_I2I_IMAGE_MODEL,
       viewMode: 'single',
       currentImageIndex: 0
     };
@@ -2975,7 +2978,7 @@ export default function App() {
       aspectRatio: type === 'panoramaT2i' ? '2:1' : (type === 't2i' || type === 'i2i' || type === 'video' || type === 'gridSplit' || type === 'gridMerge' ? '16:9' : '1:1'),
       resolution: type === 't2i' || type === 'i2i' || type === 'panoramaT2i' ? '4k' : '2k',
       imageCount: 1,
-      model: type === 't2i' || type === 'i2i' || type === 'panoramaT2i' ? 'gpt-image-2' : 'gemini-3.1-flash-image-preview',
+      model: type === 't2i' || type === 'i2i' || type === 'panoramaT2i' ? DEFAULT_T2I_I2I_IMAGE_MODEL : 'gemini-3.1-flash-image-preview',
       viewMode: 'single',
       currentImageIndex: 0,
       // 全景图生成节点默认预设
@@ -3114,7 +3117,7 @@ export default function App() {
           finalPrompt,
           node.aspectRatio || '16:9',
           node.imageCount || 1,
-          node.model || 'gpt-image-2',
+          node.model || DEFAULT_T2I_I2I_IMAGE_MODEL,
           node.resolution,
           ac.signal
         );
@@ -3131,7 +3134,7 @@ export default function App() {
           imageInputs,
           promptForModel,
           node.imageCount || 1,
-          node.model || 'gpt-image-2',
+          node.model || DEFAULT_T2I_I2I_IMAGE_MODEL,
           aspectRatio,
           node.resolution,
           ac.signal
@@ -3707,14 +3710,14 @@ export default function App() {
             <div className="flex flex-wrap items-center gap-1.5">
               <select
                 className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-blue-500 flex-1 min-w-[100px]"
-                value={node.model || (node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' ? 'gpt-image-2' : 'gemini-3.1-flash-image-preview')}
+                value={node.model || (node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' ? DEFAULT_T2I_I2I_IMAGE_MODEL : 'gemini-3.1-flash-image-preview')}
                 onChange={(e) => handleUpdateNode(node.id, { model: e.target.value })}
                 onPointerDown={e => e.stopPropagation()}
               >
                 {(node.type === 't2i' || node.type === 'panoramaT2i') ? (
                   <>
-                    <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
                     <option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option>
+                    <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
                     <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option>
                     <option value="imagen-4">Imagen 4</option>
                     <option value="gemini-3-pro-image-preview">Nano-Banana Pro</option>
@@ -3722,8 +3725,8 @@ export default function App() {
                   </>
                 ) : (
                   <>
-                    <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
                     <option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option>
+                    <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
                     <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option>
                     <option value="gemini-3-pro-image-preview">Nano-Banana Pro</option>
                     <option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option>
