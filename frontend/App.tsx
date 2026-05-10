@@ -6,6 +6,7 @@ import {
   DEFAULT_JUNLAN_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
   getAiSettingsSnapshot,
+  getJunlanSavedKey,
   migrateAiSettingsIfLegacy,
   persistAiSettings,
 } from './services/aiSettings';
@@ -647,15 +648,17 @@ function I2iPresetCategorySelect({
   );
 }
 
-/** 文生图 / 图生图 / 360 全景生成节点默认模型（君澜 GPT Image 2，与 ToAPIs 模型 id 区分） */
-const DEFAULT_T2I_I2I_IMAGE_MODEL = 'gpt-image-2-junlan';
+/** 已配置君澜密钥时默认君澜；否则默认 ToAPIs/OpenAI 主通道的 gpt-image-2，避免未填密钥即失败 */
+function defaultCanvasImageModel(): string {
+  return getJunlanSavedKey().trim() ? 'gpt-image-2-junlan' : 'gpt-image-2';
+}
 
 // --- Main App Component ---
 
 export default function App() {
   // --- State ---
   const [nodes, setNodes] = useState<CanvasNode[]>([
-    { id: `t2i-initial`, type: 't2i', x: window.innerWidth / 2 - 160, y: window.innerHeight / 2 - 280, width: 320, height: 560, prompt: '', images: [], aspectRatio: '16:9', resolution: '4k', imageCount: 1, model: DEFAULT_T2I_I2I_IMAGE_MODEL, viewMode: 'single', currentImageIndex: 0 }
+    { id: `t2i-initial`, type: 't2i', x: window.innerWidth / 2 - 160, y: window.innerHeight / 2 - 280, width: 320, height: 560, prompt: '', images: [], aspectRatio: '16:9', resolution: '4k', imageCount: 1, model: defaultCanvasImageModel(), viewMode: 'single', currentImageIndex: 0 }
   ]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: 1 });
@@ -839,7 +842,7 @@ export default function App() {
       aspectRatio: '16:9',
       resolution: '4k',
       imageCount: 1,
-      model: DEFAULT_T2I_I2I_IMAGE_MODEL,
+      model: defaultCanvasImageModel(),
       viewMode: 'single',
       currentImageIndex: 0,
     };
@@ -894,7 +897,7 @@ export default function App() {
                 aspectRatio: node.type === 'panoramaT2i' ? '2:1' : '16:9',
                 imageCount: 1,
                 resolution: '4k',
-                ...(node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' ? { model: DEFAULT_T2I_I2I_IMAGE_MODEL } : {}),
+                ...(node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' ? { model: defaultCanvasImageModel() } : {}),
                 error: undefined,
               }),
           },
@@ -1287,7 +1290,7 @@ export default function App() {
       aspectRatio: '16:9',
       resolution: '4k',
       imageCount: 1,
-      model: DEFAULT_T2I_I2I_IMAGE_MODEL,
+      model: defaultCanvasImageModel(),
       viewMode: 'single',
       currentImageIndex: 0
     };
@@ -2978,7 +2981,7 @@ export default function App() {
       aspectRatio: type === 'panoramaT2i' ? '2:1' : (type === 't2i' || type === 'i2i' || type === 'video' || type === 'gridSplit' || type === 'gridMerge' ? '16:9' : '1:1'),
       resolution: type === 't2i' || type === 'i2i' || type === 'panoramaT2i' ? '4k' : '2k',
       imageCount: 1,
-      model: type === 't2i' || type === 'i2i' || type === 'panoramaT2i' ? DEFAULT_T2I_I2I_IMAGE_MODEL : 'gemini-3.1-flash-image-preview',
+      model: type === 't2i' || type === 'i2i' || type === 'panoramaT2i' ? defaultCanvasImageModel() : 'gemini-3.1-flash-image-preview',
       viewMode: 'single',
       currentImageIndex: 0,
       // 全景图生成节点默认预设
@@ -3117,7 +3120,7 @@ export default function App() {
           finalPrompt,
           node.aspectRatio || '16:9',
           node.imageCount || 1,
-          node.model || DEFAULT_T2I_I2I_IMAGE_MODEL,
+          node.model || defaultCanvasImageModel(),
           node.resolution,
           ac.signal
         );
@@ -3134,7 +3137,7 @@ export default function App() {
           imageInputs,
           promptForModel,
           node.imageCount || 1,
-          node.model || DEFAULT_T2I_I2I_IMAGE_MODEL,
+          node.model || defaultCanvasImageModel(),
           aspectRatio,
           node.resolution,
           ac.signal
@@ -3710,7 +3713,7 @@ export default function App() {
             <div className="flex flex-wrap items-center gap-1.5">
               <select
                 className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-blue-500 flex-1 min-w-[100px]"
-                value={node.model || (node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' ? DEFAULT_T2I_I2I_IMAGE_MODEL : 'gemini-3.1-flash-image-preview')}
+                value={node.model || (node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' ? defaultCanvasImageModel() : 'gemini-3.1-flash-image-preview')}
                 onChange={(e) => handleUpdateNode(node.id, { model: e.target.value })}
                 onPointerDown={e => e.stopPropagation()}
               >

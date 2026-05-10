@@ -965,16 +965,14 @@ export async function openAiGenerateNewImage(
 ): Promise<string[]> {
   const rawModel = (modelName || '').trim();
   if (rawModel === 'gpt-image-2-junlan') {
-    const apiKey = getJunlanSavedKey();
-    if (!apiKey) {
-      throw new Error(
-        '未配置君澜 AI API Key。请在「设置 → API」中填写「君澜 AI（GPT Image 2）」密钥（与 ToAPIs / 主 OpenAI 兼容通道分开）。'
-      );
+    const jlKey = getJunlanSavedKey().trim();
+    if (!jlKey) {
+      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, 'gpt-image-2', nodeResolution, signal);
     }
     const jlBase = normalizeBaseUrl(getJunlanBaseUrl());
     return generateImagesAtOpenAiCompatibleBase(
       jlBase,
-      apiKey,
+      jlKey,
       prompt,
       aspectRatio,
       numberOfImages,
@@ -1005,16 +1003,14 @@ export async function openAiEditImage(
 ): Promise<string[]> {
   const rawModel = (modelName || '').trim();
   if (rawModel === 'gpt-image-2-junlan') {
-    const apiKey = getJunlanSavedKey();
-    if (!apiKey) {
-      throw new Error(
-        '未配置君澜 AI API Key。请在「设置 → API」中填写「君澜 AI（GPT Image 2）」密钥（与 ToAPIs 主通道分开）。'
-      );
+    const jlKey = getJunlanSavedKey().trim();
+    if (!jlKey) {
+      return openAiEditImage(base64Images, prompt, numberOfImages, 'gpt-image-2', aspectRatio, nodeResolution, signal);
     }
     const jlBase = normalizeBaseUrl(getJunlanBaseUrl());
     return editImagesAtOpenAiCompatibleBase(
       jlBase,
-      apiKey,
+      jlKey,
       base64Images,
       prompt,
       numberOfImages,
