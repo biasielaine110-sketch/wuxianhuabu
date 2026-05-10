@@ -11,6 +11,7 @@ import {
 import {
   loadProjectLibrary,
   saveProjectLibrary,
+  buildProjectZipBlob,
   exportProjectZipToDisk,
   overwriteProjectZipFileHandle,
   parseProjectFromZipFile,
@@ -1070,7 +1071,7 @@ export default function App() {
    * 本地存档策略（简要）：
    * - 画布上的 nodes / edges / transform 只在内存中实时变化；
    * - 「保存当前画布 / Ctrl+S」：合并进当前项目并写入 **IndexedDB**；若该项目尚未在本机完成过「本地 JSON 备份路径」选择，会先弹出另存为（支持 File System Access API 的浏览器），成功后立即写入草稿；取消则仍写入草稿库、下次手动保存会再次询问；
-   * - **Ctrl+Alt+S（⌘+⌥+S）**：若最近一次通过系统选择器保存的是 **JSON** 或 **ZIP**，则覆盖写入该文件；仅 ZIP 在支持 `showSaveFilePicker` 时绑定句柄，纯浏览器下载的 ZIP 无法覆盖；
+   * - **Ctrl+Alt+S（⌘+⌥+S）**：若已绑定 **JSON** 或 **ZIP** 文件句柄则覆盖写入；**首次**（尚无句柄或句柄失效）时弹出系统「另存为」，默认文件名为导出基名（与项目名/草稿名一致）的 `.json`，您可改扩展名为 `.zip` / `.wxcanvas.zip` 保存为 ZIP；完成后绑定，下次 Ctrl+Alt+S 即覆盖该文件；
    * - 「定时自动保存」：可在项目管理里设为每 5 / 10 / 30 分钟静默覆盖草稿（IndexedDB），仅在**已完成首次本地备份路径**后生效，不会弹出另存为；
    * - 「草稿名称」：可选 `draftTitle`，默认同项目名；用于顶栏展示与导出 JSON/ZIP 默认文件名；
    * - 「导出 JSON / ZIP」成功也会标记已选过本地备份，避免与首次另存为重复弹窗；
@@ -1422,7 +1423,7 @@ export default function App() {
     return { ...project, nodes: nc, edges: ec, transform: tc, updatedAt: Date.now() };
   }, []);
 
-  /** Ctrl+Alt+S：按「上次另存为」类型覆盖写入 JSON 或 ZIP（须此前用系统选择器保存过对应格式） */
+  /** Ctrl+Alt+S：已绑定文件则覆盖；否则首次弹出「另存为」绑定路径与文件名（默认同导出基名 / 项目名） */
   const handleOverwriteLastDiskExport = useCallback(async () => {
     const active = projectsRef.current.find((p) => p.id === activeProjectIdRef.current);
     if (!active) {
@@ -1430,9 +1431,89 @@ export default function App() {
       return;
     }
     const snapshot = projectSnapshotForJsonExport(active);
+    const pid = active.id;
     const fmt = lastDiskWriteFormatRef.current;
     const jsonHandle = lastJsonFileHandleRef.current;
     const zipHandle = lastZipFileHandleRef.current;
+
+    const tryFirstTimeSavePicker = async (): Promise<boolean> => {
+      const w = window as unknown as {
+        showSaveFilePicker?: (opts: {
+          suggestedName?: string;
+          types?: { description: string; accept: Record<string, string[]> }[];
+        }) => Promise<FileSystemFileHandle>;
+      };
+      if (typeof w.showSaveFilePicker !== 'function') {
+        alert(
+          '当前浏览器不支持「另存为」选择器。请使用 Chrome / Edge（HTTPS 或 localhost），或通过项目管理里的「导出 JSON / ZIP」完成首次备份。'
+        );
+        return false;
+      }
+      const suggestedName = `${projectExportBasename(snapshot)}.json`;
+      let handle: FileSystemFileHandle;
+      try {
+        handle = await w.showSaveFilePicker({
+          suggestedName,
+          types: [
+            { description: 'JSON 项目备份', accept: { 'application/json': ['.json'] } },
+            {
+              description: '画布 ZIP（.wxcanvas.zip）',
+              accept: { 'application/zip': ['.wxcanvas.zip', '.zip'] },
+            },
+          ],
+        });
+      } catch (e: unknown) {
+        if ((e as { name?: string })?.name === 'AbortError') return false;
+        console.warn('另存为选择失败', e);
+        alert('选择保存位置失败，请重试。');
+        return false;
+      }
+      const picked = (handle.name || suggestedName).trim();
+      const lower = picked.toLowerCase();
+      const asZip = lower.endsWith('.zip') || lower.endsWith('.wxcanvas.zip');
+      try {
+        const writable = await handle.createWritable();
+        if (asZip) {
+          const blob = await buildProjectZipBlob(snapshot);
+          await writable.write(blob);
+          await writable.close();
+          lastZipFileHandleRef.current = handle;
+          lastJsonFileHandleRef.current = null;
+          lastDiskWriteFormatRef.current = 'zip';
+        } else {
+          const forWrite = { ...snapshot };
+          delete (forWrite as { diskSaveEstablished?: boolean }).diskSaveEstablished;
+          const json = JSON.stringify(forWrite, null, 2);
+          await writable.write(json);
+          await writable.close();
+          lastJsonFileHandleRef.current = handle;
+          lastZipFileHandleRef.current = null;
+          lastDiskWriteFormatRef.current = 'json';
+          void persistProjectBackupFileHandle(pid, handle).catch((err) =>
+            console.warn('持久化项目 JSON 句柄失败', err)
+          );
+        }
+        setLastJsonFilename(handle.name || suggestedName);
+        setProjects((prev) => {
+          const next = prev.map((p) =>
+            p.id === pid ? { ...p, diskSaveEstablished: true as const, updatedAt: Date.now() } : p
+          );
+          projectsRef.current = next;
+          void saveProjectLibrary(next, activeProjectIdRef.current);
+          return next;
+        });
+        alert(
+          asZip
+            ? '已保存并绑定 ZIP 文件。之后 Ctrl+Alt+S（⌘+⌥+S）将覆盖保存到此文件。'
+            : '已保存并绑定 JSON 文件。之后 Ctrl+Alt+S（⌘+⌥+S）将覆盖保存到此文件。'
+        );
+        return true;
+      } catch (err) {
+        console.error('首次写入本地备份失败', err);
+        alert('写入失败：可能无写入权限或磁盘已满。');
+        return false;
+      }
+    };
 
     const tryOverwriteJson = async (): Promise<boolean> => {
       if (!jsonHandle) return false;
@@ -1468,17 +1549,20 @@ export default function App() {
 
     if (fmt === 'zip') {
       if (await tryOverwriteZip()) return;
-      alert('无法覆盖上次的 ZIP：请先在项目管理中「导出 ZIP」并用系统对话框选择保存位置（不支持时无法覆盖）。');
+      if (await tryFirstTimeSavePicker()) return;
+      alert('无法覆盖上次的 ZIP：句柄已失效。已尝试让您重新选择保存位置；若取消则无变更。');
       return;
     }
     if (fmt === 'json') {
       if (await tryOverwriteJson()) return;
-      alert('还没有可覆盖的上次 JSON 文件，请先通过「另存为 JSON」或保存画布时选择 JSON 路径。');
+      if (await tryFirstTimeSavePicker()) return;
+      alert('无法覆盖上次的 JSON：句柄已失效。已尝试让您重新选择保存位置；若取消则无变更。');
       return;
     }
     if (await tryOverwriteJson()) return;
     if (await tryOverwriteZip()) return;
-    alert('暂无可覆盖的本地文件。请先用「另存为 JSON」或「导出 ZIP」（浏览器支持文件选择器时）选择保存路径。');
+    if (await tryFirstTimeSavePicker()) return;
+    alert('无法完成本地备份：请使用支持「另存为」的浏览器，或通过项目管理导出 JSON/ZIP。');
   }, [lastJsonFilename, projectSnapshotForJsonExport]);
 
   const handleExportProjectZip = useCallback(
@@ -2591,7 +2675,55 @@ export default function App() {
     const mouseX = (e.clientX - rect.left - transform.x) / transform.scale;
     const mouseY = (e.clientY - rect.top - transform.y) / transform.scale;
 
-    const file = e.dataTransfer.files?.[0];
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length === 0) return;
+
+    const isVideoFile = (f: File) =>
+      f.type.startsWith('video/') ||
+      /\.(mp4|webm|mov|mkv|avi|m4v|ogv|mpeg|mpg)(\?.*)?$/i.test(f.name);
+
+    const videoFiles = files.filter(isVideoFile);
+    if (videoFiles.length > 0) {
+      const def = DEFAULT_NODE_SIZES.video || { width: 480, height: 560 };
+      try {
+        const urls = videoFiles.map((f) => URL.createObjectURL(f));
+        const stripName = (name: string) =>
+          sanitizeFilename(name.replace(/\.[^.]+$/i, '').trim() || '本地视频');
+        const promptLabel =
+          videoFiles.length === 1
+            ? stripName(videoFiles[0].name)
+            : `已拖入 ${videoFiles.length} 个本地视频`;
+        const newNode: CanvasNode = {
+          id: `video-${Date.now()}`,
+          type: 'video',
+          x: mouseX - def.width / 2,
+          y: mouseY - def.height / 2,
+          width: def.width,
+          height: def.height,
+          prompt: promptLabel,
+          images: [],
+          aspectRatio: '16:9',
+          resolution: '2k',
+          imageCount: 1,
+          model: 'veo3.1-fast',
+          viewMode: 'single',
+          currentImageIndex: 0,
+          videos: urls,
+          currentVideoIndex: 0,
+          videoDuration: 8,
+          videoResolution: '720p',
+          isGenerating: false,
+        };
+        setNodes((prev) => [...prev, newNode]);
+        setSelectedIds([newNode.id]);
+      } catch (err) {
+        console.error(err);
+        alert('无法加载拖入的视频文件。');
+      }
+      return;
+    }
+
+    const file = files[0];
     if (file && file.type.startsWith('image/')) {
       const reader = new FileReader();
       reader.onload = (event) => {
@@ -8595,6 +8727,229 @@ function readStoredChatFontPx(): number {
   }
 }
 
+/** 即梦 CCC 资产分镜工程提示词（对话节点一键填入） */
+const CHAT_PROMPT_JIMENG_CCC_ASSETS = `【角色定位】
+你是即梦AI视频生成工具的竖屏/横屏短剧专属分镜提示词工程师，擅长将各类详略程度的短剧剧本，拆解为即梦agent可直接执行的标准化分镜提示词工程文件，完美适配横屏16:9画幅的纯AI生成图片+视频+人工后期剪辑全流程，可自动补全剧本未标注的镜头、景别、人设、场景、画风细节，严格遵循单Clip整数秒时长规范，精准匹配AI生成逻辑与竖屏短剧的叙事节奏。
+【输入剧本原文】
+我将给你完整的短剧剧本，支持带时间码、画面描述、台词、音效、核心主题的分段式竖屏剧本，也支持常规分场景剧本，剧本全文如下：
+---【把你的剧本在此处粘贴/传附件】---
+【核心任务与强制输出规范】
+请严格遵循以下所有要求，将上述剧本100%还原转换为即梦agent可直接使用的分镜提示词工程文件，不得增减、修改原剧本的核心剧情、人设、台词、时长节点、特效要求，具体要求如下：
+一、第一部分：分场景Shot级镜头拆分（AI生成专属适配）
+1. 严格遵循原剧本的叙事顺序、时间节点、核心剧情，拆分出独立的最小镜头单元，每个镜头标注固定格式：场景序号+场景名称（日/夜 内/外）、Shot ID、景别、横屏16:9适配画面内容、同步音效/环境音
+2. 若原剧本未标注景别，需根据画面内容与竖屏短剧呈现逻辑，自动匹配适配的景别（怼脸特写、近景、中景、全景等）；原剧本已标注的景别、镜头、特效要求，必须100%完整对应到单个Shot中，不得打乱原剧本叙事逻辑
+3. 原剧本中的所有台词、旁白、内心OS、画外音、音效标注，必须精准对应到所属画面的Shot中，不得遗漏任何原剧本内容。
+4. 所有画面描述优先适配横屏16:9画幅，突出人物主体与核心冲突，贴合AI文生图/文生视频的prompt逻辑，补充明确的画风、光影、构图细节，为后续AI生成与Clip拆分做好基础适配
+二、第二部分：分镜计时表（全整数时长强制规范）
+1. 制作规范表格，表头固定为：镜头ID、景别、画面内容、台词/旁白、字数、说话时长、动作时长、计算时长、AI生成适配说明
+2. 时长核算规则：全表格所有时长必须为正整数，不得出现小数；严格对齐原剧本标注的时间节点，中文说话时长按每秒5个字标准语速计算后向上取整；单镜头动作时长贴合原剧本时间分配，最低2秒，全部取整数
+3. 计算时长取值规则：说话时长＞动作时长，取说话时长；反之取动作时长；对时长＜4秒的镜头，必须标注「⚠️<4s需合并入同场景Clip」
+4. 结尾核算所有镜头总时长，保证与原剧本要求的单集时长完全匹配，总时长为整数，误差为0，同时备注单镜头合并规则，严格匹配后续4-15秒整数Clip的拆分要求
+三、第三部分：分镜组合Clip表（整数时长+AI生成专属规范）
+1. 按原剧本的单集总时长、镜头切换点、叙事节拍，拆分为适配AI视频生成的Clip片段，单Clip时长必须为整数秒，严格控制在4秒≤单Clip时长≤15秒区间内，仅可使用4-15之间的整数时长，不得出现小数、超上限、低于下限的片段
+2. 拆分规则：优先按原剧本的时间码、镜头切换节点拆分，同一场景、连续动作、单句台词优先归入同一个Clip，每个Clip内的镜头切换不超过3个，保证AI生成画面的连贯性，拆分完成后每个Clip必须明确标注整数时长
+3. 每个Clip片段内，按叙事逻辑组合对应Shot，完整描述连贯画面内容、镜头切换顺序、同步音效、台词/旁白；画面描述必须补充精准的人物状态、服饰妆造、道具细节、环境光影、统一画风，适配竖屏9:16画幅与即梦AI生成规则
+4. 每个Clip片段末尾，必须标注3项核心内容：参考人物素材、参考场景素材、参考物品素材，素材名称必须和后续资产设定完全对应，保证AI生成画面的前后一致性
+四、第四部分：角色设计标准化设定（AI生成专属）
+1. 提取原剧本中所有出现的核心角色，逐个做标准化设定，每个角色必须包含：角色名称、AI生成基础设定（年龄、外貌、五官特征、发型、气质、妆造、服饰、核心性格、统一画风适配）、涉及Clip序号
+2. 若原剧本未详细描述角色外观，需根据角色人设、剧情定位、题材风格，自动补全符合逻辑、适配AI生成的标准化设定，保证角色形象在全片所有Clip中完全统一，无画风、五官、服饰偏差
+五、第五部分：核心道具/物品+场景设计标准化设定（AI生成专属）
+1. 道具资产部分：提取原剧本中所有出现的关键道具、核心物品，逐个做标准化设定，每个道具必须包含：物品名称、分类 (Category)、AI生成基础设定 (Base)、物品类别、涉及Clip序号；基础设定需精准描述材质、尺寸、外观细节、核心特征、光影质感，100%还原原剧本描述，未提及的细节贴合剧情题材自动补全，适配AI生成逻辑
+2. 场景资产部分：提取原剧本中所有出现的场景，逐个做标准化设定，每个场景必须包含：场景名称、环境细节描述、光影与色调设定、氛围设定、统一画风适配、涉及Clip序号；环境描述需精准到建筑材质、空间陈设、环境细节，光影色调贴合剧情情绪，适配竖屏9:16画幅与AI生成要求
+六、第六部分：音频资产设计（适配人工后期剪辑）
+1. 提取原剧本中所有有台词/旁白/OS/画外音的角色，逐个标注标准化音色设定，每个角色必须包含：角色名称、音色描述（性别、年龄、语调、音高、语速、口音、情绪适配）
+2. 提取原剧本中所有标注的音效、背景音要求，补充适配剧情氛围的环境音设计，标注对应出现的镜头ID与Clip序号，精准对齐每个Clip的整数时长节点，适配人工后期剪辑的音画同步需求
+【格式与最终校验规则】
+1. 所有内容使用中文，层级清晰，用markdown格式规范排版，标题、列表、表格格式正确，适配即梦agent的读取规则
+2. 所有镜头、片段、资产的描述，必须适配即梦AI文生图/文生视频的prompt规范，画面描述具象化，避免抽象词汇，精准到人物动作、微表情、环境细节、光影特效、画风统一，横屏16:9画幅适配贯穿全内容
+3. 核心强制校验项：
+- 全文档所有时长（单镜头、单Clip、总时长）必须全部为正整数，不得出现任何小数
+- 所有Clip片段必须严格遵守4-15秒整数时长要求，不得出现时长＜4秒、＞15秒的Clip
+- 全内容全程适配纯AI生成图片+视频，无任何真人实拍相关要求与描述
+- 拆分完成后需单独标注全片Clip总数量、单Clip整数时长明细、总时长，确保与原剧本要求时长完全匹配
+4. 原剧本中标注的特效、镜头要求、核心剧情节点，必须在对应镜头、片段中重复标注，确保AI生成时精准触发
+5. 最终输出内容必须100%还原原剧本，不得擅自修改、增减任何剧情、台词、人设、时长节点，哪怕原剧本描述简略，也需在不改动核心内容的前提下，仅补全AI生成所需的画面细节。`;
+
+/** 即梦 Seedance 2.0 · CCC 单镜视频提示词模板（对话节点一键填入） */
+const CHAT_PROMPT_JIMENG_CCC_VIDEO_SEEDANCE = `【角色定位】
+即梦 Seedance 2.0 横屏短剧·标准化分镜生成提示词模板
+你现在是即梦 Seedance 2.0 视频生成专属提示词工程师，核心任务是：将投喂的剧本分镜工程文件，转化为「零崩脸、零崩盘、叙事节奏清晰、可直接复制进即梦零修改生成视频」的标准化单镜生成提示词，全程严格遵循以下所有规则。
+第一章·核心铁则
+（一）模型稳定性铁则
+1. 参考素材绝对优先：上传的角色/场景参考图优先级高于任何文字描述，文字仅做补充，严禁修改素材内角色五官、妆容、服饰、场景布局、光影风格。
+2. 提示词模块顺序固定，严禁调换或遗漏：导演讲戏·分镜时间轴 → 风格光影定调 → 正向稳定约束 → 音效约束 → 特殊约束 → 本镜头专项负面词
+3. 单镜内容安全上限：同框角色最多 2 人，仅 1 人为核心动作主体；单镜固定单一场景，严禁时空跳变；单镜仅承载 1 个核心连贯动作或 1 个核心叙事节拍。
+4. 时长严格对齐分镜工程文件：单镜时长锁定 4～15 秒整数，与 Clip 工程文件时长 100% 一致。
+时长区间：4～6 秒 适配场景：短镜，强冲击特写、道具细节、情绪定格
+时长区间：7～10 秒 适配场景：中镜，角色对话、剧情推进、情绪递进
+时长区间：11～15 秒 适配场景：长镜，氛围渲染、情绪沉浸、长线铺垫
+5. 动作物理真实防崩：所有动作描述必须包含「起点状态 → 过程变化 → 终点状态」完整物理链，明确标注衣物飘动方向与幅度、肢体联动起止细节，严禁描述孤立静止画面。
+6. 字数上限：4～6 秒 ≤500 字；7～10 秒 ≤1000 字；11～15 秒 ≤1500 字。输出前必须自检，超出立即压缩。
+（二）叙事创作铁则
+1. 神还原：100% 匹配原分镜工程文件的核心剧情、人设、台词、时长节点、特效要求；仅可在自然语义停顿处拆分超长台词，严禁机械拆分完整语义。
+2. 单镜单节拍叙事：每个镜头仅承载 1 个核心叙事节拍；强冲击用短镜，氛围渲染用长镜。
+3. 落地具象：所有描述必须为 AI 可直接识别的具象物理细节——景别+角度+运镜方式、具体面部肌肉状态、可被摄影机捕捉的物理动作，严禁使用"展示情绪""感到悲伤""神情复杂"等抽象表述。
+4. 五维融合叙述：【导演讲戏·分镜时间轴】将画面内容、人物动作、台词声音、镜头运动、光影氛围五个维度融合为自然叙述段落，严禁分条列举与标签堆砌。
+第二章·开始前必须输出的全剧锚定基准
+开始任何分镜输出之前，必须先完成并输出素材对应表，同角色/同场景全剧仅保留唯一一张参考图，严禁使用多张。
+【素材对应表】@图片1 = [角色/场景/道具名称]（核心特征简述）@图片2 = [角色/场景/道具名称]（核心特征简述）@图片N = …
+第三章·输出强制规则
+@素材引用直接复用第二章【素材对应表】代号，单独占一行，行后严禁附加任何说明文字
+【风格光影定调】每个单镜必须完整独立写出，严禁省略，需结合本镜头具体光影情绪描述
+【本镜头专项负面词】仅保留 3～5 条本镜头专项负面词
+第四章·标准化单镜生成提示词模板
+每个分镜单独成块，开头标注 【集数 X | 镜头 X | 时长 XXs | 核心叙事节拍】，镜头间用 --- 分隔，所有字段必须填写，无内容标「无」。
+@图片X
+@图片X
+【导演讲戏·分镜时间轴】0-Xs：[景别+运镜+画面内容+人物动作（起点→过程→终点）+台词/旁白原文+光影氛围+音效卡点，五维融合为连续自然叙述，角色以完整姓名写入，场景以完整地点名写入，严禁分条列举]X-Xs：[景别+运镜+承接上段动作终点，递进物理动作链+台词/旁白（如有）+环境细节+音效卡点]X-XXs：[景别+运镜+动作闭环+物理余韵+台词/旁白（如有）+收尾定格+转场方式（硬切/淡出）+音效卡点]
+【风格光影定调】[本镜头画风+光影色调+布光方式+色温+明暗对比+画面质感，结合本镜头情绪完整独立描述]，8K超高清，超细节
+【正向稳定约束】
+全程画面流畅丝滑，无跳帧、无抖动、无突兀切换；角色五官、妆容、发型、服饰全程100%固定不变；人物肢体自然正常，无多手指、无肢体扭曲、无穿模；画面焦点始终锁定核心主体；
+【音效专属约束】
+基础环境音：[内容]卡点动作音：[内容/无]氛围音效：[内容/无]硬性约束：全程无背景音乐、无BGM，音效与画面动作完全同步，人声清晰优先，无穿帮音效
+【特殊约束】
+[本镜头特殊生成约束，如道具细节固定、特效层叠加、动作幅度限制；无则标「无」]
+【本镜头专项负面词】
+[3～5条，仅针对当前镜头AI易错点；无则标「无」]
+第五章·核心禁忌红线
+红线1·时长：单镜时长严禁超过 15 秒；时长必须与 Clip 工程文件 100% 一致。
+红线2·人数与场景：单镜严禁 3 人及以上交互；严禁单镜内多场景切换；严禁堆砌多个核心动作节拍。
+红线3·原著还原：严禁偏离原分镜工程文件的核心情节、角色人设、时长节点；严禁修改或增删原台词。
+红线4·音效：严禁出现背景音乐/BGM/现代音效；严禁音效盖过人声。
+红线5·角色与场景写法：严禁使用代号替代角色姓名或场景地点；所有出镜角色必须以完整姓名写入，所有场景必须以完整地点名写入。
+红线6·风格光影：严禁【风格光影定调】以任何形式省略；每个单镜必须完整独立描述，与当前镜头情绪精准匹配。`;
+
+/** BBBB_全能资产：全中文 AI 绘画提示词专家模板（人物四宫格 / 场景与关键帧九宫格） */
+const CHAT_PROMPT_BBBB_ALL_ASSET = `# Role: 资深影视概念设计师 & AI绘图提示词专家
+
+## 任务目标
+请仔细阅读我提供的【剧本内容】和【视觉风格】，为我撰写用于AI绘画（如 Nano Banana, Flux, Qwen）的**全中文自然语言提示词**。
+
+## 核心规则（必须严格遵守）
+1. **语言要求**：所有输出的提示词必须是**中文**，使用优美、精准的自然语言描述（包含光影、材质、构图、氛围）。
+2. **格式要求**：请将每组提示词放入独立的**代码块**中，方便我直接点击“复制”按钮。
+3. **画幅锁定**：
+   - **人物设定图**：严格锁定 **--ar 9:16**。
+   - **场景设定图**：严格锁定 **--ar 16:9**。
+   - **关键帧拼图**：严格锁定 **--ar 16:9**。
+4. **拼图逻辑**：
+   - 人物图：严格使用 **2x2 四宫格**。
+   - 场景设定图与关键帧：统一严格使用 **3x3 九宫格**（取消2x2模式）。
+
+## 风格控制（Style Control）
+请根据用户指定的【视觉风格】，在提示词的开头和结尾加入对应的风格修饰词。**注意：以下列出的专业修饰词仅为“参考示例”，请不要太过限定或生搬硬套。请根据剧本的具体氛围，在网络相关提示词的常识基础上灵活调整、发散组合，不要受限于下方举例。**
+- **写实电影类**：（示例：电影级摄影、ARRI Alexa实拍、真实物理材质、皮肤毛孔细节、胶片颗粒感、自然光影、非CG、Raw photo...）
+- **动漫/二次元类**：（示例：吉卜力画风、赛璐璐上色、新海诚式唯美光影、京阿尼精细线条、浓郁色彩、平面插画...）
+- **唯美CG/游戏类**：（示例：虚幻引擎5渲染、辛烷渲染、极致全局光照、3D精细建模、CG艺术杰作、次世代游戏质感...）
+
+---
+
+## 输出内容结构
+
+### 第一部分：人物设定图 (Character Design)
+- **提取要求**：仔细阅读剧本，**提取剧本中出现的所有重要人物（不能只写一两个主角）**，为每一个人物单独生成一组提示词。
+- **命名规则（极其重要）**：在最终输出的提示词文本内，**绝对不要出现剧本里的具体姓名**，请用角色定位、性别、身份或职业代称（例如：女主、男主、伯爵、伯爵夫人、管家、公主、怪物、一名年轻男性、神秘的女剑客、年迈的反派等）。
+- **排版要求**：在每个人物的提示词代码块上方，请用加粗文本清晰标注：\`### 角色[X]：[人物身份]\`。
+- **一致性与构图规则**：除面部特写外，必须在提示词中强制强调正面、侧面、背面视图**包含从头到脚的完整全身（避免画面截断）**。同时，必须要求**不同视角的发型、服装细节、配饰保持绝对一致**。
+- **垫图规则**：如果用户在输入区提供了【人物面部参考】，请在提示词中明确加入指令：**“保持人物面部特征与参考图完全一致”**。
+- **内容**：生成人物的白底（或中性灰底）四视图。
+- **结构参考**：
+  > [风格修饰词]，一张2x2的四宫格人物设定图。主角是[人物身份代称，禁带原名]，[外貌/服装/气质]。左上角：从头到脚完整全身的正面站立；右上角：从头到脚完整全身的侧面；左下角：从头到脚完整全身的背面；右下角：面部特写，[五官细节]。[一致性指令：所有视角的人物发型、服装细节和配饰必须保持绝对一致]。[垫图指令：面部特征需参考上传图片]。[画质修饰词]。 --ar 9:16
+
+### 第二部分：场景设定图 (Scene Design)
+- **内容**：梳理剧本中的核心环境，强调宏大感和空间关系。
+- **结构参考**：
+  > [风格修饰词]，一张3x3的九宫格场景概念图。
+  > 画面1：[场景名]，[宏大的环境描述、天气、光影、建筑风格]；
+  > 画面2：[场景名]...
+  > 画面9：[场景名]...
+  > [画质修饰词]。 --ar 16:9
+
+### 第三部分：关键剧情首帧图 (Key Frames)
+- **内容**：提取剧本中控制剧情走向的关键节点（用于视频生成的起始帧）。
+- **垫图提醒**：在生成提示词前，请加粗提示：**“生成本图时，建议配合前两部分的人物和场景图以保持一致性。”**
+- **结构参考**：
+  > [风格修饰词]，一张3x3的电影分镜关键帧拼图。
+  > 画面1：[人物代称]身处[场景]中，[具体的动作、神态、交互]，[镜头语言：特写/广角/过肩镜头]；
+  > 画面2：[剧情发展]...
+  > 画面9：[剧情发展]...
+  > [画质修饰词]。 --ar 16:9
+
+---
+等待用户输入
+## 用户输入区
+
+**1. 【剧本内容】：**
+（请在此处粘贴剧本）
+
+**2. 【人物面部参考】：**
+（例如：男主参考上传图片1；大反派参考上传图片2；其余未提及人物则自由发挥）
+
+**3. 【视觉风格】：**
+（请填写你想要的风格，如：好莱坞废土写实风、唯美3D国漫风、水墨武侠风等）
+
+**4. 【其他要求】：**
+（如有特殊光影、特定动作或色调要求请填写）`;
+
+/** 对话节点快捷功能：一键填入任务提示词（风格接近图生图预设条） */
+const CHAT_FEATURE_BUTTONS: {
+  id: string;
+  label: string;
+  title: string;
+  icon?: 'video' | 'wand' | 'message';
+  buildText: () => string;
+}[] = [
+  {
+    id: 'reverse-video',
+    label: '反推视频',
+    icon: 'video',
+    title:
+      '填入「分镜逆向 / 视频反推」完整指令（含 JSON 字段）。请用参考区连接含视频或关键帧的节点；若模型无法直接读取视频，请改用文字按时间线描述镜头或换用支持多模态视频的模型。',
+    buildText: () => {
+      const spec = {
+        prompt_main:
+          '请作为专业的电影分析师与AI提示词工程师，对上传视频进行逐分镜解构，逆向推导可复现该画面的AI视频提示词。',
+        prompt_detail:
+          '请严格按以下维度分析：1.镜头设计：含镜头类型、角度、运动、构图；2.主体与动作：识别核心主体、行为动作、叙事意图；3.场景环境：场景、时间、天气、空间细节；4.光影色彩：光线方向、色调、对比度、氛围；5.风格质感：艺术风格、画质、质感、参考风格；6.音频信息：旁白、台词、音效、背景音乐；7.技术参数：分辨率、帧率、渲染质量。输出需完整覆盖各分镜，格式清晰，确保提示词可直接用于AI视频生成。',
+        output_format:
+          'JSON结构，包含分镜序号、时间戳、画面提示词、音频描述、风格参数、运镜参数、完整可复用提示词。',
+      };
+      return [
+        '【任务：反推视频】',
+        '',
+        '—— 以下为结构化指令（随本消息发送）——',
+        JSON.stringify(spec, null, 2),
+        '',
+        '请基于我提供的参考（视频/截图/文字描述），严格按上述维度与 output_format 输出；若无法访问视频本体，请说明原因并基于可用信息尽力完成。',
+      ].join('\n');
+    },
+  },
+  {
+    id: 'bbbb-all-asset',
+    label: 'BBBB_全能资产',
+    icon: 'wand',
+    title:
+      'BBBB_全能资产：根据剧本与视觉风格生成全中文 AI 绘画提示词（人物 2x2·9:16；场景与关键帧 3x3·16:9）。发送前请填入剧本、风格与可选面部参考说明，并可连接参考图。',
+    buildText: () => CHAT_PROMPT_BBBB_ALL_ASSET,
+  },
+  {
+    id: 'jimeng-ccc-assets-storyboard',
+    label: 'CCC即梦分镜',
+    icon: 'wand',
+    title:
+      'CCC_资产分镜提示词_即梦：一键填入即梦 agent 分镜工程规范（Shot/计时表/Clip/角色与场景资产/音频）。发送前请在占位处粘贴完整剧本或连接文本节点。',
+    buildText: () => CHAT_PROMPT_JIMENG_CCC_ASSETS,
+  },
+  {
+    id: 'jimeng-ccc-seedance-video',
+    label: 'CCC即梦视频',
+    icon: 'message',
+    title:
+      'CCC_视频提示词_即梦（Seedance 2.0）：单镜标准化提示词工程模板。发送前请连接或粘贴分镜工程文件要点，并在参考区绑定角色/场景参考图。',
+    buildText: () => CHAT_PROMPT_JIMENG_CCC_VIDEO_SEEDANCE,
+  },
+];
+
 interface ChatNodeContentProps {
   node: ChatNode;
   nodes: CanvasNode[];
@@ -8778,6 +9133,34 @@ function ChatNodeContent({
         >
           <EyedropperIcon size={12} />
         </button>
+      </div>
+
+      {/* 快捷功能（类图生图预设条） */}
+      <div className="flex flex-wrap items-center gap-1.5 px-2 py-1.5 bg-[#222] border-b border-[#333] shrink-0">
+        <span className="text-[10px] text-gray-500 shrink-0">功能</span>
+        {CHAT_FEATURE_BUTTONS.map((btn) => (
+          <button
+            key={btn.id}
+            type="button"
+            disabled={node.isGenerating}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onUpdate({ prompt: btn.buildText(), error: undefined });
+            }}
+            className="inline-flex items-center gap-0.5 rounded-md border border-rose-800/55 bg-rose-950/45 px-2 py-0.5 text-[10px] font-medium text-rose-100 hover:bg-rose-900/55 disabled:cursor-not-allowed disabled:opacity-40"
+            title={btn.title}
+          >
+            {btn.icon === 'wand' ? (
+              <WandIcon size={11} />
+            ) : btn.icon === 'message' ? (
+              <MessageIcon size={11} />
+            ) : (
+              <VideoIcon size={11} />
+            )}
+            {btn.label}
+          </button>
+        ))}
       </div>
 
       {/* 模型选择 */}
