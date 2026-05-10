@@ -3,6 +3,7 @@ import { CanvasNode, Edge, Transform, Tool, NodeType, Annotation, AnnotationNode
 import type { AiProvider } from './services/aiSettings';
 import {
   DEFAULT_DEEPSEEK_BASE_URL,
+  DEFAULT_JUNLAN_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
   getAiSettingsSnapshot,
   migrateAiSettingsIfLegacy,
@@ -1144,6 +1145,8 @@ export default function App() {
   });
   const [deepSeekKeyInput, setDeepSeekKeyInput] = useState(() => getAiSettingsSnapshot().deepSeekKey);
   const [deepSeekBaseInput, setDeepSeekBaseInput] = useState(() => getAiSettingsSnapshot().deepSeekBaseUrl);
+  const [junlanBaseInput, setJunlanBaseInput] = useState(() => getAiSettingsSnapshot().junlanBaseUrl);
+  const [junlanKeyInput, setJunlanKeyInput] = useState(() => getAiSettingsSnapshot().junlanKey);
 
   useEffect(() => {
     const s = getAiSettingsSnapshot();
@@ -1152,6 +1155,8 @@ export default function App() {
     setApiKeyInput(s.provider === 'gemini' ? s.geminiKey : s.openAiKey);
     setDeepSeekKeyInput(s.deepSeekKey);
     setDeepSeekBaseInput(s.deepSeekBaseUrl);
+    setJunlanBaseInput(s.junlanBaseUrl);
+    setJunlanKeyInput(s.junlanKey);
   }, []);
 
   useEffect(() => {
@@ -1176,6 +1181,8 @@ export default function App() {
     setApiKeyInput(s.provider === 'gemini' ? s.geminiKey : s.openAiKey);
     setDeepSeekKeyInput(s.deepSeekKey);
     setDeepSeekBaseInput(s.deepSeekBaseUrl);
+    setJunlanBaseInput(s.junlanBaseUrl);
+    setJunlanKeyInput(s.junlanKey);
     setDownloadPathSettings(loadDownloadPathSettings());
     setCreditPricingRows(loadCreditPricingRows());
     void hydrateDownloadDirectoryHandlesFromIDB().then(() => refreshDownloadDirLabels());
@@ -3706,7 +3713,8 @@ export default function App() {
               >
                 {(node.type === 't2i' || node.type === 'panoramaT2i') ? (
                   <>
-                    <option value="gpt-image-2">GPT Image 2</option>
+                    <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
+                    <option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option>
                     <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option>
                     <option value="imagen-4">Imagen 4</option>
                     <option value="gemini-3-pro-image-preview">Nano-Banana Pro</option>
@@ -3714,7 +3722,8 @@ export default function App() {
                   </>
                 ) : (
                   <>
-                    <option value="gpt-image-2">GPT Image 2</option>
+                    <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
+                    <option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option>
                     <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option>
                     <option value="gemini-3-pro-image-preview">Nano-Banana Pro</option>
                     <option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option>
@@ -5466,7 +5475,7 @@ export default function App() {
               {settingsTab === 'api' && (
                 <div>
                   <p className="text-gray-400 text-sm mb-3">
-                    选择接口类型：<span className="text-gray-300">OpenAI 兼容</span>通道优先：使用 <span className="text-gray-300">sk-...</span> 密钥，并填写服务商 Base URL（默认 <span className="text-gray-300">https://toapis.com/v1</span>；亦可改为官方 <span className="text-gray-300">https://api.openai.com/v1</span> 等）。若选 <span className="text-gray-300">Google Gemini</span>，请使用 <span className="text-gray-300">AIza...</span> 密钥。对话节点可选 DeepSeek 模型，需在下方填写 DeepSeek 密钥（或与 OpenAI 兼容配置为同一 DeepSeek 端点）。
+                    选择接口类型：<span className="text-gray-300">OpenAI 兼容</span>为主通道：使用 <span className="text-gray-300">sk-...</span> 密钥与 Base URL（默认 ToAPIs <span className="text-gray-300">https://toapis.com/v1</span>）。节点模型「GPT Image 2（君澜 AI）」单独走下方<span className="text-gray-300">君澜 AI</span>密钥与 Base URL（默认 <span className="text-gray-300">{DEFAULT_JUNLAN_BASE_URL}</span>），与 ToAPIs 互不混用。若选 <span className="text-gray-300">Google Gemini</span>，请使用 <span className="text-gray-300">AIza...</span> 密钥。DeepSeek 对话见区块下方。
                   </p>
                   <label className="text-xs text-gray-500 block mb-1">接口类型</label>
                   <select
@@ -5508,6 +5517,8 @@ export default function App() {
                           geminiApiKey: aiProvider === 'gemini' ? apiKeyInput.trim() : undefined,
                           openAiApiKey: aiProvider === 'openai-compatible' ? apiKeyInput.trim() : undefined,
                           openAiBaseUrl: (openAiBaseInput.trim() || DEFAULT_OPENAI_BASE_URL),
+                          junlanApiKey: junlanKeyInput.trim(),
+                          junlanBaseUrl: junlanBaseInput.trim() || DEFAULT_JUNLAN_BASE_URL,
                           deepSeekApiKey: deepSeekKeyInput.trim(),
                           deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
                         });
@@ -5518,6 +5529,29 @@ export default function App() {
                     placeholder={aiProvider === 'gemini' ? 'AIza...' : 'sk-...'}
                     className="w-full bg-[#121212] border border-[#444] rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
                   />
+
+                  <div className="mt-5 pt-4 border-t border-[#333]">
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">君澜 AI · GPT Image 2（可选）</h3>
+                    <p className="text-gray-500 text-xs mb-2">
+                      仅当文生图 / 图生图节点选择「GPT Image 2（君澜 AI）」时使用；请求发往君澜 OpenAI 兼容网关（Base URL 须含 <span className="text-gray-400">/v1</span>）。勿把密钥提交到代码仓库。
+                    </p>
+                    <label className="text-xs text-gray-500 block mb-1">君澜 Base URL</label>
+                    <input
+                      type="text"
+                      value={junlanBaseInput}
+                      onChange={(e) => setJunlanBaseInput(e.target.value)}
+                      placeholder={DEFAULT_JUNLAN_BASE_URL}
+                      className="w-full mb-3 bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-600 transition-colors text-sm"
+                    />
+                    <label className="text-xs text-gray-500 block mb-1">君澜 API Key（sk-...）</label>
+                    <input
+                      type="password"
+                      value={junlanKeyInput}
+                      onChange={(e) => setJunlanKeyInput(e.target.value)}
+                      placeholder="sk-..."
+                      className="w-full bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-600 transition-colors text-sm"
+                    />
+                  </div>
 
                   <div className="mt-5 pt-4 border-t border-[#333]">
                     <h3 className="text-sm font-semibold text-gray-200 mb-2">DeepSeek 对话（可选）</h3>
@@ -5557,6 +5591,8 @@ export default function App() {
                           geminiApiKey: aiProvider === 'gemini' ? apiKeyInput.trim() : undefined,
                           openAiApiKey: aiProvider === 'openai-compatible' ? apiKeyInput.trim() : undefined,
                           openAiBaseUrl: (openAiBaseInput.trim() || DEFAULT_OPENAI_BASE_URL),
+                          junlanApiKey: junlanKeyInput.trim(),
+                          junlanBaseUrl: junlanBaseInput.trim() || DEFAULT_JUNLAN_BASE_URL,
                           deepSeekApiKey: deepSeekKeyInput.trim(),
                           deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
                         });

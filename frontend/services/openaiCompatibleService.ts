@@ -1,4 +1,10 @@
-import { getAiProvider, getOpenAiBaseUrl, getOpenAiSavedKey } from './aiSettings';
+import {
+  getAiProvider,
+  getJunlanBaseUrl,
+  getJunlanSavedKey,
+  getOpenAiBaseUrl,
+  getOpenAiSavedKey,
+} from './aiSettings';
 
 function normalizeBaseUrl(url: string): string {
   let u = url.trim().replace(/\/+$/, '');
@@ -52,6 +58,7 @@ async function sleepInterruptible(ms: number, signal?: AbortSignal): Promise<voi
 /** ToAPIs：透传 imagen / gemini / gpt-image-* 等模型 id（含 gemini-3.1-flash-image-preview 文生图/图生图） */
 function toApisT2iModel(modelName: string): string {
   const m = (modelName || '').trim();
+  if (m === 'gpt-image-2-junlan') return 'gpt-image-2';
   if (m.startsWith('imagen') || m.startsWith('gemini')) return m;
   if (m === 'gpt-image-2' || m === 'gpt-image-1' || m.startsWith('gpt-image')) return m;
   if (m === 'gpt-4o-image') return m;
@@ -748,12 +755,14 @@ function aspectRatioToOpenAiSize(aspectRatio: string, model: string): string {
 
 function resolveT2iModel(modelName: string): string {
   const m = (modelName || '').trim();
+  if (m === 'gpt-image-2-junlan') return 'gpt-image-2';
   if (m === 'dall-e-2' || m === 'dall-e-3' || m === 'gpt-image-2' || m === 'gpt-image-1') return m;
   return 'dall-e-3';
 }
 
 function resolveEditModel(modelName: string): string {
   const m = (modelName || '').trim();
+  if (m === 'gpt-image-2-junlan') return 'gpt-image-2';
   if (m === 'gpt-image-2') return 'gpt-image-2';
   if (m === 'dall-e-2' || m === 'gpt-image-1') return m;
   if (m === 'dall-e-3') return 'gpt-image-1';
@@ -837,98 +846,91 @@ async function postJsonAtBase<T>(base: string, path: string, body: unknown, apiK
   return JSON.parse(text) as T;
 }
 
-async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const apiKey = getOpenAiSavedKey();
-  if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key，请在设置中选择「OpenAI 兼容」并填写密钥。');
-  const base = normalizeBaseUrl(getOpenAiBaseUrl());
-  return postJsonAtBase<T>(base, path, body, apiKey);
-}
-
-export async function openAiGenerateNewImage(
+async function generateImagesAtOpenAiCompatibleBase(
+  baseNorm: string,
+  apiKey: string,
   prompt: string,
   aspectRatio: string,
   numberOfImages: number,
-  modelName: string,
-  nodeResolution?: string,
+  resolvedModel: string,
   signal?: AbortSignal
 ): Promise<string[]> {
-  const base = normalizeBaseUrl(getOpenAiBaseUrl());
-  if (isToApisHost(base)) {
-    return toApisGenerateNewImage(prompt, aspectRatio, numberOfImages, modelName, nodeResolution, signal);
-  }
-
-  const model = resolveT2iModel(modelName);
-  const size = aspectRatioToOpenAiSize(aspectRatio, model);
+  const size = aspectRatioToOpenAiSize(aspectRatio, resolvedModel);
   const enhancedPrompt = buildPromptWithDimensions(prompt, aspectRatio);
   const out: string[] = [];
-
-  const onePerRequest = model === 'dall-e-3' || model === 'gpt-image-2' || model === 'gpt-image-1';
+  const onePerRequest =
+    resolvedModel === 'dall-e-3' || resolvedModel === 'gpt-image-2' || resolvedModel === 'gpt-image-1';
   if (onePerRequest) {
     for (let i = 0; i < numberOfImages; i++) {
-      const json = await postJson<{ data?: { b64_json?: string }[] }>('/images/generations', {
-        model,
-        prompt: enhancedPrompt,
-        n: 1,
-        size,
-        response_format: 'b64_json',
-      });
+      assertNotAborted(signal);
+      const json = await postJsonAtBase<{ data?: { b64_json?: string }[] }>(
+        baseNorm,
+        '/images/generations',
+        {
+          model: resolvedModel,
+          prompt: enhancedPrompt,
+          n: 1,
+          size,
+          response_format: 'b64_json',
+        },
+        apiKey
+      );
       const b64 = json.data?.[0]?.b64_json;
       if (!b64) throw new Error('文生图接口未返回图片数据。');
       out.push(b64);
     }
   } else {
     const n = Math.min(Math.max(numberOfImages, 1), 10);
-    const json = await postJson<{ data?: { b64_json?: string }[] }>('/images/generations', {
-      model: 'dall-e-2',
-      prompt: enhancedPrompt,
-      n,
-      size,
-      response_format: 'b64_json',
-    });
+    assertNotAborted(signal);
+    const json = await postJsonAtBase<{ data?: { b64_json?: string }[] }>(
+      baseNorm,
+      '/images/generations',
+      {
+        model: 'dall-e-2',
+        prompt: enhancedPrompt,
+        n,
+        size,
+        response_format: 'b64_json',
+      },
+      apiKey
+    );
     const list = json.data?.map(d => d.b64_json).filter(Boolean) as string[];
     if (!list.length) throw new Error('文生图接口未返回图片数据。');
     out.push(...list);
   }
-
   return out;
 }
 
-export async function openAiEditImage(
+async function editImagesAtOpenAiCompatibleBase(
+  baseNorm: string,
+  apiKey: string,
   base64Images: string[],
   prompt: string,
   numberOfImages: number,
-  modelName: string,
+  resolvedEditModel: string,
   aspectRatio: string,
-  nodeResolution?: string,
   signal?: AbortSignal
 ): Promise<string[]> {
   if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
-  if (isToApisHost(normalizeBaseUrl(getOpenAiBaseUrl()))) {
-    return toApisEditImage(base64Images, prompt, numberOfImages, modelName, aspectRatio, nodeResolution, signal);
-  }
-  const apiKey = getOpenAiSavedKey();
-  if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key。');
-  const base = normalizeBaseUrl(getOpenAiBaseUrl());
-  const model = resolveEditModel(modelName);
-  // images/edits 与部分模型仅支持固定方块尺寸，避免与文生图尺寸映射混用
-  const size = model === 'dall-e-2' ? '1024x1024' : '1024x1024';
+  const size = resolvedEditModel === 'dall-e-2' ? '1024x1024' : '1024x1024';
   const enhancedPrompt = buildPromptWithDimensions(prompt, aspectRatio);
   const pngBlob = await jpegBase64ToPngBlob(base64Images[0]);
   const results: string[] = [];
   const count = Math.min(
     Math.max(numberOfImages, 1),
-    model === 'dall-e-2' ? 10 : model === 'gpt-image-2' ? 4 : 1
+    resolvedEditModel === 'dall-e-2' ? 10 : resolvedEditModel === 'gpt-image-2' ? 4 : 1
   );
 
   for (let i = 0; i < count; i++) {
+    assertNotAborted(signal);
     const form = new FormData();
     form.append('image', pngBlob, 'ref.png');
     form.append('prompt', enhancedPrompt);
-    form.append('model', model);
+    form.append('model', resolvedEditModel);
     form.append('n', '1');
     form.append('size', size);
 
-    const res = await fetch(`${base}/images/edits`, {
+    const res = await fetch(`${baseNorm}/images/edits`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}` },
       body: form,
@@ -944,6 +946,93 @@ export async function openAiEditImage(
   }
 
   return results;
+}
+
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const apiKey = getOpenAiSavedKey();
+  if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key，请在设置中选择「OpenAI 兼容」并填写密钥。');
+  const base = normalizeBaseUrl(getOpenAiBaseUrl());
+  return postJsonAtBase<T>(base, path, body, apiKey);
+}
+
+export async function openAiGenerateNewImage(
+  prompt: string,
+  aspectRatio: string,
+  numberOfImages: number,
+  modelName: string,
+  nodeResolution?: string,
+  signal?: AbortSignal
+): Promise<string[]> {
+  const rawModel = (modelName || '').trim();
+  if (rawModel === 'gpt-image-2-junlan') {
+    const apiKey = getJunlanSavedKey();
+    if (!apiKey) {
+      throw new Error(
+        '未配置君澜 AI API Key。请在「设置 → API」中填写「君澜 AI（GPT Image 2）」密钥（与 ToAPIs / 主 OpenAI 兼容通道分开）。'
+      );
+    }
+    const jlBase = normalizeBaseUrl(getJunlanBaseUrl());
+    return generateImagesAtOpenAiCompatibleBase(
+      jlBase,
+      apiKey,
+      prompt,
+      aspectRatio,
+      numberOfImages,
+      'gpt-image-2',
+      signal
+    );
+  }
+
+  const base = normalizeBaseUrl(getOpenAiBaseUrl());
+  if (isToApisHost(base)) {
+    return toApisGenerateNewImage(prompt, aspectRatio, numberOfImages, modelName, nodeResolution, signal);
+  }
+
+  const apiKey = getOpenAiSavedKey();
+  if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key，请在设置中选择「OpenAI 兼容」并填写密钥。');
+  const model = resolveT2iModel(modelName);
+  return generateImagesAtOpenAiCompatibleBase(base, apiKey, prompt, aspectRatio, numberOfImages, model, signal);
+}
+
+export async function openAiEditImage(
+  base64Images: string[],
+  prompt: string,
+  numberOfImages: number,
+  modelName: string,
+  aspectRatio: string,
+  nodeResolution?: string,
+  signal?: AbortSignal
+): Promise<string[]> {
+  const rawModel = (modelName || '').trim();
+  if (rawModel === 'gpt-image-2-junlan') {
+    const apiKey = getJunlanSavedKey();
+    if (!apiKey) {
+      throw new Error(
+        '未配置君澜 AI API Key。请在「设置 → API」中填写「君澜 AI（GPT Image 2）」密钥（与 ToAPIs 主通道分开）。'
+      );
+    }
+    const jlBase = normalizeBaseUrl(getJunlanBaseUrl());
+    return editImagesAtOpenAiCompatibleBase(
+      jlBase,
+      apiKey,
+      base64Images,
+      prompt,
+      numberOfImages,
+      'gpt-image-2',
+      aspectRatio,
+      signal
+    );
+  }
+
+  if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
+  if (isToApisHost(normalizeBaseUrl(getOpenAiBaseUrl()))) {
+    return toApisEditImage(base64Images, prompt, numberOfImages, modelName, aspectRatio, nodeResolution, signal);
+  }
+  const apiKey = getOpenAiSavedKey();
+  if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key。');
+  const base = normalizeBaseUrl(getOpenAiBaseUrl());
+  const model = resolveEditModel(modelName);
+  return editImagesAtOpenAiCompatibleBase(base, apiKey, base64Images, prompt, numberOfImages, model, aspectRatio, signal);
 }
 
 /** 多轮对话：OpenAI / DeepSeek 兼容 /chat/completions */

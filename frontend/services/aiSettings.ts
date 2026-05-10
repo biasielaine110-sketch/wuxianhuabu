@@ -6,8 +6,13 @@ const OPENAI_API_KEY_STORAGE_KEY = 'openai-compatible-api-key-v1';
 const OPENAI_BASE_URL_STORAGE_KEY = 'openai-compatible-base-url-v1';
 const DEEPSEEK_API_KEY_STORAGE_KEY = 'deepseek-api-key-v1';
 const DEEPSEEK_BASE_URL_STORAGE_KEY = 'deepseek-base-url-v1';
+/** 君澜 AI OpenAI 兼容网关（与 ToAPIs / 主 OpenAI 兼容通道分离，仅用于节点模型「GPT Image 2（君澜 AI）」） */
+const JUNLAN_API_KEY_STORAGE_KEY = 'junlan-openai-compatible-api-key-v1';
+const JUNLAN_BASE_URL_STORAGE_KEY = 'junlan-openai-compatible-base-url-v1';
 
 export const DEFAULT_OPENAI_BASE_URL = 'https://toapis.com/v1';
+/** 文档：https://stsg17lkjz.apifox.cn/8682367m0 — Base URL 须含 /v1 */
+export const DEFAULT_JUNLAN_BASE_URL = 'https://www.junlanai.com/v1';
 /** DeepSeek 官方 OpenAI 兼容入口 */
 export const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1';
 
@@ -117,6 +122,43 @@ export function setOpenAiBaseUrl(url: string): void {
   }
 }
 
+export function getJunlanSavedKey(): string {
+  try {
+    return localStorage.getItem(JUNLAN_API_KEY_STORAGE_KEY)?.trim() || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setJunlanKey(apiKey: string): void {
+  const normalized = apiKey.trim();
+  try {
+    if (normalized) localStorage.setItem(JUNLAN_API_KEY_STORAGE_KEY, normalized);
+    else localStorage.removeItem(JUNLAN_API_KEY_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getJunlanBaseUrl(): string {
+  try {
+    const raw = localStorage.getItem(JUNLAN_BASE_URL_STORAGE_KEY)?.trim();
+    return raw || DEFAULT_JUNLAN_BASE_URL;
+  } catch {
+    return DEFAULT_JUNLAN_BASE_URL;
+  }
+}
+
+export function setJunlanBaseUrl(url: string): void {
+  const normalized = url.trim();
+  try {
+    if (normalized) localStorage.setItem(JUNLAN_BASE_URL_STORAGE_KEY, normalized);
+    else localStorage.removeItem(JUNLAN_BASE_URL_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function getDeepSeekSavedKey(): string {
   try {
     return localStorage.getItem(DEEPSEEK_API_KEY_STORAGE_KEY)?.trim() || '';
@@ -159,6 +201,8 @@ export type AiSettingsSnapshot = {
   geminiKey: string;
   openAiKey: string;
   openAiBaseUrl: string;
+  junlanKey: string;
+  junlanBaseUrl: string;
   deepSeekKey: string;
   deepSeekBaseUrl: string;
 };
@@ -169,6 +213,8 @@ export function getAiSettingsSnapshot(): AiSettingsSnapshot {
     geminiKey: getGeminiSavedKey(),
     openAiKey: getOpenAiSavedKey(),
     openAiBaseUrl: getOpenAiBaseUrl(),
+    junlanKey: getJunlanSavedKey(),
+    junlanBaseUrl: getJunlanBaseUrl(),
     deepSeekKey: getDeepSeekSavedKey(),
     deepSeekBaseUrl: getDeepSeekBaseUrl(),
   };
@@ -181,6 +227,9 @@ export type PersistAiSettingsInput = {
   /** 仅在选择 OpenAI 兼容时写入；不传则保留原值 */
   openAiApiKey?: string;
   openAiBaseUrl?: string;
+  /** 君澜 GPT Image 2 专用；不传则保留原值 */
+  junlanApiKey?: string;
+  junlanBaseUrl?: string;
   /** DeepSeek 对话专用；不传则保留原值 */
   deepSeekApiKey?: string;
   deepSeekBaseUrl?: string;
@@ -191,6 +240,8 @@ export function persistAiSettings(opts: PersistAiSettingsInput): void {
   if (opts.geminiApiKey !== undefined) setGeminiKey(opts.geminiApiKey);
   if (opts.openAiApiKey !== undefined) setOpenAiKey(opts.openAiApiKey);
   if (opts.openAiBaseUrl !== undefined) setOpenAiBaseUrl(opts.openAiBaseUrl);
+  if (opts.junlanApiKey !== undefined) setJunlanKey(opts.junlanApiKey);
+  if (opts.junlanBaseUrl !== undefined) setJunlanBaseUrl(opts.junlanBaseUrl);
   if (opts.deepSeekApiKey !== undefined) setDeepSeekKey(opts.deepSeekApiKey);
   if (opts.deepSeekBaseUrl !== undefined) setDeepSeekBaseUrl(opts.deepSeekBaseUrl);
 }

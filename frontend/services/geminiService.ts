@@ -106,9 +106,12 @@ export const generateNewImage = async (
     }
 
     const model = modelName || 'imagen-4';
+    if (model === 'gpt-image-2-junlan') {
+      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, signal);
+    }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {
       throw new Error(
-        'GPT Image 2 等模型需在「设置 → API」中将接口类型切换为「OpenAI 兼容」，并配置支持 gpt-image-2 的网关（例如 ToAPIs：https://toapis.com/v1）。'
+        'GPT Image 2（ToAPIs）等需在「设置 → API」中使用 OpenAI 兼容主通道，Base URL 指向 ToAPIs（https://toapis.com/v1）。若使用君澜 AI，请选择节点模型「GPT Image 2（君澜 AI）」并在设置中填写君澜密钥。'
       );
     }
     // 构建包含比例和尺寸要求的提示词
@@ -190,9 +193,12 @@ export const editExistingImage = async (
 
     const results: string[] = [];
     const model = modelName || 'gemini-3.1-flash-image-preview';
+    if (model === 'gpt-image-2-junlan') {
+      return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, signal);
+    }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {
       throw new Error(
-        'GPT Image 2 图生图需使用「OpenAI 兼容」接口与对应网关（如 ToAPIs）；Google Gemini 直连不支持该模型 id。'
+        'GPT Image 2（ToAPIs）图生图需使用 OpenAI 兼容主通道与 ToAPIs。君澜通路请选择「GPT Image 2（君澜 AI）」并填写君澜密钥。'
       );
     }
     // 构建包含比例和尺寸要求的提示词
