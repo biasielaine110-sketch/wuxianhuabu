@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
 import { CanvasNode, Edge, Transform, Tool, NodeType, Annotation, AnnotationNode, PanoramaNode, GridSplitNode, GridMergeNode, Director3DNode, Figure3D, ChatNode, ChatMessage } from './types';
 import type { AiProvider } from './services/aiSettings';
 import {
@@ -437,48 +437,104 @@ const INITIAL_I2I_PROMPT_PRESETS: Record<string, string> = {
 
 const PRESET_SETTINGS_GUARD_PASSWORD = 'zhangbiwen666';
 
-/** 根据缩放起点快照与累计指针位移（画布坐标）计算节点矩形；避免逐帧增量 + 多处监听叠加导致的抖动 */
-function computeNodeResizeRect(
+/** 用指针画布坐标算节点矩形；手柄带 translate(±50%)，抓取点往往在角/边外侧，须用按下时的 grab 与几何参考点的差值修正，否则四角起手会跳。 */
+function computeNodeResizeFromPointer(
   origin: { x: number; y: number; width: number; height: number },
   direction: string,
-  dx: number,
-  dy: number,
+  px: number,
+  py: number,
+  grabPx: number,
+  grabPy: number,
   shiftKey: boolean,
   minWidth: number,
   minHeight: number
 ): { x: number; y: number; width: number; height: number } {
-  const right = origin.x + origin.width;
-  const bottom = origin.y + origin.height;
+  const ox = origin.x;
+  const oy = origin.y;
+  const right = ox + origin.width;
+  const bottom = oy + origin.height;
 
-  let newWidth = origin.width;
-  let newHeight = origin.height;
+  let newX = ox;
+  let newY = oy;
+  let newW = origin.width;
+  let newH = origin.height;
 
-  if (direction.includes('e')) newWidth = origin.width + dx;
-  if (direction.includes('w')) newWidth = origin.width - dx;
-  if (direction.includes('s')) newHeight = origin.height + dy;
-  if (direction.includes('n')) newHeight = origin.height - dy;
-
-  if (shiftKey && direction === 'se') {
-    const ratio = origin.width / origin.height;
-    if (Math.abs(dx) > Math.abs(dy)) {
-      newHeight = newWidth / ratio;
+  if (direction === 'e') {
+    const edgeX = px - (grabPx - right);
+    newW = Math.max(minWidth, edgeX - ox);
+    newX = ox;
+    newY = oy;
+    newH = origin.height;
+  } else if (direction === 'w') {
+    const edgeX = px - (grabPx - ox);
+    newW = Math.max(minWidth, right - edgeX);
+    newX = right - newW;
+    newY = oy;
+    newH = origin.height;
+  } else if (direction === 's') {
+    const edgeY = py - (grabPy - bottom);
+    newH = Math.max(minHeight, edgeY - oy);
+    newX = ox;
+    newY = oy;
+    newW = origin.width;
+  } else if (direction === 'n') {
+    const edgeY = py - (grabPy - oy);
+    newH = Math.max(minHeight, bottom - edgeY);
+    newY = bottom - newH;
+    newX = ox;
+    newW = origin.width;
+  } else if (direction === 'se') {
+    newX = ox;
+    newY = oy;
+    const cx = px - (grabPx - right);
+    const cy = py - (grabPy - bottom);
+    const tw = cx - ox;
+    const th = cy - oy;
+    if (shiftKey) {
+      const ratio = origin.width / origin.height;
+      if (tw > 0 && th > 0) {
+        if (tw / th > ratio) {
+          newW = Math.max(minWidth, th * ratio);
+          newH = Math.max(minHeight, th);
+        } else {
+          newW = Math.max(minWidth, tw);
+          newH = Math.max(minHeight, tw / ratio);
+        }
+      } else {
+        newW = minWidth;
+        newH = minHeight;
+      }
     } else {
-      newWidth = newHeight * ratio;
+      newW = Math.max(minWidth, tw);
+      newH = Math.max(minHeight, th);
     }
+  } else if (direction === 'sw') {
+    newY = oy;
+    const cx = px - (grabPx - ox);
+    const cy = py - (grabPy - bottom);
+    newW = Math.max(minWidth, right - cx);
+    newX = right - newW;
+    newH = Math.max(minHeight, cy - oy);
+  } else if (direction === 'ne') {
+    newX = ox;
+    const cx = px - (grabPx - right);
+    const cy = py - (grabPy - oy);
+    newW = Math.max(minWidth, cx - ox);
+    newH = Math.max(minHeight, bottom - cy);
+    newY = bottom - newH;
+  } else if (direction === 'nw') {
+    const cx = px - (grabPx - ox);
+    const cy = py - (grabPy - oy);
+    newW = Math.max(minWidth, right - cx);
+    newH = Math.max(minHeight, bottom - cy);
+    newX = right - newW;
+    newY = bottom - newH;
   }
-
-  newWidth = Math.max(minWidth, newWidth);
-  newHeight = Math.max(minHeight, newHeight);
-
-  let newX = origin.x;
-  let newY = origin.y;
-  if (direction.includes('w')) newX = right - newWidth;
-  if (direction.includes('n')) newY = bottom - newHeight;
 
   newX = Math.max(0, newX);
   newY = Math.max(0, newY);
 
-  return { x: newX, y: newY, width: newWidth, height: newHeight };
+  return { x: newX, y: newY, width: newW, height: newH };
 }
 
 type SettingsPresetPwdIntent =
@@ -664,8 +720,13 @@ export default function App() {
   const edgesRef = useRef(edges);
   useEffect(() => { activeProjectIdRef.current = activeProjectId; }, [activeProjectId]);
   useEffect(() => { projectsRef.current = projects; }, [projects]);
-  useEffect(() => { transformRef.current = transform; }, [transform]);
-  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
+  /** 绘制前同步，避免新建节点后立刻拖缩放时 ref 仍为上一轮渲染（useEffect 晚一拍会导致 origin/grab 错位跳一下） */
+  useLayoutEffect(() => {
+    transformRef.current = transform;
+  }, [transform]);
+  useLayoutEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
   useEffect(() => { edgesRef.current = edges; }, [edges]);
 
   useEffect(() => {
@@ -714,13 +775,13 @@ export default function App() {
   const [resizeDirection, setResizeDirection] = useState<string>('');
   const resizeDirectionRef = useRef<string>('');
   const [isResizing, setIsResizing] = useState(false);
-  /** 按下缩放手柄时的节点几何快照 + 指针起点（画布位移一律相对该点计算，避免丢帧/双监听重复叠加 delta） */
+  /** 按下缩放手柄时的节点几何快照 + 指针在画布上的抓取点（用于抵消手柄 CSS 偏移） */
   const nodeResizeSessionRef = useRef<{
     nodeId: string;
     direction: string;
-    startClientX: number;
-    startClientY: number;
     origin: { x: number; y: number; width: number; height: number };
+    grabCanvasX: number;
+    grabCanvasY: number;
     minWidth: number;
     minHeight: number;
   } | null>(null);
@@ -960,15 +1021,27 @@ export default function App() {
   const beginNodeResize = useCallback((e: React.PointerEvent, nodeId: string, direction: string) => {
     e.stopPropagation();
     e.preventDefault();
-    const node = nodesRef.current.find((n) => n.id === nodeId);
+    // 取消节点拖拽遗留的 RAF，避免下一帧仍 apply 位移导致 origin 快照与屏幕不一致（缩放开始就「跳一下」）
+    if (rafIdRef.current) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    nodeDragAccumRef.current = null;
+
+    const node = nodes.find((n) => n.id === nodeId);
     if (!node) return;
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const scale = Math.max(transform.scale, 0.1);
+    const grabCanvasX = (e.clientX - rect.left - transform.x) / scale;
+    const grabCanvasY = (e.clientY - rect.top - transform.y) / scale;
     const minSize = MIN_NODE_SIZES[node.type] || { width: 200, height: 150 };
     nodeResizeSessionRef.current = {
       nodeId,
       direction,
-      startClientX: e.clientX,
-      startClientY: e.clientY,
       origin: { x: node.x, y: node.y, width: node.width, height: node.height },
+      grabCanvasX,
+      grabCanvasY,
       minWidth: minSize.width,
       minHeight: minSize.height,
     };
@@ -979,7 +1052,7 @@ export default function App() {
     setResizeDirection(direction);
     setIsResizing(true);
     lastMousePosRef.current = { x: e.clientX, y: e.clientY };
-  }, []);
+  }, [nodes, transform]);
 
   // 兼容旧数据：防止历史项目中的宫格节点过小导致内容显示不全
   useEffect(() => {
@@ -2276,15 +2349,18 @@ export default function App() {
       lastFsMousePosRef.current = { x: e.clientX, y: e.clientY };
     } else if (pointerType === 'resize') {
       const sess = nodeResizeSessionRef.current;
-      if (sess) {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (sess && rect) {
         const scale = Math.max(transformRef.current.scale, 0.1);
-        const dx = (e.clientX - sess.startClientX) / scale;
-        const dy = (e.clientY - sess.startClientY) / scale;
-        const next = computeNodeResizeRect(
+        const px = (e.clientX - rect.left - transformRef.current.x) / scale;
+        const py = (e.clientY - rect.top - transformRef.current.y) / scale;
+        const next = computeNodeResizeFromPointer(
           sess.origin,
           sess.direction,
-          dx,
-          dy,
+          px,
+          py,
+          sess.grabCanvasX,
+          sess.grabCanvasY,
           e.shiftKey,
           sess.minWidth,
           sess.minHeight
@@ -2308,6 +2384,21 @@ export default function App() {
       if (pointerType === 'node') {
         draggingNodeIdRef.current = null;
         setDraggingNodeId(null);
+        // 结束拖拽时必须取消 RAF 并刷掉剩余累积位移，否则下一帧仍会移动节点（紧接着拖缩放柄时会突然错位一跳）
+        if (rafIdRef.current) {
+          cancelAnimationFrame(rafIdRef.current);
+          rafIdRef.current = null;
+        }
+        const acc = nodeDragAccumRef.current;
+        if (acc && (acc.deltaX !== 0 || acc.deltaY !== 0)) {
+          const { nodeIds, deltaX, deltaY } = acc;
+          setNodes((prev) =>
+            prev.map((node) =>
+              nodeIds.includes(node.id) ? { ...node, x: node.x + deltaX, y: node.y + deltaY } : node
+            )
+          );
+        }
+        nodeDragAccumRef.current = null;
       }
 
       // 清理缩放状态
