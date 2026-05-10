@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { CanvasNode, Edge, Transform, Tool, NodeType, Annotation, AnnotationNode, PanoramaNode, GridSplitNode, GridMergeNode, Director3DNode, Figure3D, ChatNode, ChatMessage } from './types';
 import type { AiProvider } from './services/aiSettings';
 import {
@@ -31,6 +31,13 @@ import {
   generateNewImage,
   initGeminiClientFromStorage,
 } from './services/geminiService';
+import {
+  buildIncomingRefSlots,
+  parseRefPickIndices,
+  stripRefMarkers,
+  resolveSlotImagesForIndices,
+  type IncomingRefSlot,
+} from './referenceSlots';
 import type { DownloadPathPersisted } from './services/downloadPathSettings';
 import {
   clearStoredDownloadDirectory,
@@ -760,7 +767,13 @@ export default function App() {
       if (!canReceiveConnection(target)) return false;
       // 对话节点只接收明确支持的上游类型，避免“能吸附但不生效”的不稳定体验
       if (target.type === 'chat') {
-        return source.type === 'text' || source.type === 'image' || source.type === 't2i' || source.type === 'i2i';
+        return (
+          source.type === 'text' ||
+          source.type === 'image' ||
+          source.type === 't2i' ||
+          source.type === 'i2i' ||
+          source.type === 'video'
+        );
       }
       return true;
     };
@@ -2027,7 +2040,13 @@ export default function App() {
     if (source.id === target.id) return false;
     if (!canReceiveConnection(target)) return false;
     if (target.type === 'chat') {
-      return source.type === 'text' || source.type === 'image' || source.type === 't2i' || source.type === 'i2i';
+      return (
+        source.type === 'text' ||
+        source.type === 'image' ||
+        source.type === 't2i' ||
+        source.type === 'i2i' ||
+        source.type === 'video'
+      );
     }
     return true;
   }, [canReceiveConnection]);
@@ -2884,7 +2903,6 @@ export default function App() {
       const inputNodes = incomingEdges.map(e => nodes.find(n => n.id === e.sourceId)).filter(Boolean) as CanvasNode[];
 
       const textInputs = inputNodes.map(n => n.prompt).filter(Boolean);
-      const imageInputs = inputNodes.flatMap(n => n.images || []).filter(Boolean);
 
       // 获取预设提示词（如果有激活的预设）
       const presetPrompt = node.activePreset ? promptPresets[node.activePreset] || '' : '';
@@ -2908,13 +2926,17 @@ export default function App() {
           ac.signal
         );
       } else if (node.type === 'i2i' || node.type === 'panoramaT2i') {
-        if (imageInputs.length === 0) throw new Error("请连接至少一个包含图片的节点作为参考图");
-        if (!finalPrompt) throw new Error("请输入编辑指令或连接文本节点");
+        const slots = buildIncomingRefSlots(nodeId, edges, nodes);
+        const pickIndices = parseRefPickIndices(finalPrompt);
+        const { base64s: imageInputs } = await resolveSlotImagesForIndices(slots, pickIndices);
+        const promptForModel = stripRefMarkers(finalPrompt) || finalPrompt;
+        if (imageInputs.length === 0) throw new Error("请连接参考图片或视频节点，或使用 @R 引用有效参考槽位");
+        if (!promptForModel) throw new Error("请输入编辑指令或连接文本节点");
         // 全景图生成使用节点配置的画幅
         const aspectRatio = node.aspectRatio || '2:1';
         base64DataArray = await editExistingImage(
           imageInputs,
-          finalPrompt,
+          promptForModel,
           node.imageCount || 1,
           node.model || 'gpt-image-2',
           aspectRatio,
@@ -2967,8 +2989,13 @@ export default function App() {
 
     const incomingEdges = edges.filter(e => e.targetId === nodeId);
     const inputNodes = incomingEdges.map(e => nodes.find(n => n.id === e.sourceId)).filter(Boolean) as CanvasNode[];
-    const imageInputs = inputNodes.flatMap(n => n.images || []).filter(Boolean);
     const textInputs = inputNodes.map(n => n.prompt).filter(Boolean);
+
+    const slots = buildIncomingRefSlots(nodeId, edges, nodes);
+    const pickIndices = parseRefPickIndices(inputText);
+    const { base64s: refImages, missing } = await resolveSlotImagesForIndices(slots, pickIndices);
+
+    const strippedQuestion = stripRefMarkers(inputText) || inputText;
 
     const baseMessages = opts?.baseMessages ?? (node.messages || []);
 
@@ -2976,21 +3003,33 @@ export default function App() {
       id: `msg-${Date.now()}-user`,
       role: 'user',
       content: inputText,
-      image: imageInputs[0],
+      image: refImages.length >= 1 ? refImages[0] : undefined,
+      images: refImages.length > 1 ? refImages : undefined,
     };
 
       const contextParts: string[] = [];
-      if (imageInputs.length > 0) {
-        contextParts.push('用户上传了一张图片，请根据图片内容回答。');
+      if (refImages.length > 0) {
+        contextParts.push(`用户通过参考区提供了 ${refImages.length} 张视觉参考（见附图，顺序与 @R 序号一致）。`);
+      }
+      const fallbackVideos = slots.filter(
+        (s) => s.kind === 'video' && s.videoUrl && missing.includes(s.n)
+      );
+      if (fallbackVideos.length > 0) {
+        contextParts.push(
+          '以下参考视频若模型无法解码为附图，请结合链接理解场景（外链可能受跨域限制）：\n' +
+            fallbackVideos.map((s) => `@R${s.n} ${s.videoUrl}`).join('\n')
+        );
       }
       if (textInputs.length > 0) {
         contextParts.push('相关背景信息：' + textInputs.join('\n'));
       }
-      contextParts.push('用户问题：' + inputText);
+      contextParts.push('用户问题：' + strippedQuestion);
       const fullPrompt = contextParts.join('\n\n');
 
     const historyForApi = baseMessages.filter(
-      (m) => (m.content && m.content.trim().length > 0) || (m.role === 'user' && m.image)
+      (m) =>
+        (m.content && m.content.trim().length > 0) ||
+        (m.role === 'user' && (m.image || (m.images?.length ?? 0) > 0))
     );
 
     generationStartedAtRef.current.set(nodeId, Date.now());
@@ -3010,15 +3049,22 @@ export default function App() {
 
     try {
       const apiTurns = [
-        ...historyForApi.map((m) => ({
-          role: m.role as 'user' | 'assistant',
-          content: m.content,
-          imageBase64: m.role === 'user' ? m.image : undefined,
-        })),
+        ...historyForApi.map((m) => {
+          const imgs = m.role === 'user' && m.images?.length ? m.images : undefined;
+          const single =
+            m.role === 'user' && !imgs?.length && m.image ? m.image : undefined;
+          return {
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+            imageBase64: imgs && imgs.length === 1 ? imgs[0] : single,
+            imageBase64s: imgs && imgs.length > 1 ? imgs : undefined,
+          };
+        }),
         {
           role: 'user' as const,
           content: fullPrompt,
-          imageBase64: imageInputs[0],
+          imageBase64: refImages.length === 1 ? refImages[0] : undefined,
+          imageBase64s: refImages.length > 1 ? refImages : undefined,
         },
       ];
 
@@ -3136,10 +3182,14 @@ export default function App() {
       const incomingEdges = edges.filter(e => e.targetId === nodeId);
       const inputNodes = incomingEdges.map(e => nodes.find(n => n.id === e.sourceId)).filter(Boolean) as CanvasNode[];
       const textInputs = inputNodes.map(n => n.prompt).filter(Boolean);
-      const imageInputs = inputNodes.flatMap(n => n.images || []).filter(Boolean);
 
-      const combinedPrompt = [node.prompt, ...textInputs].filter(Boolean).join('\n').trim();
-      if (!combinedPrompt) throw new Error('请输入提示词或连接文本节点');
+      const combinedRaw = [node.prompt, ...textInputs].filter(Boolean).join('\n').trim();
+      if (!combinedRaw) throw new Error('请输入提示词或连接文本节点');
+
+      const slots = buildIncomingRefSlots(nodeId, edges, nodes);
+      const pickIndices = parseRefPickIndices(combinedRaw);
+      const combinedPrompt = stripRefMarkers(combinedRaw) || combinedRaw;
+      const { base64s: imageInputs } = await resolveSlotImagesForIndices(slots, pickIndices);
 
       const videoModel: 'grok-video-3' | 'sora-2-vvip' | 'veo3.1-fast' =
         node.model === 'sora-2-vvip'
@@ -3296,7 +3346,25 @@ export default function App() {
           <div 
             className="absolute left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-[#333] border-2 border-[#666] rounded-full z-30 group/port hover:border-green-400 hover:bg-green-500 transition-all cursor-crosshair"
             onPointerDown={(e) => { e.stopPropagation(); handlePortPointerDown(e, node.id); }}
-            title={node.type === 'gridSplit' ? "输入端口 (连接图片节点)" : node.type === 'gridMerge' ? "输入端口 (连接图片节点)" : node.type === 'panorama' ? "输入端口 (连接图片节点输入全景图)" : node.type === 'annotation' ? "输入端口 (连接图片节点)" : node.type === 'panoramaT2i' ? "输入端口 (连接图片节点)" : node.type === 'director3d' ? "输入端口 (连接图片节点作为背景)" : node.type === 'video' ? "输入端口 (连接文本；可选一张参考图)" : "输入端口 (连接文本或图片)"}
+            title={
+              node.type === 'gridSplit'
+                ? '输入端口 (连接图片节点)'
+                : node.type === 'gridMerge'
+                  ? '输入端口 (连接图片节点)'
+                  : node.type === 'panorama'
+                    ? '输入端口 (连接图片节点输入全景图)'
+                    : node.type === 'annotation'
+                      ? '输入端口 (连接图片节点)'
+                      : node.type === 'panoramaT2i'
+                        ? '输入端口 (连接图片节点)'
+                        : node.type === 'director3d'
+                          ? '输入端口 (连接图片节点作为背景)'
+                          : node.type === 'chat'
+                            ? '输入端口 (文本 / 图片 / 视频节点作为参考)'
+                            : node.type === 'video'
+                              ? '输入端口 (文本；参考图片或视频节点)'
+                              : '输入端口 (连接文本或图片)'
+            }
           />
         )}
         
@@ -3589,51 +3657,70 @@ export default function App() {
           return (
           <div className="flex flex-col gap-1.5 p-2 bg-[#252525] border-b border-[#333] text-xs shrink-0">
             {(() => {
-              const videoIncomingEdges = edges.filter(e => e.targetId === node.id);
-              const videoSourceNodes = videoIncomingEdges
-                .map(e => nodes.find(n => n.id === e.sourceId))
-                .filter(Boolean) as CanvasNode[];
-              const videoSourceImages = videoSourceNodes.flatMap(n => n.images || []).filter(img => img && img !== '');
+              const vSlots = buildIncomingRefSlots(node.id, edges, nodes);
               return (
                 <div className="flex items-center gap-2 px-2 py-1 bg-[#1a1a1a] rounded text-[10px]">
-                  <span className="text-gray-400">参考图:</span>
-                  <span className="text-green-400 font-medium">{videoSourceImages.length} 张</span>
+                  <span className="text-gray-400 shrink-0">参考:</span>
+                  <span className="text-green-400 font-medium shrink-0">
+                    {vSlots.filter((s) => s.kind === 'image').length}图
+                    {vSlots.some((s) => s.kind === 'video') ? (
+                      <span className="text-amber-400">
+                        {' '}
+                        · {vSlots.filter((s) => s.kind === 'video').length}视频
+                      </span>
+                    ) : null}
+                  </span>
                   <div className="flex gap-1 ml-2 flex-wrap">
-                    {videoSourceImages.slice(0, 6).map((img, idx) => (
-                      <div key={`${node.id}-vref-${idx}`} className="relative group">
-                        <OptimizedImage
-                          base64={img}
-                          maxSide={128}
-                          quality={0.7}
-                          alt={`参考图${idx + 1}`}
-                          className="w-6 h-6 object-cover rounded border border-[#444]"
-                        />
+                    {vSlots.slice(0, 6).map((slot) => (
+                      <div key={`${node.id}-vslot-${slot.n}`} className="relative group">
+                        <div className="absolute -top-0.5 left-0 z-[1] rounded bg-black/70 px-0.5 text-[7px] font-bold leading-none text-cyan-300">
+                          R{slot.n}
+                        </div>
+                        {slot.kind === 'image' && slot.imageBase64 ? (
+                          <OptimizedImage
+                            base64={slot.imageBase64}
+                            maxSide={128}
+                            quality={0.7}
+                            alt={slot.label}
+                            className="h-6 w-6 rounded border border-[#444] object-cover"
+                          />
+                        ) : slot.kind === 'video' && slot.videoUrl ? (
+                          <video
+                            src={slot.videoUrl}
+                            className="h-6 w-6 rounded border border-[#444] object-cover"
+                            muted
+                            playsInline
+                            preload="metadata"
+                          />
+                        ) : (
+                          <div className="h-6 w-6 rounded border border-[#444] bg-[#333]" title={slot.label} />
+                        )}
                         <button
-                          onPointerDown={(e) => { e.stopPropagation(); }}
+                          onPointerDown={(e) => {
+                            e.stopPropagation();
+                          }}
                           onClick={(e) => {
                             e.stopPropagation();
-                            const edgeToDelete = edges.find(
-                              edge =>
-                                edge.targetId === node.id &&
-                                edge.sourceId === videoSourceNodes.find(n => n.images?.includes(img))?.id
-                            );
-                            if (edgeToDelete) handleDeleteEdge(edgeToDelete.id);
+                            handleDeleteEdge(slot.edgeId);
                           }}
-                          className="absolute -top-1 -right-1 w-3 h-3 bg-red-600 hover:bg-red-500 rounded-full text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-red-600 text-white opacity-0 transition-opacity hover:bg-red-500 group-hover:opacity-100"
                           title="取消引用"
                         >
                           <span className="text-[6px] leading-none">×</span>
                         </button>
                       </div>
                     ))}
-                    {videoSourceImages.length > 6 && (
-                      <span className="text-gray-500 flex items-center">+{videoSourceImages.length - 6}</span>
+                    {vSlots.length > 6 && (
+                      <span className="flex items-center text-gray-500">+{vSlots.length - 6}</span>
                     )}
                   </div>
                   <button
-                    onPointerDown={(e) => { e.stopPropagation(); setEyedropperTargetNodeId(node.id); }}
-                    className={`ml-auto px-2 py-0.5 rounded text-white ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
-                    title={eyedropperTargetNodeId === node.id ? '取消吸取' : '吸取图片'}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      setEyedropperTargetNodeId(node.id);
+                    }}
+                    className={`ml-auto shrink-0 rounded px-2 py-0.5 text-white ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
+                    title={eyedropperTargetNodeId === node.id ? '取消吸取' : '吸取参考（图片 / 视频节点）'}
                   >
                     <EyedropperIcon size={12} />
                   </button>
@@ -3641,7 +3728,7 @@ export default function App() {
               );
             })()}
             <div className="text-[10px] text-gray-500 px-1">
-              需 OpenAI 兼容 + ToAPIs Base URL · 最多 3 张参考图 ·
+              需 OpenAI 兼容 + ToAPIs Base URL · 最多 3 张参考图（视频将截取关键帧） ·
               {isVeo
                 ? ' Veo3.1 Fast（veo3.1-fast）：ToAPIs 固定 8 秒；画幅 16:9 或 9:16（其它按横屏）；720p/1080p/4k'
                 : isSora
@@ -4302,6 +4389,15 @@ export default function App() {
                 />
               )}
               <div className="relative flex flex-col flex-1 min-h-0">
+                {(node.type === 'i2i' || node.type === 'video') && (
+                  <RefPickBar
+                    slots={buildIncomingRefSlots(node.id, edges, nodes)}
+                    disabled={node.isGenerating}
+                    onInsert={(tok) =>
+                      handleUpdateNode(node.id, { prompt: (node.prompt || '') + tok })
+                    }
+                  />
+                )}
                 <textarea
                   className="w-full h-full bg-[#121212] text-gray-200 text-sm p-2 rounded border border-[#333] focus:outline-none focus:border-blue-500 transition-colors resize-none"
                   value={node.prompt}
@@ -4312,8 +4408,8 @@ export default function App() {
                       : node.type === 't2i'
                         ? '输入画面描述...'
                         : node.type === 'video'
-                          ? '描述镜头与动作（可连接文本节点补充）...'
-                          : '输入编辑指令...'
+                          ? '描述镜头与动作；可用 @R1 引用参考（图/视频截取帧）…'
+                          : '输入编辑指令；可用 @R1 引用参考图或视频帧…'
                   }
                   onPointerDown={(e) => e.stopPropagation()}
                   style={{ minHeight: node.type === 'i2i' ? '72px' : '96px' }}
@@ -8710,6 +8806,41 @@ function GridMergeNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEy
   );
 }
 
+/** 在提示词中插入 @R 序号，引用汇入节点的参考槽位 */
+function RefPickBar({
+  slots,
+  disabled,
+  onInsert,
+}: {
+  slots: IncomingRefSlot[];
+  disabled?: boolean;
+  onInsert: (token: string) => void;
+}) {
+  if (!slots.length) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1 px-0.5 pt-1 text-[10px]">
+      <span className="text-gray-500 shrink-0">引用参考</span>
+      {slots.map((s) => (
+        <button
+          key={`${s.edgeId}-r${s.n}-${s.kind}`}
+          type="button"
+          disabled={disabled}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onInsert(`@R${s.n}`);
+          }}
+          className="rounded border border-cyan-900/55 bg-cyan-950/35 px-1.5 py-0.5 font-medium text-cyan-100 hover:bg-cyan-900/45 disabled:cursor-not-allowed disabled:opacity-35"
+          title={s.label}
+        >
+          @R{s.n}
+        </button>
+      ))}
+      <span className="text-gray-600 leading-snug">点选插入；亦可键盘输入 @R 序号筛选参考项</span>
+    </div>
+  );
+}
+
 // ==================== 对话节点组件 ====================
 const CHAT_FONT_LS_KEY = 'wxcanvas-chat-font-px';
 function clampChatFontPx(n: number): number {
@@ -8992,6 +9123,9 @@ function ChatNodeContent({
   generationSeconds,
 }: ChatNodeContentProps) {
   const [showAllRefs, setShowAllRefs] = useState(false);
+  const chatPromptRef = useRef<HTMLTextAreaElement>(null);
+  const refSlots = useMemo(() => buildIncomingRefSlots(node.id, edges, nodes), [node.id, edges, nodes]);
+
   const [editingUserMessageId, setEditingUserMessageId] = useState<string | null>(null);
   const [editUserDraft, setEditUserDraft] = useState('');
   const [chatFontPx, setChatFontPx] = useState(readStoredChatFontPx);
@@ -9008,22 +9142,6 @@ function ChatNodeContent({
   useEffect(() => {
     if (node.isGenerating) setEditingUserMessageId(null);
   }, [node.isGenerating]);
-
-  // 获取连接的图片
-  const incomingEdges = edges.filter(e => e.targetId === node.id);
-  const sourceNodes = incomingEdges
-    .map(e => nodes.find(n => n.id === e.sourceId))
-    .filter(Boolean) as CanvasNode[];
-  const sourceImages = sourceNodes.flatMap(n => n.images || []).filter(img => img && img !== '');
-  const sourceImageRefs = incomingEdges.flatMap(edge => {
-    const sourceNode = nodes.find(n => n.id === edge.sourceId);
-    if (!sourceNode?.images || sourceNode.images.length === 0) return [];
-    return sourceNode.images.map((img, idx) => ({
-      img,
-      edgeId: edge.id,
-      key: `${edge.id}-${idx}`,
-    }));
-  });
 
   const messages = node.messages || [];
 
@@ -9097,81 +9215,78 @@ function ChatNodeContent({
 
   return (
     <div className="flex flex-col h-full bg-[#1a1a1a] rounded-b-xl overflow-hidden">
-      {/* 参考图区 - 与图生图节点一致风格 */}
+      {/* 参考区：图片 + 视频 */}
       <div className="flex items-center gap-2 px-2 py-1.5 bg-[#252525] border-b border-[#333] text-[10px] shrink-0">
-        <span className="text-gray-400">参考图:</span>
-        <span className="text-green-400 font-medium">{sourceImages.length} 张</span>
+        <span className="text-gray-400 shrink-0">参考:</span>
+        <span className="text-green-400 font-medium shrink-0">
+          {refSlots.filter((s) => s.kind === 'image').length}图
+          {refSlots.some((s) => s.kind === 'video') ? (
+            <span className="text-amber-400"> · {refSlots.filter((s) => s.kind === 'video').length}视频</span>
+          ) : null}
+        </span>
         <div className="flex gap-1 ml-1 flex-wrap max-w-[220px]">
-          {(showAllRefs ? sourceImageRefs : sourceImageRefs.slice(0, 6)).map((item) => (
-            <div key={item.key} className="relative group">
-              <OptimizedImage
-                base64={item.img}
-                maxSide={128}
-                quality={0.72}
-                alt="参考图"
-                className="w-6 h-6 object-cover rounded border border-[#444]"
-              />
+          {(showAllRefs ? refSlots : refSlots.slice(0, 6)).map((slot) => (
+            <div key={`${slot.edgeId}-slot-${slot.n}`} className="relative group">
+              <div className="absolute -top-0.5 left-0 z-[1] rounded bg-black/70 px-0.5 text-[7px] font-bold leading-none text-cyan-300">
+                R{slot.n}
+              </div>
+              {slot.kind === 'image' && slot.imageBase64 ? (
+                <OptimizedImage
+                  base64={slot.imageBase64}
+                  maxSide={128}
+                  quality={0.72}
+                  alt={slot.label}
+                  className="w-6 h-6 object-cover rounded border border-[#444]"
+                />
+              ) : slot.kind === 'video' && slot.videoUrl ? (
+                <video
+                  src={slot.videoUrl}
+                  className="h-6 w-6 rounded border border-[#444] object-cover"
+                  muted
+                  playsInline
+                  preload="metadata"
+                />
+              ) : (
+                <div className="h-6 w-6 rounded border border-[#444] bg-[#333]" title={slot.label} />
+              )}
               <button
-                onPointerDown={(e) => { e.stopPropagation(); }}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                }}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onDeleteEdge(item.edgeId);
+                  onDeleteEdge(slot.edgeId);
                 }}
-                className="absolute -top-1 -right-1 w-3 h-3 bg-red-600 hover:bg-red-500 rounded-full text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-red-600 text-white opacity-0 transition-opacity hover:bg-red-500 group-hover:opacity-100"
                 title="取消引用"
               >
                 <span className="text-[6px] leading-none">×</span>
               </button>
             </div>
           ))}
-          {sourceImageRefs.length > 6 && (
+          {refSlots.length > 6 && (
             <button
               onPointerDown={(e) => {
                 e.stopPropagation();
-                setShowAllRefs(prev => !prev);
+                setShowAllRefs((prev) => !prev);
               }}
-              className="text-gray-400 hover:text-white px-1 rounded hover:bg-white/10 flex items-center"
-              title={showAllRefs ? "收起参考图" : "展开全部参考图"}
+              className="flex items-center rounded px-1 text-gray-400 hover:bg-white/10 hover:text-white"
+              title={showAllRefs ? '收起参考' : '展开全部参考'}
             >
-              {showAllRefs ? '收起' : `+${sourceImageRefs.length - 6}`}
+              {showAllRefs ? '收起' : `+${refSlots.length - 6}`}
             </button>
           )}
         </div>
         <button
-          onPointerDown={(e) => { e.stopPropagation(); onEyedropperSelect(); }}
-          className={`ml-auto px-2 py-0.5 rounded text-white ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
-          title={eyedropperTargetNodeId === node.id ? "取消吸取" : "吸取图片"}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            onEyedropperSelect();
+          }}
+          className={`ml-auto shrink-0 rounded px-2 py-0.5 text-white ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
+          title={eyedropperTargetNodeId === node.id ? '取消吸取' : '吸取参考（图片 / 视频节点）'}
         >
           <EyedropperIcon size={12} />
         </button>
-      </div>
-
-      {/* 快捷功能（类图生图预设条） */}
-      <div className="flex flex-wrap items-center gap-1.5 px-2 py-1.5 bg-[#222] border-b border-[#333] shrink-0">
-        <span className="text-[10px] text-gray-500 shrink-0">功能</span>
-        {CHAT_FEATURE_BUTTONS.map((btn) => (
-          <button
-            key={btn.id}
-            type="button"
-            disabled={node.isGenerating}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              onUpdate({ prompt: btn.buildText(), error: undefined });
-            }}
-            className="inline-flex items-center gap-0.5 rounded-md border border-rose-800/55 bg-rose-950/45 px-2 py-0.5 text-[10px] font-medium text-rose-100 hover:bg-rose-900/55 disabled:cursor-not-allowed disabled:opacity-40"
-            title={btn.title}
-          >
-            {btn.icon === 'wand' ? (
-              <WandIcon size={11} />
-            ) : btn.icon === 'message' ? (
-              <MessageIcon size={11} />
-            ) : (
-              <VideoIcon size={11} />
-            )}
-            {btn.label}
-          </button>
-        ))}
       </div>
 
       {/* 模型选择 */}
@@ -9246,9 +9361,9 @@ function ChatNodeContent({
         {messages.length === 0 && (
           <div className="text-center text-gray-500 py-8" style={{ fontSize: chatFontPx }}>
             输入问题，AI将为你解答
-            {sourceImages.length > 0 && (
+            {refSlots.length > 0 && (
               <div className="mt-2 text-cyan-400" style={{ fontSize: Math.max(11, chatFontPx - 1) }}>
-                已加载 {sourceImages.length} 张参考图
+                已连接 {refSlots.length} 条参考（含图/视频），可用下方按钮插入 @R 引用
               </div>
             )}
           </div>
@@ -9270,15 +9385,16 @@ function ChatNodeContent({
                 style={{ fontSize: chatFontPx }}
               onPointerDown={(e) => e.stopPropagation()}
             >
-              {msg.image && (
+              {(msg.images?.length ? msg.images : msg.image ? [msg.image] : []).map((im, ii) => (
                 <OptimizedImage
-                  base64={msg.image}
+                  key={`${msg.id}-img-${ii}`}
+                  base64={im}
                   maxSide={140}
                   quality={0.56}
-                  alt="用户图片"
-                  className="w-16 h-16 object-cover rounded mb-2"
+                  alt="用户参考图"
+                  className={`${ii ? 'mt-1 ' : ''}mb-2 h-16 w-16 rounded object-cover`}
                 />
-              )}
+              ))}
                 {editingThis ? (
                   <>
                     <textarea
@@ -9422,14 +9538,63 @@ function ChatNodeContent({
 
       {/* 输入区域 */}
       <div className="p-2 bg-[#252525] border-t border-[#333] shrink-0">
+        {/* 快捷功能：置于文字输入框上方 */}
+        <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-md border border-[#333] bg-[#222] px-2 py-1.5">
+          <span className="shrink-0 text-[10px] text-gray-500">功能</span>
+          {CHAT_FEATURE_BUTTONS.map((btn) => (
+            <button
+              key={btn.id}
+              type="button"
+              disabled={node.isGenerating}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onUpdate({ prompt: btn.buildText(), error: undefined });
+              }}
+              className="inline-flex items-center gap-0.5 rounded-md border border-rose-800/55 bg-rose-950/45 px-2 py-0.5 text-[10px] font-medium text-rose-100 hover:bg-rose-900/55 disabled:cursor-not-allowed disabled:opacity-40"
+              title={btn.title}
+            >
+              {btn.icon === 'wand' ? (
+                <WandIcon size={11} />
+              ) : btn.icon === 'message' ? (
+                <MessageIcon size={11} />
+              ) : (
+                <VideoIcon size={11} />
+              )}
+              {btn.label}
+            </button>
+          ))}
+        </div>
+        <RefPickBar
+          slots={refSlots}
+          disabled={node.isGenerating}
+          onInsert={(tok) => {
+            const el = chatPromptRef.current;
+            const cur = node.prompt || '';
+            if (el && document.activeElement === el) {
+              const s = el.selectionStart ?? cur.length;
+              const e = el.selectionEnd ?? cur.length;
+              const next = cur.slice(0, s) + tok + cur.slice(e);
+              onUpdate({ prompt: next });
+              requestAnimationFrame(() => {
+                const p = s + tok.length;
+                el.selectionStart = el.selectionEnd = p;
+                el.focus();
+              });
+            } else {
+              onUpdate({ prompt: cur + tok });
+            }
+          }}
+        />
         <div className="flex gap-2">
           <textarea
+            ref={chatPromptRef}
             className="flex-1 min-h-[108px] bg-[#121212] text-gray-200 p-2.5 rounded border border-[#444] focus:outline-none focus:border-rose-500 resize-y"
             style={{ fontSize: chatFontPx, height: node.chatInputHeight || 152 }}
             value={node.prompt || ''}
             onChange={(e) => onUpdate({ prompt: e.target.value })}
             onKeyDown={handleKeyDown}
-            placeholder="输入问题..."
+            placeholder="输入问题… 可用 @R1 @R2 引用上方参考"
             onPointerDown={(e) => e.stopPropagation()}
             onPointerUp={(e) => {
               e.stopPropagation();

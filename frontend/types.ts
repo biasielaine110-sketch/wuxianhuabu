@@ -153,5 +153,7 @@ export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
-  image?: string; // 可选的图片内容
+  image?: string; // 可选的图片内容（单图；与 images 二选一或并存时优先 images）
+  /** 多参考图（用户消息）；展示与历史回放用 */
+  images?: string[];
 }

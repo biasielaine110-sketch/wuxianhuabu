@@ -950,8 +950,10 @@ export async function openAiEditImage(
 export type ChatCompletionHistoryTurn = {
   role: 'user' | 'assistant' | 'system';
   content: string;
-  /** 仅 user：可选单张参考图 */
+  /** 仅 user：可选单张参考图（与 imageBase64s 并存时合并） */
   imageBase64?: string;
+  /** 仅 user：多张参考图（Vision） */
+  imageBase64s?: string[];
 };
 
 export async function chatCompletionHistoryAtBase(
@@ -973,13 +975,18 @@ export async function chatCompletionHistoryAtBase(
     if (turn.role === 'system') {
       return { role: 'system' as const, content: turn.content };
     }
-    if (turn.imageBase64) {
+    const imgs: string[] = [];
+    if (turn.imageBase64s?.length) imgs.push(...turn.imageBase64s);
+    if (turn.imageBase64) imgs.push(turn.imageBase64);
+    if (imgs.length > 0) {
+      const parts: Array<{ type: 'image_url'; image_url: { url: string } } | { type: 'text'; text: string }> = [];
+      for (const b64 of imgs) {
+        parts.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } });
+      }
+      parts.push({ type: 'text', text: turn.content });
       return {
         role: 'user' as const,
-        content: [
-          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${turn.imageBase64}` } },
-          { type: 'text', text: turn.content },
-        ],
+        content: parts,
       };
     }
     return { role: 'user' as const, content: turn.content };

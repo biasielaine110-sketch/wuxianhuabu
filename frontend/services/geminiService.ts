@@ -247,8 +247,10 @@ export const editExistingImage = async (
 export type ChatCompletionTurn = {
   role: 'user' | 'assistant';
   content: string;
-  /** 仅 user：可选单张参考图 */
+  /** 仅 user：可选单张参考图（与 imageBase64s 并存时合并为多张） */
   imageBase64?: string;
+  /** 仅 user：多张参考图 */
+  imageBase64s?: string[];
 };
 
 const MAX_CHAT_HISTORY_TURNS = 48;
@@ -293,6 +295,7 @@ export const callGeminiChatWithHistory = async (
           role: t.role,
           content: t.content,
           imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
+          imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
         }))
       );
     }
@@ -304,6 +307,7 @@ export const callGeminiChatWithHistory = async (
         role: t.role,
         content: t.content,
         imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
+        imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
       })));
     }
 
@@ -312,9 +316,12 @@ export const callGeminiChatWithHistory = async (
         return { role: 'model' as const, parts: [{ text: t.content }] };
       }
       const parts: Array<{ text: string } | { inlineData: { data: string; mimeType: string } }> = [];
-      if (t.imageBase64) {
+      const imgs: string[] = [];
+      if (t.imageBase64s?.length) imgs.push(...t.imageBase64s);
+      if (t.imageBase64) imgs.push(t.imageBase64);
+      for (const b64 of imgs) {
         parts.push({
-          inlineData: { data: t.imageBase64, mimeType: 'image/jpeg' },
+          inlineData: { data: b64, mimeType: 'image/jpeg' },
         });
       }
       parts.push({ text: t.content });

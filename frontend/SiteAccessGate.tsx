@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 
 declare global {
   interface Window {
@@ -26,16 +26,51 @@ function timingSafeEqualStr(a: string, b: string): boolean {
   return r === 0;
 }
 
+/** 与密码文本绑定的轻量指纹（非密码学保密用途）；后台修改密码后指纹变化会要求重新登录 */
+function sitePasswordFingerprint(pw: string): string {
+  let h = 5381 >>> 0;
+  for (let i = 0; i < pw.length; i += 1) {
+    h = (((h << 5) + h) ^ pw.charCodeAt(i)) >>> 0;
+  }
+  return h.toString(16);
+}
+
+const LS_UNLOCK_UNTIL = 'wx-site-access-until';
+const LS_PW_FP = 'wx-site-access-pw-fp';
+const TWENTY_FOUR_H_MS = 24 * 60 * 60 * 1000;
+
+function readStoredUnlockValid(requiredPassword: string): boolean {
+  if (!requiredPassword) return true;
+  try {
+    const until = parseInt(localStorage.getItem(LS_UNLOCK_UNTIL) || '0', 10);
+    const fp = localStorage.getItem(LS_PW_FP);
+    if (!until || !fp || Date.now() > until) return false;
+    if (fp !== sitePasswordFingerprint(requiredPassword)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function persistUnlock(requiredPassword: string): void {
+  try {
+    localStorage.setItem(LS_UNLOCK_UNTIL, String(Date.now() + TWENTY_FOUR_H_MS));
+    localStorage.setItem(LS_PW_FP, sitePasswordFingerprint(requiredPassword));
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * 站内访问门：仅在构建时配置了 VITE_SITE_PASSWORD 时显示。
- * 密码写入 Vercel 环境变量或 frontend/.env.local（勿提交），每次刷新页面都需重新输入。
+ * 密码写入 Vercel 环境变量或 frontend/.env.local（勿提交）。
+ * 验证通过后 24 小时内同一浏览器免输入；修改后台密码后指纹不匹配需重新验证。
  *
- * 注意：子应用始终在 DOM 中挂载，未通过验证时仅用全屏层盖住。此前「未解锁则不渲染 children」会导致
- * 主应用在通过验证后才首次挂载，线上与本地布局/Timing 不一致时易出现画布/WebGL 全黑等问题。
+ * 注意：子应用始终在 DOM 中挂载，未通过验证时仅用全屏层盖住。
  */
 export default function SiteAccessGate({ children }: { children: React.ReactNode }) {
-  const required = readConfiguredSitePassword().trim();
-  const [unlocked, setUnlocked] = useState(() => !required);
+  const required = useMemo(() => readConfiguredSitePassword().trim(), []);
+  const [unlocked, setUnlocked] = useState(() => !required || readStoredUnlockValid(required));
   const [input, setInput] = useState('');
   const [error, setError] = useState('');
 
@@ -49,6 +84,7 @@ export default function SiteAccessGate({ children }: { children: React.ReactNode
         return;
       }
       if (timingSafeEqualStr(pass, required)) {
+        persistUnlock(required);
         setUnlocked(true);
         setInput('');
       } else {
@@ -75,7 +111,9 @@ export default function SiteAccessGate({ children }: { children: React.ReactNode
         >
           <div className="w-full max-w-sm rounded-2xl border border-[#333] bg-[#1a1a1a] p-8 shadow-2xl">
             <h1 className="text-lg font-semibold text-white mb-1">访问验证</h1>
-            <p className="text-xs text-gray-500 mb-6">请输入站点密码。刷新或重新打开页面后需再次输入。</p>
+            <p className="text-xs text-gray-500 mb-6">
+              请输入站点密码。验证通过后 24 小时内本设备无需再次输入；若后台修改了密码，需重新验证。
+            </p>
             <form onSubmit={onSubmit} className="flex flex-col gap-4">
               <input
                 type="password"
