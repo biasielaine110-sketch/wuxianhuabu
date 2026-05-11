@@ -846,6 +846,14 @@ function newApiVideoUpstreamModelId(canvasId: string): string {
   return (canvasId || '').trim().replace(/-newapi$/i, '');
 }
 
+/** Firefly Kling 3.0 / Omni：界面仅 3 / 10 / 15 秒，非法旧值就近映射 */
+function newApiKling30VideoDuration(ui: number): 3 | 10 | 15 {
+  if (ui === 3 || ui === 10 || ui === 15) return ui;
+  if (ui <= 6) return 3;
+  if (ui <= 12) return 10;
+  return 15;
+}
+
 async function newApiUploadVideoReferenceImageUrls(
   baseNorm: string,
   apiKey: string,
@@ -941,7 +949,7 @@ async function newApiPollVideoTaskToPlayableUrl(
 
 /**
  * 画布「视频生成」节点 · New API 通道（与 ToAPIs 的 grok-video-3 / sora-2-vvip / veo3.1-fast 分离）。
- * 请求体与 ToAPIs 文档对齐，便于同一聚合网关路由；参考图依赖 `/uploads/images` 或 `/upload/image`。
+ * 请求体与 ToAPIs 文档对齐；Kling 3.0 / Omni 时长仅 3 / 10 / 15 秒（`duration` + `seconds` 字符串）；参考图依赖上传接口。
  */
 export async function newApiCanvasVideoGenerate(params: {
   canvasVideoModelId: string;
@@ -1006,6 +1014,20 @@ export async function newApiCanvasVideoGenerate(params: {
       resolution_name: res,
     };
     if (imageUrls.length) body.image_urls = imageUrls;
+  } else if (canvasId.startsWith('firefly-kling30')) {
+    const duration = newApiKling30VideoDuration(params.durationSeconds);
+    const aspect_ratio = toApisAspectSize(params.aspectRatio);
+    const resolution = params.resolution === '480p' ? '480p' : '720p';
+    body = {
+      model,
+      prompt: params.prompt,
+      duration,
+      seconds: String(duration),
+      aspect_ratio,
+      resolution,
+      resolution_name: resolution,
+    };
+    if (imageUrls.length) body.images = imageUrls;
   } else {
     const seconds = toApisGrokVideoSeconds(params.durationSeconds);
     const aspect_ratio = toApisAspectSize(params.aspectRatio);

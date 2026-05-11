@@ -133,15 +133,14 @@ function isVideoSoraStyleModel(m?: string): boolean {
   return m === 'sora-2-vvip' || m === 'firefly-sora2-newapi' || m === 'firefly-sora2-pro-newapi';
 }
 
-/** 视频节点 Grok 秒数档：ToAPIs Grok3 / New API grok-imagine / kling */
+/** 视频节点 Grok 秒数档：ToAPIs Grok3 / New API grok-imagine（不含 Kling，Kling 单独 3/10/15 秒） */
 function isVideoGrokDurationStyleModel(m?: string): boolean {
-  return (
-    !m ||
-    m === 'grok-video-3' ||
-    m === 'grok-imagine-video-newapi' ||
-    m === 'firefly-kling30-newapi' ||
-    m === 'firefly-kling30omni-newapi'
-  );
+  return !m || m === 'grok-video-3' || m === 'grok-imagine-video-newapi';
+}
+
+/** New API：Firefly Kling 3.0 / Omni，时长仅 3 / 10 / 15 秒 */
+function isVideoKling30NewApiModel(m?: string): boolean {
+  return m === 'firefly-kling30-newapi' || m === 'firefly-kling30omni-newapi';
 }
 
 function base64ToImageDataUrl(raw: string): string {
@@ -3891,6 +3890,7 @@ export default function App() {
           const isNaVideo = isNewApiVideoCanvasModel(vm);
           const isSora = isVideoSoraStyleModel(vm);
           const isVeo = isVideoVeoStyleModel(vm);
+          const isKling30Na = isVideoKling30NewApiModel(vm);
           const isGroDur = isVideoGrokDurationStyleModel(vm);
           const modelSelectValue =
             vm === 'sora-2-vvip' || isVeo31FastVideoModel(vm) || vm === 'grok-video-3' || isNaVideo
@@ -3977,9 +3977,11 @@ export default function App() {
                 ? ' · Veo：固定 8 秒；画幅 16:9 或 9:16；720p/1080p/4k'
                 : isSora
                   ? ' · Sora 系：4/8/12 秒、16:9 或 9:16、720p'
-                  : isGroDur
-                    ? ' · Grok / Kling / Imagine：多档秒数与画幅'
-                    : ''}
+                  : isKling30Na
+                    ? ' · Kling：3 / 10 / 15 秒'
+                    : isGroDur
+                      ? ' · Grok / Imagine：多档秒数与画幅'
+                      : ''}
             </div>
             {!isSora && !isVeo && isGroDur && (
               <div className="text-[9px] text-amber-600/95 px-1 leading-snug">
@@ -4007,6 +4009,12 @@ export default function App() {
                         : '720p';
                     const ar = node.aspectRatio || '16:9';
                     if (!['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].includes(ar)) updates.aspectRatio = '16:9';
+                  } else if (m === 'firefly-kling30-newapi' || m === 'firefly-kling30omni-newapi') {
+                    const d = node.videoDuration ?? 10;
+                    updates.videoDuration = [3, 10, 15].includes(d) ? d : 10;
+                    if (node.videoResolution === '1080p' || node.videoResolution === '4k') {
+                      updates.videoResolution = '720p';
+                    }
                   } else {
                     const d = node.videoDuration ?? 8;
                     if (d === 4 || d === 8 || d === 12) updates.videoDuration = 10;
@@ -4047,6 +4055,17 @@ export default function App() {
                   <option value={8}>8 秒</option>
                   <option value={12}>12 秒</option>
             </select>
+              ) : isKling30Na ? (
+                <select
+                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  value={[3, 10, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 10}
+                  onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
+                  onPointerDown={e => e.stopPropagation()}
+                >
+                  <option value={3}>3 秒</option>
+                  <option value={10}>10 秒</option>
+                  <option value={15}>15 秒</option>
+                </select>
               ) : (
             <select
                   className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
