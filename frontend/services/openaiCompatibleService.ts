@@ -33,6 +33,11 @@ function rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNormalized: string): st
 
 /** 502/504 等为网关层错误，多为上游或反向代理；与 Chrome 扩展报的 runtime.lastError 无关 */
 function openAiCompatFailureHint(status: number, kind: 'generations-json' | 'image-edit'): string {
+  if (status === 404) {
+    return kind === 'image-edit'
+      ? '（404：请确认请求为 POST multipart；开发环境须在 frontend 目录启动 Vite 以启用 /yunzhi-openai 代理；若直连云智正常而此处 404，多为路径未正确转发或上游未开放该路由。）'
+      : '（404：请检查 Base URL 与路径；开发环境需 Vite 代理 /yunzhi-openai。）';
+  }
   if (status === 502 || status === 504) {
     return '（502/504：多为上游 API（如云智 yunzhi-ai.top）或本站 /yunzhi-openai 转发暂时失败、超时；请稍后重试、检查密钥与上游状态，图生图可尝试缩小参考图。）';
   }

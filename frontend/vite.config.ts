@@ -34,7 +34,12 @@ const toapisFileCdnProxy = {
     target: 'https://yunzhi-ai.top',
     changeOrigin: true,
     secure: true,
-    rewrite: (p: string) => p.replace(/^\/yunzhi-openai/, '') || '/',
+    /** http-proxy 传入的 path 在少数环境下可能无前导 /，需归一化后再剥前缀，避免误转发到 /yunzhi-openai/... 导致上游 404 */
+    rewrite: (p: string) => {
+      const path = p.startsWith('/') ? p : `/${p}`;
+      const stripped = path.replace(/^\/yunzhi-openai(?=\/|$)/, '');
+      return stripped.length ? stripped : '/';
+    },
   },
 } as const;
 
