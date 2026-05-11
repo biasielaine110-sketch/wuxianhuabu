@@ -1054,7 +1054,12 @@ async function editImagesAtOpenAiCompatibleBase(
   for (let i = 0; i < count; i++) {
     assertNotAborted(signal);
     const form = new FormData();
-    form.append('image', pngBlob, 'ref.png');
+    // dall-e-2 沿用单字段 image；gpt-image-* / firefly 等与 OpenAI 新文档一致使用 image[]（仅一张也传 image[]），否则部分网关会 404
+    if (resolvedEditModel === 'dall-e-2') {
+      form.append('image', pngBlob, 'ref.png');
+    } else {
+      form.append('image[]', pngBlob, 'ref.png');
+    }
     form.append('prompt', enhancedPrompt);
     form.append('model', resolvedEditModel);
     form.append('n', '1');
