@@ -5639,72 +5639,16 @@ export default function App() {
               <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1 -mr-1">
               {settingsTab === 'api' && (
                 <div>
-                  <label className="text-xs text-gray-500 block mb-1">接口类型</label>
-                  <select
-                    value={aiProvider}
-                    onChange={(e) => {
-                      const p = e.target.value as AiProvider;
-                      setAiProvider(p);
-                      const s = getAiSettingsSnapshot();
-                      setApiKeyInput(p === 'gemini' ? s.geminiKey : s.openAiKey);
-                    }}
-                    className="w-full mb-4 bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="openai-compatible">OpenAI 兼容（Bearer / sk-）</option>
-                    <option value="gemini">Google Gemini</option>
-                  </select>
-                  {aiProvider === 'openai-compatible' && (
-                    <>
-                      <label className="text-xs text-gray-500 block mb-1">Base URL</label>
-                      <input
-                        type="text"
-                        value={openAiBaseInput}
-                        onChange={(e) => setOpenAiBaseInput(e.target.value)}
-                        placeholder={DEFAULT_OPENAI_BASE_URL}
-                        className="w-full mb-4 bg-[#121212] border border-[#444] rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
-                      />
-                    </>
-                  )}
-                  <label className="text-xs text-gray-500 block mb-1">
-                    {aiProvider === 'gemini' ? 'Gemini API Key' : 'API Key'}
-                  </label>
-                  <input
-                    type="password"
-                    value={apiKeyInput}
-                    onChange={(e) => setApiKeyInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        persistAiSettings({
-                          provider: aiProvider,
-                          geminiApiKey: aiProvider === 'gemini' ? apiKeyInput.trim() : undefined,
-                          openAiApiKey: aiProvider === 'openai-compatible' ? apiKeyInput.trim() : undefined,
-                          openAiBaseUrl: (openAiBaseInput.trim() || DEFAULT_OPENAI_BASE_URL),
-                          junlanApiKey: junlanKeyInput.trim(),
-                          junlanBaseUrl: junlanBaseInput.trim() || DEFAULT_JUNLAN_BASE_URL,
-                          codesonlineApiKey: codesonlineKeyInput.trim(),
-                          codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
-                          newApiApiKey: newApiKeyInput.trim(),
-                          newApiBaseUrl: newApiBaseInput.trim(),
-                          deepSeekApiKey: deepSeekKeyInput.trim(),
-                          deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
-                        });
-                        initGeminiClientFromStorage();
-                        setShowSettingsModal(false);
-                      }
-                    }}
-                    placeholder={aiProvider === 'gemini' ? 'AIza...' : 'sk-...'}
-                    className="w-full bg-[#121212] border border-[#444] rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
-                  />
-
-                  <div className="mt-5 pt-4 border-t border-[#333]">
+                  {/* ① 君澜 */}
+                  <div>
                     <h3 className="text-sm font-semibold text-gray-200 mb-2">君澜 AI</h3>
                     <label className="text-xs text-gray-500 block mb-1">君澜 Base URL</label>
                     <input
                       type="text"
+                      readOnly
                       value={junlanBaseInput}
-                      onChange={(e) => setJunlanBaseInput(e.target.value)}
                       placeholder={DEFAULT_JUNLAN_BASE_URL}
-                      className="w-full mb-3 bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-600 transition-colors text-sm"
+                      className="w-full mb-3 bg-[#252525] border border-[#333] rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
                     />
                     <label className="text-xs text-gray-500 block mb-1">君澜 API Key</label>
                     <input
@@ -5716,27 +5660,16 @@ export default function App() {
                     />
                   </div>
 
+                  {/* ② codesonline */}
                   <div className="mt-5 pt-4 border-t border-[#333]">
                     <h3 className="text-sm font-semibold text-gray-200 mb-2">codesonline（GPT Image 2）</h3>
-                    <p className="text-[11px] text-gray-500 mb-2">
-                      画布模型 id：<code className="text-gray-400">gpt-image-2-codesonline</code>（上游仍为{' '}
-                      <code className="text-gray-400">gpt-image-2</code>，与 ToAPIs/君澜分流）。文档：{' '}
-                      <a
-                        href="https://image.codesonline.dev/personal/docs"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-sky-400 hover:underline"
-                      >
-                        image.codesonline.dev/personal/docs
-                      </a>
-                    </p>
                     <label className="text-xs text-gray-500 block mb-1">codesonline Base URL</label>
                     <input
                       type="text"
+                      readOnly
                       value={codesonlineBaseInput}
-                      onChange={(e) => setCodesonlineBaseInput(e.target.value)}
                       placeholder={DEFAULT_CODESONLINE_IMAGE_BASE_URL}
-                      className="w-full mb-3 bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-sky-600 transition-colors text-sm"
+                      className="w-full mb-3 bg-[#252525] border border-[#333] rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
                     />
                     <label className="text-xs text-gray-500 block mb-1">codesonline API Key</label>
                     <input
@@ -5748,26 +5681,7 @@ export default function App() {
                     />
                   </div>
 
-                  <div className="mt-5 pt-4 border-t border-[#333]">
-                    <h3 className="text-sm font-semibold text-gray-200 mb-2">New API</h3>
-                    <label className="text-xs text-gray-500 block mb-1">New API Base URL</label>
-                    <input
-                      type="text"
-                      value={newApiBaseInput}
-                      onChange={(e) => setNewApiBaseInput(e.target.value)}
-                      placeholder={DEFAULT_NEWAPI_BASE_URL}
-                      className="w-full mb-3 bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-violet-500 transition-colors text-sm"
-                    />
-                    <label className="text-xs text-gray-500 block mb-1">New API Key</label>
-                    <input
-                      type="password"
-                      value={newApiKeyInput}
-                      onChange={(e) => setNewApiKeyInput(e.target.value)}
-                      placeholder="sk-..."
-                      className="w-full bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-violet-500 transition-colors text-sm"
-                    />
-                  </div>
-
+                  {/* ③ DeepSeek */}
                   <div className="mt-5 pt-4 border-t border-[#333]">
                     <h3 className="text-sm font-semibold text-gray-200 mb-2">DeepSeek</h3>
                     <label className="text-xs text-gray-500 block mb-1">DeepSeek API Key</label>
@@ -5781,10 +5695,119 @@ export default function App() {
                     <label className="text-xs text-gray-500 block mb-1">DeepSeek Base URL</label>
                     <input
                       type="text"
+                      readOnly
                       value={deepSeekBaseInput}
-                      onChange={(e) => setDeepSeekBaseInput(e.target.value)}
                       placeholder={DEFAULT_DEEPSEEK_BASE_URL}
-                      className="w-full bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-cyan-600 transition-colors text-sm"
+                      className="w-full bg-[#252525] border border-[#333] rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
+                    />
+                  </div>
+
+                  {/* ④ ToAPIs */}
+                  <div className="mt-5 pt-4 border-t border-[#333]">
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">ToAPIs</h3>
+                    <label className="text-xs text-gray-500 block mb-1">接口类型</label>
+                    <select
+                      value={aiProvider}
+                      onChange={(e) => {
+                        const p = e.target.value as AiProvider;
+                        setAiProvider(p);
+                        const s = getAiSettingsSnapshot();
+                        setApiKeyInput(p === 'gemini' ? s.geminiKey : s.openAiKey);
+                      }}
+                      className="w-full mb-3 bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="openai-compatible">OpenAI 兼容（Bearer / sk-）</option>
+                      <option value="gemini">Google Gemini</option>
+                    </select>
+                    <label className="text-xs text-gray-500 block mb-1">ToAPIs Base URL</label>
+                    <input
+                      type="text"
+                      readOnly
+                      value={openAiBaseInput}
+                      placeholder={DEFAULT_OPENAI_BASE_URL}
+                      className="w-full mb-3 bg-[#252525] border border-[#333] rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
+                    />
+                    {aiProvider === 'openai-compatible' ? (
+                      <>
+                        <label className="text-xs text-gray-500 block mb-1">ToAPIs API Key</label>
+                        <input
+                          type="password"
+                          value={apiKeyInput}
+                          onChange={(e) => setApiKeyInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              persistAiSettings({
+                                provider: aiProvider,
+                                openAiApiKey: apiKeyInput.trim(),
+                                openAiBaseUrl: openAiBaseInput.trim() || DEFAULT_OPENAI_BASE_URL,
+                                junlanApiKey: junlanKeyInput.trim(),
+                                junlanBaseUrl: junlanBaseInput.trim() || DEFAULT_JUNLAN_BASE_URL,
+                                codesonlineApiKey: codesonlineKeyInput.trim(),
+                                codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
+                                newApiApiKey: newApiKeyInput.trim(),
+                                newApiBaseUrl: newApiBaseInput.trim(),
+                                deepSeekApiKey: deepSeekKeyInput.trim(),
+                                deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
+                              });
+                              initGeminiClientFromStorage();
+                              setShowSettingsModal(false);
+                            }
+                          }}
+                          placeholder="sk-..."
+                          className="w-full bg-[#121212] border border-[#444] rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <label className="text-xs text-gray-500 block mb-1">Gemini API Key</label>
+                        <input
+                          type="password"
+                          value={apiKeyInput}
+                          onChange={(e) => setApiKeyInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              persistAiSettings({
+                                provider: aiProvider,
+                                geminiApiKey: apiKeyInput.trim(),
+                                openAiBaseUrl: openAiBaseInput.trim() || DEFAULT_OPENAI_BASE_URL,
+                                junlanApiKey: junlanKeyInput.trim(),
+                                junlanBaseUrl: junlanBaseInput.trim() || DEFAULT_JUNLAN_BASE_URL,
+                                codesonlineApiKey: codesonlineKeyInput.trim(),
+                                codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
+                                newApiApiKey: newApiKeyInput.trim(),
+                                newApiBaseUrl: newApiBaseInput.trim(),
+                                deepSeekApiKey: deepSeekKeyInput.trim(),
+                                deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
+                              });
+                              initGeminiClientFromStorage();
+                              setShowSettingsModal(false);
+                            }
+                          }}
+                          placeholder="AIza..."
+                          className="w-full bg-[#121212] border border-[#444] rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
+                        />
+                      </>
+                    )}
+                  </div>
+
+                  {/* ⑤ New API */}
+                  <div className="mt-5 pt-4 border-t border-[#333]">
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">New API</h3>
+                    <label className="text-xs text-gray-500 block mb-1">New API Base URL</label>
+                    <input
+                      type="text"
+                      readOnly
+                      value={newApiBaseInput}
+                      placeholder={DEFAULT_NEWAPI_BASE_URL}
+                      className="w-full mb-3 bg-[#252525] border border-[#333] rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
+                    />
+                    <label className="text-xs text-gray-500 block mb-1">New API Key</label>
+                    <input
+                      type="password"
+                      value={newApiKeyInput}
+                      onChange={(e) => setNewApiKeyInput(e.target.value)}
+                      placeholder="sk-..."
+                      className="w-full bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-violet-500 transition-colors text-sm"
                     />
                   </div>
 
