@@ -896,6 +896,15 @@ async function jpegBase64ToPngBlob(base64: string): Promise<Blob> {
   });
 }
 
+async function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result));
+    fr.onerror = () => reject(new Error('无法读取参考图'));
+    fr.readAsDataURL(blob);
+  });
+}
+
 async function postJsonAtBase<T>(base: string, path: string, body: unknown, apiKey: string): Promise<T> {
   if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key，请在设置中选择「OpenAI 兼容」并填写密钥。');
   const fetchBase = rewriteRemoteOpenAiCompatBaseForBrowserCors(base);
@@ -1028,8 +1037,8 @@ async function generateImagesAtOpenAiCompatibleBase(
 }
 
 /**
- * 云智 / 部分 New API 对 `/v1/images/edits` 可能返回 404（仅开放 generations 图生图）。
- * 依次尝试：multipart `image[]` → `image` → JSON `/images/generations` 并带参考图 base64。
+ * 云智 / 部分 New API 对 `/v1/images/edits` 可能返回 404。
+ * 回退到 `/images/generations` 时：裸 base64 常被忽略（结果像纯文生图），须优先 data URI、image_urls、与 edits 一致的 PNG multipart。
  */
 async function editImagesNewApiFireflyWithRouteFallback(
   baseNorm: string,
@@ -1045,7 +1054,9 @@ async function editImagesNewApiFireflyWithRouteFallback(
   const size = aspectRatioToOpenAiSize(aspectRatio, resolvedEditModel);
   const enhancedPrompt = buildPromptWithDimensions(prompt, aspectRatio);
   const pngBlob = await jpegBase64ToPngBlob(base64Images[0]);
-  const rawB64 = parseBase64ImageInput(base64Images[0]).raw;
+  const parsedRef = parseBase64ImageInput(base64Images[0]);
+  const rawB64 = parsedRef.raw;
+  const refDataUrl = `data:${parsedRef.mime || 'image/jpeg'};base64,${parsedRef.raw}`;
   const results: string[] = [];
   const count = Math.min(Math.max(numberOfImages, 1), 4);
   const url = `${rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm)}/images/edits`;
@@ -1082,23 +1093,51 @@ async function editImagesNewApiFireflyWithRouteFallback(
       }
     }
     if (!done) {
+      const refAnchoredPrompt = `【请以上传的参考图像为输入基准，不得忽略。】\n\n${enhancedPrompt}`;
+      const refPngDataUrl = await blobToDataUrl(pngBlob);
+      const genUrl = `${rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm)}/images/generations`;
+      let multipartOk = false;
+      for (const useBracket of [true, false] as const) {
+        const form = new FormData();
+        form.append('model', resolvedEditModel);
+        form.append('prompt', refAnchoredPrompt);
+        form.append('n', '1');
+        form.append('size', size);
+        form.append('response_format', 'b64_json');
+        if (useBracket) form.append('image[]', pngBlob, 'ref.png');
+        else form.append('image', pngBlob, 'ref.png');
+        const res = await fetch(genUrl, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${apiKey}` },
+          body: form,
+          signal,
+        });
+        const text = await res.text();
+        if (res.ok) {
+          const json = JSON.parse(text) as unknown;
+          results.push(await openAiStyleGenerationJsonToBase64(json, signal, apiKey));
+          multipartOk = true;
+          break;
+        }
+        if (res.status !== 404) {
+          throw new Error(
+            `图生图接口错误 (${res.status})${openAiCompatFailureHint(res.status, 'image-edit')}: ${text.slice(0, 800)}`
+          );
+        }
+      }
+      if (multipartOk) continue;
+
+      // 裸 base64 常被网关忽略→仅按 prompt 文生图；需 data URI 或 image_urls（与 ToAPIs 习惯一致）
       const tryBodies: Record<string, unknown>[] = [
-        {
-          model: resolvedEditModel,
-          prompt: enhancedPrompt,
-          n: 1,
-          size,
-          response_format: 'b64_json',
-          image: rawB64,
-        },
-        {
-          model: resolvedEditModel,
-          prompt: enhancedPrompt,
-          n: 1,
-          size,
-          response_format: 'b64_json',
-          images: [rawB64],
-        },
+        { model: resolvedEditModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: [refPngDataUrl] },
+        { model: resolvedEditModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image_urls: [refPngDataUrl] },
+        { model: resolvedEditModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: refPngDataUrl },
+        { model: resolvedEditModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: [refDataUrl] },
+        { model: resolvedEditModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: refDataUrl },
+        { model: resolvedEditModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', images: [refDataUrl] },
+        { model: resolvedEditModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image_urls: [refDataUrl] },
+        { model: resolvedEditModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: rawB64 },
+        { model: resolvedEditModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', images: [rawB64] },
       ];
       let lastErr: Error | null = null;
       for (const body of tryBodies) {
