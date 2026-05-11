@@ -8,6 +8,7 @@ import {
   getJunlanSavedKey,
   getOpenAiBaseUrl,
   getOpenAiSavedKey,
+  normalizeDeepSeekChatModelId,
   setGeminiKey,
 } from './aiSettings';
 import {
@@ -22,8 +23,8 @@ import {
 } from './openaiCompatibleService';
 
 function isDeepSeekChatModelId(modelName: string): boolean {
-  const m = (modelName || '').trim();
-  return m === 'deepseek-chat' || m === 'deepseek-reasoner' || m.startsWith('deepseek-');
+  const m = normalizeDeepSeekChatModelId(modelName).trim();
+  return m === 'deepseek-v4-flash' || m === 'deepseek-v4-pro' || m.startsWith('deepseek-v4-');
 }
 
 /** 对话走君澜 OpenAI 兼容网关（与 ToAPIs 主通道分离，使用设置中的君澜 Base URL + Key） */
@@ -316,7 +317,7 @@ export const callGeminiChatWithHistory = async (
       return chatCompletionHistoryAtBase(
         base,
         key,
-        modelName,
+        normalizeDeepSeekChatModelId(modelName).trim(),
         slice.map((t) => ({
           role: t.role,
           content: t.content,

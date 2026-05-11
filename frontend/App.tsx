@@ -3,10 +3,12 @@ import { CanvasNode, Edge, Transform, Tool, NodeType, Annotation, AnnotationNode
 import type { AiProvider } from './services/aiSettings';
 import {
   DEFAULT_DEEPSEEK_BASE_URL,
+  DEFAULT_DEEPSEEK_CHAT_MODEL_ID,
   DEFAULT_JUNLAN_BASE_URL,
   DEFAULT_NEWAPI_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
   getAiSettingsSnapshot,
+  normalizeDeepSeekChatModelId,
   getJunlanSavedKey,
   getNewApiSavedKey,
   migrateAiSettingsIfLegacy,
@@ -1057,7 +1059,7 @@ export default function App() {
     'panoramaT2i': { width: 480, height: 560 },
     'annotation': { width: 560, height: 480 },
     'director3d': { width: 600, height: 520 },
-    'chat': { width: 360, height: 720 },
+    'chat': { width: 720, height: 1440 },
     'text': { width: 280, height: 200 },
     'image': { width: 320, height: 300 },
     'gridSplit': { width: 420, height: 300 },
@@ -1070,7 +1072,7 @@ export default function App() {
     image: { width: 280, height: 260 },
     gridSplit: { width: 360, height: 280 },
     gridMerge: { width: 360, height: 280 },
-    chat: { width: 300, height: 560 },
+    chat: { width: 600, height: 1120 },
   };
 
   // 重置节点大小
@@ -3070,7 +3072,14 @@ export default function App() {
       // 3D导演台节点特有属性
       ...(type === 'director3d' ? { backgroundImage: '', yaw: 0, pitch: 0, fov: 75, figures: [], selectedFigureId: undefined } : {}),
       // 对话节点特有属性
-      ...(type === 'chat' ? { messages: [], model: 'deepseek-chat', isGenerating: false, chatInputHeight: 152 } : {}),
+      ...(type === 'chat'
+        ? {
+            messages: [],
+            model: DEFAULT_DEEPSEEK_CHAT_MODEL_ID,
+            isGenerating: false,
+            chatInputHeight: Math.round(304 * CHAT_PANEL_FONT_SCALE),
+          }
+        : {}),
       ...(type === 'video'
         ? {
             videos: [],
@@ -3338,7 +3347,10 @@ export default function App() {
         },
       ];
 
-      const response = await callGeminiChatWithHistory(apiTurns, node.model || 'deepseek-chat');
+      const response = await callGeminiChatWithHistory(
+        apiTurns,
+        normalizeDeepSeekChatModelId(node.model || DEFAULT_DEEPSEEK_CHAT_MODEL_ID).trim()
+      );
 
       const assistantMessage: ChatMessage = {
         id: `msg-${Date.now()}-assistant`,
@@ -9230,14 +9242,18 @@ function RefPickBar({
   slots,
   disabled,
   onInsert,
+  uiScale = 1,
 }: {
   slots: IncomingRefSlot[];
   disabled?: boolean;
   onInsert: (token: string) => void;
+  /** 仅 AI 对话节点传 1.5；其它节点默认 1 */
+  uiScale?: number;
 }) {
   if (!slots.length) return null;
+  const sp = (px: number) => Math.round(px * uiScale);
   return (
-    <div className="flex flex-wrap items-center gap-1 px-0.5 pt-1 text-[10px]">
+    <div className="flex flex-wrap items-center gap-1 px-0.5 pt-1" style={{ fontSize: sp(10) }}>
       <span className="text-gray-500 shrink-0">引用参考</span>
       {slots.map((s) => (
         <button
@@ -9261,6 +9277,8 @@ function RefPickBar({
 }
 
 // ==================== 对话节点组件 ====================
+/** AI 对话节点界面文字相对原设计的倍数（与「字号」存盘值相乘） */
+const CHAT_PANEL_FONT_SCALE = 1.5;
 const CHAT_FONT_LS_KEY = 'wxcanvas-chat-font-px';
 function clampChatFontPx(n: number): number {
   if (!Number.isFinite(n)) return 14;
@@ -9578,9 +9596,20 @@ function ChatNodeContent({
     }
   }, []);
 
+  const fs = (px: number) => Math.round(px * CHAT_PANEL_FONT_SCALE);
+  const chatFontScaled = fs(chatFontPx);
+
   useEffect(() => {
     if (node.isGenerating) setEditingUserMessageId(null);
   }, [node.isGenerating]);
+
+  /** 旧 DeepSeek 模型 id 写入画布数据后，打开节点时升级为官方 V4 命名 */
+  useEffect(() => {
+    const m = (node.model || '').trim();
+    if (m === 'deepseek-chat' || m === 'deepseek-reasoner') {
+      onUpdate({ model: DEFAULT_DEEPSEEK_CHAT_MODEL_ID });
+    }
+  }, [node.id, node.model, onUpdate]);
 
   const messages = node.messages || [];
 
@@ -9608,7 +9637,7 @@ function ChatNodeContent({
         reason: '未填写 DeepSeek 密钥、密钥无效，或 OpenAI 兼容未指向 DeepSeek。',
         fixes: [
           { label: '打开 API 设置', action: () => onOpenApiSettings() },
-          { label: '切换到 DeepSeek Chat', action: () => onUpdate({ model: 'deepseek-chat', error: undefined }) },
+          { label: '切换到 DeepSeek-V4-Flash', action: () => onUpdate({ model: DEFAULT_DEEPSEEK_CHAT_MODEL_ID, error: undefined }) },
           { label: '切换到 GPT-5.5（君澜）', action: () => onUpdate({ model: 'gpt-5.5-junlan', error: undefined }) },
           { label: '清除报错', action: () => onUpdate({ error: undefined }) },
         ],
@@ -9647,7 +9676,7 @@ function ChatNodeContent({
       title: 'API 错误',
       reason: '接口鉴权、服务状态或响应格式异常。',
       fixes: [
-        { label: '切换到 DeepSeek Chat', action: () => onUpdate({ model: 'deepseek-chat', error: undefined }) },
+        { label: '切换到 DeepSeek-V4-Flash', action: () => onUpdate({ model: DEFAULT_DEEPSEEK_CHAT_MODEL_ID, error: undefined }) },
         { label: '切换到 GPT-5.5（君澜）', action: () => onUpdate({ model: 'gpt-5.5-junlan', error: undefined }) },
         { label: '切换到 Gemini 2.5 Flash', action: () => onUpdate({ model: 'gemini-2.5-flash', error: undefined }) },
         { label: '打开 API 设置', action: () => onOpenApiSettings() },
@@ -9659,7 +9688,7 @@ function ChatNodeContent({
   return (
     <div className="flex flex-col h-full bg-[#1a1a1a] rounded-b-xl overflow-hidden">
       {/* 参考区：图片 + 视频 */}
-      <div className="flex items-center gap-2 px-2 py-1.5 bg-[#252525] border-b border-[#333] text-[10px] shrink-0">
+      <div className="flex items-center gap-2 px-2 py-1.5 bg-[#252525] border-b border-[#333] shrink-0" style={{ fontSize: fs(10) }}>
         <span className="text-gray-400 shrink-0">参考:</span>
         <span className="text-green-400 font-medium shrink-0">
           {refSlots.filter((s) => s.kind === 'image').length}图
@@ -9667,30 +9696,30 @@ function ChatNodeContent({
             <span className="text-amber-400"> · {refSlots.filter((s) => s.kind === 'video').length}视频</span>
           ) : null}
         </span>
-        <div className="flex gap-1 ml-1 flex-wrap max-w-[220px]">
+        <div className="flex gap-1 ml-1 flex-wrap max-w-[330px]">
           {(showAllRefs ? refSlots : refSlots.slice(0, 6)).map((slot) => (
             <div key={`${slot.edgeId}-slot-${slot.n}`} className="relative group">
-              <div className="absolute -top-0.5 left-0 z-[1] rounded bg-black/70 px-0.5 text-[7px] font-bold leading-none text-cyan-300">
+              <div className="absolute -top-0.5 left-0 z-[1] rounded bg-black/70 px-0.5 font-bold leading-none text-cyan-300" style={{ fontSize: fs(7) }}>
                 R{slot.n}
               </div>
               {slot.kind === 'image' && slot.imageBase64 ? (
                 <OptimizedImage
                   base64={slot.imageBase64}
-                  maxSide={128}
+                  maxSide={192}
                   quality={0.72}
                   alt={slot.label}
-                  className="w-6 h-6 object-cover rounded border border-[#444]"
+                  className="w-9 h-9 object-cover rounded border border-[#444]"
                 />
               ) : slot.kind === 'video' && slot.videoUrl ? (
                 <video
                   src={slot.videoUrl}
-                  className="h-6 w-6 rounded border border-[#444] object-cover"
+                  className="h-9 w-9 rounded border border-[#444] object-cover"
                   muted
                   playsInline
                   preload="metadata"
                 />
               ) : (
-                <div className="h-6 w-6 rounded border border-[#444] bg-[#333]" title={slot.label} />
+                <div className="h-9 w-9 rounded border border-[#444] bg-[#333]" title={slot.label} />
               )}
               <button
                 onPointerDown={(e) => {
@@ -9703,7 +9732,7 @@ function ChatNodeContent({
                 className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-red-600 text-white opacity-0 transition-opacity hover:bg-red-500 group-hover:opacity-100"
                 title="取消引用"
               >
-                <span className="text-[6px] leading-none">×</span>
+                <span className="leading-none" style={{ fontSize: fs(6) }}>×</span>
               </button>
             </div>
           ))}
@@ -9728,22 +9757,22 @@ function ChatNodeContent({
           className={`ml-auto shrink-0 rounded px-2 py-0.5 text-white ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
           title={eyedropperTargetNodeId === node.id ? '取消吸取' : '吸取参考（图片 / 视频节点）'}
         >
-          <EyedropperIcon size={12} />
+          <EyedropperIcon size={fs(12)} />
         </button>
       </div>
 
       {/* 模型选择 */}
-      <div className="flex items-center gap-2 px-3 py-2 bg-[#252525] border-b border-[#333]">
-        <span className="text-xs text-gray-400">模型:</span>
+      <div className="flex items-center gap-2 px-3 py-2 bg-[#252525] border-b border-[#333]" style={{ fontSize: fs(12) }}>
+        <span className="text-gray-400">模型:</span>
         <select
-          className="bg-[#121212] border border-[#444] rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-rose-500 max-w-[220px]"
-          value={node.model || 'deepseek-chat'}
+          className="bg-[#121212] border border-[#444] rounded px-2 py-1 text-gray-300 outline-none focus:border-rose-500 max-w-[330px]"
+          value={normalizeDeepSeekChatModelId(node.model || DEFAULT_DEEPSEEK_CHAT_MODEL_ID).trim()}
           onChange={(e) => onUpdate({ model: e.target.value })}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <optgroup label="DeepSeek（OpenAI 兼容）">
-            <option value="deepseek-chat">DeepSeek Chat（默认）</option>
-            <option value="deepseek-reasoner">DeepSeek Reasoner</option>
+          <optgroup label="DeepSeek（OpenAI 兼容 · api.deepseek.com/v1）">
+            <option value="deepseek-v4-flash">DeepSeek-V4-Flash</option>
+            <option value="deepseek-v4-pro">DeepSeek-V4-Pro</option>
           </optgroup>
           <optgroup label="君澜 AI（OpenAI 兼容）">
             <option value="gpt-5.5-junlan">GPT-5.5（君澜 · www.junlanai.com/v1）</option>
@@ -9756,10 +9785,11 @@ function ChatNodeContent({
           <option value="gemini-3-pro-preview">Gemini 3 Pro</option>
           </optgroup>
         </select>
-        <label className="flex items-center gap-1 shrink-0 text-[10px] text-gray-500">
+        <label className="flex items-center gap-1 shrink-0 text-gray-500" style={{ fontSize: fs(10) }}>
           <span className="whitespace-nowrap">字号</span>
           <select
-            className="max-w-[76px] rounded border border-[#444] bg-[#121212] px-1 py-0.5 text-[10px] text-gray-200 outline-none focus:border-rose-500"
+            className="max-w-[76px] rounded border border-[#444] bg-[#121212] px-1 py-0.5 text-gray-200 outline-none focus:border-rose-500"
+            style={{ fontSize: fs(10) }}
             value={chatFontPx}
             onChange={(e) => persistChatFontPx(Number(e.target.value))}
             onPointerDown={(e) => e.stopPropagation()}
@@ -9778,7 +9808,7 @@ function ChatNodeContent({
           className="ml-auto p-1.5 rounded text-white transition-colors bg-[#333] hover:bg-red-600 disabled:opacity-30 disabled:hover:bg-[#333] disabled:cursor-not-allowed"
           title="清除对话"
         >
-          <TrashIcon size={14} />
+          <TrashIcon size={fs(14)} />
         </button>
       </div>
 
@@ -9790,7 +9820,7 @@ function ChatNodeContent({
       >
         <style>{`
           .chat-messages::-webkit-scrollbar {
-            width: 6px;
+            width: ${fs(6)}px;
           }
           .chat-messages::-webkit-scrollbar-track {
             background: #1a1a1a;
@@ -9805,10 +9835,10 @@ function ChatNodeContent({
           }
         `}</style>
         {messages.length === 0 && (
-          <div className="text-center text-gray-500 py-8" style={{ fontSize: chatFontPx }}>
+          <div className="text-center text-gray-500 py-8" style={{ fontSize: chatFontScaled }}>
             输入问题，AI将为你解答
             {refSlots.length > 0 && (
-              <div className="mt-2 text-cyan-400" style={{ fontSize: Math.max(11, chatFontPx - 1) }}>
+              <div className="mt-2 text-cyan-400" style={{ fontSize: fs(Math.max(11, chatFontPx - 1)) }}>
                 已连接 {refSlots.length} 条参考（含图/视频），可用下方按钮插入 @R 引用
               </div>
             )}
@@ -9828,17 +9858,17 @@ function ChatNodeContent({
                   ? 'bg-blue-600 text-white'
                   : 'bg-[#2a2a2a] text-gray-200'
               }`}
-                style={{ fontSize: chatFontPx }}
+                style={{ fontSize: chatFontScaled }}
               onPointerDown={(e) => e.stopPropagation()}
             >
               {(msg.images?.length ? msg.images : msg.image ? [msg.image] : []).map((im, ii) => (
                 <OptimizedImage
                   key={`${msg.id}-img-${ii}`}
                   base64={im}
-                  maxSide={140}
+                  maxSide={210}
                   quality={0.56}
                   alt="用户参考图"
-                  className={`${ii ? 'mt-1 ' : ''}mb-2 h-16 w-16 rounded object-cover`}
+                  className={`${ii ? 'mt-1 ' : ''}mb-2 h-24 w-24 rounded object-cover`}
                 />
               ))}
                 {editingThis ? (
@@ -9847,8 +9877,8 @@ function ChatNodeContent({
                       value={editUserDraft}
                       onChange={(e) => setEditUserDraft(e.target.value)}
                       rows={5}
-                      className="w-full min-h-[120px] rounded-md bg-black/25 border border-white/35 px-2 py-1.5 text-white outline-none focus:border-white/60"
-                      style={{ fontSize: chatFontPx }}
+                      className="w-full min-h-[180px] rounded-md bg-black/25 border border-white/35 px-2 py-1.5 text-white outline-none focus:border-white/60"
+                      style={{ fontSize: chatFontScaled }}
                       onPointerDown={(e) => e.stopPropagation()}
                     />
                     <div className="mt-2 flex flex-wrap justify-end gap-2">
@@ -9860,7 +9890,7 @@ function ChatNodeContent({
                           setEditingUserMessageId(null);
                         }}
                         className="rounded bg-white/15 px-2 py-1 hover:bg-white/25"
-                        style={{ fontSize: Math.max(10, chatFontPx - 2) }}
+                        style={{ fontSize: fs(Math.max(10, chatFontPx - 2)) }}
                       >
                         取消
                       </button>
@@ -9876,7 +9906,7 @@ function ChatNodeContent({
                           setEditingUserMessageId(null);
                         }}
                         className="rounded bg-white/90 px-2 py-1 font-medium text-blue-800 hover:bg-white"
-                        style={{ fontSize: Math.max(10, chatFontPx - 2) }}
+                        style={{ fontSize: fs(Math.max(10, chatFontPx - 2)) }}
                       >
                         保存并重新生成
                       </button>
@@ -9911,7 +9941,7 @@ function ChatNodeContent({
                             ? 'rounded border border-white/25 bg-white/10 px-2 py-0.5 opacity-90 hover:bg-white/20'
                             : 'rounded px-2 py-0.5 opacity-50 hover:opacity-100'
                         }
-                        style={{ fontSize: Math.max(10, chatFontPx - 2) }}
+                        style={{ fontSize: fs(Math.max(10, chatFontPx - 2)) }}
                         title="复制"
                       >
                         复制
@@ -9926,7 +9956,7 @@ function ChatNodeContent({
                             setEditUserDraft(msg.content);
                           }}
                           className="rounded border border-white/40 bg-white/15 px-2 py-0.5 font-medium hover:bg-white/25"
-                          style={{ fontSize: Math.max(10, chatFontPx - 2) }}
+                          style={{ fontSize: fs(Math.max(10, chatFontPx - 2)) }}
                           title="修改本条提问并重新生成之后的回复"
                         >
                           编辑
@@ -9943,13 +9973,13 @@ function ChatNodeContent({
           <div className="flex justify-start">
             <div
               className="bg-[#2a2a2a] rounded-lg p-3 text-gray-400 flex flex-col gap-1"
-              style={{ fontSize: chatFontPx }}
+              style={{ fontSize: chatFontScaled }}
             >
               <span className="flex items-center gap-2">
-                <LoaderIcon size={14} /> 思考中…
+                <LoaderIcon size={fs(14)} /> 思考中…
               </span>
               {generationMmSs != null && (
-                <span className="tabular-nums text-gray-500" style={{ fontSize: Math.max(10, chatFontPx - 1) }}>
+                <span className="tabular-nums text-gray-500" style={{ fontSize: fs(Math.max(10, chatFontPx - 1)) }}>
                   已用时 {generationMmSs}
                   {generationSeconds != null ? ` · ${generationSeconds} 秒` : ''}
                 </span>
@@ -9961,7 +9991,7 @@ function ChatNodeContent({
           <div className="flex justify-start">
             <div
               className="bg-red-950/90 rounded-lg p-2.5 text-red-200 border border-red-900/60 max-w-[92%]"
-              style={{ fontSize: chatFontPx }}
+              style={{ fontSize: chatFontScaled }}
             >
               <div className="font-bold mb-1">{chatErrorDiagnosis.title}</div>
               <div className="text-red-100/90 mb-1">{chatErrorDiagnosis.reason}</div>
@@ -9985,8 +10015,8 @@ function ChatNodeContent({
       {/* 输入区域 */}
       <div className="p-2 bg-[#252525] border-t border-[#333] shrink-0">
         {/* 快捷功能：置于文字输入框上方 */}
-        <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-md border border-[#333] bg-[#222] px-2 py-1.5">
-          <span className="shrink-0 text-[10px] text-gray-500">功能</span>
+        <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-md border border-[#333] bg-[#222] px-2 py-1.5" style={{ fontSize: fs(10) }}>
+          <span className="shrink-0 text-gray-500">功能</span>
           {CHAT_FEATURE_BUTTON_SPECS.map((btn) => {
             const presetBody = promptPresets[btn.presetKey] ?? '';
             return (
@@ -9999,15 +10029,15 @@ function ChatNodeContent({
                 e.stopPropagation();
                 onUpdate({ prompt: presetBody, error: undefined });
               }}
-              className="inline-flex items-center gap-0.5 rounded-md border border-rose-800/55 bg-rose-950/45 px-2 py-0.5 text-[10px] font-medium text-rose-100 hover:bg-rose-900/55 disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex items-center gap-0.5 rounded-md border border-rose-800/55 bg-rose-950/45 px-2 py-0.5 font-medium text-rose-100 hover:bg-rose-900/55 disabled:cursor-not-allowed disabled:opacity-40"
               title={btn.title}
             >
               {btn.icon === 'wand' ? (
-                <WandIcon size={11} />
+                <WandIcon size={fs(11)} />
               ) : btn.icon === 'message' ? (
-                <MessageIcon size={11} />
+                <MessageIcon size={fs(11)} />
               ) : (
-                <VideoIcon size={11} />
+                <VideoIcon size={fs(11)} />
               )}
               {btn.label}
             </button>
@@ -10017,6 +10047,7 @@ function ChatNodeContent({
         <RefPickBar
           slots={refSlots}
           disabled={node.isGenerating}
+          uiScale={CHAT_PANEL_FONT_SCALE}
           onInsert={(tok) => {
             const el = chatPromptRef.current;
             const cur = node.prompt || '';
@@ -10038,8 +10069,12 @@ function ChatNodeContent({
         <div className="flex gap-2">
           <textarea
             ref={chatPromptRef}
-            className="flex-1 min-h-[108px] bg-[#121212] text-gray-200 p-2.5 rounded border border-[#444] focus:outline-none focus:border-rose-500 resize-y"
-            style={{ fontSize: chatFontPx, height: node.chatInputHeight || 152 }}
+            className="flex-1 bg-[#121212] text-gray-200 p-2.5 rounded border border-[#444] focus:outline-none focus:border-rose-500 resize-y"
+            style={{
+              fontSize: chatFontScaled,
+              minHeight: fs(108),
+              height: node.chatInputHeight ?? fs(152),
+            }}
             value={node.prompt || ''}
             onChange={(e) => onUpdate({ prompt: e.target.value })}
             onKeyDown={handleKeyDown}
@@ -10047,8 +10082,8 @@ function ChatNodeContent({
             onPointerDown={(e) => e.stopPropagation()}
             onPointerUp={(e) => {
               e.stopPropagation();
-              const nextHeight = Math.max(108, Math.round((e.currentTarget as HTMLTextAreaElement).offsetHeight));
-              if (nextHeight !== (node.chatInputHeight || 152)) {
+              const nextHeight = Math.max(fs(108), Math.round((e.currentTarget as HTMLTextAreaElement).offsetHeight));
+              if (nextHeight !== (node.chatInputHeight ?? fs(152))) {
                 onUpdate({ chatInputHeight: nextHeight });
               }
             }}
@@ -10061,7 +10096,7 @@ function ChatNodeContent({
             disabled={node.isGenerating || !node.prompt?.trim()}
             className="px-3 rounded bg-rose-600 hover:bg-rose-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white flex items-center justify-center"
           >
-            <SendIcon size={14} />
+            <SendIcon size={fs(14)} />
           </button>
         </div>
       </div>

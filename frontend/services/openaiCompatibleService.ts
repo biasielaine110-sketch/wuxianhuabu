@@ -1,4 +1,6 @@
 import {
+  DEFAULT_DEEPSEEK_CHAT_MODEL_ID,
+  normalizeDeepSeekChatModelId,
   getAiProvider,
   getJunlanBaseUrl,
   getJunlanSavedKey,
@@ -1421,9 +1423,10 @@ function resolveChatModelForBase(baseNormalized: string, modelName: string): str
     return 'gemini-3-pro-preview';
   }
   if (isDeepSeekHost(baseNormalized)) {
-    if (m === 'deepseek-chat' || m === 'deepseek-reasoner') return m;
-    if (m.startsWith('deepseek-')) return m;
-    return 'deepseek-chat';
+    const nm = normalizeDeepSeekChatModelId(m).trim();
+    if (nm === 'deepseek-v4-flash' || nm === 'deepseek-v4-pro') return nm;
+    if (nm.startsWith('deepseek-v4-')) return nm;
+    return DEFAULT_DEEPSEEK_CHAT_MODEL_ID;
   }
   if (m.startsWith('gpt-') || m.startsWith('o1') || m.startsWith('o3')) return m;
   if (m.startsWith('deepseek-')) return m;

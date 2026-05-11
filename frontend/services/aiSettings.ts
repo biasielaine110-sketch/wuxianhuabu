@@ -18,6 +18,16 @@ export const DEFAULT_OPENAI_BASE_URL = 'https://toapis.com/v1';
 export const DEFAULT_JUNLAN_BASE_URL = 'https://www.junlanai.com/v1';
 /** DeepSeek 官方 OpenAI 兼容入口 */
 export const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1';
+/** 画布「AI 对话」默认 DeepSeek 模型（与 {@link DEFAULT_DEEPSEEK_BASE_URL} 配合；官方 ID：deepseek-v4-flash / deepseek-v4-pro） */
+export const DEFAULT_DEEPSEEK_CHAT_MODEL_ID = 'deepseek-v4-flash';
+
+/** 旧版存盘中的 model id → 当前官方命名（不在界面展示旧名） */
+export function normalizeDeepSeekChatModelId(modelId: string): string {
+  const m = (modelId || '').trim();
+  if (m === 'deepseek-chat' || m === 'deepseek-reasoner') return DEFAULT_DEEPSEEK_CHAT_MODEL_ID;
+  return m;
+}
+
 /** New API（Firefly *-newapi 画布模型）OpenAI 兼容根路径；含 /v1 */
 export const DEFAULT_NEWAPI_BASE_URL = 'https://yunzhi-ai.top/v1';
 
