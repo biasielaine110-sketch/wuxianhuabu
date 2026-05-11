@@ -612,19 +612,6 @@ type SettingsPresetPwdIntent =
   | { type: 'delete'; name: string }
   | { type: 'add' };
 
-function settingsPresetPwdIntentLabel(intent: SettingsPresetPwdIntent): string {
-  switch (intent.type) {
-    case 'copy':
-      return '复制预设全文到剪贴板';
-    case 'rename':
-      return `重命名预设「${intent.name}」`;
-    case 'delete':
-      return `删除预设「${intent.name}」`;
-    case 'add':
-      return '添加新预设';
-  }
-}
-
 function I2iPresetCategorySelect({
   nodeId,
   activePreset,
@@ -1096,13 +1083,14 @@ export default function App() {
     }
     nodeDragAccumRef.current = null;
 
-    const node = nodes.find((n) => n.id === nodeId);
+    const node = nodesRef.current.find((n) => n.id === nodeId);
     if (!node) return;
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const scale = Math.max(transform.scale, 0.1);
-    const grabCanvasX = (e.clientX - rect.left - transform.x) / scale;
-    const grabCanvasY = (e.clientY - rect.top - transform.y) / scale;
+    const tf = transformRef.current;
+    const scale = Math.max(tf.scale, 0.1);
+    const grabCanvasX = (e.clientX - rect.left - tf.x) / scale;
+    const grabCanvasY = (e.clientY - rect.top - tf.y) / scale;
     const minSize = MIN_NODE_SIZES[node.type] || { width: 200, height: 150 };
     nodeResizeSessionRef.current = {
       nodeId,
@@ -1120,7 +1108,7 @@ export default function App() {
     setResizeDirection(direction);
     setIsResizing(true);
     lastMousePosRef.current = { x: e.clientX, y: e.clientY };
-  }, [nodes, transform]);
+  }, []);
 
   // 兼容旧数据：防止历史项目中的宫格节点过小导致内容显示不全
   useEffect(() => {
@@ -2891,6 +2879,13 @@ export default function App() {
 
   const handleNodePointerDown = (e: React.PointerEvent, id: string) => {
     if (e.button === 2 || fullscreenImage) return;
+
+    const targetEl = e.target as HTMLElement | null;
+    /** 节点内表单控件：不应触发整块节点拖拽（否则调整下拉/输入时窗口会跟着「飞」） */
+    const isInteractiveSurface =
+      !!targetEl?.closest(
+        'input, textarea, select, button, a, [role="button"], [role="slider"], [role="listbox"], [contenteditable="true"]'
+      );
     
     // 如果正在拖拽其他节点，取消当前拖拽并切换到新节点
     if (activePointerTypeRef.current === 'node' && draggingNodeIdRef.current !== id) {
@@ -2927,15 +2922,19 @@ export default function App() {
           setSelectedIds([id]);
         }
       }
+
+      setContextMenu(null);
+
+      if (isInteractiveSurface) {
+        return;
+      }
       
-      // 开始拖拽
+      // 开始拖拽（标题栏与节点空白区域）
       setDraggingNodeId(id);
       draggingNodeIdRef.current = id;
       activePointerTypeRef.current = 'node';
       lastMousePosRef.current = { x: e.clientX, y: e.clientY };
       nodeDragAccumRef.current = null;
-      
-      setContextMenu(null);
     }
   };
 
@@ -5560,7 +5559,6 @@ export default function App() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="w-[200px] shrink-0 bg-[#171717] border-r border-[#333] p-3 flex flex-col gap-2">
-              <div className="text-xs text-gray-500 px-2 py-1">设置</div>
               <button
                 onClick={() => {
                   setSettingsPresetAuthSession(false);
@@ -5630,11 +5628,6 @@ export default function App() {
               <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1 -mr-1">
               {settingsTab === 'api' && (
                 <div>
-                  <p className="text-gray-400 text-sm mb-3">
-                    选择接口类型：<span className="text-gray-300">OpenAI 兼容</span>为主通道：使用 <span className="text-gray-300">sk-...</span> 密钥与 Base URL（默认 ToAPIs <span className="text-gray-300">https://toapis.com/v1</span>）。「GPT Image 2（君澜 AI）」与对话「GPT-5.5（君澜）」走下方<span className="text-gray-300">君澜 AI</span>；「Firefly Nano Banana *（New API）」走下方<span className="text-gray-300">New API</span>，均与 ToAPIs 主通道密钥分离。New API 文档见{' '}
-                    <a href="https://docs.newapi.pro/zh/docs/api" target="_blank" rel="noreferrer" className="text-cyan-400 hover:underline">docs.newapi.pro</a>
-                    。若选 <span className="text-gray-300">Google Gemini</span>，请使用 <span className="text-gray-300">AIza...</span> 密钥。
-                  </p>
                   <label className="text-xs text-gray-500 block mb-1">接口类型</label>
                   <select
                     value={aiProvider}
@@ -5651,7 +5644,7 @@ export default function App() {
                   </select>
                   {aiProvider === 'openai-compatible' && (
                     <>
-                      <label className="text-xs text-gray-500 block mb-1">Base URL（须含 /v1，可只填域名自动补全）</label>
+                      <label className="text-xs text-gray-500 block mb-1">Base URL</label>
                       <input
                         type="text"
                         value={openAiBaseInput}
@@ -5662,7 +5655,7 @@ export default function App() {
                     </>
                   )}
                   <label className="text-xs text-gray-500 block mb-1">
-                    {aiProvider === 'gemini' ? 'Gemini API Key' : 'API Key（sk-...）'}
+                    {aiProvider === 'gemini' ? 'Gemini API Key' : 'API Key'}
                   </label>
                   <input
                     type="password"
@@ -5691,10 +5684,7 @@ export default function App() {
                   />
 
                   <div className="mt-5 pt-4 border-t border-[#333]">
-                    <h3 className="text-sm font-semibold text-gray-200 mb-2">君澜 AI · GPT Image 2 / 对话 GPT-5.5（可选）</h3>
-                    <p className="text-gray-500 text-xs mb-2">
-                      文生图 / 图生图选「GPT Image 2（君澜 AI）」或对话节点选「GPT-5.5（君澜）」时使用；请求发往君澜 OpenAI 兼容网关（Base URL 须含 <span className="text-gray-400">/v1</span>，默认 <span className="text-gray-400">https://www.junlanai.com/v1</span>）。勿把密钥提交到代码仓库。
-                    </p>
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">君澜 AI</h3>
                     <label className="text-xs text-gray-500 block mb-1">君澜 Base URL</label>
                     <input
                       type="text"
@@ -5703,7 +5693,7 @@ export default function App() {
                       placeholder={DEFAULT_JUNLAN_BASE_URL}
                       className="w-full mb-3 bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-600 transition-colors text-sm"
                     />
-                    <label className="text-xs text-gray-500 block mb-1">君澜 API Key（sk-...）</label>
+                    <label className="text-xs text-gray-500 block mb-1">君澜 API Key</label>
                     <input
                       type="password"
                       value={junlanKeyInput}
@@ -5714,23 +5704,7 @@ export default function App() {
                   </div>
 
                   <div className="mt-5 pt-4 border-t border-[#333]">
-                    <h3 className="text-sm font-semibold text-gray-200 mb-2">New API · Firefly 文生图 / 图生图 / 视频生成（可选）</h3>
-                    <p className="text-gray-500 text-xs mb-2">
-                      当节点选择「Firefly Nano Banana *（New API）」图模型，或视频节点中选择带「（New API）」后缀的视频模型（如 Grok
-                      Imagine Video、Firefly Veo / Sora / Kling 等）时使用；Base URL 仍填实际上游地址（如{' '}
-                      <span className="text-gray-400">https://yunzhi-ai.top/v1</span>）。对{' '}
-                      <span className="text-gray-400">yunzhi-ai.top</span> 本站会自动经同源路径转发，避免浏览器 CORS。与 ToAPIs、君澜密钥分开保存。
-                      <span className="text-gray-600">
-                        {' '}
-                        云智上 Firefly 视频（Veo / Sora / Kling）与官方视频文档一致，走{' '}
-                        <span className="text-gray-400">/v1/chat/completions</span> 流式；Grok Imagine 等仍走异步 video 任务接口。
-                      </span>
-                      <span className="text-gray-600"> Vercel 部署：项目 Root 为仓库根时用根目录 vercel.json；Root 为 </span>
-                      <span className="text-gray-400">frontend</span>
-                      <span className="text-gray-600">
-                        时必须包含本仓库的 frontend/vercel.json 与 frontend/api/yunzhi-proxy/v1/… 各路由文件（Vercel 非 Next 不支持 api 下多段 [...] catch-all，否则 /api/yunzhi-proxy/v1/chat/completions 会 404）。
-                      </span>
-                    </p>
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">New API</h3>
                     <label className="text-xs text-gray-500 block mb-1">New API Base URL</label>
                     <input
                       type="text"
@@ -5739,7 +5713,7 @@ export default function App() {
                       placeholder={DEFAULT_NEWAPI_BASE_URL}
                       className="w-full mb-3 bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-violet-500 transition-colors text-sm"
                     />
-                    <label className="text-xs text-gray-500 block mb-1">New API Key（sk-...）</label>
+                    <label className="text-xs text-gray-500 block mb-1">New API Key</label>
                     <input
                       type="password"
                       value={newApiKeyInput}
@@ -5750,11 +5724,7 @@ export default function App() {
                   </div>
 
                   <div className="mt-5 pt-4 border-t border-[#333]">
-                    <h3 className="text-sm font-semibold text-gray-200 mb-2">DeepSeek 对话（可选）</h3>
-                    <p className="text-gray-500 text-xs mb-2">
-                      在「AI 对话」节点选择 <span className="text-gray-400">DeepSeek</span> 模型时使用。官方 Base URL 一般为{' '}
-                      <span className="text-gray-400">{DEFAULT_DEEPSEEK_BASE_URL}</span>。若已在上方选择 OpenAI 兼容且 Base URL 指向 DeepSeek，可不填此处密钥，对话仍会走兼容配置。
-                    </p>
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">DeepSeek</h3>
                     <label className="text-xs text-gray-500 block mb-1">DeepSeek API Key</label>
                     <input
                       type="password"
@@ -5807,18 +5777,6 @@ export default function App() {
 
               {settingsTab === 'presets' && (
                 <div className="space-y-4">
-                  <p className="text-[11px] text-gray-500 leading-relaxed">
-                    预设按顶层分类：
-                    <span className="text-gray-400"> AI对话</span>（与对话节点「功能」按钮共用全文）、
-                    <span className="text-gray-400"> 文生图</span>、
-                    <span className="text-gray-400"> 图生图</span>（其下再分角色/场景/道具/其他，与图生图节点下拉一致）。
-                    <span className="text-gray-600"> 每行可调整「大类」；仅大类为图生图时「图生图类」生效。</span>
-                    <span className="block mt-1 text-amber-600/90">
-                      {settingsPresetAuthSession
-                        ? '已通过密码验证：当前可编辑提示词，复制/重命名/删除不再弹密码。完成后可点下方「恢复密码保护」。'
-                        : '提示词默认灰色只读；首次点「复制 / 重命名 / 删除 / 添加」会弹出密码框，验证通过后本会话内可直接编辑且上述按钮不再要求密码。'}
-                    </span>
-                  </p>
                   {settingsPresetAuthSession && (
                     <button
                       type="button"
@@ -5899,24 +5857,8 @@ export default function App() {
                       return true;
                     });
                     entries.sort(([a], [b]) => a.localeCompare(b, 'zh-Hans-CN'));
-                    const domainLabel =
-                      PRESET_DOMAIN_TAB_OPTIONS.find((d) => d.id === settingsPresetDomainTab)?.label ?? '';
-                    const subLabel =
-                      settingsPresetDomainTab === 'i2i'
-                        ? I2I_PRESET_CATEGORY_OPTIONS.find((c) => c.id === settingsPresetCategoryTab)?.label ?? ''
-                        : null;
                     return (
                       <div className="rounded-lg border border-[#333] bg-[#141414] p-3 space-y-2 min-h-[120px]">
-                        <div className="text-xs text-gray-500 pb-2 border-b border-[#2a2a2a]">
-                          当前：<span className="text-amber-400/95 font-semibold">{domainLabel}</span>
-                          {subLabel ? (
-                            <>
-                              <span className="text-gray-600"> · </span>
-                              <span className="text-cyan-400/95 font-semibold">{subLabel}</span>
-                            </>
-                          ) : null}
-                          <span className="ml-2 text-gray-600">{entries.length} 项</span>
-                        </div>
                         {entries.length === 0 ? (
                           <p className="text-[11px] text-gray-600 py-4 text-center">该分类下暂无预设</p>
                         ) : (
@@ -5943,7 +5885,6 @@ export default function App() {
                                   ) : (
                                     <div
                                       className="w-full h-20 select-none rounded border border-[#2a2a2a] bg-[#0a0a0a] p-2 text-xs leading-snug text-gray-500 pointer-events-none overflow-hidden whitespace-pre-wrap break-words shadow-[inset_0_0_0_1px_rgba(0,0,0,0.35)]"
-                                      title="已锁定：请先通过密码验证（点复制/重命名/删除/添加之一）"
                                     >
                                       {content || '（无内容）'}
                                     </div>
@@ -6074,13 +6015,9 @@ export default function App() {
 
               {settingsTab === 'downloads' && (
                 <div className="space-y-4 text-sm text-gray-300">
-                  <p className="text-[11px] text-gray-500 leading-relaxed">
-                    使用浏览器 <span className="text-gray-400">File System Access API</span>（推荐 Chrome / Edge，页面为 HTTPS 或 localhost）。
-                    勾选「固定目录」并选择文件夹后，画布内下载图片/视频将自动写入该目录；不勾选时每次下载会弹出「另存为」由您选择路径（若浏览器支持）。
-                  </p>
                   {!supportsFileSystemAccess() && (
                     <p className="text-xs text-amber-600/95 rounded border border-amber-800/50 bg-amber-950/30 px-3 py-2">
-                      当前环境不支持目录选择 API，无法保存固定文件夹；下载将尽量使用「另存为」或浏览器默认下载。
+                      当前环境不支持目录选择 API。
                     </p>
                   )}
                   <label className="flex items-start gap-2 cursor-pointer">
@@ -6095,12 +6032,7 @@ export default function App() {
                         saveDownloadPathSettings(next);
                       }}
                     />
-                    <span>
-                      <span className="font-medium text-gray-200">启用固定下载目录</span>
-                      <span className="block text-[11px] text-gray-500 mt-0.5">
-                        勾选后请先点击下方按钮选择保存文件夹；下载图片/视频时自动保存到该路径（若权限被拒绝会回退为另存为）。
-                      </span>
-                    </span>
+                    <span className="font-medium text-gray-200">启用固定下载目录</span>
                   </label>
                   <label className={`flex items-start gap-2 ${downloadPathSettings.enabled ? 'cursor-pointer' : 'opacity-40 pointer-events-none'}`}>
                     <input
@@ -6115,25 +6047,20 @@ export default function App() {
                         saveDownloadPathSettings(next);
                       }}
                     />
-                    <span>
-                      <span className="font-medium text-gray-200">图片与视频使用不同文件夹</span>
-                      <span className="block text-[11px] text-gray-500 mt-0.5">
-                        不勾选则图片与视频共用同一个目录；勾选后需分别选择「图片目录」与「视频目录」。
-                      </span>
-                    </span>
+                    <span className="font-medium text-gray-200">图片与视频使用不同文件夹</span>
                   </label>
 
                   <div className="rounded-lg border border-[#333] bg-[#141414] p-4 space-y-3">
                     {!downloadPathSettings.separateImageVideo ? (
                       <div>
-                        <div className="text-xs text-gray-400 mb-2">统一目录（图片 + 视频）</div>
+                        <div className="text-xs text-gray-400 mb-2">统一目录</div>
                         <div className="text-[11px] text-gray-500 mb-2 min-h-[1.25rem]">
                           {downloadDirLabels.combined ? (
                             <span className="text-cyan-400/90">已选：{downloadDirLabels.combined}</span>
                           ) : (
                             <span>未选择</span>
-              )}
-            </div>
+                          )}
+                        </div>
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
@@ -6157,8 +6084,8 @@ export default function App() {
                           >
                             清除
                           </button>
-          </div>
-        </div>
+                        </div>
+                      </div>
                     ) : (
                       <div className="space-y-4">
                         <div>
@@ -6232,23 +6159,11 @@ export default function App() {
                       </div>
                     )}
                   </div>
-
-                  <p className="text-[11px] text-gray-600 leading-relaxed">
-                    未勾选「启用固定下载目录」时：每次点击下载会弹出系统「另存为」对话框（若浏览器支持）；不支持时则使用浏览器默认下载行为。
-                  </p>
-      </div>
+                </div>
               )}
 
               {settingsTab === 'credits' && (
                 <div className="space-y-4">
-                  <p className="text-[11px] text-gray-500 leading-relaxed">
-                    在此维护各模型与分辨率档位的<strong className="text-gray-400">积分标价</strong>（默认已填入图生图常用项）。数据保存在本机浏览器。
-                    <span className="block mt-1 text-amber-600/90">
-                      {settingsCreditsAuthSession
-                        ? '当前已解锁：可编辑表格、添加或删除行。完成后请点「恢复锁定」。'
-                        : '表格默认锁定为只读；请先点「解锁编辑（需密码）」，密码与「预设」页的管理密码相同。'}
-                    </span>
-                  </p>
                   {settingsCreditsAuthSession ? (
                     <button
                       type="button"
@@ -6323,7 +6238,6 @@ export default function App() {
                                     )
                                   )
                                 }
-                                placeholder="如 2k/4k"
                                 className="w-full rounded border border-[#444] bg-[#121212] px-2 py-1.5 text-white placeholder-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
                               />
                             </td>
@@ -6392,10 +6306,7 @@ export default function App() {
             className="w-full max-w-[400px] rounded-xl border border-amber-700/45 bg-[#1a1a1a] p-5 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-sm font-semibold text-white mb-1">请输入预设操作密码</h3>
-            <p className="text-[11px] text-amber-200/80 mb-3 leading-relaxed">
-              {settingsPresetPwdIntentLabel(settingsPresetPwdModal.intent)}
-            </p>
+            <h3 className="text-sm font-semibold text-white mb-3">请输入预设操作密码</h3>
             <label className="text-[10px] text-gray-500 block mb-1">密码</label>
             <input
               type="password"
@@ -6412,7 +6323,6 @@ export default function App() {
                   confirmSettingsPresetPassword();
                 }
               }}
-              placeholder="输入密码后点确定"
             />
             <div className="mt-4 flex justify-end gap-2">
               <button
@@ -6444,10 +6354,7 @@ export default function App() {
             className="w-full max-w-[400px] rounded-xl border border-amber-700/45 bg-[#1a1a1a] p-5 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-sm font-semibold text-white mb-1">解锁积分消耗编辑</h3>
-            <p className="text-[11px] text-amber-200/80 mb-3 leading-relaxed">
-              验证通过后可编辑模型名称、分辨率说明与积分，并可添加或删除行。密码与「预设」页相同。
-            </p>
+            <h3 className="text-sm font-semibold text-white mb-3">解锁积分消耗编辑</h3>
             <label className="text-[10px] text-gray-500 block mb-1">密码</label>
             <input
               type="password"
@@ -6464,7 +6371,6 @@ export default function App() {
                   confirmSettingsCreditsPassword();
                 }
               }}
-              placeholder="输入密码后点确定"
             />
             <div className="mt-4 flex justify-end gap-2">
               <button

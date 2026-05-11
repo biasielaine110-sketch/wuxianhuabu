@@ -6,6 +6,9 @@
   "functions": {
     "api/yunzhi-proxy/**/*.js": {
       "maxDuration": 300
+    },
+    "api/yunzhi-proxy/[...slug].js": {
+      "maxDuration": 300
     }
   },
   "headers": [
