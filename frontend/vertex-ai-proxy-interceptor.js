@@ -145,7 +145,9 @@
             p.startsWith('/cdn-files-toapis') ||
             p.startsWith('/cdn-files-dashlyai') ||
             p.startsWith('/api-proxy') ||
-            p.startsWith('/ws-proxy')
+            p.startsWith('/ws-proxy') ||
+            p.startsWith('/yunzhi-openai') ||
+            p.startsWith('/api/yunzhi')
           ) {
             return originalFetch(url, options);
           }
