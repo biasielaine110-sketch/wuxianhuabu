@@ -54,6 +54,9 @@ function openAiCompatFailureHint(status: number, kind: 'generations-json' | 'ima
       ? '（503：上游不可用，或该网关不支持当前 OpenAI 同步文生图格式；若使用 ToAPIs，请把 Base URL 设为 https://toapis.com/v1 。云智长耗时流式接口若经 Vercel 部署，请使用含 api/yunzhi-proxy/ 路径代理的仓库版本，以免边缘 rewrite 超时。）'
       : '（503：上游不可用或暂时过载。）';
   }
+  if (status === 413) {
+    return '（413：请求体过大；经本站代理时单次 JSON 不宜超过约 4MB。已自动尝试上传参考图 URL 与压缩；若仍失败请换更小参考图或检查云智是否开放 /v1/uploads/images。）';
+  }
   return '';
 }
 
@@ -272,6 +275,106 @@ function base64ToBlob(raw: string, mime: string): Blob {
   const bytes = new Uint8Array(len);
   for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
   return new Blob([bytes], { type: mime || 'image/jpeg' });
+}
+
+/**
+ * 云智文档建议压缩参考图；经本站 /api/yunzhi-proxy 转发时 JSON 过大易 413（Vercel FUNCTION_PAYLOAD_TOO_LARGE）。
+ * 将任意参考图压为 JPEG data URL，长边不超过 maxSide。
+ */
+async function shrinkBase64ImageToJpegDataUrl(
+  base64Input: string,
+  maxSide: number,
+  jpegQuality: number
+): Promise<string> {
+  const { raw, mime } = parseBase64ImageInput(base64Input);
+  const src = `data:${mime || 'image/jpeg'};base64,${raw}`;
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const w = img.naturalWidth;
+      const h = img.naturalHeight;
+      if (!w || !h) {
+        reject(new Error('参考图尺寸无效'));
+        return;
+      }
+      const scale = Math.min(1, maxSide / Math.max(w, h));
+      const cw = Math.max(1, Math.round(w * scale));
+      const ch = Math.max(1, Math.round(h * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = cw;
+      canvas.height = ch;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('无法创建画布'));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, cw, ch);
+      canvas.toBlob(
+        blob => {
+          if (!blob) {
+            reject(new Error('JPEG 编码失败'));
+            return;
+          }
+          const fr = new FileReader();
+          fr.onload = () => resolve(String(fr.result));
+          fr.onerror = () => reject(new Error('读取编码结果失败'));
+          fr.readAsDataURL(blob);
+        },
+        'image/jpeg',
+        jpegQuality
+      );
+    };
+    img.onerror = () => reject(new Error('参考图解码失败'));
+    img.src = src;
+  });
+}
+
+/**
+ * 云智 chat/completions 图生图/视频参考图：优先上传得公网 URL（请求体小，避免代理 413），失败则压缩为 JPEG data URI。
+ * @see 云智API调用文档.md（参考图 base64；建议压缩）
+ */
+async function buildYunzhiChatContentImageParts(
+  baseNorm: string,
+  apiKey: string,
+  base64Images: string[],
+  uploadNamePrefix: string,
+  signal?: AbortSignal
+): Promise<Array<{ type: 'image_url'; image_url: { url: string } }>> {
+  const key = apiKey.trim();
+  const out: Array<{ type: 'image_url'; image_url: { url: string } }> = [];
+  const maxSide = 1536;
+  const jpegQ = 0.82;
+  for (let i = 0; i < base64Images.length; i++) {
+    assertNotAborted(signal);
+    const img = base64Images[i];
+    let uploaded: string | null = null;
+    if (key) {
+      try {
+        const parsed = parseBase64ImageInput(img);
+        const blob = base64ToBlob(parsed.raw, parsed.mime || 'image/jpeg');
+        const mimeStr = String(parsed.mime || '').toLowerCase();
+        const ext = mimeStr.includes('png')
+          ? 'png'
+          : mimeStr.includes('webp')
+            ? 'webp'
+            : mimeStr.includes('gif')
+              ? 'gif'
+              : 'jpg';
+        uploaded = await openAiCompatUploadImageBlob(baseNorm, key, blob, `${uploadNamePrefix}-${i}.${ext}`, signal);
+      } catch {
+        uploaded = null;
+      }
+    }
+    const u = uploaded?.trim() ?? '';
+    if (u && /^https?:\/\//i.test(u)) {
+      out.push({ type: 'image_url', image_url: { url: u } });
+      continue;
+    }
+    const dataUrl = await shrinkBase64ImageToJpegDataUrl(img, maxSide, jpegQ);
+    out.push({ type: 'image_url', image_url: { url: dataUrl } });
+  }
+  return out;
 }
 
 /** JSON generations 请求体是否含公网 URL 参考图（多数网关仅在此情况下真正绑定参考图） */
@@ -958,15 +1061,13 @@ async function yunzhiNewApiCanvasVideoGenerateViaChatCompletions(params: {
 
   const content: Array<
     { type: 'image_url'; image_url: { url: string } } | { type: 'text'; text: string }
-  > = [];
-  for (const img of params.referenceImagesBase64.filter(Boolean).slice(0, 6)) {
-    const parsed = parseBase64ImageInput(img);
-    const mime = parsed.mime || 'image/jpeg';
-    content.push({
-      type: 'image_url',
-      image_url: { url: `data:${mime};base64,${parsed.raw}` },
-    });
-  }
+  > = await buildYunzhiChatContentImageParts(
+    params.baseNorm,
+    params.apiKey,
+    params.referenceImagesBase64.filter(Boolean).slice(0, 6),
+    'yunzhi-video-ref',
+    params.signal
+  );
   const text = (params.prompt || '').trim() || ' ';
   content.push({ type: 'text', text });
 
@@ -1458,7 +1559,9 @@ async function yunzhiOpenAiCompatStreamChatCompletionsToUrl(
   });
   if (!res.ok) {
     const t = await res.text();
-    throw new Error(`${label} (${res.status}): ${t.slice(0, 800)}`);
+    const hint =
+      res.status === 413 ? openAiCompatFailureHint(413, 'generations-json') : '';
+    throw new Error(`${label} (${res.status}): ${t.slice(0, 800)}${hint}`);
   }
   if (!res.body) throw new Error(`${label}：响应不支持流式读取。`);
   const reader = res.body.getReader();
@@ -1563,15 +1666,13 @@ async function editImagesYunzhiNewApiFireflyViaChatCompletions(params: {
   const yAr = yunzhiChatDocAspectRatio(aspectRatio);
   const yQ = yunzhiChatDocQuality(nodeResolution);
   const count = Math.min(Math.max(numberOfImages, 1), 4);
-  const imageParts: Array<{ type: 'image_url'; image_url: { url: string } }> = [];
-  for (const img of base64Images.slice(0, 6)) {
-    const parsed = parseBase64ImageInput(img);
-    const mime = parsed.mime || 'image/jpeg';
-    imageParts.push({
-      type: 'image_url',
-      image_url: { url: `data:${mime};base64,${parsed.raw}` },
-    });
-  }
+  const imageParts = await buildYunzhiChatContentImageParts(
+    baseNorm,
+    apiKey,
+    base64Images.slice(0, 6),
+    'yunzhi-i2i',
+    signal
+  );
   const results: string[] = [];
   for (let i = 0; i < count; i++) {
     assertNotAborted(signal);
