@@ -19,16 +19,16 @@ import {
 import {
   loadProjectLibrary,
   saveProjectLibrary,
-  buildProjectZipBlob,
   exportProjectZipToDisk,
-  overwriteProjectZipFileHandle,
   parseProjectFromZipFile,
   sanitizeFilename,
   CANVAS_LIBRARY_IDB_LABELS,
 } from './services/projectPersistence';
 import {
   getProjectBackupFileHandle,
+  getProjectDraftDirectoryHandle,
   persistProjectBackupFileHandle,
+  persistProjectDraftDirectoryHandle,
   removeProjectBackupFileHandle,
 } from './services/projectBackupHandleStore';
 import type { CanvasProjectSnapshot } from './services/projectPersistence';
@@ -56,6 +56,7 @@ import {
   saveDownloadPathSettings,
   saveImageDownload,
   saveVideoDownloadFromUrl,
+  setActiveProjectDraftDownloadDirectory,
   supportsFileSystemAccess,
 } from './services/downloadPathSettings';
 import type { CreditPricingRow } from './services/creditPricingSettings';
@@ -376,6 +377,20 @@ function sanitizeDraftStoragePathNote(raw: string | undefined): string {
   const cut = candidates.length ? Math.min(...candidates) : -1;
   return cut > 0 ? s.slice(0, cut).trim() : s;
 }
+
+type DraftDiskModalState =
+  | null
+  | {
+      mode: 'firstSave';
+      mergedProjects: CanvasProject[];
+      pid: string;
+      basenameDraft: string;
+    }
+  | {
+      mode: 'saveAs';
+      snapshot: CanvasProject;
+      basenameDraft: string;
+    };
 
 type CanvasHistoryEntry = {
   nodes: CanvasNode[];
@@ -804,6 +819,9 @@ export default function App() {
   /** 最近一次用户选择的磁盘覆盖目标：JSON 另存为 或 ZIP 另存为 */
   const lastDiskWriteFormatRef = useRef<'json' | 'zip' | null>(null);
   const [lastJsonFilename, setLastJsonFilename] = useState<string>('');
+  const draftDiskFlowResolveRef = useRef<((v: boolean) => void) | null>(null);
+  const draftDiskModalRef = useRef<DraftDiskModalState>(null);
+  const [draftDiskModal, setDraftDiskModal] = useState<DraftDiskModalState>(null);
 
   /** 与画布/项目 state 同步，供保存与列表操作读取「最新」快照，避免闭包滞后 */
   const activeProjectIdRef = useRef(activeProjectId);
@@ -821,6 +839,10 @@ export default function App() {
     nodesRef.current = nodes;
   }, [nodes]);
   useEffect(() => { edgesRef.current = edges; }, [edges]);
+
+  useEffect(() => {
+    draftDiskModalRef.current = draftDiskModal;
+  }, [draftDiskModal]);
 
   useEffect(() => {
     setCenterTitleEditValue(null);
@@ -1348,13 +1370,12 @@ export default function App() {
   /**
    * 本地存档策略（简要）：
    * - 画布上的 nodes / edges / transform 只在内存中实时变化；
-   * - 「保存当前画布 / Ctrl+S」：合并进当前项目并写入 **IndexedDB**；若该项目尚未在本机完成过「本地 JSON 备份路径」选择，会先弹出另存为（支持 File System Access API 的浏览器），成功后立即写入草稿；取消则仍写入草稿库、下次手动保存会再次询问；
-   * - **Ctrl+Alt+S（⌘+⌥+S）**：若已绑定 **JSON** 或 **ZIP** 文件句柄则覆盖写入；**首次**（尚无句柄或句柄失效）时弹出系统「另存为」，默认文件名为导出基名（与项目名/草稿名一致）的 `.json`，您可改扩展名为 `.zip` / `.wxcanvas.zip` 保存为 ZIP；完成后绑定，下次 Ctrl+Alt+S 即覆盖该文件；
-   * - 「定时自动保存」：可在项目管理里设为每 5 / 10 / 30 分钟静默覆盖草稿（IndexedDB），仅在**已完成首次本地备份路径**后生效，不会弹出另存为；
-   * - 「草稿名称」：可选 `draftTitle`，默认同项目名；用于顶栏展示与导出 JSON/ZIP 默认文件名；
-   * - 「导出 JSON / ZIP」成功也会标记已选过本地备份，避免与首次另存为重复弹窗；
-   * - 首次打开会从旧版 **localStorage** 自动迁移到 IndexedDB，迁移后删除旧键；
-   * - 「新建 / 导入 / 删除 / 重命名」：会更新草稿库；可 **导出 .wxcanvas.zip** 或 JSON 作可移植备份；
+   * - 「保存当前画布 / Ctrl+S」：写入 IndexedDB；若该项目尚未绑定本地草稿 JSON，会先弹出对话框填写文件名并选择保存文件夹（Chrome / Edge）；确认后绑定句柄，项目名下展示草稿位置；取消则仍只写草稿库；
+   * - 已绑定草稿后：**Ctrl+S** 会同步覆盖绑定的 JSON；**Ctrl+Alt+S（⌘+⌥+S）** 为「另存 JSON」（选文件夹 + 文件名），不改变当前绑定的主草稿；
+   * - 「定时自动保存」：已绑定草稿的项目打开时默认每 **5** 分钟静默保存（IndexedDB + 覆盖绑定 JSON）；可在项目管理里改为关闭或其它间隔；
+   * - 图片 / 视频下载在已选择草稿文件夹时，默认写入该文件夹（无需在设置里启用固定目录）；
+   * - 「导出 JSON / ZIP」仍可通过菜单另存；导出 JSON 也会标记已做过磁盘备份；
+   * - 首次打开会从旧版 localStorage 迁移到 IndexedDB；
    * - 「切换项目」：先保存当前画布到原项目，再载入目标项目。
    */
   const createNewProject = useCallback((name?: string) => {
@@ -1392,52 +1413,92 @@ export default function App() {
     });
   }, []);
 
-  const saveCurrentProject = useCallback((options?: { skipDiskPrompt?: boolean }): Promise<boolean> => {
-    const pid = activeProjectIdRef.current;
-    if (!pid) {
-      alert('项目数据仍在加载，请稍后再试保存。');
-      return Promise.resolve(false);
-    }
-    const nextProjects = mergeCurrentCanvasIntoProjectList(
-      projectsRef.current,
-      pid,
-      nodesRef.current,
-      edgesRef.current,
-      transformRef.current
-    );
-    const cur = nextProjects.find((p) => p.id === pid);
-    const needsDiskPrompt = !options?.skipDiskPrompt && cur != null && !cur.diskSaveEstablished;
-
-    const commitToIdb = (list: CanvasProject[]): Promise<boolean> => {
-      setProjects(list);
-      projectsRef.current = list;
-      return saveProjectLibrary(list, pid).then((ok) => {
-        if (!ok) {
-          alert('保存失败：无法写入 IndexedDB 草稿库。请检查存储权限或尝试导出 ZIP/JSON 备份。');
-        } else {
-      persistWarningShownRef.current = false;
+  const flushBoundDraftJsonToDisk = useCallback(
+    async (
+      pid: string,
+      list: CanvasProject[],
+      opts?: { alertOnFailure?: boolean }
+    ): Promise<void> => {
+      const p = list.find((x) => x.id === pid);
+      if (!p?.diskSaveEstablished || lastDiskWriteFormatRef.current !== 'json') return;
+      let h = lastJsonFileHandleRef.current as FileSystemFileHandle | null;
+      if (!h) {
+        const fetched = await getProjectBackupFileHandle(pid);
+        h = fetched ?? null;
+        lastJsonFileHandleRef.current = h;
+      }
+      if (!h) return;
+      try {
+        const forWrite = { ...p };
+        delete (forWrite as { diskSaveEstablished?: boolean }).diskSaveEstablished;
+        const json = JSON.stringify(forWrite, null, 2);
+        const writable = await h.createWritable();
+        await writable.write(json);
+        await writable.close();
+        setLastJsonFilename(h.name || '');
+      } catch (e) {
+        console.warn('[canvas] 覆盖本地草稿 JSON 失败', e);
+        if (opts?.alertOnFailure) {
+          alert('草稿库已更新，但覆盖本地 JSON 草稿失败（文件可能被移动或无写入权限）。');
         }
-        return ok;
+      }
+    },
+    []
+  );
+
+  const saveCurrentProject = useCallback(
+    (options?: { skipDiskPrompt?: boolean }): Promise<boolean> => {
+      const pid = activeProjectIdRef.current;
+      if (!pid) {
+        alert('项目数据仍在加载，请稍后再试保存。');
+        return Promise.resolve(false);
+      }
+      const nextProjects = mergeCurrentCanvasIntoProjectList(
+        projectsRef.current,
+        pid,
+        nodesRef.current,
+        edgesRef.current,
+        transformRef.current
+      );
+      const cur = nextProjects.find((p) => p.id === pid);
+      const needsDiskPrompt = !options?.skipDiskPrompt && cur != null && !cur.diskSaveEstablished;
+
+      const commitToIdb = (list: CanvasProject[]): Promise<boolean> => {
+        setProjects(list);
+        projectsRef.current = list;
+        return saveProjectLibrary(list, pid).then((ok) => {
+          if (!ok) {
+            alert('保存失败：无法写入 IndexedDB 草稿库。请检查存储权限或尝试导出 ZIP/JSON 备份。');
+          } else {
+            persistWarningShownRef.current = false;
+          }
+          return ok;
+        });
+      };
+
+      if (!needsDiskPrompt) {
+        return (async () => {
+          const ok = await commitToIdb(nextProjects);
+          if (!ok) return false;
+          await flushBoundDraftJsonToDisk(pid, nextProjects, {
+            alertOnFailure: !options?.skipDiskPrompt,
+          });
+          return true;
+        })();
+      }
+
+      return new Promise<boolean>((resolve) => {
+        draftDiskFlowResolveRef.current = resolve;
+        setDraftDiskModal({
+          mode: 'firstSave',
+          mergedProjects: nextProjects,
+          pid,
+          basenameDraft: projectExportBasename(cur as CanvasProject),
+        });
       });
-    };
-
-    if (!needsDiskPrompt) {
-      return commitToIdb(nextProjects);
-    }
-
-    return (async () => {
-      const snapshot = cur as CanvasProject;
-      const filename = `${projectExportBasename(snapshot)}.json`;
-      const payload = { ...snapshot };
-      delete (payload as { diskSaveEstablished?: boolean }).diskSaveEstablished;
-      const diskResult = await saveJsonToDisk(filename, payload, { backupProjectId: pid });
-      const listAfterDisk =
-        diskResult === 'saved'
-          ? nextProjects.map((p) => (p.id === pid ? { ...p, diskSaveEstablished: true as const } : p))
-          : nextProjects;
-      return commitToIdb(listAfterDisk);
-    })();
-  }, [saveJsonToDisk]);
+    },
+    [flushBoundDraftJsonToDisk]
+  );
 
   const saveCurrentProjectRef = useRef(saveCurrentProject);
   useEffect(() => {
@@ -1457,6 +1518,28 @@ export default function App() {
     return () => clearInterval(timer);
   }, [projectStoreReady, autosaveIntervalMin]);
 
+  useEffect(() => {
+    if (!projectStoreReady || !activeProjectId) return;
+    const pid = activeProjectId;
+    void getProjectDraftDirectoryHandle(pid).then((dir) => {
+      setActiveProjectDraftDownloadDirectory(dir ?? null);
+    });
+    const p = projectsRef.current.find((x) => x.id === pid);
+    if (p?.diskSaveEstablished) {
+      setAutosaveIntervalMin((p.draftAutosaveIntervalMin ?? 5) as 0 | 5 | 10 | 20 | 30);
+    } else {
+      try {
+        const v = localStorage.getItem('wxcanvas-autosave-interval-min');
+        if (v === '0') setAutosaveIntervalMin(0);
+        else if (v === '5' || v === '10' || v === '20' || v === '30')
+          setAutosaveIntervalMin(Number(v) as 5 | 10 | 20 | 30);
+        else setAutosaveIntervalMin(20);
+      } catch {
+        setAutosaveIntervalMin(20);
+      }
+    }
+  }, [projectStoreReady, activeProjectId]);
+
   const handleAutosaveIntervalChange = useCallback((v: 0 | 5 | 10 | 20 | 30) => {
     setAutosaveIntervalMin(v);
     try {
@@ -1464,6 +1547,158 @@ export default function App() {
       else localStorage.setItem('wxcanvas-autosave-interval-min', String(v));
     } catch {
       /* ignore */
+    }
+    const pid = activeProjectIdRef.current;
+    const cur = projectsRef.current.find((x) => x.id === pid);
+    if (cur?.diskSaveEstablished) {
+      setProjects((prev) => {
+        const next = prev.map((p) =>
+          p.id === pid ? { ...p, draftAutosaveIntervalMin: v, updatedAt: Date.now() } : p
+        );
+        projectsRef.current = next;
+        void saveProjectLibrary(next, pid);
+        return next;
+      });
+    }
+  }, []);
+
+  const cancelDraftDiskModal = useCallback(() => {
+    const modal = draftDiskModalRef.current;
+    if (modal?.mode === 'firstSave') {
+      const resolve = draftDiskFlowResolveRef.current;
+      draftDiskFlowResolveRef.current = null;
+      setDraftDiskModal(null);
+      const { mergedProjects, pid } = modal;
+      void (async () => {
+        setProjects(mergedProjects);
+        projectsRef.current = mergedProjects;
+        const ok = await saveProjectLibrary(mergedProjects, pid);
+        if (!ok) alert('保存失败：无法写入 IndexedDB 草稿库。');
+        else persistWarningShownRef.current = false;
+        resolve?.(false);
+      })();
+      return;
+    }
+    draftDiskFlowResolveRef.current = null;
+    setDraftDiskModal(null);
+  }, []);
+
+  const confirmDraftDiskModal = useCallback(async () => {
+    const modal = draftDiskModalRef.current;
+    if (!modal) return;
+
+    const snap =
+      modal.mode === 'firstSave'
+        ? modal.mergedProjects.find((p) => p.id === modal.pid)
+        : modal.snapshot;
+    if (!snap) {
+      alert('无法保存：项目数据无效。');
+      return;
+    }
+
+    const defaultStem = projectExportBasename(snap);
+    const raw = modal.basenameDraft.trim();
+    const stem = sanitizeFilename((raw || defaultStem).replace(/\.json$/i, ''));
+    const filename = `${stem}.json`;
+
+    const payload = { ...snap };
+    delete (payload as { diskSaveEstablished?: boolean }).diskSaveEstablished;
+    const json = JSON.stringify(payload, null, 2);
+
+    const w = window as unknown as {
+      showDirectoryPicker?: (opts?: { mode?: 'readwrite' }) => Promise<FileSystemDirectoryHandle>;
+      showSaveFilePicker?: (opts: {
+        suggestedName?: string;
+        types?: { description: string; accept: Record<string, string[]> }[];
+      }) => Promise<FileSystemFileHandle>;
+    };
+
+    let fileHandle: FileSystemFileHandle;
+    let dirHandle: FileSystemDirectoryHandle | null = null;
+
+    try {
+      if (typeof w.showDirectoryPicker === 'function') {
+        dirHandle = await w.showDirectoryPicker({ mode: 'readwrite' });
+        fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+      } else if (typeof w.showSaveFilePicker === 'function') {
+        fileHandle = await w.showSaveFilePicker({
+          suggestedName: filename,
+          types: [{ description: 'JSON 文件', accept: { 'application/json': ['.json'] } }],
+        });
+      } else {
+        alert('当前浏览器不支持选择保存文件夹，请使用 Chrome / Edge（HTTPS 或 localhost）。');
+        return;
+      }
+
+      const writable = await fileHandle.createWritable();
+      await writable.write(json);
+      await writable.close();
+    } catch (e: unknown) {
+      if ((e as { name?: string })?.name === 'AbortError') return;
+      console.error(e);
+      alert('写入失败：可能无权限或磁盘已满。');
+      return;
+    }
+
+    if (modal.mode === 'saveAs') {
+      setDraftDiskModal(null);
+      alert(`已另存为：${fileHandle.name}`);
+      return;
+    }
+
+    const pid = modal.pid;
+    try {
+      await persistProjectBackupFileHandle(pid, fileHandle);
+      if (dirHandle) await persistProjectDraftDirectoryHandle(pid, dirHandle);
+    } catch (e) {
+      console.warn(e);
+    }
+
+    lastJsonFileHandleRef.current = fileHandle;
+    lastDiskWriteFormatRef.current = 'json';
+    setLastJsonFilename(fileHandle.name);
+
+    const folderLabel = dirHandle?.name?.trim() || '';
+    const pathNote = folderLabel ? `${folderLabel} · ${fileHandle.name}` : fileHandle.name;
+    const projectName = (snap.name || '').trim();
+    const draftTitle = stem !== projectName ? stem : undefined;
+
+    const resolve = draftDiskFlowResolveRef.current;
+    draftDiskFlowResolveRef.current = null;
+    setDraftDiskModal(null);
+
+    const updatedList = modal.mergedProjects.map((p) =>
+      p.id === pid
+        ? {
+            ...p,
+            diskSaveEstablished: true as const,
+            draftStoragePathNote: pathNote,
+            draftTitle,
+            draftAutosaveIntervalMin: 5 as const,
+            updatedAt: Date.now(),
+          }
+        : p
+    );
+
+    setProjects(updatedList);
+    projectsRef.current = updatedList;
+    const ok = await saveProjectLibrary(updatedList, pid);
+    if (!ok) alert('本地 JSON 已写入，但同步 IndexedDB 草稿库失败，请重试。');
+    else persistWarningShownRef.current = false;
+
+    setAutosaveIntervalMin(5);
+    try {
+      localStorage.setItem('wxcanvas-autosave-interval-min', '5');
+    } catch {
+      /* ignore */
+    }
+
+    if (dirHandle) setActiveProjectDraftDownloadDirectory(dirHandle);
+    else setActiveProjectDraftDownloadDirectory(null);
+
+    resolve?.(ok);
+    if (ok) {
+      alert('草稿已绑定：之后 Ctrl+S 将直接覆盖该 JSON；图片默认保存到所选文件夹。');
     }
   }, []);
 
@@ -1698,147 +1933,20 @@ export default function App() {
     return { ...project, nodes: nc, edges: ec, transform: tc, updatedAt: Date.now() };
   }, []);
 
-  /** Ctrl+Alt+S：已绑定文件则覆盖；否则首次弹出「另存为」绑定路径与文件名（默认同导出基名 / 项目名） */
-  const handleOverwriteLastDiskExport = useCallback(async () => {
+  /** Ctrl+Alt+S：另存 JSON（选文件夹 + 文件名），不替换当前绑定的主草稿 */
+  const handleSaveDraftJsonSaveAs = useCallback(() => {
     const active = projectsRef.current.find((p) => p.id === activeProjectIdRef.current);
     if (!active) {
       alert('未找到当前项目');
       return;
     }
     const snapshot = projectSnapshotForJsonExport(active);
-    const pid = active.id;
-    const fmt = lastDiskWriteFormatRef.current;
-    const jsonHandle = lastJsonFileHandleRef.current;
-    const zipHandle = lastZipFileHandleRef.current;
-
-    const tryFirstTimeSavePicker = async (): Promise<boolean> => {
-      const w = window as unknown as {
-        showSaveFilePicker?: (opts: {
-          suggestedName?: string;
-          types?: { description: string; accept: Record<string, string[]> }[];
-        }) => Promise<FileSystemFileHandle>;
-      };
-      if (typeof w.showSaveFilePicker !== 'function') {
-        alert(
-          '当前浏览器不支持「另存为」选择器。请使用 Chrome / Edge（HTTPS 或 localhost），或通过项目管理里的「导出 JSON / ZIP」完成首次备份。'
-        );
-        return false;
-      }
-      const suggestedName = `${projectExportBasename(snapshot)}.json`;
-      let handle: FileSystemFileHandle;
-      try {
-        handle = await w.showSaveFilePicker({
-          suggestedName,
-          types: [
-            { description: 'JSON 项目备份', accept: { 'application/json': ['.json'] } },
-            {
-              description: '画布 ZIP（.wxcanvas.zip）',
-              accept: { 'application/zip': ['.wxcanvas.zip', '.zip'] },
-            },
-          ],
-        });
-      } catch (e: unknown) {
-        if ((e as { name?: string })?.name === 'AbortError') return false;
-        console.warn('另存为选择失败', e);
-        alert('选择保存位置失败，请重试。');
-        return false;
-      }
-      const picked = (handle.name || suggestedName).trim();
-      const lower = picked.toLowerCase();
-      const asZip = lower.endsWith('.zip') || lower.endsWith('.wxcanvas.zip');
-      try {
-        const writable = await handle.createWritable();
-        if (asZip) {
-          const blob = await buildProjectZipBlob(snapshot);
-          await writable.write(blob);
-          await writable.close();
-          lastZipFileHandleRef.current = handle;
-          lastJsonFileHandleRef.current = null;
-          lastDiskWriteFormatRef.current = 'zip';
-        } else {
-          const forWrite = { ...snapshot };
-          delete (forWrite as { diskSaveEstablished?: boolean }).diskSaveEstablished;
-          const json = JSON.stringify(forWrite, null, 2);
-          await writable.write(json);
-          await writable.close();
-          lastJsonFileHandleRef.current = handle;
-          lastZipFileHandleRef.current = null;
-          lastDiskWriteFormatRef.current = 'json';
-          void persistProjectBackupFileHandle(pid, handle).catch((err) =>
-            console.warn('持久化项目 JSON 句柄失败', err)
-          );
-        }
-        setLastJsonFilename(handle.name || suggestedName);
-        setProjects((prev) => {
-          const next = prev.map((p) =>
-            p.id === pid ? { ...p, diskSaveEstablished: true as const, updatedAt: Date.now() } : p
-          );
-          projectsRef.current = next;
-          void saveProjectLibrary(next, activeProjectIdRef.current);
-          return next;
-        });
-        alert(
-          asZip
-            ? '已保存并绑定 ZIP 文件。之后 Ctrl+Alt+S（⌘+⌥+S）将覆盖保存到此文件。'
-            : '已保存并绑定 JSON 文件。之后 Ctrl+Alt+S（⌘+⌥+S）将覆盖保存到此文件。'
-        );
-        return true;
-      } catch (err) {
-        console.error('首次写入本地备份失败', err);
-        alert('写入失败：可能无写入权限或磁盘已满。');
-        return false;
-      }
-    };
-
-    const tryOverwriteJson = async (): Promise<boolean> => {
-      if (!jsonHandle) return false;
-      const forWrite = { ...snapshot };
-      delete (forWrite as { diskSaveEstablished?: boolean }).diskSaveEstablished;
-      const json = JSON.stringify(forWrite, null, 2);
-      try {
-        const writable = await jsonHandle.createWritable();
-        await writable.write(json);
-        await writable.close();
-        setLastJsonFilename(jsonHandle.name || lastJsonFilename || `${snapshot.name || 'project'}.json`);
-        alert('已覆盖保存到上次 JSON 文件。');
-        return true;
-      } catch (error) {
-        console.error('JSON 覆盖保存失败:', error);
-        alert('覆盖 JSON 失败：可能无写入权限或文件已被移动。');
-        return false;
-      }
-    };
-
-    const tryOverwriteZip = async (): Promise<boolean> => {
-      if (!zipHandle) return false;
-      try {
-        await overwriteProjectZipFileHandle(zipHandle, snapshot);
-        alert(`已覆盖保存到上次 ZIP 文件：${zipHandle.name || '备份.zip'}`);
-        return true;
-      } catch (error) {
-        console.error('ZIP 覆盖保存失败:', error);
-        alert('覆盖 ZIP 失败：可能无写入权限或文件已被移动。');
-        return false;
-      }
-    };
-
-    if (fmt === 'zip') {
-      if (await tryOverwriteZip()) return;
-      if (await tryFirstTimeSavePicker()) return;
-      alert('无法覆盖上次的 ZIP：句柄已失效。已尝试让您重新选择保存位置；若取消则无变更。');
-      return;
-    }
-    if (fmt === 'json') {
-      if (await tryOverwriteJson()) return;
-      if (await tryFirstTimeSavePicker()) return;
-      alert('无法覆盖上次的 JSON：句柄已失效。已尝试让您重新选择保存位置；若取消则无变更。');
-      return;
-    }
-    if (await tryOverwriteJson()) return;
-    if (await tryOverwriteZip()) return;
-    if (await tryFirstTimeSavePicker()) return;
-    alert('无法完成本地备份：请使用支持「另存为」的浏览器，或通过项目管理导出 JSON/ZIP。');
-  }, [lastJsonFilename, projectSnapshotForJsonExport]);
+    setDraftDiskModal({
+      mode: 'saveAs',
+      snapshot,
+      basenameDraft: projectExportBasename(snapshot),
+    });
+  }, [projectSnapshotForJsonExport]);
 
   const handleExportProjectZip = useCallback(
     async (project: CanvasProject) => {
@@ -2818,7 +2926,7 @@ export default function App() {
         // 交给 paste 事件统一处理（优先粘贴外部图片）
       } else if ((e.ctrlKey || e.metaKey) && e.altKey && e.code === 'KeyS' && !isInput && !(e.target as HTMLElement).isContentEditable) {
         e.preventDefault();
-        void handleOverwriteLastDiskExport();
+        void handleSaveDraftJsonSaveAs();
       } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyS' && !e.altKey && !isInput && !(e.target as HTMLElement).isContentEditable) {
         e.preventDefault();
         void saveCurrentProject();
@@ -2878,7 +2986,7 @@ export default function App() {
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('paste', handlePaste);
     };
-  }, [selectedIds, nodes, clipboard, fullscreenImage, createImageNodeFromBase64, undoCanvasState, saveCurrentProject, handleOverwriteLastDiskExport]);
+  }, [selectedIds, nodes, clipboard, fullscreenImage, createImageNodeFromBase64, undoCanvasState, saveCurrentProject, handleSaveDraftJsonSaveAs]);
 
   // --- Fullscreen Modal Handlers ---
   useEffect(() => {
@@ -5578,6 +5686,9 @@ export default function App() {
                   <option value={20}>每 20 分钟</option>
                   <option value={30}>每 30 分钟</option>
                 </select>
+                <span className="text-[10px] text-gray-600 leading-snug max-w-[260px]">
+                  已绑定本地草稿 JSON 的项目打开时默认每 5 分钟；会写入 IndexedDB 并覆盖绑定 JSON。
+                </span>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2 mb-3 sm:grid-cols-4">
@@ -5595,7 +5706,7 @@ export default function App() {
                 type="button"
                 onClick={() => void saveCurrentProject()}
                 className="px-3 py-2.5 text-xs rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white font-medium"
-                title="合并画布后写入 IndexedDB；未完成首次本地备份时会先另存为 JSON。快捷键 Ctrl+S / ⌘+S"
+                title="合并画布写入 IndexedDB；未绑定本地草稿时会先填写文件名并选择文件夹。Ctrl+S / ⌘+S 保存；Ctrl+Alt+S 另存 JSON。"
               >
                 保存当前画布
               </button>
@@ -5740,6 +5851,59 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {draftDiskModal ? (
+        <div
+          className="fixed inset-0 z-[400] bg-black/75 flex items-center justify-center p-4"
+          onClick={() => cancelDraftDiskModal()}
+        >
+          <div
+            className="bg-[#1a1a1a] rounded-xl border border-[#444] shadow-2xl max-w-md w-full p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-semibold text-gray-100 mb-1">
+              {draftDiskModal.mode === 'firstSave' ? '首次保存草稿 JSON' : '另存 JSON'}
+            </h3>
+            <p className="text-[11px] text-gray-500 mb-3 leading-relaxed">
+              {draftDiskModal.mode === 'firstSave'
+                ? '设置文件名（不含扩展名）；留空则使用当前项目名。确认后将弹出系统文件夹选择器，请选择草稿保存位置。'
+                : '设置另存文件名；留空则使用与导出一致的默认名。确认后将弹出文件夹选择器（不改变当前 Ctrl+S 绑定的主草稿）。'}
+            </p>
+            <label className="block mb-4">
+              <span className="text-[10px] text-gray-500 mb-1 block">JSON 文件名（不含 .json）</span>
+              <input
+                type="text"
+                value={draftDiskModal.basenameDraft}
+                onChange={(e) =>
+                  setDraftDiskModal((m) => (m ? { ...m, basenameDraft: e.target.value } : m))
+                }
+                className="w-full rounded-md border border-[#444] bg-[#0d0d0d] px-2 py-2 text-xs text-gray-100 outline-none focus:border-cyan-600"
+                placeholder={
+                  (draftDiskModal.mode === 'firstSave'
+                    ? draftDiskModal.mergedProjects.find((p) => p.id === draftDiskModal.pid)?.name
+                    : draftDiskModal.snapshot.name) || '项目名'
+                }
+              />
+            </label>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-md border border-[#444] px-3 py-1.5 text-xs text-gray-300 hover:bg-[#222]"
+                onClick={() => cancelDraftDiskModal()}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="rounded-md bg-cyan-700 hover:bg-cyan-600 px-3 py-1.5 text-xs text-white"
+                onClick={() => void confirmDraftDiskModal()}
+              >
+                {draftDiskModal.mode === 'firstSave' ? '选择文件夹并保存' : '选择文件夹并另存'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* Unified Settings Modal */}
       {showSettingsModal && (

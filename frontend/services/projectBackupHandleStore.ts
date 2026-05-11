@@ -4,8 +4,9 @@
  */
 
 const DB_NAME = 'wxcanvas-project-backup-handles-v1';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = 'jsonFile';
+const DRAFT_DIR_STORE = 'draftDir';
 
 /** 供「存储位置」说明：记录各项目 JSON 文件句柄的 IndexedDB 库名 */
 export const PROJECT_JSON_HANDLE_IDB_NAME = DB_NAME;
@@ -13,6 +14,11 @@ export const PROJECT_JSON_HANDLE_IDB_NAME = DB_NAME;
 type Row = {
   projectId: string;
   fileHandle: FileSystemFileHandle;
+};
+
+type DraftDirRow = {
+  projectId: string;
+  directoryHandle: FileSystemDirectoryHandle;
 };
 
 function openDb(): Promise<IDBDatabase> {
@@ -23,6 +29,9 @@ function openDb(): Promise<IDBDatabase> {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) {
         db.createObjectStore(STORE, { keyPath: 'projectId' });
+      }
+      if (!db.objectStoreNames.contains(DRAFT_DIR_STORE)) {
+        db.createObjectStore(DRAFT_DIR_STORE, { keyPath: 'projectId' });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -68,13 +77,48 @@ export async function removeProjectBackupFileHandle(projectId: string): Promise<
   try {
     const db = await openDb();
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE, 'readwrite');
+      const tx = db.transaction([STORE, DRAFT_DIR_STORE], 'readwrite');
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
       tx.objectStore(STORE).delete(projectId);
+      tx.objectStore(DRAFT_DIR_STORE).delete(projectId);
     });
   } catch {
     /* ignore */
+  }
+}
+
+export async function persistProjectDraftDirectoryHandle(
+  projectId: string,
+  directoryHandle: FileSystemDirectoryHandle
+): Promise<void> {
+  if (!projectId) return;
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(DRAFT_DIR_STORE, 'readwrite');
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.objectStore(DRAFT_DIR_STORE).put({ projectId, directoryHandle } as DraftDirRow);
+  });
+}
+
+export async function getProjectDraftDirectoryHandle(
+  projectId: string
+): Promise<FileSystemDirectoryHandle | undefined> {
+  if (!projectId) return undefined;
+  try {
+    const db = await openDb();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(DRAFT_DIR_STORE, 'readonly');
+      const r = tx.objectStore(DRAFT_DIR_STORE).get(projectId);
+      r.onerror = () => reject(r.error);
+      r.onsuccess = () => {
+        const row = r.result as DraftDirRow | undefined;
+        resolve(row?.directoryHandle);
+      };
+    });
+  } catch {
+    return undefined;
   }
 }
 

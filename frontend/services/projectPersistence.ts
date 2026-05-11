@@ -15,6 +15,8 @@ export type CanvasProjectSnapshot = {
   diskSaveEstablished?: boolean;
   /** 用户自填的本机草稿/备份参考路径（仅展示与「打开位置」校验；应用无法写入该路径） */
   draftStoragePathNote?: string;
+  /** 已绑定本地草稿 JSON 后的定时保存间隔（分钟）；未写入时打开该项目默认按 5 分钟 */
+  draftAutosaveIntervalMin?: 0 | 5 | 10 | 20 | 30;
 };
 
 const DB_NAME = 'infinite-ai-canvas-db';

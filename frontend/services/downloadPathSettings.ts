@@ -24,6 +24,13 @@ let cachedCombined: FileSystemDirectoryHandle | null = null;
 let cachedImage: FileSystemDirectoryHandle | null = null;
 let cachedVideo: FileSystemDirectoryHandle | null = null;
 
+/** 当前打开项目通过 Ctrl+S 绑定的草稿文件夹（图片/视频下载优先写入此处） */
+let activeProjectDraftDownloadDir: FileSystemDirectoryHandle | null = null;
+
+export function setActiveProjectDraftDownloadDirectory(dir: FileSystemDirectoryHandle | null): void {
+  activeProjectDraftDownloadDir = dir;
+}
+
 export function supportsFileSystemAccess(): boolean {
   return typeof (window as unknown as { showDirectoryPicker?: unknown }).showDirectoryPicker === 'function';
 }
@@ -238,6 +245,15 @@ export async function saveImageDownload(
   const blob = new Blob([binary], { type: mime });
   const filename = pickFilename('image', ext);
 
+  if (activeProjectDraftDownloadDir && (await verifyDirWritable(activeProjectDraftDownloadDir))) {
+    try {
+      await writeBlobToDirectory(activeProjectDraftDownloadDir, filename, blob);
+      return { ok: true };
+    } catch (e) {
+      console.warn('写入草稿文件夹失败，尝试其它路径', e);
+    }
+  }
+
   const settings = loadDownloadPathSettings();
   if (settings.enabled) {
     const dir = settings.separateImageVideo ? cachedImage : cachedCombined;
@@ -264,6 +280,15 @@ export async function saveVideoDownloadFromUrl(url: string): Promise<{ ok: boole
   if (!res.ok) throw new Error(`下载失败 (${res.status})`);
   const blob = await res.blob();
   const filename = pickFilename('video', 'mp4');
+
+  if (activeProjectDraftDownloadDir && (await verifyDirWritable(activeProjectDraftDownloadDir))) {
+    try {
+      await writeBlobToDirectory(activeProjectDraftDownloadDir, filename, blob);
+      return { ok: true };
+    } catch (e) {
+      console.warn('写入草稿文件夹失败，尝试其它路径', e);
+    }
+  }
 
   const settings = loadDownloadPathSettings();
   if (settings.enabled) {
