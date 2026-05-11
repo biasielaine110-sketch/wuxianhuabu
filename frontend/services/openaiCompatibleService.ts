@@ -266,6 +266,17 @@ function base64ToBlob(raw: string, mime: string): Blob {
   return new Blob([bytes], { type: mime || 'image/jpeg' });
 }
 
+/** JSON generations 请求体是否含公网 URL 参考图（多数网关仅在此情况下真正绑定参考图） */
+function isStrongRefBindingJsonBody(body: Record<string, unknown>): boolean {
+  const hasHttp = (s: string) => /^https?:\/\//i.test(s.trim());
+  const check = (v: unknown): boolean => {
+    if (typeof v === 'string') return hasHttp(v);
+    if (Array.isArray(v)) return v.some((x) => typeof x === 'string' && hasHttp(x));
+    return false;
+  };
+  return check(body.image_urls) || check(body.image) || check(body.images);
+}
+
 /** OpenAI 兼容（New API / 云智 / ToAPIs）上传参考图，返回上游可拉取的 URL，用于 image_urls 图生图（部分网关忽略 data URI / 裸 base64） */
 async function openAiCompatUploadImageBlob(
   baseNorm: string,
@@ -275,33 +286,40 @@ async function openAiCompatUploadImageBlob(
   signal?: AbortSignal
 ): Promise<string> {
   const fetchBase = rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm);
-  const form = new FormData();
-  form.append('file', blob, filename);
-  const res = await fetch(`${fetchBase}/uploads/images`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey.trim()}` },
-    body: form,
-    signal,
-  });
-  const text = await res.text();
-  if (!res.ok) {
-    throw new Error(`参考图上传失败 (${res.status}): ${text.slice(0, 500)}`);
+  const relPaths = ['uploads/images', 'upload/image'];
+  let lastFail = '';
+  for (const rp of relPaths) {
+    const form = new FormData();
+    form.append('file', blob, filename);
+    const res = await fetch(`${fetchBase}/${rp}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey.trim()}` },
+      body: form,
+      signal,
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      lastFail = `(${res.status}) ${text.slice(0, 400)}`;
+      if (res.status === 404 || res.status === 405) continue;
+      throw new Error(`参考图上传失败 ${lastFail}`);
+    }
+    let json: unknown;
+    try {
+      json = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      throw new Error(`上传响应无效: ${text.slice(0, 200)}`);
+    }
+    const o = json && typeof json === 'object' ? (json as Record<string, unknown>) : {};
+    const data = o.data && typeof o.data === 'object' ? (o.data as Record<string, unknown>) : undefined;
+    const u1 = typeof data?.url === 'string' ? data.url.trim() : '';
+    const u2 = typeof o.url === 'string' ? o.url.trim() : '';
+    const url = u1 || u2;
+    if (o.success === false || !url) {
+      throw new Error(typeof o.message === 'string' ? o.message : '上传未返回图片 URL');
+    }
+    return url;
   }
-  let json: unknown;
-  try {
-    json = JSON.parse(text) as Record<string, unknown>;
-  } catch {
-    throw new Error(`上传响应无效: ${text.slice(0, 200)}`);
-  }
-  const o = json && typeof json === 'object' ? (json as Record<string, unknown>) : {};
-  const data = o.data && typeof o.data === 'object' ? (o.data as Record<string, unknown>) : undefined;
-  const u1 = typeof data?.url === 'string' ? data.url.trim() : '';
-  const u2 = typeof o.url === 'string' ? o.url.trim() : '';
-  const url = u1 || u2;
-  if (o.success === false || !url) {
-    throw new Error(typeof o.message === 'string' ? o.message : '上传未返回图片 URL');
-  }
-  return url;
+  throw new Error(`参考图上传失败 (404) ${lastFail}`);
 }
 
 async function toApisUploadImageBlob(blob: Blob, filename: string, signal?: AbortSignal): Promise<string> {
@@ -1067,7 +1085,8 @@ async function generateImagesAtOpenAiCompatibleBase(
 
 /**
  * 云智 / 部分 New API 对 `/v1/images/edits` 可能返回 404 或 503（如 model_not_found）。
- * 非 401 时不中断；优先 `/uploads/images` 得公网 URL 后以 `image_urls` 调 generations（多数网关只吃 URL，忽略内联图则结果像纯文生图）。
+ * 非 401 时不中断；尝试 `uploads/images` 与 `upload/image` 得公网 URL 后以 `image_urls` 调 generations。
+ * 若上传为 404 且 edits 失败：拒绝仅含 data URI/裸 base64 的 JSON 成功（避免误接受纯文生图），multipart 二进制仍尝试。
  */
 async function editImagesNewApiFireflyWithRouteFallback(
   baseNorm: string,
@@ -1094,6 +1113,7 @@ async function editImagesNewApiFireflyWithRouteFallback(
   const url = `${rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm)}/images/edits`;
 
   for (let i = 0; i < count; i++) {
+    const startLen = results.length;
     assertNotAborted(signal);
     let done = false;
     for (const tryModel of modelCandidates) {
@@ -1132,11 +1152,15 @@ async function editImagesNewApiFireflyWithRouteFallback(
       const refAnchoredPrompt = `【必须以上传参考图中的人物/场景/构图/色调为基准进行编辑或重绘，禁止换成无关角色或全新场景；仅可按文字指令微调姿态、细节与风格。】\n\n${enhancedPrompt}`;
       const refPngDataUrl = await blobToDataUrl(pngBlob);
       let refUploadUrl: string | null = null;
+      let refUpload404 = false;
       try {
         refUploadUrl = await openAiCompatUploadImageBlob(baseNorm, apiKey, pngBlob, 'ref.png', signal);
-      } catch {
-        refUploadUrl = null;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        refUpload404 = msg.includes('(404)') || msg.includes(' 404');
       }
+      /** 上传 404 且 edits 未成功时：云智等常忽略 JSON 里的 data URI/裸 base64，接受则多为纯文生图 */
+      const strictRejectInlineRefJson = refUpload404;
       const genUrl = `${rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm)}/images/generations`;
       const makeUrlRefBodies = (tryModel: string): Record<string, unknown>[] =>
         refUploadUrl
@@ -1246,6 +1270,12 @@ async function editImagesNewApiFireflyWithRouteFallback(
               body,
               apiKey
             );
+            if (strictRejectInlineRefJson && !isStrongRefBindingJsonBody(body)) {
+              lastErr = new Error(
+                '上游在无公网 image_urls 时常忽略内联参考图（易退化为纯文生图），已跳过该次响应。'
+              );
+              continue;
+            }
             results.push(await openAiStyleGenerationJsonToBase64(json, signal, apiKey));
             lastErr = null;
             break;
@@ -1255,7 +1285,13 @@ async function editImagesNewApiFireflyWithRouteFallback(
         }
         if (!lastErr) break;
       }
-      if (lastErr) throw lastErr;
+      if (results.length === startLen) {
+        throw new Error(
+          refUpload404
+            ? '图生图：上游未开放参考图暂存（POST …/uploads/images 与 …/upload/image 均不可用），且 /images/edits 失败。此类网关对 JSON 里的 data URI/裸 base64 常会忽略参考图，结果易与参考无关。请改用支持「参考图上传」或稳定图生图的通道（例如 ToAPIs 主通道），或在 New API 管理端开启上传类路由。'
+            : lastErr?.message || '图生图：所有尝试均未返回有效图片。'
+        );
+      }
     }
   }
   return results;
