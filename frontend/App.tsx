@@ -653,6 +653,16 @@ function defaultCanvasImageModel(): string {
   return getJunlanSavedKey().trim() ? 'gpt-image-2-junlan' : 'gpt-image-2';
 }
 
+/** 画布节点 Firefly（New API）模型 id */
+function isFireflyNewApiImageModelId(id: string): boolean {
+  return id === 'firefly-nano-banana-pro-newapi' || id === 'firefly-nano-banana2-newapi';
+}
+
+/** GPT Image 2：君澜 / ToAPIs 节点选择时默认 4K */
+function isGptImage2CanvasModelId(id: string): boolean {
+  return id === 'gpt-image-2-junlan' || id === 'gpt-image-2';
+}
+
 // --- Main App Component ---
 
 export default function App() {
@@ -3720,27 +3730,33 @@ export default function App() {
               <select
                 className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-blue-500 flex-1 min-w-[100px]"
                 value={node.model || (node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' ? defaultCanvasImageModel() : 'gemini-3.1-flash-image-preview')}
-                onChange={(e) => handleUpdateNode(node.id, { model: e.target.value })}
+                onChange={(e) => {
+                  const m = e.target.value;
+                  const patch: Partial<CanvasNode> = { model: m };
+                  if (isFireflyNewApiImageModelId(m)) patch.resolution = '2k';
+                  else if (isGptImage2CanvasModelId(m)) patch.resolution = '4k';
+                  handleUpdateNode(node.id, patch);
+                }}
                 onPointerDown={e => e.stopPropagation()}
               >
                 {(node.type === 't2i' || node.type === 'panoramaT2i') ? (
                   <>
                     <option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option>
-                    <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
-                    <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option>
-                    <option value="imagen-4">Imagen 4</option>
                     <option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option>
                     <option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option>
+                    <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
+                    <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option>
                     <option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option>
+                    <option value="imagen-4">Imagen 4</option>
                     <option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option>
                   </>
                 ) : (
                   <>
                     <option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option>
-                    <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
-                    <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option>
                     <option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option>
                     <option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option>
+                    <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
+                    <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option>
                     <option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option>
                     <option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option>
                   </>
@@ -5576,7 +5592,7 @@ export default function App() {
                   <div className="mt-5 pt-4 border-t border-[#333]">
                     <h3 className="text-sm font-semibold text-gray-200 mb-2">New API · Firefly 文生图 / 图生图（可选）</h3>
                     <p className="text-gray-500 text-xs mb-2">
-                      仅当节点选择「Firefly Nano Banana Pro / 2（New API）」时使用；请求发往自建 New API 的 OpenAI 兼容地址（须含 <span className="text-gray-400">/v1</span>）。与 ToAPIs、君澜密钥分开保存。
+                      仅当节点选择「Firefly Nano Banana Pro / 2（New API）」时使用；Base URL 仍填实际上游地址（如 <span className="text-gray-400">https://yunzhi-ai.top/v1</span>）。对 <span className="text-gray-400">yunzhi-ai.top</span> 本站会自动经同源路径转发，避免浏览器 CORS。与 ToAPIs、君澜密钥分开保存。
                     </p>
                     <label className="text-xs text-gray-500 block mb-1">New API Base URL</label>
                     <input

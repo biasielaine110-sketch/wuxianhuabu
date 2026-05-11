@@ -25,6 +25,10 @@
   ],
   "rewrites": [
     {
+      "source": "/yunzhi-openai/:path*",
+      "destination": "https://yunzhi-ai.top/:path*"
+    },
+    {
       "source": "/cdn-files-toapis/:path*",
       "destination": "https://files.toapis.com/:path*"
     },

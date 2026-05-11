@@ -29,6 +29,13 @@ const toapisFileCdnProxy = {
     secure: true,
     rewrite: (p: string) => p.replace(/^\/cdn-files-dashlyai/, ''),
   },
+  /** 云智等自建 OpenAI 兼容站未配 CORS 时，前端经同源路径转发（与 openaiCompatibleService.rewriteRemoteOpenAiCompatBaseForBrowserCors 对齐） */
+  '/yunzhi-openai': {
+    target: 'https://yunzhi-ai.top',
+    changeOrigin: true,
+    secure: true,
+    rewrite: (p: string) => p.replace(/^\/yunzhi-openai/, '') || '/',
+  },
 } as const;
 
 export default defineConfig(({ mode }) => {

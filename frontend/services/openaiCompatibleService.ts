@@ -14,6 +14,23 @@ function normalizeBaseUrl(url: string): string {
   return u.replace(/\/+$/, '');
 }
 
+/**
+ * 部分自建 OpenAI 兼容网关（如 yunzhi-ai.top）未返回 Access-Control-Allow-Origin，浏览器会拦截。
+ * 开发环境走 Vite `server.proxy`，生产走 Vercel `rewrites`，将请求变为与前端同源后再转发到上游。
+ */
+function rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNormalized: string): string {
+  if (typeof window === 'undefined') return baseNormalized;
+  try {
+    const u = new URL(baseNormalized);
+    if (u.hostname.toLowerCase() !== 'yunzhi-ai.top') return baseNormalized;
+    let pathname = u.pathname.replace(/\/+$/, '');
+    if (!pathname) pathname = '/v1';
+    return `${window.location.origin}/yunzhi-openai${pathname}`;
+  } catch {
+    return baseNormalized;
+  }
+}
+
 function isToApisHost(baseNormalized: string): boolean {
   try {
     const host = new URL(baseNormalized).hostname.toLowerCase();
@@ -142,14 +159,33 @@ function rewriteKnownImageCdnToSameOrigin(imageUrl: string): string {
   return imageUrl;
 }
 
-async function fetchUrlAsBase64(imageUrl: string, signal?: AbortSignal): Promise<string> {
-  const fetchUrl = rewriteKnownImageCdnToSameOrigin(imageUrl);
-  const res = await fetch(fetchUrl, { mode: 'cors', credentials: 'omit', signal });
+/** 文生图同步接口若返回临时图片 URL，仍指向 yunzhi 时需经同源代理拉取，否则浏览器二次跨域失败 */
+function rewriteYunzhiAssetUrlToSameOriginProxy(imageUrl: string): string {
+  if (typeof window === 'undefined') return imageUrl;
+  try {
+    const u = new URL(imageUrl);
+    if (u.hostname.toLowerCase() === 'yunzhi-ai.top') {
+      return `${window.location.origin}/yunzhi-openai${u.pathname}${u.search}`;
+    }
+  } catch {
+    /* ignore */
+  }
+  return imageUrl;
+}
+
+async function fetchUrlAsBase64(imageUrl: string, signal?: AbortSignal, bearerToken?: string): Promise<string> {
+  let fetchUrl = rewriteYunzhiAssetUrlToSameOriginProxy(imageUrl);
+  fetchUrl = rewriteKnownImageCdnToSameOrigin(fetchUrl);
+  const headers: Record<string, string> = {};
+  if (bearerToken?.trim()) {
+    headers.Authorization = `Bearer ${bearerToken.trim()}`;
+  }
+  const res = await fetch(fetchUrl, { mode: 'cors', credentials: 'omit', signal, headers });
   if (!res.ok) {
     throw new Error(
       `无法下载生成图 (${res.status})。` +
         (fetchUrl !== imageUrl
-          ? '若已部署生产环境，请为 /cdn-files-toapis 与 /cdn-files-dashlyai 配置反向代理到对应 CDN 域名。原始链接：'
+          ? '同源代理拉取失败：若为云智等网关，生成图 URL 常需携带与文生图相同的 Bearer Token（已自动附带）；仍 502 时请检查密钥权限或上游服务。原始链接：'
           : '若为跨域限制，请直接打开链接保存：') +
         imageUrl.slice(0, 200)
     );
@@ -202,7 +238,7 @@ function base64ToBlob(raw: string, mime: string): Blob {
 async function toApisUploadImageBlob(blob: Blob, filename: string, signal?: AbortSignal): Promise<string> {
   const apiKey = getOpenAiSavedKey();
   if (!apiKey) throw new Error('未配置 API Key。');
-  const base = normalizeBaseUrl(getOpenAiBaseUrl());
+  const base = rewriteRemoteOpenAiCompatBaseForBrowserCors(normalizeBaseUrl(getOpenAiBaseUrl()));
   const form = new FormData();
   form.append('file', blob, filename);
   const res = await fetch(`${base}/uploads/images`, {
@@ -275,7 +311,7 @@ async function toApisEditImage(
 async function toApisSubmitGeneration(body: Record<string, unknown>, signal?: AbortSignal): Promise<{ id: string }> {
   const apiKey = getOpenAiSavedKey();
   if (!apiKey) throw new Error('未配置 API Key。');
-  const base = normalizeBaseUrl(getOpenAiBaseUrl());
+  const base = rewriteRemoteOpenAiCompatBaseForBrowserCors(normalizeBaseUrl(getOpenAiBaseUrl()));
   const res = await fetch(`${base}/images/generations`, {
     method: 'POST',
     headers: {
@@ -300,7 +336,7 @@ async function toApisSubmitGeneration(body: Record<string, unknown>, signal?: Ab
 
 async function toApisPollTaskToBase64(taskId: string, signal?: AbortSignal): Promise<string> {
   const apiKey = getOpenAiSavedKey();
-  const base = normalizeBaseUrl(getOpenAiBaseUrl());
+  const base = rewriteRemoteOpenAiCompatBaseForBrowserCors(normalizeBaseUrl(getOpenAiBaseUrl()));
   const deadline = Date.now() + TOAPIS_TASK_MAX_WAIT_MS;
   await sleepInterruptible(2000, signal);
 
@@ -324,7 +360,7 @@ async function toApisPollTaskToBase64(taskId: string, signal?: AbortSignal): Pro
     if (data.status === 'completed') {
       const url = data.url || data.result?.data?.[0]?.url;
       if (!url) throw new Error('ToAPIs 任务完成但未返回图片 URL。');
-      return fetchUrlAsBase64(url, signal);
+      return fetchUrlAsBase64(url, signal, apiKey);
     }
     if (data.status === 'failed') {
       throw new Error(`ToAPIs 生成失败: ${data.error?.message || JSON.stringify(data.error)}`);
@@ -464,7 +500,7 @@ function isVideoTaskCompletedStatus(status: unknown): boolean {
 async function toApisSubmitVideoGeneration(body: Record<string, unknown>, signal?: AbortSignal): Promise<{ id: string }> {
   const apiKey = getOpenAiSavedKey();
   if (!apiKey) throw new Error('未配置 API Key。');
-  const base = normalizeBaseUrl(getOpenAiBaseUrl());
+  const base = rewriteRemoteOpenAiCompatBaseForBrowserCors(normalizeBaseUrl(getOpenAiBaseUrl()));
   const res = await fetch(`${base}/videos/generations`, {
     method: 'POST',
     headers: {
@@ -486,7 +522,7 @@ async function toApisSubmitVideoGeneration(body: Record<string, unknown>, signal
 
 async function toApisPollVideoTaskToPlayableUrl(taskId: string, signal?: AbortSignal): Promise<string> {
   const apiKey = getOpenAiSavedKey();
-  const base = normalizeBaseUrl(getOpenAiBaseUrl());
+  const base = rewriteRemoteOpenAiCompatBaseForBrowserCors(normalizeBaseUrl(getOpenAiBaseUrl()));
   const deadline = Date.now() + TOAPIS_VIDEO_TASK_MAX_WAIT_MS;
   await sleepInterruptible(5000, signal);
 
@@ -840,7 +876,8 @@ async function jpegBase64ToPngBlob(base64: string): Promise<Blob> {
 
 async function postJsonAtBase<T>(base: string, path: string, body: unknown, apiKey: string): Promise<T> {
   if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key，请在设置中选择「OpenAI 兼容」并填写密钥。');
-  const res = await fetch(`${base}${path}`, {
+  const fetchBase = rewriteRemoteOpenAiCompatBaseForBrowserCors(base);
+  const res = await fetch(`${fetchBase}${path}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -857,6 +894,52 @@ async function postJsonAtBase<T>(base: string, path: string, body: unknown, apiK
     throw new Error(`兼容接口错误 (${res.status}): ${text.slice(0, 800)}${hint}`);
   }
   return JSON.parse(text) as T;
+}
+
+/** OpenAI 兼容 images/generations | edits：常见 data[]；条目多为 b64_json，New API 等常仅返回 url */
+function firstOpenAiImageGenerationItem(json: unknown): Record<string, unknown> | undefined {
+  if (!json || typeof json !== 'object') return undefined;
+  const data = (json as Record<string, unknown>).data;
+  if (!Array.isArray(data) || data.length === 0) return undefined;
+  const first = data[0];
+  return first && typeof first === 'object' ? (first as Record<string, unknown>) : undefined;
+}
+
+async function openAiStyleImagePayloadToBase64(
+  item: Record<string, unknown> | undefined,
+  signal?: AbortSignal,
+  bearerToken?: string
+): Promise<string> {
+  if (!item) throw new Error('接口未返回图片条目。');
+  const b64Candidate = item.b64_json ?? item.b64 ?? item.image;
+  if (typeof b64Candidate === 'string' && b64Candidate.trim()) return b64Candidate.trim();
+  const urlVal = item.url;
+  if (typeof urlVal === 'string' && urlVal.trim()) {
+    return fetchUrlAsBase64(urlVal.trim(), signal, bearerToken);
+  }
+  throw new Error('接口未返回可用图片（缺少 b64_json / url）。');
+}
+
+async function openAiStyleGenerationJsonToBase64(
+  json: unknown,
+  signal?: AbortSignal,
+  bearerToken?: string
+): Promise<string> {
+  const item = firstOpenAiImageGenerationItem(json);
+  if (item) return openAiStyleImagePayloadToBase64(item, signal, bearerToken);
+  if (json && typeof json === 'object') {
+    const urlTop = (json as Record<string, unknown>).url;
+    if (typeof urlTop === 'string' && urlTop.trim()) {
+      return fetchUrlAsBase64(urlTop.trim(), signal, bearerToken);
+    }
+  }
+  let snippet = '';
+  try {
+    snippet = JSON.stringify(json).slice(0, 400);
+  } catch {
+    snippet = String(json).slice(0, 400);
+  }
+  throw new Error(`接口未返回图片数据。响应片段：${snippet}`);
 }
 
 async function generateImagesAtOpenAiCompatibleBase(
@@ -879,7 +962,7 @@ async function generateImagesAtOpenAiCompatibleBase(
   if (onePerRequest) {
     for (let i = 0; i < numberOfImages; i++) {
       assertNotAborted(signal);
-      const json = await postJsonAtBase<{ data?: { b64_json?: string }[] }>(
+      const json = await postJsonAtBase<Record<string, unknown>>(
         baseNorm,
         '/images/generations',
         {
@@ -891,14 +974,12 @@ async function generateImagesAtOpenAiCompatibleBase(
         },
         apiKey
       );
-      const b64 = json.data?.[0]?.b64_json;
-      if (!b64) throw new Error('文生图接口未返回图片数据。');
-      out.push(b64);
+      out.push(await openAiStyleGenerationJsonToBase64(json, signal, apiKey));
     }
   } else {
     const n = Math.min(Math.max(numberOfImages, 1), 10);
     assertNotAborted(signal);
-    const json = await postJsonAtBase<{ data?: { b64_json?: string }[] }>(
+    const json = await postJsonAtBase<Record<string, unknown>>(
       baseNorm,
       '/images/generations',
       {
@@ -910,8 +991,17 @@ async function generateImagesAtOpenAiCompatibleBase(
       },
       apiKey
     );
-    const list = json.data?.map(d => d.b64_json).filter(Boolean) as string[];
-    if (!list.length) throw new Error('文生图接口未返回图片数据。');
+    const data = json.data;
+    if (!Array.isArray(data) || !data.length) {
+      throw new Error(`文生图接口未返回图片列表。${JSON.stringify(json).slice(0, 400)}`);
+    }
+    const list = await Promise.all(
+      data.map((d) =>
+        d && typeof d === 'object'
+          ? openAiStyleImagePayloadToBase64(d as Record<string, unknown>, signal, apiKey)
+          : Promise.reject(new Error('文生图接口返回的图片条目格式无效'))
+      )
+    );
     out.push(...list);
   }
   return out;
@@ -950,7 +1040,7 @@ async function editImagesAtOpenAiCompatibleBase(
     form.append('n', '1');
     form.append('size', size);
 
-    const res = await fetch(`${baseNorm}/images/edits`, {
+    const res = await fetch(`${rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm)}/images/edits`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}` },
       body: form,
@@ -959,10 +1049,8 @@ async function editImagesAtOpenAiCompatibleBase(
     if (!res.ok) {
       throw new Error(`图生图接口错误 (${res.status}): ${text.slice(0, 800)}`);
     }
-    const json = JSON.parse(text) as { data?: { b64_json?: string }[] };
-    const b64 = json.data?.[0]?.b64_json;
-    if (!b64) throw new Error('图生图接口未返回图片数据。');
-    results.push(b64);
+    const json = JSON.parse(text) as unknown;
+    results.push(await openAiStyleGenerationJsonToBase64(json, signal, apiKey));
   }
 
   return results;
@@ -1033,7 +1121,15 @@ export async function openAiGenerateNewImage(
   const apiKey = getOpenAiSavedKey();
   if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key，请在设置中选择「OpenAI 兼容」并填写密钥。');
   const model = resolveT2iModel(modelName);
-  return generateImagesAtOpenAiCompatibleBase(base, apiKey, prompt, aspectRatio, numberOfImages, model, signal);
+  return generateImagesAtOpenAiCompatibleBase(
+    rewriteRemoteOpenAiCompatBaseForBrowserCors(base),
+    apiKey,
+    prompt,
+    aspectRatio,
+    numberOfImages,
+    model,
+    signal
+  );
 }
 
 export async function openAiEditImage(
@@ -1097,7 +1193,16 @@ export async function openAiEditImage(
   if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key。');
   const base = normalizeBaseUrl(getOpenAiBaseUrl());
   const model = resolveEditModel(modelName);
-  return editImagesAtOpenAiCompatibleBase(base, apiKey, base64Images, prompt, numberOfImages, model, aspectRatio, signal);
+  return editImagesAtOpenAiCompatibleBase(
+    rewriteRemoteOpenAiCompatBaseForBrowserCors(base),
+    apiKey,
+    base64Images,
+    prompt,
+    numberOfImages,
+    model,
+    aspectRatio,
+    signal
+  );
 }
 
 /** 多轮对话：OpenAI / DeepSeek 兼容 /chat/completions */
