@@ -31,6 +31,19 @@ function rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNormalized: string): st
   }
 }
 
+/** 502/504 等为网关层错误，多为上游或反向代理；与 Chrome 扩展报的 runtime.lastError 无关 */
+function openAiCompatFailureHint(status: number, kind: 'generations-json' | 'image-edit'): string {
+  if (status === 502 || status === 504) {
+    return '（502/504：多为上游 API（如云智 yunzhi-ai.top）或本站 /yunzhi-openai 转发暂时失败、超时；请稍后重试、检查密钥与上游状态，图生图可尝试缩小参考图。）';
+  }
+  if (status === 503) {
+    return kind === 'generations-json'
+      ? '（503：上游不可用，或该网关不支持当前 OpenAI 同步文生图格式；若使用 ToAPIs，请把 Base URL 设为 https://toapis.com/v1 。）'
+      : '（503：上游不可用或暂时过载。）';
+  }
+  return '';
+}
+
 function isToApisHost(baseNormalized: string): boolean {
   try {
     const host = new URL(baseNormalized).hostname.toLowerCase();
@@ -887,11 +900,9 @@ async function postJsonAtBase<T>(base: string, path: string, body: unknown, apiK
   });
   const text = await res.text();
   if (!res.ok) {
-    const hint =
-      res.status === 503
-        ? '（503：上游不可用，或该网关不支持当前 OpenAI 同步文生图格式；若使用 ToAPIs，请把 Base URL 设为 https://toapis.com/v1 。）'
-        : '';
-    throw new Error(`兼容接口错误 (${res.status}): ${text.slice(0, 800)}${hint}`);
+    throw new Error(
+      `兼容接口错误 (${res.status}): ${text.slice(0, 800)}${openAiCompatFailureHint(res.status, 'generations-json')}`
+    );
   }
   return JSON.parse(text) as T;
 }
@@ -1047,7 +1058,9 @@ async function editImagesAtOpenAiCompatibleBase(
     });
     const text = await res.text();
     if (!res.ok) {
-      throw new Error(`图生图接口错误 (${res.status}): ${text.slice(0, 800)}`);
+      throw new Error(
+        `图生图接口错误 (${res.status})${openAiCompatFailureHint(res.status, 'image-edit')}: ${text.slice(0, 800)}`
+      );
     }
     const json = JSON.parse(text) as unknown;
     results.push(await openAiStyleGenerationJsonToBase64(json, signal, apiKey));
