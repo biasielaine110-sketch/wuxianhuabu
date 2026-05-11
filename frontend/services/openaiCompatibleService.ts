@@ -801,8 +801,10 @@ async function toApisGenerateNewImage(
   return out;
 }
 
+/** OpenAI 兼容 images/generations 与 images/edits 的 size（WxH）；dall-e-2 仅支持正方形 */
 function aspectRatioToOpenAiSize(aspectRatio: string, model: string): string {
   if (model === 'dall-e-2') return '1024x1024';
+  const key = (aspectRatio || '1:1').trim();
   const map: Record<string, string> = {
     '1:1': '1024x1024',
     '16:9': '1792x1024',
@@ -811,8 +813,10 @@ function aspectRatioToOpenAiSize(aspectRatio: string, model: string): string {
     '3:4': '1024x1792',
     '21:9': '1792x1024',
     '2:1': '1792x1024',
+    '3:2': '1792x1024',
+    '2:3': '1024x1792',
   };
-  return map[aspectRatio] || '1024x1024';
+  return map[key] || '1024x1024';
 }
 
 function resolveT2iModel(modelName: string): string {
@@ -1029,7 +1033,7 @@ async function editImagesAtOpenAiCompatibleBase(
   signal?: AbortSignal
 ): Promise<string[]> {
   if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
-  const size = resolvedEditModel === 'dall-e-2' ? '1024x1024' : '1024x1024';
+  const size = aspectRatioToOpenAiSize(aspectRatio, resolvedEditModel);
   const enhancedPrompt = buildPromptWithDimensions(prompt, aspectRatio);
   const pngBlob = await jpegBase64ToPngBlob(base64Images[0]);
   const results: string[] = [];

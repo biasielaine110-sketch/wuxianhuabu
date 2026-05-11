@@ -6502,12 +6502,13 @@ function PanoramaNodeContent({ node, nodes, eyedropperTargetNodeId, onEyedropper
       const prompt = 'Convert this image into a seamless 360-degree panoramic view. Extend the edges naturally to create a continuous horizontal panorama. Maintain the original lighting, colors, and style. The result should be a panoramic image suitable for a 360-degree VR environment.';
 
       // 使用 Gemini 图片编辑功能转换
+      const convertAspect = node.aspectRatio === '9:16' ? '9:16' : '16:9';
       const results = await editExistingImage(
         [panoramaImage],
         prompt,
         1,
         'gemini-3.1-flash-image-preview',
-        '16:9',
+        convertAspect,
         '4k'
       );
 

@@ -44,8 +44,11 @@ const aspectRatioToDimensions = (aspectRatio: string): { width: number; height: 
     '21:9': { width: 1536, height: 672 },
     '4:3': { width: 1024, height: 768 },
     '3:4': { width: 768, height: 1024 },
+    '2:1': { width: 2048, height: 1024 },
+    '3:2': { width: 1536, height: 1024 },
+    '2:3': { width: 1024, height: 1536 },
   };
-  return ratioMap[aspectRatio] || ratioMap['1:1'];
+  return ratioMap[(aspectRatio || '1:1').trim()] || ratioMap['1:1'];
 };
 
 /**
