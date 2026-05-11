@@ -767,6 +767,13 @@ export default function App() {
 
   // Pending edge source - for auto-connecting after creating new node
   const [pendingEdgeSourceId, setPendingEdgeSourceId] = useState<string | null>(null);
+  const pendingEdgeSourceIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    pendingEdgeSourceIdRef.current = pendingEdgeSourceId;
+  }, [pendingEdgeSourceId]);
+
+  /** 供早于声明处的键盘 effect 安全调用 */
+  const addNodeAtCanvasPositionRef = useRef<(type: NodeType, canvasX: number, canvasY: number) => void>(() => {});
 
   // Context Menu & Clipboard
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, canvasX: number, canvasY: number } | null>(null);
@@ -2221,12 +2228,95 @@ export default function App() {
   const nodeDragAccumRef = useRef<{ nodeIds: string[], deltaX: number, deltaY: number } | null>(null);
   const rafIdRef = useRef<number | null>(null);
 
+  /** Alt + 拖拽：超过阈值后复制选中节点；与复制集相连的边（含外部入边/出边）一并映射到新节点 */
+  const altDupPendingRef = useRef(false);
+  const altDupDoneRef = useRef(false);
+  const altDupClickNodeIdRef = useRef<string | null>(null);
+  const altDragScreenAccumRef = useRef({ x: 0, y: 0 });
+  const duplicateNodesSubgraphForAltDragRef = useRef<() => void>(() => {});
+
   useEffect(() => { draftEdgeRef.current = draftEdge; }, [draftEdge]);
   useEffect(() => { draggingEdgeIdRef.current = draggingEdgeId; }, [draggingEdgeId]);
   
   // selectedIds ref 用于事件处理中获取最新值
   const selectedIdsRef = useRef(selectedIds);
   useEffect(() => { selectedIdsRef.current = selectedIds; }, [selectedIds]);
+
+  duplicateNodesSubgraphForAltDragRef.current = () => {
+    const primaryId = draggingNodeIdRef.current;
+    if (!primaryId) return;
+    const sel = selectedIdsRef.current;
+    const ids = sel.includes(primaryId) ? [...sel] : [primaryId];
+    const idSet = new Set(ids);
+    const snapNodes = nodesRef.current;
+    const snapEdges = edgesRef.current;
+    let n = 0;
+    const genId = (prefix: string) => `${prefix}-${Date.now()}-${n++}-${Math.floor(Math.random() * 10000)}`;
+    const idMap = new Map<string, string>();
+    for (const oid of ids) {
+      const srcNode = snapNodes.find((x) => x.id === oid);
+      idMap.set(oid, genId(srcNode?.type || 'node'));
+    }
+    const newNodes: CanvasNode[] = [];
+    for (const oid of ids) {
+      const src = snapNodes.find((x) => x.id === oid);
+      if (!src) continue;
+      const cloned = structuredClone(src) as CanvasNode;
+      cloned.id = idMap.get(oid)!;
+      if (cloned.type === 'chat' && cloned.messages?.length) {
+        cloned.messages = cloned.messages.map((m) => ({ ...m, id: genId('msg') }));
+      }
+      if (cloned.type === 'annotation' && cloned.annotations?.length) {
+        cloned.annotations = cloned.annotations.map((a) => ({ ...a, id: genId('ann') }));
+      }
+      if (cloned.type === 'director3d' && cloned.figures?.length) {
+        const figMap = new Map<string, string>();
+        cloned.figures = cloned.figures.map((f) => {
+          const nid = genId('figure');
+          figMap.set(f.id, nid);
+          return { ...f, id: nid };
+        });
+        if (cloned.selectedFigureId && figMap.has(cloned.selectedFigureId)) {
+          cloned.selectedFigureId = figMap.get(cloned.selectedFigureId)!;
+        }
+      }
+      newNodes.push(cloned);
+    }
+    const newEdges: Edge[] = [];
+    const edgeDupKey = (s: string, t: string) => `${s}->${t}`;
+    const seenEdge = new Set<string>();
+    for (const e of snapEdges) {
+      const sIn = idSet.has(e.sourceId);
+      const tIn = idSet.has(e.targetId);
+      if (!sIn && !tIn) continue;
+      let newS: string;
+      let newT: string;
+      if (sIn && tIn) {
+        newS = idMap.get(e.sourceId)!;
+        newT = idMap.get(e.targetId)!;
+      } else if (!sIn && tIn) {
+        newS = e.sourceId;
+        newT = idMap.get(e.targetId)!;
+      } else {
+        newS = idMap.get(e.sourceId)!;
+        newT = e.targetId;
+      }
+      if (newS === newT) continue;
+      const k = edgeDupKey(newS, newT);
+      if (seenEdge.has(k)) continue;
+      seenEdge.add(k);
+      newEdges.push({ id: genId('edge'), sourceId: newS, targetId: newT });
+    }
+    const newSel = ids.map((oid) => idMap.get(oid)!).filter(Boolean);
+    const primaryNew = idMap.get(primaryId);
+    if (!primaryNew) return;
+    setNodes((prev) => [...prev, ...newNodes]);
+    setEdges((prev) => [...prev, ...newEdges]);
+    selectedIdsRef.current = newSel;
+    setSelectedIds(newSel);
+    draggingNodeIdRef.current = primaryNew;
+    setDraggingNodeId(primaryNew);
+  };
 
   const buildCanvasHistorySignature = useCallback((snapshot: CanvasHistoryEntry) => {
     return JSON.stringify({
@@ -2365,9 +2455,28 @@ export default function App() {
       setTransform(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
       lastMousePosRef.current = { x: e.clientX, y: e.clientY };
     } else if (pointerType === 'node') {
-      const dx = (e.clientX - lastMousePosRef.current.x) / transformRef.current.scale;
-      const dy = (e.clientY - lastMousePosRef.current.y) / transformRef.current.scale;
-      
+      const ddx = e.clientX - lastMousePosRef.current.x;
+      const ddy = e.clientY - lastMousePosRef.current.y;
+      const dx = ddx / transformRef.current.scale;
+      const dy = ddy / transformRef.current.scale;
+
+      if (altDupPendingRef.current && !altDupDoneRef.current) {
+        altDragScreenAccumRef.current.x += ddx;
+        altDragScreenAccumRef.current.y += ddy;
+        if (Math.hypot(altDragScreenAccumRef.current.x, altDragScreenAccumRef.current.y) > 6) {
+          duplicateNodesSubgraphForAltDragRef.current();
+          const adx = altDragScreenAccumRef.current.x / transformRef.current.scale;
+          const ady = altDragScreenAccumRef.current.y / transformRef.current.scale;
+          const moved = selectedIdsRef.current;
+          setNodes((prev) =>
+            prev.map((n) => (moved.includes(n.id) ? { ...n, x: n.x + adx, y: n.y + ady } : n))
+          );
+          altDupDoneRef.current = true;
+        }
+        lastMousePosRef.current = { x: e.clientX, y: e.clientY };
+        return;
+      }
+
       // 获取当前选中的节点ID列表（用于多选拖拽）
       const currentSelectedIds = selectedIdsRef.current;
       
@@ -2477,6 +2586,15 @@ export default function App() {
       }
 
       if (pointerType === 'node') {
+        const subtractId = altDupClickNodeIdRef.current;
+        if (altDupPendingRef.current && !altDupDoneRef.current && subtractId) {
+          setSelectedIds((prev) => prev.filter((sid) => sid !== subtractId));
+        }
+        altDupPendingRef.current = false;
+        altDupDoneRef.current = false;
+        altDupClickNodeIdRef.current = null;
+        altDragScreenAccumRef.current = { x: 0, y: 0 };
+
         draggingNodeIdRef.current = null;
         setDraggingNodeId(null);
         // 结束拖拽时必须取消 RAF 并刷掉剩余累积位移，否则下一帧仍会移动节点（紧接着拖缩放柄时会突然错位一跳）
@@ -2629,14 +2747,60 @@ export default function App() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const isInput = (e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA' || (e.target as HTMLElement).tagName === 'SELECT';
-      
+      const isContentEditable = (e.target as HTMLElement).isContentEditable;
+
+      const shortcutCreatesNode =
+        !isInput &&
+        !isContentEditable &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey;
+
+      const placeNewNodeCentered = (type: NodeType) => {
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        const defaultSize = DEFAULT_NODE_SIZES[type] || { width: 280, height: 200 };
+        const tf = transformRef.current;
+        const canvasX = (rect.width / 2 - tf.x) / tf.scale - defaultSize.width / 2;
+        const canvasY = (rect.height / 2 - tf.y) / tf.scale - defaultSize.height / 2;
+        addNodeAtCanvasPositionRef.current(type, canvasX, canvasY);
+      };
+
       if (e.code === 'Space' && !isInput) {
         e.preventDefault();
         setActiveTool('pan');
       } else if (e.code === 'KeyV' && !isInput && !e.ctrlKey && !e.metaKey) {
         setActiveTool('select');
-      } else if (e.code === 'KeyQ' && !isInput && !e.ctrlKey && !e.metaKey) {
+      } else if (e.code === 'KeyB' && !isInput && !isContentEditable && !e.ctrlKey && !e.metaKey && !e.altKey) {
         setActiveTool('boxSelect');
+      } else if (e.code === 'KeyQ' && shortcutCreatesNode) {
+        e.preventDefault();
+        placeNewNodeCentered('chat');
+      } else if (e.code === 'KeyW' && shortcutCreatesNode) {
+        e.preventDefault();
+        placeNewNodeCentered('t2i');
+      } else if (e.code === 'KeyE' && shortcutCreatesNode) {
+        e.preventDefault();
+        placeNewNodeCentered('i2i');
+      } else if (e.code === 'KeyR' && shortcutCreatesNode) {
+        e.preventDefault();
+        placeNewNodeCentered('annotation');
+      } else if (
+        e.code === 'KeyX' &&
+        !isInput &&
+        !(e.target as HTMLElement).isContentEditable &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey
+      ) {
+        e.preventDefault();
+        const sel = selectedIdsRef.current;
+        if (sel.length === 0) {
+          setEyedropperTargetNodeId(null);
+          return;
+        }
+        const id = sel[0];
+        setEyedropperTargetNodeId((prev) => (prev === id ? null : id));
       } else if (e.code === 'Escape') {
         setSelectedIds([]);
         setContextMenu(null);
@@ -2916,27 +3080,39 @@ export default function App() {
         rafIdRef.current = null;
       }
       nodeDragAccumRef.current = null;
+      altDupPendingRef.current = false;
+      altDupDoneRef.current = false;
+      altDupClickNodeIdRef.current = null;
+      altDragScreenAccumRef.current = { x: 0, y: 0 };
     }
     
     if (activeTool === 'select' || activeTool === 'boxSelect') {
       e.stopPropagation();
-      
+
       const isAlreadySelected = selectedIdsRef.current.includes(id);
-      
+
+      const isPureAlt = e.altKey && !e.ctrlKey && !e.metaKey;
+      if (!isPureAlt) {
+        altDupPendingRef.current = false;
+        altDupDoneRef.current = false;
+        altDupClickNodeIdRef.current = null;
+        altDragScreenAccumRef.current = { x: 0, y: 0 };
+      }
+
       // Ctrl + 点击：加选/减选
       if (e.ctrlKey || e.metaKey) {
         if (isAlreadySelected) {
-          setSelectedIds(prev => prev.filter(sid => sid !== id));
+          setSelectedIds((prev) => prev.filter((sid) => sid !== id));
         } else {
-          setSelectedIds(prev => [...prev, id]);
+          setSelectedIds((prev) => [...prev, id]);
         }
-      }
-      // Alt + 点击：减选
-      else if (e.altKey) {
-        setSelectedIds(prev => prev.filter(sid => sid !== id));
-      }
-      // 普通点击
-      else {
+      } else if (isPureAlt) {
+        // Alt：拖拽超过阈值后复制子图（pointermove）；未拖拽则在 pointerup 时减选
+        if (!isAlreadySelected) {
+          setSelectedIds([id]);
+          selectedIdsRef.current = [id];
+        }
+      } else {
         // 如果节点未被选中，则切换为单选这个节点
         // 如果节点已被选中，保持当前多选状态不变
         if (!isAlreadySelected) {
@@ -2949,7 +3125,14 @@ export default function App() {
       if (isInteractiveSurface) {
         return;
       }
-      
+
+      if (isPureAlt) {
+        altDupPendingRef.current = true;
+        altDupClickNodeIdRef.current = id;
+        altDragScreenAccumRef.current = { x: 0, y: 0 };
+        altDupDoneRef.current = false;
+      }
+
       // 开始拖拽（标题栏与节点空白区域）
       setDraggingNodeId(id);
       draggingNodeIdRef.current = id;
@@ -3059,39 +3242,43 @@ export default function App() {
   }, [transform]);
 
   // --- Node Actions ---
-  const handleAddNode = (type: NodeType) => {
-    if (!contextMenu) return;
+  const addNodeAtCanvasPosition = useCallback((type: NodeType, canvasX: number, canvasY: number) => {
     const defaultSize = DEFAULT_NODE_SIZES[type] || { width: 280, height: 200 };
+    const newId = `${type}-${Date.now()}`;
     const newNode: CanvasNode = {
-      id: `${type}-${Date.now()}`,
+      id: newId,
       type,
-      x: contextMenu.canvasX,
-      y: contextMenu.canvasY,
+      x: canvasX,
+      y: canvasY,
       width: defaultSize.width,
       height: defaultSize.height,
-      prompt: '',  // 提示词使用预设，不直接设置
+      prompt: '', // 提示词使用预设，不直接设置
       images: [],
-      aspectRatio: type === 'panoramaT2i' ? '2:1' : (type === 't2i' || type === 'i2i' || type === 'video' || type === 'gridSplit' || type === 'gridMerge' ? '16:9' : '1:1'),
+      aspectRatio:
+        type === 'panoramaT2i'
+          ? '2:1'
+          : type === 't2i' || type === 'i2i' || type === 'video' || type === 'gridSplit' || type === 'gridMerge'
+            ? '16:9'
+            : '1:1',
       resolution: type === 't2i' || type === 'i2i' || type === 'panoramaT2i' ? '4k' : '2k',
       imageCount: 1,
-      model: type === 't2i' || type === 'i2i' || type === 'panoramaT2i' || type === 'panorama' ? defaultCanvasImageModel() : 'gemini-3.1-flash-image-preview',
+      model:
+        type === 't2i' || type === 'i2i' || type === 'panoramaT2i' || type === 'panorama'
+          ? defaultCanvasImageModel()
+          : 'gemini-3.1-flash-image-preview',
       viewMode: 'single',
       currentImageIndex: 0,
-      // 全景图生成节点默认预设
       ...(type === 'panoramaT2i' ? { activePreset: '全景图生成' } : {}),
-      // 360 全景图节点特有属性
       ...(type === 'panorama' ? { panoramaImage: '', yaw: 0, pitch: 0, fov: 75, envMode: 'day' as const } : {}),
-      // 全景图生成节点特有属性
       ...(type === 'panoramaT2i' ? { panoramaImage: '', isGenerating: false } : {}),
-      // 标注节点特有属性
-      ...(type === 'annotation' ? { sourceImage: '', annotations: [], isEditing: false, selectedAnnotationId: undefined } : {}),
-      // 宫格拆分节点特有属性
+      ...(type === 'annotation'
+        ? { sourceImage: '', annotations: [], isEditing: false, selectedAnnotationId: undefined }
+        : {}),
       ...(type === 'gridSplit' ? { inputImage: '', gridCount: 4 as const, outputImages: [] } : {}),
-      // 宫格合并节点特有属性
       ...(type === 'gridMerge' ? { inputImages: [], gridCount: 4 as const, outputImage: '' } : {}),
-      // 3D导演台节点特有属性
-      ...(type === 'director3d' ? { backgroundImage: '', yaw: 0, pitch: 0, fov: 75, figures: [], selectedFigureId: undefined } : {}),
-      // 对话节点特有属性
+      ...(type === 'director3d'
+        ? { backgroundImage: '', yaw: 0, pitch: 0, fov: 75, figures: [], selectedFigureId: undefined }
+        : {}),
       ...(type === 'chat'
         ? {
             messages: [],
@@ -3110,18 +3297,25 @@ export default function App() {
           }
         : {}),
     };
-    setNodes(prev => [...prev, newNode]);
-    setSelectedIds([newNode.id]);
+    setNodes((prev) => [...prev, newNode]);
+    setSelectedIds([newId]);
 
-    // 如果有待连接的源节点，自动创建连线
-    if (pendingEdgeSourceId) {
-      const exists = edges.some(edge => edge.sourceId === pendingEdgeSourceId && edge.targetId === newNode.id);
-      if (!exists) {
-        setEdges(prev => [...prev, { id: `edge-${Date.now()}`, sourceId: pendingEdgeSourceId, targetId: newNode.id }]);
-      }
+    const pending = pendingEdgeSourceIdRef.current;
+    if (pending) {
+      setEdges((prev) => {
+        if (prev.some((edge) => edge.sourceId === pending && edge.targetId === newId)) return prev;
+        return [...prev, { id: `edge-${Date.now()}`, sourceId: pending, targetId: newId }];
+      });
       setPendingEdgeSourceId(null);
+      pendingEdgeSourceIdRef.current = null;
     }
+  }, []);
 
+  addNodeAtCanvasPositionRef.current = addNodeAtCanvasPosition;
+
+  const handleAddNode = (type: NodeType) => {
+    if (!contextMenu) return;
+    addNodeAtCanvasPosition(type, contextMenu.canvasX, contextMenu.canvasY);
     setContextMenu(null);
   };
 
@@ -4349,15 +4543,26 @@ export default function App() {
                 </>
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center text-gray-600 text-sm">
+                  {eyedropperTargetNodeId && eyedropperTargetNodeId !== node.id ? (
+                    <div
+                      className="absolute inset-0 z-[1] cursor-crosshair bg-transparent"
+                      title="点击连接上游节点"
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        const t = eyedropperTargetNodeIdRef.current;
+                        if (t) handleCanvasEyedropper(node.id, t);
+                      }}
+                    />
+                  ) : null}
                   {node.isGenerating ? (
-                    <div className="flex flex-col items-center gap-1.5 text-gray-400">
+                    <div className="relative z-[2] flex flex-col items-center gap-1.5 text-gray-400">
                       <LoaderIcon size={24} />
                       <span className="text-xs tabular-nums tracking-tight">已用时 {genTimeMmSs}</span>
                       <span className="text-[10px] text-gray-500">{genElapsedSec} 秒</span>
                     </div>
                   ) : (
                     node.type === 'image' ? (
-                      <div className="flex flex-col items-center gap-2">
+                      <div className="relative z-[2] flex flex-col items-center gap-2">
                         <div className="text-xs text-gray-400">创建图片节点</div>
                         <button 
                           onPointerDown={(e) => {
@@ -4380,12 +4585,18 @@ export default function App() {
                             setEyedropperTargetNodeId(node.id);
                           }}
                           className={`px-2 py-1 rounded text-[10px] flex items-center gap-1 ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600 text-white' : 'bg-[#333] hover:bg-[#444] text-gray-300'}`}
-                          title={eyedropperTargetNodeId === node.id ? "取消吸取" : "吸取画布内图片"}
+                          title={
+                            eyedropperTargetNodeId === node.id
+                              ? '取消吸取（快捷键 X）'
+                              : '吸取画布内图片（快捷键 X）'
+                          }
                         >
                           <EyedropperIcon size={10} /> 吸管
                         </button>
                       </div>
-                    ) : '等待生成...'
+                    ) : (
+                      <span className="relative z-[2]">等待生成...</span>
+                    )
                   )}
                 </div>
               )}
@@ -4453,14 +4664,25 @@ export default function App() {
                 </>
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center text-gray-600 text-sm">
+                  {eyedropperTargetNodeId && eyedropperTargetNodeId !== node.id ? (
+                    <div
+                      className="absolute inset-0 z-[1] cursor-crosshair bg-transparent"
+                      title="点击连接上游节点"
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        const t = eyedropperTargetNodeIdRef.current;
+                        if (t) handleCanvasEyedropper(node.id, t);
+                      }}
+                    />
+                  ) : null}
                   {node.isGenerating ? (
-                    <div className="flex flex-col items-center gap-1.5 text-gray-400">
+                    <div className="relative z-[2] flex flex-col items-center gap-1.5 text-gray-400">
                       <LoaderIcon size={24} />
                       <span className="text-xs tabular-nums tracking-tight">已用时 {genTimeMmSs}</span>
                       <span className="text-[10px] text-gray-500">{genElapsedSec} 秒</span>
                     </div>
                   ) : (
-                    '生成后在此预览（链接约 24 小时内有效）'
+                    <span className="relative z-[2]">生成后在此预览（链接约 24 小时内有效）</span>
                   )}
                 </div>
               )}
@@ -4474,6 +4696,14 @@ export default function App() {
               nodes={nodes}
               eyedropperTargetNodeId={eyedropperTargetNodeId}
               onEyedropperSelect={() => setEyedropperTargetNodeId(node.id)}
+              onEyedropperPickLink={
+                eyedropperTargetNodeId && eyedropperTargetNodeId !== node.id
+                  ? () => {
+                      const t = eyedropperTargetNodeIdRef.current;
+                      if (t) handleCanvasEyedropper(node.id, t);
+                    }
+                  : undefined
+              }
               onUpdate={(updates) => handleUpdateNode(node.id, updates)}
               onCreateImageNode={(images, x, y) => {
                 const newNode: CanvasNode = {
@@ -5069,7 +5299,7 @@ export default function App() {
           >
             {/* 点击提示 - 只在顶部显示提示文字，不遮挡内容 */}
             <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-cyan-600 text-white text-xs font-medium rounded-lg shadow-lg flex items-center gap-2 pointer-events-auto" style={{ zIndex: 100 }}>
-              <EyedropperIcon size={14} /> 点击图片吸取 | ESC取消
+              <EyedropperIcon size={14} /> 点击节点连线吸取 · 快捷键 X · ESC 取消
             </div>
           </div>
         )}
@@ -5143,7 +5373,7 @@ export default function App() {
         <button
           onPointerDown={(e) => { e.stopPropagation(); setActiveTool('boxSelect'); }}
           className={`p-2.5 rounded-lg transition-colors ${activeTool === 'boxSelect' ? 'bg-blue-600 text-white' : 'hover:bg-[#333] text-gray-400 hover:text-white'}`}
-          title="框选工具 (Q)"
+          title="框选工具 (B)"
         >
           <BoxSelectIcon size={18} />
         </button>
@@ -6464,6 +6694,8 @@ interface PanoramaNodeContentProps {
   nodes: CanvasNode[];
   eyedropperTargetNodeId: string | null;
   onEyedropperSelect: () => void;
+  /** 吸管激活时点击无图预览区：将本节点作为连线起点连向吸管目标 */
+  onEyedropperPickLink?: () => void;
   onUpdate: (updates: Partial<PanoramaNode>) => void;
   onCreateImageNode: (images: string[], nodeX: number, nodeY: number) => void;
   onCopyToImage?: () => void;
@@ -6483,7 +6715,16 @@ const FullscreenIcon = ({ size = 16 }: { size?: number }) => (
   </svg>
 );
 
-function PanoramaNodeContent({ node, nodes, eyedropperTargetNodeId, onEyedropperSelect, onUpdate, onCreateImageNode, onCopyToImage }: PanoramaNodeContentProps) {
+function PanoramaNodeContent({
+  node,
+  nodes,
+  eyedropperTargetNodeId,
+  onEyedropperSelect,
+  onEyedropperPickLink,
+  onUpdate,
+  onCreateImageNode,
+  onCopyToImage,
+}: PanoramaNodeContentProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -7354,12 +7595,25 @@ function PanoramaNodeContent({ node, nodes, eyedropperTargetNodeId, onEyedropper
         onWheel={(e) => e.stopPropagation()}
       >
         {!panoramaImage && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/40 z-10">
-            <PanoramaIcon size={36} />
-            <span className="text-gray-300 text-xs text-center px-4">
-              点击下方"导入"加载图片<br/>或从其他节点连线获取图片
-            </span>
-          </div>
+          <>
+            {onEyedropperPickLink ? (
+              <button
+                type="button"
+                className="absolute inset-0 z-[15] cursor-crosshair bg-transparent border-0 p-0"
+                title="点击连接上游节点"
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  onEyedropperPickLink();
+                }}
+              />
+            ) : null}
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-black/40 pointer-events-none">
+              <PanoramaIcon size={36} />
+              <span className="text-gray-300 text-xs text-center px-4">
+                点击下方&quot;导入&quot;加载图片<br />或从其他节点连线获取图片
+              </span>
+            </div>
+          </>
         )}
 
         {/* 视角指示器 */}
