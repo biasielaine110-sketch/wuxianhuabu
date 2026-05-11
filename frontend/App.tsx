@@ -5708,6 +5708,11 @@ export default function App() {
                       Imagine Video、Firefly Veo / Sora / Kling 等）时使用；Base URL 仍填实际上游地址（如{' '}
                       <span className="text-gray-400">https://yunzhi-ai.top/v1</span>）。对{' '}
                       <span className="text-gray-400">yunzhi-ai.top</span> 本站会自动经同源路径转发，避免浏览器 CORS。与 ToAPIs、君澜密钥分开保存。
+                      <span className="text-gray-600"> Vercel 部署：项目 Root 为仓库根时用根目录 vercel.json；Root 为 </span>
+                      <span className="text-gray-400">frontend</span>
+                      <span className="text-gray-600">
+                        时必须包含本仓库的 frontend/vercel.json 与 frontend/api/yunzhi（否则 POST /yunzhi-openai 易 405）。
+                      </span>
                     </p>
                     <label className="text-xs text-gray-500 block mb-1">New API Base URL</label>
                     <input
