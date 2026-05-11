@@ -1,6 +1,6 @@
 /**
  * 云智同源代理（共享逻辑）；与仓库根 `api/_lib/yunzhi-proxy-handler.cjs` 一致。
- * Vercel 非 Next 项目不支持 api 下多段 [...catch]，须拆成显式路径并共用此模块。
+ * Vite + Vercel：`/api` 下 `[...slug]` 不会像 Next 那样捕获多级路径，须在 `yunzhi-proxy/**` 下为每条上游路径建入口文件并共用此模块。
  */
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
