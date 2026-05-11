@@ -667,9 +667,7 @@ function isGptImage2CanvasModelId(id: string): boolean {
 
 export default function App() {
   // --- State ---
-  const [nodes, setNodes] = useState<CanvasNode[]>([
-    { id: `t2i-initial`, type: 't2i', x: window.innerWidth / 2 - 160, y: window.innerHeight / 2 - 280, width: 320, height: 560, prompt: '', images: [], aspectRatio: '16:9', resolution: '4k', imageCount: 1, model: defaultCanvasImageModel(), viewMode: 'single', currentImageIndex: 0 }
-  ]);
+  const [nodes, setNodes] = useState<CanvasNode[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: 1 });
   const [activeTool, setActiveTool] = useState<Tool>('select');
@@ -836,27 +834,11 @@ export default function App() {
 
   const handleClearCanvas = useCallback(() => {
     if (
-      !confirm('确定清空画布？将删除所有节点与连线，并恢复为空白文生图节点（建议先「保存当前画布」或导出项目）。')
+      !confirm('确定清空画布？将删除所有节点与连线，画布变为空白（建议先「保存当前画布」或导出项目）。')
     ) {
       return;
     }
-    const t2i: CanvasNode = {
-      id: `t2i-${Date.now()}`,
-      type: 't2i',
-      x: window.innerWidth / 2 - 160,
-      y: window.innerHeight / 2 - 280,
-      width: 320,
-      height: 560,
-      prompt: '',
-      images: [],
-      aspectRatio: '16:9',
-      resolution: '4k',
-      imageCount: 1,
-      model: defaultCanvasImageModel(),
-      viewMode: 'single',
-      currentImageIndex: 0,
-    };
-    setNodes([t2i]);
+    setNodes([]);
     setEdges([]);
     setTransform({ x: 0, y: 0, scale: 1 });
     setSelectedIds([]);
@@ -1294,27 +1276,11 @@ export default function App() {
     const projectId = `project-${Date.now()}`;
     const prevList = projectsRef.current;
     const projectName = (name || '').trim() || `项目 ${prevList.length + 1}`;
-    const baseNode: CanvasNode = {
-      id: `t2i-${Date.now()}`,
-      type: 't2i',
-      x: window.innerWidth / 2 - 160,
-      y: window.innerHeight / 2 - 280,
-      width: 320,
-      height: 560,
-      prompt: '',
-      images: [],
-      aspectRatio: '16:9',
-      resolution: '4k',
-      imageCount: 1,
-      model: defaultCanvasImageModel(),
-      viewMode: 'single',
-      currentImageIndex: 0
-    };
     const newProject: CanvasProject = {
       id: projectId,
       name: projectName,
       updatedAt: Date.now(),
-      nodes: [baseNode],
+      nodes: [],
       edges: [],
       transform: { x: 0, y: 0, scale: 1 }
     };
@@ -5090,7 +5056,7 @@ export default function App() {
           type="button"
           onClick={handleClearCanvas}
           className="bg-[#1e1e1e]/90 backdrop-blur-md px-3 py-2.5 rounded-xl shadow-2xl border border-[#333] hover:bg-[#333] transition-colors"
-          title="删除所有节点与连线，并放入一个空白文生图节点"
+          title="删除所有节点与连线，画布变为空白"
         >
           <span className="text-gray-400 text-xs font-medium whitespace-nowrap">清空画布</span>
       </button>
