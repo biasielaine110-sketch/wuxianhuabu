@@ -878,33 +878,75 @@ async function newApiSubmitVideoGeneration(
   apiKey: string,
   body: Record<string, unknown>,
   signal?: AbortSignal
-): Promise<{ id: string }> {
+): Promise<{ taskId: string; pollPath: string }> {
   const key = apiKey.trim();
   if (!key) throw new Error('未配置 New API 密钥。');
   const base = rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm);
-  const res = await fetch(`${base}/videos/generations`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${key}`,
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
-  const text = await res.text();
-  if (!res.ok) {
-    throw new Error(`New API 视频任务提交失败 (${res.status}): ${text.slice(0, 800)}`);
+
+  /** New API 文档：POST /v1/video/generations（video 单数）；部分自建站仍用 ToAPIs 式 /videos/generations */
+  const enrichNewApiVideoBody = (): Record<string, unknown> => {
+    const b = { ...body };
+    const imgs = Array.isArray(b.images) ? (b.images as unknown[]) : null;
+    const iu = Array.isArray(b.image_urls) ? (b.image_urls as unknown[]) : null;
+    const first =
+      (imgs?.[0] && typeof imgs[0] === 'string' ? imgs[0] : null) ||
+      (iu?.[0] && typeof iu[0] === 'string' ? iu[0] : null);
+    if (first && b.image == null) b.image = first;
+    const sec = b.seconds;
+    if (typeof sec === 'string' && b.duration == null) {
+      const n = parseInt(sec, 10);
+      if (!Number.isNaN(n)) b.duration = n;
+    }
+    return b;
+  };
+
+  const payload = enrichNewApiVideoBody();
+  const tryPaths = ['/video/generations', '/videos/generations'];
+  let lastFail = '';
+  for (const p of tryPaths) {
+    const res = await fetch(`${base}${p}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify(payload),
+      signal,
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      lastFail = `(${res.status}) ${text.slice(0, 800)}`;
+      if ((res.status === 405 || res.status === 404) && p === tryPaths[0]) continue;
+      throw new Error(`New API 视频任务提交失败 ${lastFail}`);
+    }
+    let json: Record<string, unknown>;
+    try {
+      json = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      throw new Error(`New API 视频响应无效：${text.slice(0, 400)}`);
+    }
+    const errObj = json.error;
+    if (errObj && typeof errObj === 'object' && typeof (errObj as Record<string, unknown>).message === 'string') {
+      throw new Error(`New API: ${(errObj as Record<string, unknown>).message}`);
+    }
+    const taskIdRaw = json.task_id ?? json.id;
+    const taskId =
+      typeof taskIdRaw === 'string'
+        ? taskIdRaw.trim()
+        : typeof taskIdRaw === 'number' && Number.isFinite(taskIdRaw)
+          ? String(taskIdRaw)
+          : '';
+    if (!taskId) throw new Error(`New API 未返回任务 id（task_id / id）：${text.slice(0, 400)}`);
+    return { taskId, pollPath: p };
   }
-  const json = JSON.parse(text) as { id?: string; error?: { message?: string } };
-  if (json.error?.message) throw new Error(`New API: ${json.error.message}`);
-  if (!json.id) throw new Error(`New API 未返回视频任务 id：${text.slice(0, 400)}`);
-  return { id: json.id };
+  throw new Error(`New API 视频任务提交失败 ${lastFail}`);
 }
 
 async function newApiPollVideoTaskToPlayableUrl(
   baseNorm: string,
   apiKey: string,
   taskId: string,
+  pollPath: string,
   signal?: AbortSignal
 ): Promise<string> {
   const key = apiKey.trim();
@@ -914,7 +956,7 @@ async function newApiPollVideoTaskToPlayableUrl(
 
   while (Date.now() < deadline) {
     assertNotAborted(signal);
-    const res = await fetch(`${base}/videos/generations/${encodeURIComponent(taskId)}`, {
+    const res = await fetch(`${base}${pollPath}/${encodeURIComponent(taskId)}`, {
       headers: { Authorization: `Bearer ${key}` },
       signal,
     });
@@ -1043,8 +1085,8 @@ export async function newApiCanvasVideoGenerate(params: {
     if (imageUrls.length) body.images = imageUrls;
   }
 
-  const { id } = await newApiSubmitVideoGeneration(baseNorm, naKey, body, params.signal);
-  return newApiPollVideoTaskToPlayableUrl(baseNorm, naKey, id, params.signal);
+  const { taskId, pollPath } = await newApiSubmitVideoGeneration(baseNorm, naKey, body, params.signal);
+  return newApiPollVideoTaskToPlayableUrl(baseNorm, naKey, taskId, pollPath, params.signal);
 }
 
 async function toApisGenerateNewImage(
@@ -1174,6 +1216,264 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
+/** 云智 yunzhi-ai.top：文生图/图生图走官方文档的 `/v1/chat/completions` + SSE，而非 OpenAI 式 `/images/*` */
+function isYunzhiOpenAiCompatBase(baseNormalized: string): boolean {
+  try {
+    return new URL(baseNormalized).hostname.toLowerCase() === 'yunzhi-ai.top';
+  } catch {
+    return false;
+  }
+}
+
+/** 云智文档允许的 aspect_ratio */
+function yunzhiChatDocAspectRatio(aspectRatio: string): '1:1' | '16:9' | '9:16' | '4:3' | '3:4' {
+  const s = (aspectRatio || '1:1').trim();
+  const allowed = new Set(['1:1', '16:9', '9:16', '4:3', '3:4']);
+  if (allowed.has(s)) return s as '1:1' | '16:9' | '9:16' | '4:3' | '3:4';
+  if (s === '3:2' || s === '5:4' || s === '2:1' || s === '21:9') return '4:3';
+  if (s === '2:3' || s === '4:5' || s === '1:2' || s === '9:21') return '3:4';
+  return '1:1';
+}
+
+function yunzhiChatDocQuality(nodeResolution?: string): '1k' | '2k' | '4k' {
+  const r = (nodeResolution || '2k').toLowerCase().replace(/\s/g, '');
+  if (r === '4k') return '4k';
+  if (r === '0.5k' || r === '1k') return '1k';
+  return '2k';
+}
+
+function yunzhiQualityPixelsLabel(q: '1k' | '2k' | '4k'): string {
+  if (q === '4k') return '4096';
+  if (q === '1k') return '1024';
+  return '2048';
+}
+
+function yunzhiQualityDisplayUpper(q: '1k' | '2k' | '4k'): string {
+  return q === '1k' ? '1K' : q === '4k' ? '4K' : '2K';
+}
+
+function extractImageUrlFromYunzhiChatSseAccumulated(acc: string): string | null {
+  const md = acc.match(/!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/);
+  if (md) return md[1];
+  const storage = acc.match(/(https?:\/\/yunzhi-ai\.top\/storage\/images\/[^\s"'<>)\]]+)/i);
+  if (storage) return storage[1];
+  const ext = acc.match(/(https?:\/\/[^\s"'<>)]+\.(?:png|jpe?g|webp|gif)(?:\?[^\s"'<>)]*)?)/i);
+  return ext ? ext[1] : null;
+}
+
+/**
+ * 云智图片（文生图/图生图）：POST /v1/chat/completions，stream:true，从 SSE 增量里解析 Markdown 图片或直链。
+ * @see 云智API调用文档.md
+ */
+async function yunzhiOpenAiCompatStreamChatToFirstImageUrl(
+  baseNorm: string,
+  apiKey: string,
+  body: Record<string, unknown>,
+  signal?: AbortSignal
+): Promise<string> {
+  const fetchBase = rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm);
+  const key = apiKey.trim();
+  const res = await fetch(`${fetchBase}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${key}`,
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`云智图片生成 (${res.status}): ${t.slice(0, 800)}`);
+  }
+  if (!res.body) throw new Error('云智图片生成：响应不支持流式读取。');
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let lineBuf = '';
+  let acc = '';
+  try {
+    while (true) {
+      assertNotAborted(signal);
+      const { done, value } = await reader.read();
+      if (done) break;
+      lineBuf += decoder.decode(value, { stream: true });
+      const lines = lineBuf.split('\n');
+      lineBuf = lines.pop() ?? '';
+      for (const rawLine of lines) {
+        const s = rawLine.trim();
+        if (!s.startsWith('data:')) continue;
+        const data = s.slice(5).trim();
+        if (data === '[DONE]') {
+          const u = extractImageUrlFromYunzhiChatSseAccumulated(acc);
+          if (u) return u;
+          continue;
+        }
+        try {
+          const chunk = JSON.parse(data) as {
+            error?: { message?: string };
+            choices?: Array<{ delta?: { content?: string } }>;
+          };
+          if (chunk.error?.message) throw new Error(`云智：${chunk.error.message}`);
+          const content = chunk.choices?.[0]?.delta?.content;
+          if (typeof content === 'string' && content) {
+            acc += content;
+            const u = extractImageUrlFromYunzhiChatSseAccumulated(acc);
+            if (u) return u;
+          }
+        } catch (e) {
+          if (e instanceof Error && e.message.startsWith('云智：')) throw e;
+        }
+      }
+    }
+    const u = extractImageUrlFromYunzhiChatSseAccumulated(acc);
+    if (u) return u;
+    throw new Error(`云智图片生成：流式响应中未解析到图片 URL。文本片段：${acc.slice(0, 500)}`);
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function buildYunzhiI2iUserText(params: {
+  prompt: string;
+  aspect: string;
+  quality: '1k' | '2k' | '4k';
+  upstreamModel: string;
+}): string {
+  const head = `图片比例${params.aspect}, ${yunzhiQualityDisplayUpper(params.quality)}分辨率(${yunzhiQualityPixelsLabel(params.quality)}像素)`;
+  const enforce =
+    '【必须以上传参考图中的人物、场景、构图与色调为基准进行编辑或重绘；禁止替换成无关主体或全新场景；仅可按文字指令微调姿态、细节与风格。】\n\n';
+  if (params.upstreamModel === 'firefly-gpt-image2' || params.upstreamModel === 'firefly-gpt-image15') {
+    return `${head}, ${params.prompt}`;
+  }
+  return `${enforce}${head}, ${params.prompt}`;
+}
+
+async function editImagesYunzhiNewApiFireflyViaChatCompletions(params: {
+  baseNorm: string;
+  apiKey: string;
+  base64Images: string[];
+  prompt: string;
+  numberOfImages: number;
+  canvasFireflyModelId: string;
+  aspectRatio: string;
+  nodeResolution?: string;
+  signal?: AbortSignal;
+}): Promise<string[]> {
+  const {
+    baseNorm,
+    apiKey,
+    base64Images,
+    prompt,
+    numberOfImages,
+    canvasFireflyModelId,
+    aspectRatio,
+    nodeResolution,
+    signal,
+  } = params;
+  if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
+  const modelCandidates = newApiFireflyRequestModelCandidates(canvasFireflyModelId);
+  if (!modelCandidates.length) throw new Error('无效的 Firefly（New API）模型。');
+  const yAr = yunzhiChatDocAspectRatio(aspectRatio);
+  const yQ = yunzhiChatDocQuality(nodeResolution);
+  const count = Math.min(Math.max(numberOfImages, 1), 4);
+  const imageParts: Array<{ type: 'image_url'; image_url: { url: string } }> = [];
+  for (const img of base64Images.slice(0, 6)) {
+    const parsed = parseBase64ImageInput(img);
+    const mime = parsed.mime || 'image/jpeg';
+    imageParts.push({
+      type: 'image_url',
+      image_url: { url: `data:${mime};base64,${parsed.raw}` },
+    });
+  }
+  const results: string[] = [];
+  for (let i = 0; i < count; i++) {
+    assertNotAborted(signal);
+    let lastErr: Error | null = null;
+    let ok = false;
+    for (const tryModel of modelCandidates) {
+      const textBlock = buildYunzhiI2iUserText({
+        prompt,
+        aspect: yAr,
+        quality: yQ,
+        upstreamModel: tryModel,
+      });
+      const content: Array<
+        { type: 'image_url'; image_url: { url: string } } | { type: 'text'; text: string }
+      > = [...imageParts, { type: 'text', text: textBlock }];
+      try {
+        const imageUrl = await yunzhiOpenAiCompatStreamChatToFirstImageUrl(
+          baseNorm,
+          apiKey,
+          {
+            model: tryModel,
+            messages: [{ role: 'user', content }],
+            stream: true,
+            aspect_ratio: yAr,
+            quality: yQ,
+          },
+          signal
+        );
+        results.push(await fetchUrlAsBase64(imageUrl, signal, apiKey.trim()));
+        ok = true;
+        break;
+      } catch (e) {
+        lastErr = e instanceof Error ? e : new Error(String(e));
+      }
+    }
+    if (!ok) throw lastErr ?? new Error('云智图生图失败');
+  }
+  return results;
+}
+
+/** 云智文生图：POST /v1/chat/completions + SSE，与官方文档一致（单条 user text）。 */
+async function generateImagesYunzhiFireflyViaChatCompletions(params: {
+  baseNorm: string;
+  apiKey: string;
+  prompt: string;
+  aspectRatio: string;
+  numberOfImages: number;
+  resolvedModel: string;
+  nodeResolution?: string;
+  signal?: AbortSignal;
+}): Promise<string[]> {
+  const {
+    baseNorm,
+    apiKey,
+    prompt,
+    aspectRatio,
+    numberOfImages,
+    resolvedModel,
+    nodeResolution,
+    signal,
+  } = params;
+  const yAr = yunzhiChatDocAspectRatio(aspectRatio);
+  const yQ = yunzhiChatDocQuality(nodeResolution);
+  const head = `图片比例${yAr}, ${yunzhiQualityDisplayUpper(yQ)}分辨率(${yunzhiQualityPixelsLabel(yQ)}像素)`;
+  const textLine =
+    resolvedModel === 'firefly-gpt-image2' || resolvedModel === 'firefly-gpt-image15'
+      ? `${head}, ${prompt.trim()}`
+      : prompt.trim();
+  const count = Math.max(numberOfImages, 1);
+  const out: string[] = [];
+  for (let i = 0; i < count; i++) {
+    assertNotAborted(signal);
+    const imageUrl = await yunzhiOpenAiCompatStreamChatToFirstImageUrl(
+      baseNorm,
+      apiKey,
+      {
+        model: resolvedModel,
+        messages: [{ role: 'user', content: [{ type: 'text', text: textLine }] }],
+        stream: true,
+        aspect_ratio: yAr,
+        quality: yQ,
+      },
+      signal
+    );
+    out.push(await fetchUrlAsBase64(imageUrl, signal, apiKey.trim()));
+  }
+  return out;
+}
+
 async function postJsonAtBase<T>(base: string, path: string, body: unknown, apiKey: string): Promise<T> {
   if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key，请在设置中选择「OpenAI 兼容」并填写密钥。');
   const fetchBase = rewriteRemoteOpenAiCompatBaseForBrowserCors(base);
@@ -1247,8 +1547,21 @@ async function generateImagesAtOpenAiCompatibleBase(
   aspectRatio: string,
   numberOfImages: number,
   resolvedModel: string,
+  nodeResolution?: string,
   signal?: AbortSignal
 ): Promise<string[]> {
+  if (isYunzhiOpenAiCompatBase(baseNorm) && resolvedModel.startsWith('firefly-')) {
+    return generateImagesYunzhiFireflyViaChatCompletions({
+      baseNorm,
+      apiKey,
+      prompt,
+      aspectRatio,
+      numberOfImages,
+      resolvedModel,
+      nodeResolution,
+      signal,
+    });
+  }
   const size = aspectRatioToOpenAiSize(aspectRatio, resolvedModel);
   const enhancedPrompt = buildPromptWithDimensions(prompt, aspectRatio);
   const out: string[] = [];
@@ -1318,9 +1631,23 @@ async function editImagesNewApiFireflyWithRouteFallback(
   numberOfImages: number,
   canvasFireflyModelId: string,
   aspectRatio: string,
+  nodeResolution?: string,
   signal?: AbortSignal
 ): Promise<string[]> {
   if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
+  if (isYunzhiOpenAiCompatBase(baseNorm)) {
+    return editImagesYunzhiNewApiFireflyViaChatCompletions({
+      baseNorm,
+      apiKey,
+      base64Images,
+      prompt,
+      numberOfImages,
+      canvasFireflyModelId,
+      aspectRatio,
+      nodeResolution,
+      signal,
+    });
+  }
   const modelCandidates = newApiFireflyRequestModelCandidates(canvasFireflyModelId);
   if (!modelCandidates.length) throw new Error('无效的 Firefly（New API）模型。');
   const sizeModel = modelCandidates[0];
@@ -1614,6 +1941,7 @@ export async function openAiGenerateNewImage(
       aspectRatio,
       numberOfImages,
       upstream,
+      nodeResolution,
       signal
     );
   }
@@ -1631,6 +1959,7 @@ export async function openAiGenerateNewImage(
       aspectRatio,
       numberOfImages,
       'gpt-image-2',
+      nodeResolution,
       signal
     );
   }
@@ -1650,6 +1979,7 @@ export async function openAiGenerateNewImage(
     aspectRatio,
     numberOfImages,
     model,
+    nodeResolution,
     signal
   );
 }
@@ -1684,6 +2014,7 @@ export async function openAiEditImage(
       numberOfImages,
       rawModel,
       aspectRatio,
+      nodeResolution,
       signal
     );
   }
