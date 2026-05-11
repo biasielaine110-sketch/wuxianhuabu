@@ -26,7 +26,7 @@
   "rewrites": [
     {
       "source": "/yunzhi-openai/(.*)",
-      "destination": "/api/yunzhi-proxy?__p=$1"
+      "destination": "/api/yunzhi-proxy/$1"
     },
     {
       "source": "/cdn-files-toapis/:path*",

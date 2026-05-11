@@ -1,6 +1,5 @@
 /**
- * 云智同源代理（单文件）。vercel.json 将 /yunzhi-openai/(.*) 转到本函数 ?__p=$1，
- * 避免部分环境下 api/yunzhi/[...segments] 动态路由未生效导致 POST 落到 index.html → 405。
+ * 与仓库根目录 `api/yunzhi-proxy/[...path].js` 一致（Vercel Root=frontend 时使用）。
  */
 const { Readable } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
@@ -25,17 +24,14 @@ function isHopByHopHeader(name) {
 module.exports = async function handler(req, res) {
   const host = req.headers.host || 'localhost';
   const url = new URL(req.url || '/', `http://${host}`);
-  const rawP = url.searchParams.get('__p');
-  if (rawP == null || String(rawP).trim() === '') {
+  let sub = url.pathname.replace(/^\/api\/yunzhi-proxy\/?/, '').replace(/^\/+/, '');
+  if (!sub) {
     res.statusCode = 400;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.end(JSON.stringify({ error: 'missing __p (proxied path)' }));
+    res.end(JSON.stringify({ error: 'missing path after /api/yunzhi-proxy' }));
     return;
   }
-  url.searchParams.delete('__p');
-  const qs = url.searchParams.toString();
-  const subpath = String(rawP).replace(/^\/+/, '');
-  const targetUrl = `${UPSTREAM_ORIGIN}/${subpath}${qs ? `?${qs}` : ''}`;
+  const targetUrl = `${UPSTREAM_ORIGIN}/${sub}${url.search}`;
 
   const headers = new Headers();
   for (const [k, v] of Object.entries(req.headers)) {

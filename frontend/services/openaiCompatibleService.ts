@@ -43,7 +43,7 @@ function openAiCompatFailureHint(status: number, kind: 'generations-json' | 'ima
   }
   if (status === 503) {
     return kind === 'generations-json'
-      ? '（503：上游不可用，或该网关不支持当前 OpenAI 同步文生图格式；若使用 ToAPIs，请把 Base URL 设为 https://toapis.com/v1 。云智长耗时流式接口若经 Vercel 部署，请使用含 api/yunzhi-proxy 的仓库版本，以免边缘 rewrite 超时。）'
+      ? '（503：上游不可用，或该网关不支持当前 OpenAI 同步文生图格式；若使用 ToAPIs，请把 Base URL 设为 https://toapis.com/v1 。云智长耗时流式接口若经 Vercel 部署，请使用含 api/yunzhi-proxy/ 路径代理的仓库版本，以免边缘 rewrite 超时。）'
       : '（503：上游不可用或暂时过载。）';
   }
   return '';
