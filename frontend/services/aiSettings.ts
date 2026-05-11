@@ -18,6 +18,8 @@ export const DEFAULT_OPENAI_BASE_URL = 'https://toapis.com/v1';
 export const DEFAULT_JUNLAN_BASE_URL = 'https://www.junlanai.com/v1';
 /** DeepSeek 官方 OpenAI 兼容入口 */
 export const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1';
+/** New API（Firefly *-newapi 画布模型）OpenAI 兼容根路径；含 /v1 */
+export const DEFAULT_NEWAPI_BASE_URL = 'https://yunzhi-ai.top/v1';
 
 let aiSettingsLegacyMigrated = false;
 
@@ -36,11 +38,15 @@ export function migrateAiSettingsIfLegacy(): void {
     const raw = localStorage.getItem(OPENAI_BASE_URL_STORAGE_KEY)?.trim() ?? '';
     if (!raw) {
       localStorage.setItem(OPENAI_BASE_URL_STORAGE_KEY, DEFAULT_OPENAI_BASE_URL);
-      return;
+    } else {
+      const u = raw.replace(/\/+$/, '').toLowerCase();
+      if (u === 'https://api.openai.com/v1' || u === 'http://api.openai.com/v1') {
+        localStorage.setItem(OPENAI_BASE_URL_STORAGE_KEY, DEFAULT_OPENAI_BASE_URL);
+      }
     }
-    const u = raw.replace(/\/+$/, '').toLowerCase();
-    if (u === 'https://api.openai.com/v1' || u === 'http://api.openai.com/v1') {
-      localStorage.setItem(OPENAI_BASE_URL_STORAGE_KEY, DEFAULT_OPENAI_BASE_URL);
+    const naRaw = localStorage.getItem(NEWAPI_BASE_URL_STORAGE_KEY)?.trim() ?? '';
+    if (!naRaw) {
+      localStorage.setItem(NEWAPI_BASE_URL_STORAGE_KEY, DEFAULT_NEWAPI_BASE_URL);
     }
   } catch {
     /* ignore */
@@ -180,12 +186,13 @@ export function setNewApiKey(apiKey: string): void {
   }
 }
 
-/** 须为自建 New API 的 OpenAI 兼容根路径（含 /v1）；未配置时返回空字符串 */
+/** 须为自建 New API 的 OpenAI 兼容根路径（含 /v1）；未配置时默认云智网关 */
 export function getNewApiBaseUrl(): string {
   try {
-    return localStorage.getItem(NEWAPI_BASE_URL_STORAGE_KEY)?.trim() || '';
+    const raw = localStorage.getItem(NEWAPI_BASE_URL_STORAGE_KEY)?.trim();
+    return raw || DEFAULT_NEWAPI_BASE_URL;
   } catch {
-    return '';
+    return DEFAULT_NEWAPI_BASE_URL;
   }
 }
 

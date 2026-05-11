@@ -4,6 +4,7 @@ import type { AiProvider } from './services/aiSettings';
 import {
   DEFAULT_DEEPSEEK_BASE_URL,
   DEFAULT_JUNLAN_BASE_URL,
+  DEFAULT_NEWAPI_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
   getAiSettingsSnapshot,
   getJunlanSavedKey,
@@ -5628,7 +5629,7 @@ export default function App() {
                       type="text"
                       value={newApiBaseInput}
                       onChange={(e) => setNewApiBaseInput(e.target.value)}
-                      placeholder="https://你的-New-API-部署域名/v1"
+                      placeholder={DEFAULT_NEWAPI_BASE_URL}
                       className="w-full mb-3 bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-violet-500 transition-colors text-sm"
                     />
                     <label className="text-xs text-gray-500 block mb-1">New API Key（sk-...）</label>
