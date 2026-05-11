@@ -34,6 +34,19 @@ const toapisFileCdnProxy = {
     target: 'https://yunzhi-ai.top',
     changeOrigin: true,
     secure: true,
+    /** 云智文/图生图 SSE 可能数分钟；默认代理超时过短会表现为 503 */
+    timeout: 1_800_000,
+    proxyTimeout: 1_800_000,
+    configure(proxy) {
+      proxy.on('error', (err, _req, res) => {
+        console.error('[vite proxy /yunzhi-openai]', err);
+        const r = res as { headersSent?: boolean; writeHead?: (c: number, h?: unknown) => void; end?: (s?: string) => void };
+        if (r && !r.headersSent && typeof r.writeHead === 'function') {
+          r.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
+          r.end?.(`云智代理错误: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      });
+    },
     /** http-proxy 传入的 path 在少数环境下可能无前导 /，需归一化后再剥前缀，避免误转发到 /yunzhi-openai/... 导致上游 404 */
     rewrite: (p: string) => {
       const path = p.startsWith('/') ? p : `/${p}`;
