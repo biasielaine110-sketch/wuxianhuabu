@@ -77,13 +77,13 @@ function newApiFireflyUpstreamModelId(modelName: string): string {
   return (modelName || '').trim().replace(/-newapi$/i, '');
 }
 
-/** 部分 New API 通道登记为去后缀 id，部分与后台「模型名」一致；图生图回退时各试一轮（优先完整画布 id） */
+/** 部分 New API 通道登记为去后缀 id（常见），少数与后台「模型名」带 -newapi 一致；优先去后缀以匹配 model_not_found 报错 */
 function newApiFireflyRequestModelCandidates(canvasModelId: string): string[] {
   const id = (canvasModelId || '').trim();
   if (!id) return [];
   const stripped = id.replace(/-newapi$/i, '');
   const out: string[] = [];
-  for (const m of [id, stripped]) {
+  for (const m of [stripped, id]) {
     const t = m.trim();
     if (t && !out.includes(t)) out.push(t);
   }
@@ -1050,8 +1050,8 @@ async function generateImagesAtOpenAiCompatibleBase(
 }
 
 /**
- * 云智 / 部分 New API 对 `/v1/images/edits` 可能返回 404。
- * 回退到 `/images/generations` 时：裸 base64 常被忽略（结果像纯文生图），须优先 data URI、image_urls、与 edits 一致的 PNG multipart。
+ * 云智 / 部分 New API 对 `/v1/images/edits` 可能返回 404 或 503（如 model_not_found）。
+ * 非 401 时不中断，回退到 `/images/generations`（multipart → JSON 多字段）。
  */
 async function editImagesNewApiFireflyWithRouteFallback(
   baseNorm: string,
@@ -1103,11 +1103,12 @@ async function editImagesNewApiFireflyWithRouteFallback(
           done = true;
           break;
         }
-        if (res.status !== 404) {
+        if (res.status === 401) {
           throw new Error(
             `图生图接口错误 (${res.status})${openAiCompatFailureHint(res.status, 'image-edit')}: ${text.slice(0, 800)}`
           );
         }
+        // 404/503/502 等：云智等对 edits 常不可用或 model_not_found，须回退 generations（勿把栈顶 vertex shim 当根因）
       }
       if (done) break;
     }
