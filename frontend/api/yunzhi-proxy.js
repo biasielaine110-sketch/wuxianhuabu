@@ -1,6 +1,5 @@
 /**
- * 生产：/api/yunzhi/* → https://yunzhi-ai.top/*（流式透传）。
- * 替代对外部域名的直连 rewrite，减轻长 SSE 被边缘代理掐断导致的 503。
+ * 与仓库根目录 `api/yunzhi-proxy.js` 一致（Root Directory=frontend 时使用）。
  */
 const { Readable } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
@@ -25,8 +24,17 @@ function isHopByHopHeader(name) {
 module.exports = async function handler(req, res) {
   const host = req.headers.host || 'localhost';
   const url = new URL(req.url || '/', `http://${host}`);
-  const subpath = url.pathname.replace(/^\/api\/yunzhi\/?/, '').replace(/^\//, '');
-  const targetUrl = `${UPSTREAM_ORIGIN}/${subpath}${url.search}`;
+  const rawP = url.searchParams.get('__p');
+  if (rawP == null || String(rawP).trim() === '') {
+    res.statusCode = 400;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify({ error: 'missing __p (proxied path)' }));
+    return;
+  }
+  url.searchParams.delete('__p');
+  const qs = url.searchParams.toString();
+  const subpath = String(rawP).replace(/^\/+/, '');
+  const targetUrl = `${UPSTREAM_ORIGIN}/${subpath}${qs ? `?${qs}` : ''}`;
 
   const headers = new Headers();
   for (const [k, v] of Object.entries(req.headers)) {
@@ -52,7 +60,7 @@ module.exports = async function handler(req, res) {
       ...(hasBody ? { duplex: 'half' } : {}),
     });
   } catch (e) {
-    console.error('[api/yunzhi] upstream fetch failed', targetUrl, e);
+    console.error('[api/yunzhi-proxy] upstream fetch failed', targetUrl, e);
     res.statusCode = 502;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.end(

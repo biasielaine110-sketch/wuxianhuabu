@@ -147,7 +147,7 @@
             p.startsWith('/api-proxy') ||
             p.startsWith('/ws-proxy') ||
             p.startsWith('/yunzhi-openai') ||
-            p.startsWith('/api/yunzhi')
+            p.startsWith('/api/yunzhi-proxy')
           ) {
             return originalFetch(url, options);
           }

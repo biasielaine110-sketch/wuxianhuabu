@@ -1,9 +1,9 @@
 /**
- * 与仓库根目录 `api/yunzhi/[...segments].js` 逻辑一致。
- * 当 Vercel 项目 Root Directory 设为 `frontend` 时，仅会打包本目录下的 `api/`，否则 POST /yunzhi-openai 会落到 SPA 的 index.html → 405。
+ * 云智同源代理（单文件）。vercel.json 将 /yunzhi-openai/(.*) 转到本函数 ?__p=$1，
+ * 避免部分环境下 api/yunzhi/[...segments] 动态路由未生效导致 POST 落到 index.html → 405。
  */
-import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
+const { Readable } = require('node:stream');
+const { pipeline } = require('node:stream/promises');
 
 const UPSTREAM_ORIGIN = 'https://yunzhi-ai.top';
 
@@ -22,11 +22,20 @@ function isHopByHopHeader(name) {
   ]).has(n);
 }
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   const host = req.headers.host || 'localhost';
   const url = new URL(req.url || '/', `http://${host}`);
-  const subpath = url.pathname.replace(/^\/api\/yunzhi\/?/, '').replace(/^\//, '');
-  const targetUrl = `${UPSTREAM_ORIGIN}/${subpath}${url.search}`;
+  const rawP = url.searchParams.get('__p');
+  if (rawP == null || String(rawP).trim() === '') {
+    res.statusCode = 400;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify({ error: 'missing __p (proxied path)' }));
+    return;
+  }
+  url.searchParams.delete('__p');
+  const qs = url.searchParams.toString();
+  const subpath = String(rawP).replace(/^\/+/, '');
+  const targetUrl = `${UPSTREAM_ORIGIN}/${subpath}${qs ? `?${qs}` : ''}`;
 
   const headers = new Headers();
   for (const [k, v] of Object.entries(req.headers)) {
@@ -52,7 +61,7 @@ export default async function handler(req, res) {
       ...(hasBody ? { duplex: 'half' } : {}),
     });
   } catch (e) {
-    console.error('[api/yunzhi] upstream fetch failed', targetUrl, e);
+    console.error('[api/yunzhi-proxy] upstream fetch failed', targetUrl, e);
     res.statusCode = 502;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.end(
@@ -91,9 +100,9 @@ export default async function handler(req, res) {
       }
     }
   }
-}
+};
 
-export const config = {
+module.exports.config = {
   maxDuration: 300,
   api: {
     bodyParser: false,
