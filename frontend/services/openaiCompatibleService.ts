@@ -1019,7 +1019,7 @@ async function newApiSubmitVideoGeneration(
   if (!key) throw new Error('未配置 New API 密钥。');
   const base = rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm);
 
-  /** New API 文档：POST /v1/video/generations（video 单数）；部分自建站仍用 ToAPIs 式 /videos/generations */
+  /** ToAPIs / 云智等常为 `/videos/generations`；New API 文档为 `/v1/video/generations`（单数 video）。先试 plural，避免首条 400 时未回退。 */
   const enrichNewApiVideoBody = (): Record<string, unknown> => {
     const b = { ...body };
     const imgs = Array.isArray(b.images) ? (b.images as unknown[]) : null;
@@ -1037,9 +1037,10 @@ async function newApiSubmitVideoGeneration(
   };
 
   const payload = enrichNewApiVideoBody();
-  const tryPaths = ['/video/generations', '/videos/generations'];
+  const tryPaths = ['/videos/generations', '/video/generations'];
   let lastFail = '';
-  for (const p of tryPaths) {
+  for (let i = 0; i < tryPaths.length; i++) {
+    const p = tryPaths[i];
     const res = await fetch(`${base}${p}`, {
       method: 'POST',
       headers: {
@@ -1052,7 +1053,13 @@ async function newApiSubmitVideoGeneration(
     const text = await res.text();
     if (!res.ok) {
       lastFail = `(${res.status}) ${text.slice(0, 800)}`;
-      if ((res.status === 405 || res.status === 404) && p === tryPaths[0]) continue;
+      const canTryAlt = i < tryPaths.length - 1;
+      const transient =
+        res.status === 405 ||
+        res.status === 404 ||
+        /** 部分网关首条路径契约不符会 400，换另一路径可能成功（勿在末条路径上吞掉真实校验错误） */
+        (res.status === 400 && canTryAlt);
+      if (transient) continue;
       throw new Error(`New API 视频任务提交失败 ${lastFail}`);
     }
     let json: Record<string, unknown>;
@@ -1229,6 +1236,8 @@ export async function newApiCanvasVideoGenerate(params: {
       model,
       prompt: params.prompt,
       seconds: String(seconds),
+      /** xAI / New API 文档常用数字秒；与 ToAPIs 式 `seconds` 字符串并存，避免网关只读一支时丢参 */
+      duration: seconds,
       aspect_ratio,
       resolution,
       resolution_name: resolution,
