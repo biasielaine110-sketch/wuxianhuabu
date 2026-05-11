@@ -7,7 +7,7 @@
     "api/yunzhi-proxy/**/*.js": {
       "maxDuration": 300
     },
-    "api/yunzhi-proxy/[...slug].js": {
+    "api/yunzhi-proxy/*.js": {
       "maxDuration": 300
     }
   },
