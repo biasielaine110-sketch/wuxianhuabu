@@ -77,6 +77,19 @@ function newApiFireflyUpstreamModelId(modelName: string): string {
   return (modelName || '').trim().replace(/-newapi$/i, '');
 }
 
+/** 部分 New API 通道登记为去后缀 id，部分与后台「模型名」一致；图生图回退时各试一轮（优先完整画布 id） */
+function newApiFireflyRequestModelCandidates(canvasModelId: string): string[] {
+  const id = (canvasModelId || '').trim();
+  if (!id) return [];
+  const stripped = id.replace(/-newapi$/i, '');
+  const out: string[] = [];
+  for (const m of [id, stripped]) {
+    const t = m.trim();
+    if (t && !out.includes(t)) out.push(t);
+  }
+  return out;
+}
+
 /** ToAPIs 异步任务轮询最长等待（文生图 / 图生图等） */
 const TOAPIS_TASK_MAX_WAIT_MS = 1_800_000;
 
@@ -1046,12 +1059,15 @@ async function editImagesNewApiFireflyWithRouteFallback(
   base64Images: string[],
   prompt: string,
   numberOfImages: number,
-  resolvedEditModel: string,
+  canvasFireflyModelId: string,
   aspectRatio: string,
   signal?: AbortSignal
 ): Promise<string[]> {
   if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
-  const size = aspectRatioToOpenAiSize(aspectRatio, resolvedEditModel);
+  const modelCandidates = newApiFireflyRequestModelCandidates(canvasFireflyModelId);
+  if (!modelCandidates.length) throw new Error('无效的 Firefly（New API）模型。');
+  const sizeModel = modelCandidates[0];
+  const size = aspectRatioToOpenAiSize(aspectRatio, sizeModel);
   const enhancedPrompt = buildPromptWithDimensions(prompt, aspectRatio);
   const pngBlob = await jpegBase64ToPngBlob(base64Images[0]);
   const parsedRef = parseBase64ImageInput(base64Images[0]);
@@ -1064,49 +1080,17 @@ async function editImagesNewApiFireflyWithRouteFallback(
   for (let i = 0; i < count; i++) {
     assertNotAborted(signal);
     let done = false;
-    for (const useBracket of [true, false] as const) {
-      const form = new FormData();
-      if (useBracket) form.append('image[]', pngBlob, 'ref.png');
-      else form.append('image', pngBlob, 'ref.png');
-      form.append('prompt', enhancedPrompt);
-      form.append('model', resolvedEditModel);
-      form.append('n', '1');
-      form.append('size', size);
-      form.append('response_format', 'b64_json');
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}` },
-        body: form,
-        signal,
-      });
-      const text = await res.text();
-      if (res.ok) {
-        const json = JSON.parse(text) as unknown;
-        results.push(await openAiStyleGenerationJsonToBase64(json, signal, apiKey));
-        done = true;
-        break;
-      }
-      if (res.status !== 404) {
-        throw new Error(
-          `图生图接口错误 (${res.status})${openAiCompatFailureHint(res.status, 'image-edit')}: ${text.slice(0, 800)}`
-        );
-      }
-    }
-    if (!done) {
-      const refAnchoredPrompt = `【请以上传的参考图像为输入基准，不得忽略。】\n\n${enhancedPrompt}`;
-      const refPngDataUrl = await blobToDataUrl(pngBlob);
-      const genUrl = `${rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm)}/images/generations`;
-      let multipartOk = false;
+    for (const tryModel of modelCandidates) {
       for (const useBracket of [true, false] as const) {
         const form = new FormData();
-        form.append('model', resolvedEditModel);
-        form.append('prompt', refAnchoredPrompt);
+        if (useBracket) form.append('image[]', pngBlob, 'ref.png');
+        else form.append('image', pngBlob, 'ref.png');
+        form.append('prompt', enhancedPrompt);
+        form.append('model', tryModel);
         form.append('n', '1');
         form.append('size', size);
         form.append('response_format', 'b64_json');
-        if (useBracket) form.append('image[]', pngBlob, 'ref.png');
-        else form.append('image', pngBlob, 'ref.png');
-        const res = await fetch(genUrl, {
+        const res = await fetch(url, {
           method: 'POST',
           headers: { Authorization: `Bearer ${apiKey}` },
           body: form,
@@ -1116,7 +1100,7 @@ async function editImagesNewApiFireflyWithRouteFallback(
         if (res.ok) {
           const json = JSON.parse(text) as unknown;
           results.push(await openAiStyleGenerationJsonToBase64(json, signal, apiKey));
-          multipartOk = true;
+          done = true;
           break;
         }
         if (res.status !== 404) {
@@ -1125,35 +1109,76 @@ async function editImagesNewApiFireflyWithRouteFallback(
           );
         }
       }
+      if (done) break;
+    }
+    if (!done) {
+      const refAnchoredPrompt = `【请以上传的参考图像为输入基准，不得忽略。】\n\n${enhancedPrompt}`;
+      const refPngDataUrl = await blobToDataUrl(pngBlob);
+      const genUrl = `${rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm)}/images/generations`;
+      let multipartOk = false;
+      for (const tryModel of modelCandidates) {
+        for (const useBracket of [true, false] as const) {
+          const form = new FormData();
+          form.append('model', tryModel);
+          form.append('prompt', refAnchoredPrompt);
+          form.append('n', '1');
+          form.append('size', size);
+          form.append('response_format', 'b64_json');
+          if (useBracket) form.append('image[]', pngBlob, 'ref.png');
+          else form.append('image', pngBlob, 'ref.png');
+          const res = await fetch(genUrl, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${apiKey}` },
+            body: form,
+            signal,
+          });
+          const text = await res.text();
+          if (res.ok) {
+            const json = JSON.parse(text) as unknown;
+            results.push(await openAiStyleGenerationJsonToBase64(json, signal, apiKey));
+            multipartOk = true;
+            break;
+          }
+          if (res.status === 401) {
+            throw new Error(
+              `图生图接口错误 (${res.status})${openAiCompatFailureHint(res.status, 'image-edit')}: ${text.slice(0, 800)}`
+            );
+          }
+          // 503/400 等：部分网关 multipart 不认参考图或模型路由错误，继续走 JSON 多字段尝试（避免误报为 dall-e 通道）
+        }
+        if (multipartOk) break;
+      }
       if (multipartOk) continue;
 
-      // 裸 base64 常被网关忽略→仅按 prompt 文生图；需 data URI 或 image_urls（与 ToAPIs 习惯一致）
-      const tryBodies: Record<string, unknown>[] = [
-        { model: resolvedEditModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: [refPngDataUrl] },
-        { model: resolvedEditModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image_urls: [refPngDataUrl] },
-        { model: resolvedEditModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: refPngDataUrl },
-        { model: resolvedEditModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: [refDataUrl] },
-        { model: resolvedEditModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: refDataUrl },
-        { model: resolvedEditModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', images: [refDataUrl] },
-        { model: resolvedEditModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image_urls: [refDataUrl] },
-        { model: resolvedEditModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: rawB64 },
-        { model: resolvedEditModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', images: [rawB64] },
+      const makeTryBodies = (tryModel: string): Record<string, unknown>[] => [
+        { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: [refPngDataUrl] },
+        { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image_urls: [refPngDataUrl] },
+        { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: refPngDataUrl },
+        { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: [refDataUrl] },
+        { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: refDataUrl },
+        { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', images: [refDataUrl] },
+        { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image_urls: [refDataUrl] },
+        { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: rawB64 },
+        { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', images: [rawB64] },
       ];
       let lastErr: Error | null = null;
-      for (const body of tryBodies) {
-        try {
-          const json = await postJsonAtBase<Record<string, unknown>>(
-            baseNorm,
-            '/images/generations',
-            body,
-            apiKey
-          );
-          results.push(await openAiStyleGenerationJsonToBase64(json, signal, apiKey));
-          lastErr = null;
-          break;
-        } catch (e) {
-          lastErr = e instanceof Error ? e : new Error(String(e));
+      for (const tryModel of modelCandidates) {
+        for (const body of makeTryBodies(tryModel)) {
+          try {
+            const json = await postJsonAtBase<Record<string, unknown>>(
+              baseNorm,
+              '/images/generations',
+              body,
+              apiKey
+            );
+            results.push(await openAiStyleGenerationJsonToBase64(json, signal, apiKey));
+            lastErr = null;
+            break;
+          } catch (e) {
+            lastErr = e instanceof Error ? e : new Error(String(e));
+          }
         }
+        if (!lastErr) break;
       }
       if (lastErr) throw lastErr;
     }
@@ -1318,14 +1343,13 @@ export async function openAiEditImage(
       throw new Error('未配置 New API Base URL（须含 /v1）。请在设置中填写。');
     }
     const naBase = normalizeBaseUrl(rawBase);
-    const upstream = newApiFireflyUpstreamModelId(rawModel);
     return editImagesNewApiFireflyWithRouteFallback(
       naBase,
       naKey,
       base64Images,
       prompt,
       numberOfImages,
-      upstream,
+      rawModel,
       aspectRatio,
       signal
     );
