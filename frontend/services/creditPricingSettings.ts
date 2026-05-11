@@ -30,6 +30,13 @@ export const DEFAULT_CREDIT_PRICING_ROWS: CreditPricingRow[] = [
     credits: 4,
   },
   {
+    id: 'default-row-gpt-image-2-codesonline',
+    category: '图生图',
+    modelName: 'gpt-image-2-codesonline',
+    specLabel: 'codesonline',
+    credits: 4,
+  },
+  {
     id: 'default-row-nano-banana-pro',
     category: '图生图',
     modelName: 'nano_banana_pro',

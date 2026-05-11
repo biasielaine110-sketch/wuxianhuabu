@@ -37,6 +37,10 @@
       "destination": "https://files.dashlyai.cc/:path*"
     },
     {
+      "source": "/codesonline-image-api/:path*",
+      "destination": "https://image.codesonline.dev/:path*"
+    },
+    {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }

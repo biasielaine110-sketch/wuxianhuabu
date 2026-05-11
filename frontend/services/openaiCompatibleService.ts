@@ -2,6 +2,8 @@ import {
   DEFAULT_DEEPSEEK_CHAT_MODEL_ID,
   normalizeDeepSeekChatModelId,
   getAiProvider,
+  getCodesonlineBaseUrl,
+  getCodesonlineSavedKey,
   getJunlanBaseUrl,
   getJunlanSavedKey,
   getNewApiBaseUrl,
@@ -28,17 +30,33 @@ function yunzhiSameOriginProxyPathPrefix(): '/api/yunzhi-proxy' | '/yunzhi-opena
   return '/yunzhi-openai';
 }
 
-function rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNormalized: string): string {
+/** image.codesonline.dev 常未对浏览器开放 CORS；生产走 Vercel rewrite、开发走 Vite 同源代理 */
+function rewriteCodesonlineImageBaseForBrowserCors(baseNormalized: string): string {
   if (typeof window === 'undefined') return baseNormalized;
   try {
     const u = new URL(baseNormalized);
-    if (u.hostname.toLowerCase() !== 'yunzhi-ai.top') return baseNormalized;
-    let pathname = u.pathname.replace(/\/+$/, '');
-    if (!pathname) pathname = '/v1';
-    return `${window.location.origin}${yunzhiSameOriginProxyPathPrefix()}${pathname}`;
+    if (u.hostname.toLowerCase() !== 'image.codesonline.dev') return baseNormalized;
+    const pathname = u.pathname.replace(/\/+$/, '') || '/v1';
+    return `${window.location.origin}/codesonline-image-api${pathname}`;
   } catch {
     return baseNormalized;
   }
+}
+
+function rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNormalized: string): string {
+  if (typeof window === 'undefined') return baseNormalized;
+  let next = baseNormalized;
+  try {
+    const u = new URL(baseNormalized);
+    if (u.hostname.toLowerCase() === 'yunzhi-ai.top') {
+      let pathname = u.pathname.replace(/\/+$/, '');
+      if (!pathname) pathname = '/v1';
+      next = `${window.location.origin}${yunzhiSameOriginProxyPathPrefix()}${pathname}`;
+    }
+  } catch {
+    /* keep next */
+  }
+  return rewriteCodesonlineImageBaseForBrowserCors(next);
 }
 
 /** 502/504 等为网关层错误，多为上游或反向代理；与 Chrome 扩展报的 runtime.lastError 无关 */
@@ -132,6 +150,7 @@ async function sleepInterruptible(ms: number, signal?: AbortSignal): Promise<voi
 function toApisT2iModel(modelName: string): string {
   const m = (modelName || '').trim();
   if (/^firefly-nano-banana.*-newapi$/i.test(m)) return newApiFireflyUpstreamModelId(m);
+  if (m === 'gpt-image-2-codesonline') return 'gpt-image-2';
   if (m === 'gpt-image-2-junlan') return 'gpt-image-2';
   if (m.startsWith('imagen') || m.startsWith('gemini')) return m;
   if (m === 'gpt-image-2' || m === 'gpt-image-1' || m.startsWith('gpt-image')) return m;
@@ -1400,6 +1419,7 @@ function aspectRatioToOpenAiSize(aspectRatio: string, model: string): string {
 
 function resolveT2iModel(modelName: string): string {
   const m = (modelName || '').trim();
+  if (m === 'gpt-image-2-codesonline') return 'gpt-image-2';
   if (m === 'gpt-image-2-junlan') return 'gpt-image-2';
   if (m === 'dall-e-2' || m === 'dall-e-3' || m === 'gpt-image-2' || m === 'gpt-image-1') return m;
   return 'dall-e-3';
@@ -1407,6 +1427,7 @@ function resolveT2iModel(modelName: string): string {
 
 function resolveEditModel(modelName: string): string {
   const m = (modelName || '').trim();
+  if (m === 'gpt-image-2-codesonline') return 'gpt-image-2';
   if (m === 'gpt-image-2-junlan') return 'gpt-image-2';
   if (m === 'gpt-image-2') return 'gpt-image-2';
   if (m === 'dall-e-2' || m === 'gpt-image-1') return m;
@@ -1449,7 +1470,9 @@ function buildPromptWithDimensions(prompt: string, aspectRatio: string): string 
   return `Aspect ratio target: ${aspectRatio} (prefer composition matching ${size}).\n\n${prompt}`;
 }
 
-async function jpegBase64ToPngBlob(base64: string): Promise<Blob> {
+async function jpegBase64ToPngBlob(base64Input: string): Promise<Blob> {
+  const { raw, mime } = parseBase64ImageInput(base64Input);
+  const src = `data:${mime || 'image/jpeg'};base64,${raw}`;
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -1469,8 +1492,67 @@ async function jpegBase64ToPngBlob(base64: string): Promise<Blob> {
       );
     };
     img.onerror = () => reject(new Error('参考图解码失败'));
-    img.src = `data:image/jpeg;base64,${base64}`;
+    img.src = src;
   });
+}
+
+/** codesonline 等：参考图 multipart 常限 20MB；PNG 大图易超限 */
+const CODESONLINE_EDIT_IMAGE_MAX_BYTES = 19 * 1024 * 1024;
+
+function isCodesonlineOpenAiCompatBase(baseNormalized: string): boolean {
+  try {
+    return new URL(baseNormalized).hostname.toLowerCase() === 'image.codesonline.dev';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 将参考图压为 JPEG，体积不超过 maxBytes（用于图生图 multipart）。
+ */
+async function jpegBlobUnderBytesForImageEdit(
+  base64Input: string,
+  maxBytes: number,
+  signal?: AbortSignal
+): Promise<Blob> {
+  const { raw, mime } = parseBase64ImageInput(base64Input);
+  const src = `data:${mime || 'image/jpeg'};base64,${raw}`;
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.crossOrigin = 'anonymous';
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error('参考图解码失败'));
+    el.src = src;
+  });
+  assertNotAborted(signal);
+  const w0 = img.naturalWidth;
+  const h0 = img.naturalHeight;
+  if (!w0 || !h0) throw new Error('参考图尺寸无效');
+
+  const maxSides = [4096, 3072, 2560, 2048, 1536, 1280, 1024, 896, 768, 640];
+  const qualities = [0.92, 0.85, 0.78, 0.72, 0.65, 0.58, 0.52, 0.46, 0.4];
+
+  for (const maxSide of maxSides) {
+    const scale = Math.min(1, maxSide / Math.max(w0, h0));
+    const cw = Math.max(1, Math.round(w0 * scale));
+    const ch = Math.max(1, Math.round(h0 * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = cw;
+    canvas.height = ch;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('无法创建画布上下文');
+    ctx.drawImage(img, 0, 0, cw, ch);
+    for (const q of qualities) {
+      assertNotAborted(signal);
+      const blob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob((b) => resolve(b), 'image/jpeg', q);
+      });
+      if (blob && blob.size > 0 && blob.size <= maxBytes) return blob;
+    }
+  }
+  throw new Error(
+    `参考图仍超过约 ${Math.round(maxBytes / (1024 * 1024))}MB 上限（网关限制）。请先缩小或压缩原图后再试。`
+  );
 }
 
 async function blobToDataUrl(blob: Blob): Promise<string> {
@@ -2150,7 +2232,11 @@ async function editImagesAtOpenAiCompatibleBase(
   if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
   const size = aspectRatioToOpenAiSize(aspectRatio, resolvedEditModel);
   const enhancedPrompt = buildPromptWithDimensions(prompt, aspectRatio);
-  const pngBlob = await jpegBase64ToPngBlob(base64Images[0]);
+  const useCodesonlineCap = isCodesonlineOpenAiCompatBase(baseNorm);
+  const editBlob = useCodesonlineCap
+    ? await jpegBlobUnderBytesForImageEdit(base64Images[0], CODESONLINE_EDIT_IMAGE_MAX_BYTES, signal)
+    : await jpegBase64ToPngBlob(base64Images[0]);
+  const editFilename = useCodesonlineCap ? 'ref.jpg' : 'ref.png';
   const results: string[] = [];
   const count = Math.min(
     Math.max(numberOfImages, 1),
@@ -2166,9 +2252,9 @@ async function editImagesAtOpenAiCompatibleBase(
     const form = new FormData();
     // dall-e-2 沿用单字段 image；gpt-image-* / firefly 等与 OpenAI 新文档一致使用 image[]（仅一张也传 image[]），否则部分网关会 404
     if (resolvedEditModel === 'dall-e-2') {
-      form.append('image', pngBlob, 'ref.png');
+      form.append('image', editBlob, editFilename);
     } else {
-      form.append('image[]', pngBlob, 'ref.png');
+      form.append('image[]', editBlob, editFilename);
     }
     form.append('prompt', enhancedPrompt);
     form.append('model', resolvedEditModel);
@@ -2255,6 +2341,26 @@ export async function openAiGenerateNewImage(
     );
   }
 
+  if (rawModel === 'gpt-image-2-codesonline') {
+    const coKey = getCodesonlineSavedKey().trim();
+    if (!coKey) {
+      throw new Error(
+        '未配置 codesonline 图像通道。请在「设置 → API」填写「codesonline（GPT Image 2）」API Key；文档：https://image.codesonline.dev/personal/docs'
+      );
+    }
+    const coBase = normalizeBaseUrl(getCodesonlineBaseUrl());
+    return generateImagesAtOpenAiCompatibleBase(
+      coBase,
+      coKey,
+      prompt,
+      aspectRatio,
+      numberOfImages,
+      'gpt-image-2',
+      nodeResolution,
+      signal
+    );
+  }
+
   const base = normalizeBaseUrl(getOpenAiBaseUrl());
   if (isToApisHost(base)) {
     return toApisGenerateNewImage(prompt, aspectRatio, numberOfImages, modelName, nodeResolution, signal);
@@ -2319,6 +2425,26 @@ export async function openAiEditImage(
     return editImagesAtOpenAiCompatibleBase(
       jlBase,
       jlKey,
+      base64Images,
+      prompt,
+      numberOfImages,
+      'gpt-image-2',
+      aspectRatio,
+      signal
+    );
+  }
+
+  if (rawModel === 'gpt-image-2-codesonline') {
+    const coKey = getCodesonlineSavedKey().trim();
+    if (!coKey) {
+      throw new Error(
+        '未配置 codesonline 图像通道。请在「设置 → API」填写「codesonline（GPT Image 2）」API Key；文档：https://image.codesonline.dev/personal/docs'
+      );
+    }
+    const coBase = normalizeBaseUrl(getCodesonlineBaseUrl());
+    return editImagesAtOpenAiCompatibleBase(
+      coBase,
+      coKey,
       base64Images,
       prompt,
       numberOfImages,

@@ -77,6 +77,12 @@ const toapisFileCdnProxy = {
       return stripped.length ? stripped : '/';
     },
   },
+  '/codesonline-image-api': {
+    target: 'https://image.codesonline.dev',
+    changeOrigin: true,
+    secure: true,
+    rewrite: (p: string) => p.replace(/^\/codesonline-image-api/, ''),
+  },
 } as const;
 
 export default defineConfig(({ mode }) => {

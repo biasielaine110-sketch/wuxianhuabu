@@ -12,6 +12,9 @@ const JUNLAN_BASE_URL_STORAGE_KEY = 'junlan-openai-compatible-base-url-v1';
 /** 自建 [New API](https://docs.newapi.pro/zh/docs/api) OpenAI 兼容网关；与 ToAPIs / 君澜分离，用于 Firefly 画布图模型（*-newapi）及视频模型（*-newapi） */
 const NEWAPI_API_KEY_STORAGE_KEY = 'newapi-openai-compatible-api-key-v1';
 const NEWAPI_BASE_URL_STORAGE_KEY = 'newapi-openai-compatible-base-url-v1';
+/** [codesonline 控制台](https://image.codesonline.dev/personal/docs) OpenAI 兼容图像网关；画布模型 id 为 `gpt-image-2-codesonline`，与 ToAPIs/君澜的 gpt-image-2 分流 */
+const CODESONLINE_IMAGE_API_KEY_STORAGE_KEY = 'codesonline-image-openai-api-key-v1';
+const CODESONLINE_IMAGE_BASE_URL_STORAGE_KEY = 'codesonline-image-openai-base-url-v1';
 
 export const DEFAULT_OPENAI_BASE_URL = 'https://toapis.com/v1';
 /** 文档：https://stsg17lkjz.apifox.cn/8682367m0 — Base URL 须含 /v1 */
@@ -30,6 +33,8 @@ export function normalizeDeepSeekChatModelId(modelId: string): string {
 
 /** New API（Firefly *-newapi 画布模型）OpenAI 兼容根路径；含 /v1 */
 export const DEFAULT_NEWAPI_BASE_URL = 'https://yunzhi-ai.top/v1';
+/** codesonline 图像 API（OpenAI 兼容 /v1）；文档见控制台 */
+export const DEFAULT_CODESONLINE_IMAGE_BASE_URL = 'https://image.codesonline.dev/v1';
 
 let aiSettingsLegacyMigrated = false;
 
@@ -216,6 +221,43 @@ export function setNewApiBaseUrl(url: string): void {
   }
 }
 
+export function getCodesonlineSavedKey(): string {
+  try {
+    return localStorage.getItem(CODESONLINE_IMAGE_API_KEY_STORAGE_KEY)?.trim() || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setCodesonlineKey(apiKey: string): void {
+  const normalized = apiKey.trim();
+  try {
+    if (normalized) localStorage.setItem(CODESONLINE_IMAGE_API_KEY_STORAGE_KEY, normalized);
+    else localStorage.removeItem(CODESONLINE_IMAGE_API_KEY_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getCodesonlineBaseUrl(): string {
+  try {
+    const raw = localStorage.getItem(CODESONLINE_IMAGE_BASE_URL_STORAGE_KEY)?.trim();
+    return raw || DEFAULT_CODESONLINE_IMAGE_BASE_URL;
+  } catch {
+    return DEFAULT_CODESONLINE_IMAGE_BASE_URL;
+  }
+}
+
+export function setCodesonlineBaseUrl(url: string): void {
+  const normalized = url.trim();
+  try {
+    if (normalized) localStorage.setItem(CODESONLINE_IMAGE_BASE_URL_STORAGE_KEY, normalized);
+    else localStorage.removeItem(CODESONLINE_IMAGE_BASE_URL_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function getDeepSeekSavedKey(): string {
   try {
     return localStorage.getItem(DEEPSEEK_API_KEY_STORAGE_KEY)?.trim() || '';
@@ -262,6 +304,8 @@ export type AiSettingsSnapshot = {
   junlanBaseUrl: string;
   newApiKey: string;
   newApiBaseUrl: string;
+  codesonlineKey: string;
+  codesonlineBaseUrl: string;
   deepSeekKey: string;
   deepSeekBaseUrl: string;
 };
@@ -276,6 +320,8 @@ export function getAiSettingsSnapshot(): AiSettingsSnapshot {
     junlanBaseUrl: getJunlanBaseUrl(),
     newApiKey: getNewApiSavedKey(),
     newApiBaseUrl: getNewApiBaseUrl(),
+    codesonlineKey: getCodesonlineSavedKey(),
+    codesonlineBaseUrl: getCodesonlineBaseUrl(),
     deepSeekKey: getDeepSeekSavedKey(),
     deepSeekBaseUrl: getDeepSeekBaseUrl(),
   };
@@ -294,6 +340,9 @@ export type PersistAiSettingsInput = {
   /** New API（Firefly 等）；不传则保留原值 */
   newApiApiKey?: string;
   newApiBaseUrl?: string;
+  /** codesonline GPT Image 2 专用（画布 id：gpt-image-2-codesonline）；不传则保留原值 */
+  codesonlineApiKey?: string;
+  codesonlineBaseUrl?: string;
   /** DeepSeek 对话专用；不传则保留原值 */
   deepSeekApiKey?: string;
   deepSeekBaseUrl?: string;
@@ -308,6 +357,8 @@ export function persistAiSettings(opts: PersistAiSettingsInput): void {
   if (opts.junlanBaseUrl !== undefined) setJunlanBaseUrl(opts.junlanBaseUrl);
   if (opts.newApiApiKey !== undefined) setNewApiKey(opts.newApiApiKey);
   if (opts.newApiBaseUrl !== undefined) setNewApiBaseUrl(opts.newApiBaseUrl);
+  if (opts.codesonlineApiKey !== undefined) setCodesonlineKey(opts.codesonlineApiKey);
+  if (opts.codesonlineBaseUrl !== undefined) setCodesonlineBaseUrl(opts.codesonlineBaseUrl);
   if (opts.deepSeekApiKey !== undefined) setDeepSeekKey(opts.deepSeekApiKey);
   if (opts.deepSeekBaseUrl !== undefined) setDeepSeekBaseUrl(opts.deepSeekBaseUrl);
 }

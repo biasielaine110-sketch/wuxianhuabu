@@ -2,6 +2,7 @@ import React, { useState, useRef, useCallback, useEffect, useLayoutEffect, useMe
 import { CanvasNode, Edge, Transform, Tool, NodeType, Annotation, AnnotationNode, PanoramaNode, GridSplitNode, GridMergeNode, Director3DNode, Figure3D, ChatNode, ChatMessage } from './types';
 import type { AiProvider } from './services/aiSettings';
 import {
+  DEFAULT_CODESONLINE_IMAGE_BASE_URL,
   DEFAULT_DEEPSEEK_BASE_URL,
   DEFAULT_DEEPSEEK_CHAT_MODEL_ID,
   DEFAULT_JUNLAN_BASE_URL,
@@ -9,6 +10,7 @@ import {
   DEFAULT_OPENAI_BASE_URL,
   getAiSettingsSnapshot,
   normalizeDeepSeekChatModelId,
+  getCodesonlineSavedKey,
   getJunlanSavedKey,
   getNewApiSavedKey,
   migrateAiSettingsIfLegacy,
@@ -705,6 +707,7 @@ function I2iPresetCategorySelect({
 /** 君澜 → New API（Firefly）→ ToAPIs，与下拉选项顺序一致 */
 function defaultCanvasImageModel(): string {
   if (getJunlanSavedKey().trim()) return 'gpt-image-2-junlan';
+  if (getCodesonlineSavedKey().trim()) return 'gpt-image-2-codesonline';
   if (getNewApiSavedKey().trim()) return 'firefly-nano-banana-pro-newapi';
   return 'gpt-image-2';
 }
@@ -714,9 +717,9 @@ function isFireflyNewApiImageModelId(id: string): boolean {
   return id === 'firefly-nano-banana-pro-newapi' || id === 'firefly-nano-banana2-newapi';
 }
 
-/** GPT Image 2：君澜 / ToAPIs 节点选择时默认 4K */
+/** GPT Image 2：君澜 / codesonline / ToAPIs 节点选择时默认 4K */
 function isGptImage2CanvasModelId(id: string): boolean {
-  return id === 'gpt-image-2-junlan' || id === 'gpt-image-2';
+  return id === 'gpt-image-2-junlan' || id === 'gpt-image-2-codesonline' || id === 'gpt-image-2';
 }
 
 // --- Main App Component ---
@@ -945,7 +948,7 @@ export default function App() {
                 aspectRatio: node.type === 'panoramaT2i' ? '2:1' : '16:9',
                 imageCount: 1,
                 resolution: '4k',
-                ...(node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' ? { model: defaultCanvasImageModel() } : {}),
+                ...(node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' || node.type === 'panorama' ? { model: defaultCanvasImageModel() } : {}),
                 error: undefined,
               }),
           },
@@ -1204,6 +1207,8 @@ export default function App() {
   const [junlanKeyInput, setJunlanKeyInput] = useState(() => getAiSettingsSnapshot().junlanKey);
   const [newApiBaseInput, setNewApiBaseInput] = useState(() => getAiSettingsSnapshot().newApiBaseUrl);
   const [newApiKeyInput, setNewApiKeyInput] = useState(() => getAiSettingsSnapshot().newApiKey);
+  const [codesonlineBaseInput, setCodesonlineBaseInput] = useState(() => getAiSettingsSnapshot().codesonlineBaseUrl);
+  const [codesonlineKeyInput, setCodesonlineKeyInput] = useState(() => getAiSettingsSnapshot().codesonlineKey);
 
   useEffect(() => {
     const s = getAiSettingsSnapshot();
@@ -1216,6 +1221,8 @@ export default function App() {
     setJunlanKeyInput(s.junlanKey);
     setNewApiBaseInput(s.newApiBaseUrl);
     setNewApiKeyInput(s.newApiKey);
+    setCodesonlineBaseInput(s.codesonlineBaseUrl);
+    setCodesonlineKeyInput(s.codesonlineKey);
   }, []);
 
   useEffect(() => {
@@ -1244,6 +1251,8 @@ export default function App() {
     setJunlanKeyInput(s.junlanKey);
     setNewApiBaseInput(s.newApiBaseUrl);
     setNewApiKeyInput(s.newApiKey);
+    setCodesonlineBaseInput(s.codesonlineBaseUrl);
+    setCodesonlineKeyInput(s.codesonlineKey);
     setDownloadPathSettings(loadDownloadPathSettings());
     setCreditPricingRows(loadCreditPricingRows());
     void hydrateDownloadDirectoryHandlesFromIDB().then(() => refreshDownloadDirLabels());
@@ -3053,7 +3062,7 @@ export default function App() {
       aspectRatio: type === 'panoramaT2i' ? '2:1' : (type === 't2i' || type === 'i2i' || type === 'video' || type === 'gridSplit' || type === 'gridMerge' ? '16:9' : '1:1'),
       resolution: type === 't2i' || type === 'i2i' || type === 'panoramaT2i' ? '4k' : '2k',
       imageCount: 1,
-      model: type === 't2i' || type === 'i2i' || type === 'panoramaT2i' ? defaultCanvasImageModel() : 'gemini-3.1-flash-image-preview',
+      model: type === 't2i' || type === 'i2i' || type === 'panoramaT2i' || type === 'panorama' ? defaultCanvasImageModel() : 'gemini-3.1-flash-image-preview',
       viewMode: 'single',
       currentImageIndex: 0,
       // 全景图生成节点默认预设
@@ -3760,7 +3769,7 @@ export default function App() {
         </div>
 
         {/* Settings Bar */}
-        {(node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i') && (
+        {(node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' || node.type === 'panorama') && (
           <div className="flex flex-col gap-1.5 p-2 bg-[#252525] border-b border-[#333] text-xs shrink-0">
             {/* 图生图节点和全景图生成节点的参考图信息 */}
             {(node.type === 'i2i' || node.type === 'panoramaT2i') && (() => {
@@ -3817,7 +3826,7 @@ export default function App() {
             <div className="flex flex-wrap items-center gap-1.5">
               <select
                 className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-blue-500 flex-1 min-w-[100px]"
-                value={node.model || (node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' ? defaultCanvasImageModel() : 'gemini-3.1-flash-image-preview')}
+                value={node.model || (node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' || node.type === 'panorama' ? defaultCanvasImageModel() : 'gemini-3.1-flash-image-preview')}
                 onChange={(e) => {
                   const m = e.target.value;
                   const patch: Partial<CanvasNode> = { model: m };
@@ -3830,6 +3839,7 @@ export default function App() {
                 {(node.type === 't2i' || node.type === 'panoramaT2i') ? (
                   <>
                     <option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option>
+                    <option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option>
                     <option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option>
                     <option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option>
                     <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
@@ -3841,6 +3851,7 @@ export default function App() {
                 ) : (
                   <>
                     <option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option>
+                    <option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option>
                     <option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option>
                     <option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option>
                     <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
@@ -3852,7 +3863,7 @@ export default function App() {
               </select>
               <select
                 className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-blue-500"
-                value={node.aspectRatio || (node.type === 'panoramaT2i' ? '2:1' : (node.type === 't2i' || node.type === 'i2i' ? '16:9' : '1:1'))}
+                value={node.aspectRatio || (node.type === 'panoramaT2i' ? '2:1' : (node.type === 't2i' || node.type === 'i2i' || node.type === 'panorama' ? '16:9' : '1:1'))}
                 onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })}
                 onPointerDown={e => e.stopPropagation()}
               >
@@ -5670,6 +5681,8 @@ export default function App() {
                           openAiBaseUrl: (openAiBaseInput.trim() || DEFAULT_OPENAI_BASE_URL),
                           junlanApiKey: junlanKeyInput.trim(),
                           junlanBaseUrl: junlanBaseInput.trim() || DEFAULT_JUNLAN_BASE_URL,
+                          codesonlineApiKey: codesonlineKeyInput.trim(),
+                          codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
                           newApiApiKey: newApiKeyInput.trim(),
                           newApiBaseUrl: newApiBaseInput.trim(),
                           deepSeekApiKey: deepSeekKeyInput.trim(),
@@ -5700,6 +5713,38 @@ export default function App() {
                       onChange={(e) => setJunlanKeyInput(e.target.value)}
                       placeholder="sk-..."
                       className="w-full bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-600 transition-colors text-sm"
+                    />
+                  </div>
+
+                  <div className="mt-5 pt-4 border-t border-[#333]">
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">codesonline（GPT Image 2）</h3>
+                    <p className="text-[11px] text-gray-500 mb-2">
+                      画布模型 id：<code className="text-gray-400">gpt-image-2-codesonline</code>（上游仍为{' '}
+                      <code className="text-gray-400">gpt-image-2</code>，与 ToAPIs/君澜分流）。文档：{' '}
+                      <a
+                        href="https://image.codesonline.dev/personal/docs"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-sky-400 hover:underline"
+                      >
+                        image.codesonline.dev/personal/docs
+                      </a>
+                    </p>
+                    <label className="text-xs text-gray-500 block mb-1">codesonline Base URL</label>
+                    <input
+                      type="text"
+                      value={codesonlineBaseInput}
+                      onChange={(e) => setCodesonlineBaseInput(e.target.value)}
+                      placeholder={DEFAULT_CODESONLINE_IMAGE_BASE_URL}
+                      className="w-full mb-3 bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-sky-600 transition-colors text-sm"
+                    />
+                    <label className="text-xs text-gray-500 block mb-1">codesonline API Key</label>
+                    <input
+                      type="password"
+                      value={codesonlineKeyInput}
+                      onChange={(e) => setCodesonlineKeyInput(e.target.value)}
+                      placeholder="sk-..."
+                      className="w-full bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-sky-600 transition-colors text-sm"
                     />
                   </div>
 
@@ -5759,6 +5804,8 @@ export default function App() {
                           openAiBaseUrl: (openAiBaseInput.trim() || DEFAULT_OPENAI_BASE_URL),
                           junlanApiKey: junlanKeyInput.trim(),
                           junlanBaseUrl: junlanBaseInput.trim() || DEFAULT_JUNLAN_BASE_URL,
+                          codesonlineApiKey: codesonlineKeyInput.trim(),
+                          codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
                           newApiApiKey: newApiKeyInput.trim(),
                           newApiBaseUrl: newApiBaseInput.trim(),
                           deepSeekApiKey: deepSeekKeyInput.trim(),
@@ -6516,11 +6563,12 @@ function PanoramaNodeContent({ node, nodes, eyedropperTargetNodeId, onEyedropper
 
       // 使用 Gemini 图片编辑功能转换
       const convertAspect = node.aspectRatio === '9:16' ? '9:16' : '16:9';
+      const modelForPanorama = (node.model || defaultCanvasImageModel()).trim();
       const results = await editExistingImage(
         [panoramaImage],
         prompt,
         1,
-        'gemini-3.1-flash-image-preview',
+        modelForPanorama,
         convertAspect,
         '4k'
       );
@@ -7407,6 +7455,16 @@ function PanoramaNodeContent({ node, nodes, eyedropperTargetNodeId, onEyedropper
             刷新
           </button>
         </div>
+
+        <button
+          type="button"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => void convertToPanorama()}
+          disabled={!panoramaImage || isConverting}
+          className="w-full py-1.5 px-2 rounded text-[10px] bg-violet-700 hover:bg-violet-600 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isConverting ? '全景转换中…' : 'AI 转为全景（沿用上方所选模型）'}
+        </button>
 
         {/* 截图功能 */}
         <div className="flex flex-wrap gap-1">

@@ -127,9 +127,12 @@ export const generateNewImage = async (
     if (model === 'gpt-image-2-junlan') {
       return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, signal);
     }
+    if (model === 'gpt-image-2-codesonline') {
+      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, signal);
+    }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {
       throw new Error(
-        'GPT Image 2（ToAPIs）等需在「设置 → API」中使用 OpenAI 兼容主通道，Base URL 指向 ToAPIs（https://toapis.com/v1）。若使用君澜 AI，请选择节点模型「GPT Image 2（君澜 AI）」并在设置中填写君澜密钥。'
+        'GPT Image 2（ToAPIs）等需在「设置 → API」中使用 OpenAI 兼容主通道，Base URL 指向 ToAPIs（https://toapis.com/v1）。君澜 / codesonline 通路请分别选择「GPT Image 2（君澜 AI）」「GPT Image 2（codesonline）」并填写对应密钥。'
       );
     }
     // 构建包含比例和尺寸要求的提示词
@@ -217,9 +220,12 @@ export const editExistingImage = async (
     if (model === 'gpt-image-2-junlan') {
       return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, signal);
     }
+    if (model === 'gpt-image-2-codesonline') {
+      return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, signal);
+    }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {
       throw new Error(
-        'GPT Image 2（ToAPIs）图生图需使用 OpenAI 兼容主通道与 ToAPIs。君澜通路请选择「GPT Image 2（君澜 AI）」并填写君澜密钥。'
+        'GPT Image 2（ToAPIs）图生图需使用 OpenAI 兼容主通道与 ToAPIs。君澜 / codesonline 请选择对应节点模型并填写密钥。'
       );
     }
     // 构建包含比例和尺寸要求的提示词
