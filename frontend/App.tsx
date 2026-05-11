@@ -3840,11 +3840,11 @@ export default function App() {
                   <>
                     <option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option>
                     <option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option>
-                    <option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option>
-                    <option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option>
                     <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
                     <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option>
                     <option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option>
+                    <option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option>
+                    <option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option>
                     <option value="imagen-4">Imagen 4</option>
                     <option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option>
                   </>
@@ -3852,11 +3852,11 @@ export default function App() {
                   <>
                     <option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option>
                     <option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option>
-                    <option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option>
-                    <option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option>
                     <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
                     <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option>
                     <option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option>
+                    <option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option>
+                    <option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option>
                     <option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option>
                   </>
                 )}
@@ -4048,11 +4048,6 @@ export default function App() {
                 }}
               onPointerDown={e => e.stopPropagation()}
             >
-                <optgroup label="ToAPIs">
-                  <option value="veo3.1-fast">Veo 3.1 Fast</option>
-                  <option value="grok-video-3">Grok Video 3</option>
-                  <option value="sora-2-vvip">Sora2 VVIP</option>
-                </optgroup>
                 <optgroup label="New API（独立密钥）">
                   <option value="grok-imagine-video-newapi">Grok Imagine Video</option>
                   <option value="firefly-veo31-ref-newapi">Firefly Veo 3.1 Ref</option>
@@ -4060,6 +4055,11 @@ export default function App() {
                   <option value="firefly-sora2-pro-newapi">Firefly Sora 2 Pro</option>
                   <option value="firefly-kling30omni-newapi">Firefly Kling 3.0 Omni</option>
                   <option value="firefly-kling30-newapi">Firefly Kling 3.0</option>
+                </optgroup>
+                <optgroup label="ToAPIs">
+                  <option value="veo3.1-fast">Veo 3.1 Fast</option>
+                  <option value="grok-video-3">Grok Video 3</option>
+                  <option value="sora-2-vvip">Sora2 VVIP</option>
                 </optgroup>
             </select>
               {isVeo ? (
