@@ -4,6 +4,8 @@ import {
   getDeepSeekBaseUrl,
   getDeepSeekSavedKey,
   getGeminiSavedKey,
+  getJunlanBaseUrl,
+  getJunlanSavedKey,
   getOpenAiBaseUrl,
   getOpenAiSavedKey,
   setGeminiKey,
@@ -22,6 +24,12 @@ import {
 function isDeepSeekChatModelId(modelName: string): boolean {
   const m = (modelName || '').trim();
   return m === 'deepseek-chat' || m === 'deepseek-reasoner' || m.startsWith('deepseek-');
+}
+
+/** 对话走君澜 OpenAI 兼容网关（与 ToAPIs 主通道分离，使用设置中的君澜 Base URL + Key） */
+function isJunlanChatModelId(modelName: string): boolean {
+  const m = (modelName || '').trim();
+  return m === 'gpt-5.5-junlan';
 }
 
 /** Google GenAI 官方模型 id；ToAPIs 等网关可使用带 -official 的别名，直连时需映射 */
@@ -308,6 +316,26 @@ export const callGeminiChatWithHistory = async (
       return chatCompletionHistoryAtBase(
         base,
         key,
+        modelName,
+        slice.map((t) => ({
+          role: t.role,
+          content: t.content,
+          imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
+          imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
+        }))
+      );
+    }
+
+    if (isJunlanChatModelId(modelName)) {
+      const jlKey = getJunlanSavedKey().trim();
+      if (!jlKey) {
+        throw new Error(
+          '使用 GPT-5.5（君澜）：请在「设置 → API」中填写「君澜 API Key」，并确认君澜 Base URL 为 https://www.junlanai.com/v1（与 ToAPIs 主通道密钥分开）。'
+        );
+      }
+      return chatCompletionHistoryAtBase(
+        getJunlanBaseUrl(),
+        jlKey,
         modelName,
         slice.map((t) => ({
           role: t.role,

@@ -5619,7 +5619,7 @@ export default function App() {
               {settingsTab === 'api' && (
                 <div>
                   <p className="text-gray-400 text-sm mb-3">
-                    选择接口类型：<span className="text-gray-300">OpenAI 兼容</span>为主通道：使用 <span className="text-gray-300">sk-...</span> 密钥与 Base URL（默认 ToAPIs <span className="text-gray-300">https://toapis.com/v1</span>）。「GPT Image 2（君澜 AI）」走下方<span className="text-gray-300">君澜 AI</span>；「Firefly Nano Banana *（New API）」走下方<span className="text-gray-300">New API</span>，均与 ToAPIs 主通道密钥分离。New API 文档见{' '}
+                    选择接口类型：<span className="text-gray-300">OpenAI 兼容</span>为主通道：使用 <span className="text-gray-300">sk-...</span> 密钥与 Base URL（默认 ToAPIs <span className="text-gray-300">https://toapis.com/v1</span>）。「GPT Image 2（君澜 AI）」与对话「GPT-5.5（君澜）」走下方<span className="text-gray-300">君澜 AI</span>；「Firefly Nano Banana *（New API）」走下方<span className="text-gray-300">New API</span>，均与 ToAPIs 主通道密钥分离。New API 文档见{' '}
                     <a href="https://docs.newapi.pro/zh/docs/api" target="_blank" rel="noreferrer" className="text-cyan-400 hover:underline">docs.newapi.pro</a>
                     。若选 <span className="text-gray-300">Google Gemini</span>，请使用 <span className="text-gray-300">AIza...</span> 密钥。
                   </p>
@@ -5679,9 +5679,9 @@ export default function App() {
                   />
 
                   <div className="mt-5 pt-4 border-t border-[#333]">
-                    <h3 className="text-sm font-semibold text-gray-200 mb-2">君澜 AI · GPT Image 2（可选）</h3>
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">君澜 AI · GPT Image 2 / 对话 GPT-5.5（可选）</h3>
                     <p className="text-gray-500 text-xs mb-2">
-                      仅当文生图 / 图生图节点选择「GPT Image 2（君澜 AI）」时使用；请求发往君澜 OpenAI 兼容网关（Base URL 须含 <span className="text-gray-400">/v1</span>）。勿把密钥提交到代码仓库。
+                      文生图 / 图生图选「GPT Image 2（君澜 AI）」或对话节点选「GPT-5.5（君澜）」时使用；请求发往君澜 OpenAI 兼容网关（Base URL 须含 <span className="text-gray-400">/v1</span>，默认 <span className="text-gray-400">https://www.junlanai.com/v1</span>）。勿把密钥提交到代码仓库。
                     </p>
                     <label className="text-xs text-gray-500 block mb-1">君澜 Base URL</label>
                     <input
@@ -9599,7 +9599,9 @@ function ChatNodeContent({
       msg.includes('unauthorized') ||
       msg.includes('invalid api key') ||
       (msg.includes('deepseek') && msg.includes('密钥')) ||
-      (msg.includes('使用 deepseek') && msg.includes('填写'))
+      (msg.includes('使用 deepseek') && msg.includes('填写')) ||
+      (msg.includes('君澜') && msg.includes('密钥')) ||
+      (msg.includes('gpt-5.5') && msg.includes('君澜'))
     ) {
       return {
         title: '鉴权 / DeepSeek 配置',
@@ -9607,6 +9609,7 @@ function ChatNodeContent({
         fixes: [
           { label: '打开 API 设置', action: () => onOpenApiSettings() },
           { label: '切换到 DeepSeek Chat', action: () => onUpdate({ model: 'deepseek-chat', error: undefined }) },
+          { label: '切换到 GPT-5.5（君澜）', action: () => onUpdate({ model: 'gpt-5.5-junlan', error: undefined }) },
           { label: '清除报错', action: () => onUpdate({ error: undefined }) },
         ],
       };
@@ -9645,6 +9648,7 @@ function ChatNodeContent({
       reason: '接口鉴权、服务状态或响应格式异常。',
       fixes: [
         { label: '切换到 DeepSeek Chat', action: () => onUpdate({ model: 'deepseek-chat', error: undefined }) },
+        { label: '切换到 GPT-5.5（君澜）', action: () => onUpdate({ model: 'gpt-5.5-junlan', error: undefined }) },
         { label: '切换到 Gemini 2.5 Flash', action: () => onUpdate({ model: 'gemini-2.5-flash', error: undefined }) },
         { label: '打开 API 设置', action: () => onOpenApiSettings() },
         { label: '清除报错', action: () => onUpdate({ error: undefined }) },
@@ -9740,6 +9744,9 @@ function ChatNodeContent({
           <optgroup label="DeepSeek（OpenAI 兼容）">
             <option value="deepseek-chat">DeepSeek Chat（默认）</option>
             <option value="deepseek-reasoner">DeepSeek Reasoner</option>
+          </optgroup>
+          <optgroup label="君澜 AI（OpenAI 兼容）">
+            <option value="gpt-5.5-junlan">GPT-5.5（君澜 · www.junlanai.com/v1）</option>
           </optgroup>
           <optgroup label="Google Gemini / ToAPIs">
             <option value="gemini-2.0-flash-official">Gemini 2.0 Flash（official · ToAPIs）</option>

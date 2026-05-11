@@ -1313,6 +1313,8 @@ function resolveEditModel(modelName: string): string {
 
 function resolveChatModelForBase(baseNormalized: string, modelName: string): string {
   const m = (modelName || '').trim();
+  /** 画布对话节点 id，上游 OpenAI 兼容 model 字段 */
+  if (m === 'gpt-5.5-junlan') return 'gpt-5.5';
   if (isToApisHost(baseNormalized)) {
     if (m) return m;
     return 'gemini-3-pro-preview';
