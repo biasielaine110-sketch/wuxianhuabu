@@ -2,6 +2,8 @@ import {
   getAiProvider,
   getJunlanBaseUrl,
   getJunlanSavedKey,
+  getNewApiBaseUrl,
+  getNewApiSavedKey,
   getOpenAiBaseUrl,
   getOpenAiSavedKey,
 } from './aiSettings';
@@ -28,6 +30,16 @@ function isDeepSeekHost(baseNormalized: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** 画布节点 id；上游 New API 请求 model 为去掉 `-newapi` 后的 id（与 ToAPIs 的 gemini-3-pro-image-preview 等区分） */
+function isNewApiFireflyCanvasModel(modelName: string): boolean {
+  const m = (modelName || '').trim();
+  return m === 'firefly-nano-banana-pro-newapi' || m === 'firefly-nano-banana2-newapi';
+}
+
+function newApiFireflyUpstreamModelId(modelName: string): string {
+  return (modelName || '').trim().replace(/-newapi$/i, '');
 }
 
 /** ToAPIs 异步任务轮询最长等待（文生图 / 图生图等） */
@@ -58,6 +70,7 @@ async function sleepInterruptible(ms: number, signal?: AbortSignal): Promise<voi
 /** ToAPIs：透传 imagen / gemini / gpt-image-* 等模型 id（含 gemini-3.1-flash-image-preview 文生图/图生图） */
 function toApisT2iModel(modelName: string): string {
   const m = (modelName || '').trim();
+  if (/^firefly-nano-banana.*-newapi$/i.test(m)) return newApiFireflyUpstreamModelId(m);
   if (m === 'gpt-image-2-junlan') return 'gpt-image-2';
   if (m.startsWith('imagen') || m.startsWith('gemini')) return m;
   if (m === 'gpt-image-2' || m === 'gpt-image-1' || m.startsWith('gpt-image')) return m;
@@ -859,7 +872,10 @@ async function generateImagesAtOpenAiCompatibleBase(
   const enhancedPrompt = buildPromptWithDimensions(prompt, aspectRatio);
   const out: string[] = [];
   const onePerRequest =
-    resolvedModel === 'dall-e-3' || resolvedModel === 'gpt-image-2' || resolvedModel === 'gpt-image-1';
+    resolvedModel === 'dall-e-3' ||
+    resolvedModel === 'gpt-image-2' ||
+    resolvedModel === 'gpt-image-1' ||
+    resolvedModel.startsWith('firefly-');
   if (onePerRequest) {
     for (let i = 0; i < numberOfImages; i++) {
       assertNotAborted(signal);
@@ -918,7 +934,11 @@ async function editImagesAtOpenAiCompatibleBase(
   const results: string[] = [];
   const count = Math.min(
     Math.max(numberOfImages, 1),
-    resolvedEditModel === 'dall-e-2' ? 10 : resolvedEditModel === 'gpt-image-2' ? 4 : 1
+    resolvedEditModel === 'dall-e-2'
+      ? 10
+      : resolvedEditModel === 'gpt-image-2' || resolvedEditModel.startsWith('firefly-')
+        ? 4
+        : 1
   );
 
   for (let i = 0; i < count; i++) {
@@ -964,6 +984,30 @@ export async function openAiGenerateNewImage(
   signal?: AbortSignal
 ): Promise<string[]> {
   const rawModel = (modelName || '').trim();
+  if (isNewApiFireflyCanvasModel(rawModel)) {
+    const naKey = getNewApiSavedKey().trim();
+    if (!naKey) {
+      throw new Error(
+        '未配置 New API 密钥。请在「设置 → API」中填写「New API（Firefly）」密钥（与 ToAPIs 主通道分开）。文档：https://docs.newapi.pro/zh/docs/api'
+      );
+    }
+    const rawBase = getNewApiBaseUrl().trim();
+    if (!rawBase) {
+      throw new Error('未配置 New API Base URL（须含 /v1）。请在「设置 → API」中填写自建 New API 地址。');
+    }
+    const naBase = normalizeBaseUrl(rawBase);
+    const upstream = newApiFireflyUpstreamModelId(rawModel);
+    return generateImagesAtOpenAiCompatibleBase(
+      naBase,
+      naKey,
+      prompt,
+      aspectRatio,
+      numberOfImages,
+      upstream,
+      signal
+    );
+  }
+
   if (rawModel === 'gpt-image-2-junlan') {
     const jlKey = getJunlanSavedKey().trim();
     if (!jlKey) {
@@ -1002,6 +1046,31 @@ export async function openAiEditImage(
   signal?: AbortSignal
 ): Promise<string[]> {
   const rawModel = (modelName || '').trim();
+  if (isNewApiFireflyCanvasModel(rawModel)) {
+    const naKey = getNewApiSavedKey().trim();
+    if (!naKey) {
+      throw new Error(
+        '未配置 New API 密钥。请在「设置 → API」中填写「New API（Firefly）」密钥。文档：https://docs.newapi.pro/zh/docs/api'
+      );
+    }
+    const rawBase = getNewApiBaseUrl().trim();
+    if (!rawBase) {
+      throw new Error('未配置 New API Base URL（须含 /v1）。请在设置中填写。');
+    }
+    const naBase = normalizeBaseUrl(rawBase);
+    const upstream = newApiFireflyUpstreamModelId(rawModel);
+    return editImagesAtOpenAiCompatibleBase(
+      naBase,
+      naKey,
+      base64Images,
+      prompt,
+      numberOfImages,
+      upstream,
+      aspectRatio,
+      signal
+    );
+  }
+
   if (rawModel === 'gpt-image-2-junlan') {
     const jlKey = getJunlanSavedKey().trim();
     if (!jlKey) {

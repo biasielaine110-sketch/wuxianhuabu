@@ -1153,6 +1153,8 @@ export default function App() {
   const [deepSeekBaseInput, setDeepSeekBaseInput] = useState(() => getAiSettingsSnapshot().deepSeekBaseUrl);
   const [junlanBaseInput, setJunlanBaseInput] = useState(() => getAiSettingsSnapshot().junlanBaseUrl);
   const [junlanKeyInput, setJunlanKeyInput] = useState(() => getAiSettingsSnapshot().junlanKey);
+  const [newApiBaseInput, setNewApiBaseInput] = useState(() => getAiSettingsSnapshot().newApiBaseUrl);
+  const [newApiKeyInput, setNewApiKeyInput] = useState(() => getAiSettingsSnapshot().newApiKey);
 
   useEffect(() => {
     const s = getAiSettingsSnapshot();
@@ -1163,6 +1165,8 @@ export default function App() {
     setDeepSeekBaseInput(s.deepSeekBaseUrl);
     setJunlanBaseInput(s.junlanBaseUrl);
     setJunlanKeyInput(s.junlanKey);
+    setNewApiBaseInput(s.newApiBaseUrl);
+    setNewApiKeyInput(s.newApiKey);
   }, []);
 
   useEffect(() => {
@@ -1189,6 +1193,8 @@ export default function App() {
     setDeepSeekBaseInput(s.deepSeekBaseUrl);
     setJunlanBaseInput(s.junlanBaseUrl);
     setJunlanKeyInput(s.junlanKey);
+    setNewApiBaseInput(s.newApiBaseUrl);
+    setNewApiKeyInput(s.newApiKey);
     setDownloadPathSettings(loadDownloadPathSettings());
     setCreditPricingRows(loadCreditPricingRows());
     void hydrateDownloadDirectoryHandlesFromIDB().then(() => refreshDownloadDirLabels());
@@ -3723,7 +3729,9 @@ export default function App() {
                     <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
                     <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option>
                     <option value="imagen-4">Imagen 4</option>
-                    <option value="gemini-3-pro-image-preview">Nano-Banana Pro</option>
+                    <option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option>
+                    <option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option>
+                    <option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option>
                     <option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option>
                   </>
                 ) : (
@@ -3731,7 +3739,9 @@ export default function App() {
                     <option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option>
                     <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
                     <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option>
-                    <option value="gemini-3-pro-image-preview">Nano-Banana Pro</option>
+                    <option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option>
+                    <option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option>
+                    <option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option>
                     <option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option>
                   </>
                 )}
@@ -5481,7 +5491,9 @@ export default function App() {
               {settingsTab === 'api' && (
                 <div>
                   <p className="text-gray-400 text-sm mb-3">
-                    选择接口类型：<span className="text-gray-300">OpenAI 兼容</span>为主通道：使用 <span className="text-gray-300">sk-...</span> 密钥与 Base URL（默认 ToAPIs <span className="text-gray-300">https://toapis.com/v1</span>）。节点模型「GPT Image 2（君澜 AI）」单独走下方<span className="text-gray-300">君澜 AI</span>密钥与 Base URL（默认 <span className="text-gray-300">{DEFAULT_JUNLAN_BASE_URL}</span>），与 ToAPIs 互不混用。若选 <span className="text-gray-300">Google Gemini</span>，请使用 <span className="text-gray-300">AIza...</span> 密钥。DeepSeek 对话见区块下方。
+                    选择接口类型：<span className="text-gray-300">OpenAI 兼容</span>为主通道：使用 <span className="text-gray-300">sk-...</span> 密钥与 Base URL（默认 ToAPIs <span className="text-gray-300">https://toapis.com/v1</span>）。「GPT Image 2（君澜 AI）」走下方<span className="text-gray-300">君澜 AI</span>；「Firefly Nano Banana *（New API）」走下方<span className="text-gray-300">New API</span>，均与 ToAPIs 主通道密钥分离。New API 文档见{' '}
+                    <a href="https://docs.newapi.pro/zh/docs/api" target="_blank" rel="noreferrer" className="text-cyan-400 hover:underline">docs.newapi.pro</a>
+                    。若选 <span className="text-gray-300">Google Gemini</span>，请使用 <span className="text-gray-300">AIza...</span> 密钥。
                   </p>
                   <label className="text-xs text-gray-500 block mb-1">接口类型</label>
                   <select
@@ -5525,6 +5537,8 @@ export default function App() {
                           openAiBaseUrl: (openAiBaseInput.trim() || DEFAULT_OPENAI_BASE_URL),
                           junlanApiKey: junlanKeyInput.trim(),
                           junlanBaseUrl: junlanBaseInput.trim() || DEFAULT_JUNLAN_BASE_URL,
+                          newApiApiKey: newApiKeyInput.trim(),
+                          newApiBaseUrl: newApiBaseInput.trim(),
                           deepSeekApiKey: deepSeekKeyInput.trim(),
                           deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
                         });
@@ -5556,6 +5570,29 @@ export default function App() {
                       onChange={(e) => setJunlanKeyInput(e.target.value)}
                       placeholder="sk-..."
                       className="w-full bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-600 transition-colors text-sm"
+                    />
+                  </div>
+
+                  <div className="mt-5 pt-4 border-t border-[#333]">
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">New API · Firefly 文生图 / 图生图（可选）</h3>
+                    <p className="text-gray-500 text-xs mb-2">
+                      仅当节点选择「Firefly Nano Banana Pro / 2（New API）」时使用；请求发往自建 New API 的 OpenAI 兼容地址（须含 <span className="text-gray-400">/v1</span>）。与 ToAPIs、君澜密钥分开保存。
+                    </p>
+                    <label className="text-xs text-gray-500 block mb-1">New API Base URL</label>
+                    <input
+                      type="text"
+                      value={newApiBaseInput}
+                      onChange={(e) => setNewApiBaseInput(e.target.value)}
+                      placeholder="https://你的-New-API-部署域名/v1"
+                      className="w-full mb-3 bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-violet-500 transition-colors text-sm"
+                    />
+                    <label className="text-xs text-gray-500 block mb-1">New API Key（sk-...）</label>
+                    <input
+                      type="password"
+                      value={newApiKeyInput}
+                      onChange={(e) => setNewApiKeyInput(e.target.value)}
+                      placeholder="sk-..."
+                      className="w-full bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-violet-500 transition-colors text-sm"
                     />
                   </div>
 
@@ -5599,6 +5636,8 @@ export default function App() {
                           openAiBaseUrl: (openAiBaseInput.trim() || DEFAULT_OPENAI_BASE_URL),
                           junlanApiKey: junlanKeyInput.trim(),
                           junlanBaseUrl: junlanBaseInput.trim() || DEFAULT_JUNLAN_BASE_URL,
+                          newApiApiKey: newApiKeyInput.trim(),
+                          newApiBaseUrl: newApiBaseInput.trim(),
                           deepSeekApiKey: deepSeekKeyInput.trim(),
                           deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
                         });

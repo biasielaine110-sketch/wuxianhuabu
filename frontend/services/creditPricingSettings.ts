@@ -37,6 +37,20 @@ export const DEFAULT_CREDIT_PRICING_ROWS: CreditPricingRow[] = [
     credits: 10,
   },
   {
+    id: 'default-row-firefly-nano-banana-pro-newapi',
+    category: '图生图',
+    modelName: 'firefly-nano-banana-pro-newapi',
+    specLabel: 'New API',
+    credits: 10,
+  },
+  {
+    id: 'default-row-firefly-nano-banana2-newapi',
+    category: '图生图',
+    modelName: 'firefly-nano-banana2-newapi',
+    specLabel: 'New API',
+    credits: 10,
+  },
+  {
     id: 'default-row-gemini-31-flash-2k',
     category: '图生图',
     modelName: 'gemini-3.1-flash-image-preview',

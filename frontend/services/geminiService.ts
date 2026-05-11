@@ -106,6 +106,9 @@ export const generateNewImage = async (
     }
 
     const model = modelName || 'imagen-4';
+    if (model === 'firefly-nano-banana-pro-newapi' || model === 'firefly-nano-banana2-newapi') {
+      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, signal);
+    }
     if (model === 'gpt-image-2-junlan') {
       return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, signal);
     }
@@ -193,6 +196,9 @@ export const editExistingImage = async (
 
     const results: string[] = [];
     const model = modelName || 'gemini-3.1-flash-image-preview';
+    if (model === 'firefly-nano-banana-pro-newapi' || model === 'firefly-nano-banana2-newapi') {
+      return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, signal);
+    }
     if (model === 'gpt-image-2-junlan') {
       return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, signal);
     }

@@ -9,6 +9,9 @@ const DEEPSEEK_BASE_URL_STORAGE_KEY = 'deepseek-base-url-v1';
 /** 君澜 AI OpenAI 兼容网关（与 ToAPIs / 主 OpenAI 兼容通道分离，仅用于节点模型「GPT Image 2（君澜 AI）」） */
 const JUNLAN_API_KEY_STORAGE_KEY = 'junlan-openai-compatible-api-key-v1';
 const JUNLAN_BASE_URL_STORAGE_KEY = 'junlan-openai-compatible-base-url-v1';
+/** 自建 [New API](https://docs.newapi.pro/zh/docs/api) OpenAI 兼容网关；与 ToAPIs / 君澜分离，仅用于 Firefly 画布模型（*-newapi） */
+const NEWAPI_API_KEY_STORAGE_KEY = 'newapi-openai-compatible-api-key-v1';
+const NEWAPI_BASE_URL_STORAGE_KEY = 'newapi-openai-compatible-base-url-v1';
 
 export const DEFAULT_OPENAI_BASE_URL = 'https://toapis.com/v1';
 /** 文档：https://stsg17lkjz.apifox.cn/8682367m0 — Base URL 须含 /v1 */
@@ -159,6 +162,43 @@ export function setJunlanBaseUrl(url: string): void {
   }
 }
 
+export function getNewApiSavedKey(): string {
+  try {
+    return localStorage.getItem(NEWAPI_API_KEY_STORAGE_KEY)?.trim() || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setNewApiKey(apiKey: string): void {
+  const normalized = apiKey.trim();
+  try {
+    if (normalized) localStorage.setItem(NEWAPI_API_KEY_STORAGE_KEY, normalized);
+    else localStorage.removeItem(NEWAPI_API_KEY_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 须为自建 New API 的 OpenAI 兼容根路径（含 /v1）；未配置时返回空字符串 */
+export function getNewApiBaseUrl(): string {
+  try {
+    return localStorage.getItem(NEWAPI_BASE_URL_STORAGE_KEY)?.trim() || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setNewApiBaseUrl(url: string): void {
+  const normalized = url.trim();
+  try {
+    if (normalized) localStorage.setItem(NEWAPI_BASE_URL_STORAGE_KEY, normalized);
+    else localStorage.removeItem(NEWAPI_BASE_URL_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function getDeepSeekSavedKey(): string {
   try {
     return localStorage.getItem(DEEPSEEK_API_KEY_STORAGE_KEY)?.trim() || '';
@@ -203,6 +243,8 @@ export type AiSettingsSnapshot = {
   openAiBaseUrl: string;
   junlanKey: string;
   junlanBaseUrl: string;
+  newApiKey: string;
+  newApiBaseUrl: string;
   deepSeekKey: string;
   deepSeekBaseUrl: string;
 };
@@ -215,6 +257,8 @@ export function getAiSettingsSnapshot(): AiSettingsSnapshot {
     openAiBaseUrl: getOpenAiBaseUrl(),
     junlanKey: getJunlanSavedKey(),
     junlanBaseUrl: getJunlanBaseUrl(),
+    newApiKey: getNewApiSavedKey(),
+    newApiBaseUrl: getNewApiBaseUrl(),
     deepSeekKey: getDeepSeekSavedKey(),
     deepSeekBaseUrl: getDeepSeekBaseUrl(),
   };
@@ -230,6 +274,9 @@ export type PersistAiSettingsInput = {
   /** 君澜 GPT Image 2 专用；不传则保留原值 */
   junlanApiKey?: string;
   junlanBaseUrl?: string;
+  /** New API（Firefly 等）；不传则保留原值 */
+  newApiApiKey?: string;
+  newApiBaseUrl?: string;
   /** DeepSeek 对话专用；不传则保留原值 */
   deepSeekApiKey?: string;
   deepSeekBaseUrl?: string;
@@ -242,6 +289,8 @@ export function persistAiSettings(opts: PersistAiSettingsInput): void {
   if (opts.openAiBaseUrl !== undefined) setOpenAiBaseUrl(opts.openAiBaseUrl);
   if (opts.junlanApiKey !== undefined) setJunlanKey(opts.junlanApiKey);
   if (opts.junlanBaseUrl !== undefined) setJunlanBaseUrl(opts.junlanBaseUrl);
+  if (opts.newApiApiKey !== undefined) setNewApiKey(opts.newApiApiKey);
+  if (opts.newApiBaseUrl !== undefined) setNewApiBaseUrl(opts.newApiBaseUrl);
   if (opts.deepSeekApiKey !== undefined) setDeepSeekKey(opts.deepSeekApiKey);
   if (opts.deepSeekBaseUrl !== undefined) setDeepSeekBaseUrl(opts.deepSeekBaseUrl);
 }
