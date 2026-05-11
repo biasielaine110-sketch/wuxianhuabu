@@ -31,9 +31,11 @@ import type { CanvasProjectSnapshot } from './services/projectPersistence';
 import {
   callGeminiChatWithHistory,
   editExistingImage,
+  generateCanvasVideoNewApi,
   generateCanvasVideoViaToApis,
   generateNewImage,
   initGeminiClientFromStorage,
+  isNewApiVideoCanvasModel,
 } from './services/geminiService';
 import {
   buildIncomingRefSlots,
@@ -119,6 +121,27 @@ function sniffImageMimeFromBase64(raw: string): string {
 /** 视频节点 Veo：当前存 `veo3.1-fast`；旧工程可能仍为 `veo3.1-fast-official` */
 function isVeo31FastVideoModel(m?: string): boolean {
   return m === 'veo3.1-fast' || m === 'veo3.1-fast-official';
+}
+
+/** 视频节点 Veo：ToAPIs 或 New API firefly-veo31-ref */
+function isVideoVeoStyleModel(m?: string): boolean {
+  return isVeo31FastVideoModel(m) || m === 'firefly-veo31-ref-newapi';
+}
+
+/** 视频节点 Sora：ToAPIs 或 New API firefly-sora2* */
+function isVideoSoraStyleModel(m?: string): boolean {
+  return m === 'sora-2-vvip' || m === 'firefly-sora2-newapi' || m === 'firefly-sora2-pro-newapi';
+}
+
+/** 视频节点 Grok 秒数档：ToAPIs Grok3 / New API grok-imagine / kling */
+function isVideoGrokDurationStyleModel(m?: string): boolean {
+  return (
+    !m ||
+    m === 'grok-video-3' ||
+    m === 'grok-imagine-video-newapi' ||
+    m === 'firefly-kling30-newapi' ||
+    m === 'firefly-kling30omni-newapi'
+  );
 }
 
 function base64ToImageDataUrl(raw: string): string {
@@ -3055,7 +3078,7 @@ export default function App() {
             currentVideoIndex: 0,
             videoDuration: 8,
             videoResolution: '720p' as const,
-            model: 'veo3.1-fast',
+            model: getNewApiSavedKey().trim() ? 'grok-imagine-video-newapi' : 'veo3.1-fast',
           }
         : {}),
     };
@@ -3439,32 +3462,54 @@ export default function App() {
       const combinedPrompt = stripRefMarkers(combinedRaw) || combinedRaw;
       const { base64s: imageInputs } = await resolveSlotImagesForIndices(slots, pickIndices);
 
-      const videoModel: 'grok-video-3' | 'sora-2-vvip' | 'veo3.1-fast' =
-        node.model === 'sora-2-vvip'
-          ? 'sora-2-vvip'
-          : isVeo31FastVideoModel(node.model)
-            ? 'veo3.1-fast'
-            : 'grok-video-3';
+      let videoUrl: string;
+      if (isNewApiVideoCanvasModel(node.model || '')) {
+        videoUrl = await generateCanvasVideoNewApi(combinedPrompt, {
+          canvasVideoModelId: node.model!.trim(),
+          durationSeconds:
+            node.videoDuration ??
+            (node.model?.startsWith('firefly-veo31-ref') || isVideoSoraStyleModel(node.model) ? 8 : 10),
+          aspectRatio: node.aspectRatio || '16:9',
+          resolution: node.model?.startsWith('firefly-veo31-ref')
+            ? ['1080p', '4k'].includes(node.videoResolution || '')
+              ? (node.videoResolution as '1080p' | '4k')
+              : '720p'
+            : isVideoSoraStyleModel(node.model)
+              ? '720p'
+              : node.videoResolution === '480p'
+                ? '480p'
+                : '720p',
+          referenceImagesBase64: imageInputs.slice(0, 3),
+          signal: ac.signal,
+        });
+      } else {
+        const videoModel: 'grok-video-3' | 'sora-2-vvip' | 'veo3.1-fast' =
+          node.model === 'sora-2-vvip'
+            ? 'sora-2-vvip'
+            : isVeo31FastVideoModel(node.model)
+              ? 'veo3.1-fast'
+              : 'grok-video-3';
 
-      const resolution: '480p' | '720p' | '1080p' | '4k' =
-        videoModel === 'veo3.1-fast'
-          ? (['1080p', '4k'].includes(node.videoResolution || '') ? (node.videoResolution as '1080p' | '4k') : '720p')
-          : videoModel === 'sora-2-vvip'
-            ? '720p'
-            : node.videoResolution === '480p'
-              ? '480p'
-              : '720p';
+        const resolution: '480p' | '720p' | '1080p' | '4k' =
+          videoModel === 'veo3.1-fast'
+            ? (['1080p', '4k'].includes(node.videoResolution || '') ? (node.videoResolution as '1080p' | '4k') : '720p')
+            : videoModel === 'sora-2-vvip'
+              ? '720p'
+              : node.videoResolution === '480p'
+                ? '480p'
+                : '720p';
 
-      const videoUrl = await generateCanvasVideoViaToApis(combinedPrompt, {
-        videoModel,
-        durationSeconds:
-          node.videoDuration ??
-          (videoModel === 'sora-2-vvip' || videoModel === 'veo3.1-fast' ? 8 : 10),
-        aspectRatio: node.aspectRatio || '16:9',
-        resolution,
-        referenceImagesBase64: imageInputs.slice(0, 3),
-        signal: ac.signal,
-      });
+        videoUrl = await generateCanvasVideoViaToApis(combinedPrompt, {
+          videoModel,
+          durationSeconds:
+            node.videoDuration ??
+            (videoModel === 'sora-2-vvip' || videoModel === 'veo3.1-fast' ? 8 : 10),
+          aspectRatio: node.aspectRatio || '16:9',
+          resolution,
+          referenceImagesBase64: imageInputs.slice(0, 3),
+          signal: ac.signal,
+        });
+      }
 
       const prevVideos = node.videos || [];
       const newVideos = [...prevVideos, videoUrl];
@@ -3842,14 +3887,15 @@ export default function App() {
         )}
 
         {node.type === 'video' && (() => {
-          const isSora = node.model === 'sora-2-vvip';
-          const isVeo = isVeo31FastVideoModel(node.model);
+          const vm = node.model || '';
+          const isNaVideo = isNewApiVideoCanvasModel(vm);
+          const isSora = isVideoSoraStyleModel(vm);
+          const isVeo = isVideoVeoStyleModel(vm);
+          const isGroDur = isVideoGrokDurationStyleModel(vm);
           const modelSelectValue =
-            node.model === 'sora-2-vvip'
-              ? 'sora-2-vvip'
-              : isVeo31FastVideoModel(node.model)
-                ? 'veo3.1-fast'
-                : 'grok-video-3';
+            vm === 'sora-2-vvip' || isVeo31FastVideoModel(vm) || vm === 'grok-video-3' || isNaVideo
+              ? vm || 'grok-video-3'
+              : 'grok-video-3';
           return (
           <div className="flex flex-col gap-1.5 p-2 bg-[#252525] border-b border-[#333] text-xs shrink-0">
             {(() => {
@@ -3924,16 +3970,20 @@ export default function App() {
               );
             })()}
             <div className="text-[10px] text-gray-500 px-1">
-              需 OpenAI 兼容 + ToAPIs Base URL · 最多 3 张参考图（视频将截取关键帧） ·
+              {isNaVideo
+                ? '使用「设置 → API」中 New API 密钥与 Base URL（与 ToAPIs 主通道分离）。最多 3 张参考图（视频将截取关键帧）。'
+                : '需 OpenAI 兼容 + ToAPIs Base URL。最多 3 张参考图（视频将截取关键帧）。'}
               {isVeo
-                ? ' Veo3.1 Fast（veo3.1-fast）：ToAPIs 固定 8 秒；画幅 16:9 或 9:16（其它按横屏）；720p/1080p/4k'
+                ? ' · Veo：固定 8 秒；画幅 16:9 或 9:16；720p/1080p/4k'
                 : isSora
-                  ? ' Sora2 VVIP：4/8/12 秒、16:9 或 9:16、720p'
-                  : ' Grok：多档秒数与画幅'}
+                  ? ' · Sora 系：4/8/12 秒、16:9 或 9:16、720p'
+                  : isGroDur
+                    ? ' · Grok / Kling / Imagine：多档秒数与画幅'
+                    : ''}
             </div>
-            {!isSora && !isVeo && (
+            {!isSora && !isVeo && isGroDur && (
               <div className="text-[9px] text-amber-600/95 px-1 leading-snug">
-                分辨率：Grok 路径已随请求发送 resolution；若成品仍为 480p，多为上游默认。
+                分辨率：Grok 系路径已随请求发送 resolution；若成品仍为 480p，多为上游默认。
               </div>
             )}
             <div className="flex flex-wrap items-center gap-1.5">
@@ -3943,13 +3993,13 @@ export default function App() {
                 onChange={(e) => {
                   const m = e.target.value;
                   const updates: Partial<CanvasNode> = { model: m };
-                  if (m === 'sora-2-vvip') {
+                  if (m === 'sora-2-vvip' || m === 'firefly-sora2-newapi' || m === 'firefly-sora2-pro-newapi') {
                     updates.videoResolution = '720p';
                     const d = node.videoDuration ?? 10;
                     updates.videoDuration = d === 4 || d === 8 || d === 12 ? d : 8;
                     const ar = node.aspectRatio || '16:9';
                     if (ar !== '16:9' && ar !== '9:16') updates.aspectRatio = '16:9';
-                  } else if (m === 'veo3.1-fast') {
+                  } else if (m === 'veo3.1-fast' || m === 'firefly-veo31-ref-newapi') {
                     updates.videoDuration = 8;
                     updates.videoResolution =
                       node.videoResolution === '1080p' || node.videoResolution === '4k'
@@ -3968,13 +4018,23 @@ export default function App() {
                 }}
               onPointerDown={e => e.stopPropagation()}
             >
-                <option value="veo3.1-fast">Veo 3.1 Fast</option>
-                <option value="grok-video-3">Grok Video 3</option>
-                <option value="sora-2-vvip">Sora2 VVIP</option>
+                <optgroup label="ToAPIs">
+                  <option value="veo3.1-fast">Veo 3.1 Fast</option>
+                  <option value="grok-video-3">Grok Video 3</option>
+                  <option value="sora-2-vvip">Sora2 VVIP</option>
+                </optgroup>
+                <optgroup label="New API（独立密钥）">
+                  <option value="grok-imagine-video-newapi">Grok Imagine Video</option>
+                  <option value="firefly-veo31-ref-newapi">Firefly Veo 3.1 Ref</option>
+                  <option value="firefly-sora2-newapi">Firefly Sora 2</option>
+                  <option value="firefly-sora2-pro-newapi">Firefly Sora 2 Pro</option>
+                  <option value="firefly-kling30omni-newapi">Firefly Kling 3.0 Omni</option>
+                  <option value="firefly-kling30-newapi">Firefly Kling 3.0</option>
+                </optgroup>
             </select>
               {isVeo ? (
                 <span className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-400 text-xs whitespace-nowrap">
-                  8 秒（ToAPIs 固定）
+                  8 秒（固定）
                 </span>
               ) : isSora ? (
             <select
@@ -5623,9 +5683,12 @@ export default function App() {
                   </div>
 
                   <div className="mt-5 pt-4 border-t border-[#333]">
-                    <h3 className="text-sm font-semibold text-gray-200 mb-2">New API · Firefly 文生图 / 图生图（可选）</h3>
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">New API · Firefly 文生图 / 图生图 / 视频生成（可选）</h3>
                     <p className="text-gray-500 text-xs mb-2">
-                      仅当节点选择「Firefly Nano Banana Pro / 2（New API）」时使用；Base URL 仍填实际上游地址（如 <span className="text-gray-400">https://yunzhi-ai.top/v1</span>）。对 <span className="text-gray-400">yunzhi-ai.top</span> 本站会自动经同源路径转发，避免浏览器 CORS。与 ToAPIs、君澜密钥分开保存。
+                      当节点选择「Firefly Nano Banana *（New API）」图模型，或视频节点中选择带「（New API）」后缀的视频模型（如 Grok
+                      Imagine Video、Firefly Veo / Sora / Kling 等）时使用；Base URL 仍填实际上游地址（如{' '}
+                      <span className="text-gray-400">https://yunzhi-ai.top/v1</span>）。对{' '}
+                      <span className="text-gray-400">yunzhi-ai.top</span> 本站会自动经同源路径转发，避免浏览器 CORS。与 ToAPIs、君澜密钥分开保存。
                     </p>
                     <label className="text-xs text-gray-500 block mb-1">New API Base URL</label>
                     <input

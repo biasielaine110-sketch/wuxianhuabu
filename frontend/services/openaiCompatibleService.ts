@@ -825,6 +825,206 @@ export async function toApisCanvasVideoGenerate(params: {
   });
 }
 
+/** 画布视频节点：走 New API 密钥/Base（与 ToAPIs 主通道区分）；`*-newapi` 为画布 id，上游 model 去后缀 */
+export const NEW_API_VIDEO_CANVAS_MODEL_IDS = [
+  'grok-imagine-video-newapi',
+  'firefly-veo31-ref-newapi',
+  'firefly-sora2-newapi',
+  'firefly-sora2-pro-newapi',
+  'firefly-kling30omni-newapi',
+  'firefly-kling30-newapi',
+] as const;
+
+export type NewApiVideoCanvasModelId = (typeof NEW_API_VIDEO_CANVAS_MODEL_IDS)[number];
+
+export function isNewApiVideoCanvasModel(modelName: string): boolean {
+  const m = (modelName || '').trim();
+  return (NEW_API_VIDEO_CANVAS_MODEL_IDS as readonly string[]).includes(m);
+}
+
+function newApiVideoUpstreamModelId(canvasId: string): string {
+  return (canvasId || '').trim().replace(/-newapi$/i, '');
+}
+
+async function newApiUploadVideoReferenceImageUrls(
+  baseNorm: string,
+  apiKey: string,
+  refs: string[],
+  filePrefix: string,
+  signal?: AbortSignal
+): Promise<string[]> {
+  const imageUrls: string[] = [];
+  const list = refs.filter(Boolean).slice(0, 3);
+  for (let i = 0; i < list.length; i++) {
+    assertNotAborted(signal);
+    const { raw, mime } = parseBase64ImageInput(list[i]);
+    const blob = base64ToBlob(raw, mime);
+    const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : mime.includes('gif') ? 'gif' : 'jpg';
+    imageUrls.push(await openAiCompatUploadImageBlob(baseNorm, apiKey, blob, `${filePrefix}-${i}.${ext}`, signal));
+  }
+  return imageUrls;
+}
+
+async function newApiSubmitVideoGeneration(
+  baseNorm: string,
+  apiKey: string,
+  body: Record<string, unknown>,
+  signal?: AbortSignal
+): Promise<{ id: string }> {
+  const key = apiKey.trim();
+  if (!key) throw new Error('未配置 New API 密钥。');
+  const base = rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm);
+  const res = await fetch(`${base}/videos/generations`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${key}`,
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`New API 视频任务提交失败 (${res.status}): ${text.slice(0, 800)}`);
+  }
+  const json = JSON.parse(text) as { id?: string; error?: { message?: string } };
+  if (json.error?.message) throw new Error(`New API: ${json.error.message}`);
+  if (!json.id) throw new Error(`New API 未返回视频任务 id：${text.slice(0, 400)}`);
+  return { id: json.id };
+}
+
+async function newApiPollVideoTaskToPlayableUrl(
+  baseNorm: string,
+  apiKey: string,
+  taskId: string,
+  signal?: AbortSignal
+): Promise<string> {
+  const key = apiKey.trim();
+  const base = rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm);
+  const deadline = Date.now() + TOAPIS_VIDEO_TASK_MAX_WAIT_MS;
+  await sleepInterruptible(5000, signal);
+
+  while (Date.now() < deadline) {
+    assertNotAborted(signal);
+    const res = await fetch(`${base}/videos/generations/${encodeURIComponent(taskId)}`, {
+      headers: { Authorization: `Bearer ${key}` },
+      signal,
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(`New API 查询视频任务失败 (${res.status}): ${text.slice(0, 500)}`);
+    }
+    const data = JSON.parse(text) as {
+      status?: string;
+      url?: string;
+      result?: unknown;
+      error?: { message?: string; code?: string };
+    };
+
+    if (isVideoTaskCompletedStatus(data.status)) {
+      const rawUrl = extractVideoUrlFromPollPayload(data);
+      if (!rawUrl) {
+        throw new Error(`New API 视频任务完成但未返回可播放 URL。响应片段：${text.slice(0, 600)}`);
+      }
+      return rewriteKnownImageCdnToSameOrigin(rewriteYunzhiAssetUrlToSameOriginProxy(rawUrl));
+    }
+    const st = String(data.status || '').toLowerCase();
+    if (st === 'failed') {
+      throw new Error(`New API 视频生成失败: ${data.error?.message || JSON.stringify(data.error)}`);
+    }
+    await sleepInterruptible(10_000, signal);
+  }
+  throw new Error(
+    `New API 视频任务超时（已等待超过 ${TOAPIS_VIDEO_TASK_MAX_WAIT_MS / 60_000} 分钟），请稍后重试。`
+  );
+}
+
+/**
+ * 画布「视频生成」节点 · New API 通道（与 ToAPIs 的 grok-video-3 / sora-2-vvip / veo3.1-fast 分离）。
+ * 请求体与 ToAPIs 文档对齐，便于同一聚合网关路由；参考图依赖 `/uploads/images` 或 `/upload/image`。
+ */
+export async function newApiCanvasVideoGenerate(params: {
+  canvasVideoModelId: string;
+  prompt: string;
+  durationSeconds: number;
+  aspectRatio: string;
+  resolution: '480p' | '720p' | '1080p' | '4k';
+  referenceImagesBase64?: string[];
+  signal?: AbortSignal;
+}): Promise<string> {
+  const naKey = getNewApiSavedKey().trim();
+  if (!naKey) {
+    throw new Error(
+      '未配置 New API 密钥。请在「设置 → API」中填写「New API（Firefly / 视频）」密钥（与 ToAPIs 主通道分开）。文档：https://docs.newapi.pro/zh/docs/api'
+    );
+  }
+  const rawBase = getNewApiBaseUrl().trim();
+  if (!rawBase) {
+    throw new Error('未配置 New API Base URL（须含 /v1）。请在设置中填写。');
+  }
+  const baseNorm = normalizeBaseUrl(rawBase);
+  const canvasId = params.canvasVideoModelId.trim();
+  if (!isNewApiVideoCanvasModel(canvasId)) {
+    throw new Error('无效的 New API 视频模型 id。');
+  }
+  const model = newApiVideoUpstreamModelId(canvasId);
+  const imageUrls = await newApiUploadVideoReferenceImageUrls(
+    baseNorm,
+    naKey,
+    params.referenceImagesBase64 || [],
+    'na-video-ref',
+    params.signal
+  );
+
+  let body: Record<string, unknown>;
+
+  if (canvasId.startsWith('firefly-veo31-ref')) {
+    const aspect_ratio = toApisVeo31FastAspectRatio(params.aspectRatio);
+    const resolution =
+      params.resolution === '1080p' ? '1080p' : params.resolution === '4k' ? '4k' : '720p';
+    body = {
+      model,
+      prompt: params.prompt,
+      duration: 8,
+      aspect_ratio,
+      metadata: {
+        resolution,
+        enable_gif: false,
+      },
+    };
+    if (imageUrls.length) body.image_urls = imageUrls;
+  } else if (canvasId.startsWith('firefly-sora2')) {
+    const duration = toApisSora2VvipDuration(params.durationSeconds);
+    const aspect_ratio = toApisSora2VvipAspectRatio(params.aspectRatio);
+    const res = params.resolution === '480p' ? '480p' : '720p';
+    body = {
+      model,
+      prompt: params.prompt,
+      duration,
+      aspect_ratio,
+      resolution: res,
+      resolution_name: res,
+    };
+    if (imageUrls.length) body.image_urls = imageUrls;
+  } else {
+    const seconds = toApisGrokVideoSeconds(params.durationSeconds);
+    const aspect_ratio = toApisAspectSize(params.aspectRatio);
+    const resolution = params.resolution === '480p' ? '480p' : '720p';
+    body = {
+      model,
+      prompt: params.prompt,
+      seconds: String(seconds),
+      aspect_ratio,
+      resolution,
+      resolution_name: resolution,
+    };
+    if (imageUrls.length) body.images = imageUrls;
+  }
+
+  const { id } = await newApiSubmitVideoGeneration(baseNorm, naKey, body, params.signal);
+  return newApiPollVideoTaskToPlayableUrl(baseNorm, naKey, id, params.signal);
+}
+
 async function toApisGenerateNewImage(
   prompt: string,
   aspectRatio: string,

@@ -9,7 +9,7 @@ const DEEPSEEK_BASE_URL_STORAGE_KEY = 'deepseek-base-url-v1';
 /** 君澜 AI OpenAI 兼容网关（与 ToAPIs / 主 OpenAI 兼容通道分离，仅用于节点模型「GPT Image 2（君澜 AI）」） */
 const JUNLAN_API_KEY_STORAGE_KEY = 'junlan-openai-compatible-api-key-v1';
 const JUNLAN_BASE_URL_STORAGE_KEY = 'junlan-openai-compatible-base-url-v1';
-/** 自建 [New API](https://docs.newapi.pro/zh/docs/api) OpenAI 兼容网关；与 ToAPIs / 君澜分离，仅用于 Firefly 画布模型（*-newapi） */
+/** 自建 [New API](https://docs.newapi.pro/zh/docs/api) OpenAI 兼容网关；与 ToAPIs / 君澜分离，用于 Firefly 画布图模型（*-newapi）及视频模型（*-newapi） */
 const NEWAPI_API_KEY_STORAGE_KEY = 'newapi-openai-compatible-api-key-v1';
 const NEWAPI_BASE_URL_STORAGE_KEY = 'newapi-openai-compatible-base-url-v1';
 
