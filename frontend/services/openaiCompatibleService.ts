@@ -266,32 +266,48 @@ function base64ToBlob(raw: string, mime: string): Blob {
   return new Blob([bytes], { type: mime || 'image/jpeg' });
 }
 
-async function toApisUploadImageBlob(blob: Blob, filename: string, signal?: AbortSignal): Promise<string> {
-  const apiKey = getOpenAiSavedKey();
-  if (!apiKey) throw new Error('未配置 API Key。');
-  const base = rewriteRemoteOpenAiCompatBaseForBrowserCors(normalizeBaseUrl(getOpenAiBaseUrl()));
+/** OpenAI 兼容（New API / 云智 / ToAPIs）上传参考图，返回上游可拉取的 URL，用于 image_urls 图生图（部分网关忽略 data URI / 裸 base64） */
+async function openAiCompatUploadImageBlob(
+  baseNorm: string,
+  apiKey: string,
+  blob: Blob,
+  filename: string,
+  signal?: AbortSignal
+): Promise<string> {
+  const fetchBase = rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm);
   const form = new FormData();
   form.append('file', blob, filename);
-  const res = await fetch(`${base}/uploads/images`, {
+  const res = await fetch(`${fetchBase}/uploads/images`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}` },
+    headers: { Authorization: `Bearer ${apiKey.trim()}` },
     body: form,
     signal,
   });
   const text = await res.text();
   if (!res.ok) {
-    throw new Error(`ToAPIs 上传参考图失败 (${res.status}): ${text.slice(0, 600)}`);
+    throw new Error(`参考图上传失败 (${res.status}): ${text.slice(0, 500)}`);
   }
-  let json: { success?: boolean; message?: string; data?: { url?: string } };
+  let json: unknown;
   try {
-    json = JSON.parse(text) as { success?: boolean; message?: string; data?: { url?: string } };
+    json = JSON.parse(text) as Record<string, unknown>;
   } catch {
-    throw new Error(`ToAPIs 上传响应无效: ${text.slice(0, 200)}`);
+    throw new Error(`上传响应无效: ${text.slice(0, 200)}`);
   }
-  if (json.success === false || !json.data?.url) {
-    throw new Error(json.message || '上传参考图未返回可用 URL');
+  const o = json && typeof json === 'object' ? (json as Record<string, unknown>) : {};
+  const data = o.data && typeof o.data === 'object' ? (o.data as Record<string, unknown>) : undefined;
+  const u1 = typeof data?.url === 'string' ? data.url.trim() : '';
+  const u2 = typeof o.url === 'string' ? o.url.trim() : '';
+  const url = u1 || u2;
+  if (o.success === false || !url) {
+    throw new Error(typeof o.message === 'string' ? o.message : '上传未返回图片 URL');
   }
-  return json.data.url;
+  return url;
+}
+
+async function toApisUploadImageBlob(blob: Blob, filename: string, signal?: AbortSignal): Promise<string> {
+  const apiKey = getOpenAiSavedKey();
+  if (!apiKey) throw new Error('未配置 API Key。');
+  return openAiCompatUploadImageBlob(normalizeBaseUrl(getOpenAiBaseUrl()), apiKey, blob, filename, signal);
 }
 
 async function toApisEditImage(
@@ -1051,7 +1067,7 @@ async function generateImagesAtOpenAiCompatibleBase(
 
 /**
  * 云智 / 部分 New API 对 `/v1/images/edits` 可能返回 404 或 503（如 model_not_found）。
- * 非 401 时不中断，回退到 `/images/generations`（multipart → JSON 多字段）。
+ * 非 401 时不中断；优先 `/uploads/images` 得公网 URL 后以 `image_urls` 调 generations（多数网关只吃 URL，忽略内联图则结果像纯文生图）。
  */
 async function editImagesNewApiFireflyWithRouteFallback(
   baseNorm: string,
@@ -1113,9 +1129,63 @@ async function editImagesNewApiFireflyWithRouteFallback(
       if (done) break;
     }
     if (!done) {
-      const refAnchoredPrompt = `【请以上传的参考图像为输入基准，不得忽略。】\n\n${enhancedPrompt}`;
+      const refAnchoredPrompt = `【必须以上传参考图中的人物/场景/构图/色调为基准进行编辑或重绘，禁止换成无关角色或全新场景；仅可按文字指令微调姿态、细节与风格。】\n\n${enhancedPrompt}`;
       const refPngDataUrl = await blobToDataUrl(pngBlob);
+      let refUploadUrl: string | null = null;
+      try {
+        refUploadUrl = await openAiCompatUploadImageBlob(baseNorm, apiKey, pngBlob, 'ref.png', signal);
+      } catch {
+        refUploadUrl = null;
+      }
       const genUrl = `${rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm)}/images/generations`;
+      const makeUrlRefBodies = (tryModel: string): Record<string, unknown>[] =>
+        refUploadUrl
+          ? [
+              {
+                model: tryModel,
+                prompt: refAnchoredPrompt,
+                n: 1,
+                size,
+                response_format: 'b64_json',
+                image_urls: [refUploadUrl],
+                resolution: '2K',
+              },
+              {
+                model: tryModel,
+                prompt: refAnchoredPrompt,
+                n: 1,
+                size,
+                response_format: 'b64_json',
+                image_urls: [refUploadUrl],
+              },
+              { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: [refUploadUrl] },
+              { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', images: [refUploadUrl] },
+            ]
+          : [];
+
+      if (refUploadUrl) {
+        let urlJsonOk = false;
+        for (const tryModel of modelCandidates) {
+          for (const body of makeUrlRefBodies(tryModel)) {
+            try {
+              const json = await postJsonAtBase<Record<string, unknown>>(
+                baseNorm,
+                '/images/generations',
+                body,
+                apiKey
+              );
+              results.push(await openAiStyleGenerationJsonToBase64(json, signal, apiKey));
+              urlJsonOk = true;
+              break;
+            } catch {
+              /* 下一组 body */
+            }
+          }
+          if (urlJsonOk) break;
+        }
+        if (urlJsonOk) continue;
+      }
+
       let multipartOk = false;
       for (const tryModel of modelCandidates) {
         for (const useBracket of [true, false] as const) {
@@ -1151,17 +1221,21 @@ async function editImagesNewApiFireflyWithRouteFallback(
       }
       if (multipartOk) continue;
 
-      const makeTryBodies = (tryModel: string): Record<string, unknown>[] => [
-        { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: [refPngDataUrl] },
-        { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image_urls: [refPngDataUrl] },
-        { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: refPngDataUrl },
-        { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: [refDataUrl] },
-        { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: refDataUrl },
-        { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', images: [refDataUrl] },
-        { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image_urls: [refDataUrl] },
-        { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: rawB64 },
-        { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', images: [rawB64] },
-      ];
+      const makeTryBodies = (tryModel: string): Record<string, unknown>[] => {
+        const urlFirst = makeUrlRefBodies(tryModel);
+        return [
+          ...urlFirst,
+          { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: [refPngDataUrl] },
+          { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image_urls: [refPngDataUrl] },
+          { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: refPngDataUrl },
+          { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: [refDataUrl] },
+          { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: refDataUrl },
+          { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', images: [refDataUrl] },
+          { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image_urls: [refDataUrl] },
+          { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: rawB64 },
+          { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', images: [rawB64] },
+        ];
+      };
       let lastErr: Error | null = null;
       for (const tryModel of modelCandidates) {
         for (const body of makeTryBodies(tryModel)) {
