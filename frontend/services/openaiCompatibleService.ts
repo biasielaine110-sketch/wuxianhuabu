@@ -1027,6 +1027,101 @@ async function generateImagesAtOpenAiCompatibleBase(
   return out;
 }
 
+/**
+ * 云智 / 部分 New API 对 `/v1/images/edits` 可能返回 404（仅开放 generations 图生图）。
+ * 依次尝试：multipart `image[]` → `image` → JSON `/images/generations` 并带参考图 base64。
+ */
+async function editImagesNewApiFireflyWithRouteFallback(
+  baseNorm: string,
+  apiKey: string,
+  base64Images: string[],
+  prompt: string,
+  numberOfImages: number,
+  resolvedEditModel: string,
+  aspectRatio: string,
+  signal?: AbortSignal
+): Promise<string[]> {
+  if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
+  const size = aspectRatioToOpenAiSize(aspectRatio, resolvedEditModel);
+  const enhancedPrompt = buildPromptWithDimensions(prompt, aspectRatio);
+  const pngBlob = await jpegBase64ToPngBlob(base64Images[0]);
+  const rawB64 = parseBase64ImageInput(base64Images[0]).raw;
+  const results: string[] = [];
+  const count = Math.min(Math.max(numberOfImages, 1), 4);
+  const url = `${rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm)}/images/edits`;
+
+  for (let i = 0; i < count; i++) {
+    assertNotAborted(signal);
+    let done = false;
+    for (const useBracket of [true, false] as const) {
+      const form = new FormData();
+      if (useBracket) form.append('image[]', pngBlob, 'ref.png');
+      else form.append('image', pngBlob, 'ref.png');
+      form.append('prompt', enhancedPrompt);
+      form.append('model', resolvedEditModel);
+      form.append('n', '1');
+      form.append('size', size);
+      form.append('response_format', 'b64_json');
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: form,
+        signal,
+      });
+      const text = await res.text();
+      if (res.ok) {
+        const json = JSON.parse(text) as unknown;
+        results.push(await openAiStyleGenerationJsonToBase64(json, signal, apiKey));
+        done = true;
+        break;
+      }
+      if (res.status !== 404) {
+        throw new Error(
+          `图生图接口错误 (${res.status})${openAiCompatFailureHint(res.status, 'image-edit')}: ${text.slice(0, 800)}`
+        );
+      }
+    }
+    if (!done) {
+      const tryBodies: Record<string, unknown>[] = [
+        {
+          model: resolvedEditModel,
+          prompt: enhancedPrompt,
+          n: 1,
+          size,
+          response_format: 'b64_json',
+          image: rawB64,
+        },
+        {
+          model: resolvedEditModel,
+          prompt: enhancedPrompt,
+          n: 1,
+          size,
+          response_format: 'b64_json',
+          images: [rawB64],
+        },
+      ];
+      let lastErr: Error | null = null;
+      for (const body of tryBodies) {
+        try {
+          const json = await postJsonAtBase<Record<string, unknown>>(
+            baseNorm,
+            '/images/generations',
+            body,
+            apiKey
+          );
+          results.push(await openAiStyleGenerationJsonToBase64(json, signal, apiKey));
+          lastErr = null;
+          break;
+        } catch (e) {
+          lastErr = e instanceof Error ? e : new Error(String(e));
+        }
+      }
+      if (lastErr) throw lastErr;
+    }
+  }
+  return results;
+}
+
 async function editImagesAtOpenAiCompatibleBase(
   baseNorm: string,
   apiKey: string,
@@ -1064,6 +1159,9 @@ async function editImagesAtOpenAiCompatibleBase(
     form.append('model', resolvedEditModel);
     form.append('n', '1');
     form.append('size', size);
+    if (resolvedEditModel !== 'dall-e-2') {
+      form.append('response_format', 'b64_json');
+    }
 
     const res = await fetch(`${rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm)}/images/edits`, {
       method: 'POST',
@@ -1182,7 +1280,7 @@ export async function openAiEditImage(
     }
     const naBase = normalizeBaseUrl(rawBase);
     const upstream = newApiFireflyUpstreamModelId(rawModel);
-    return editImagesAtOpenAiCompatibleBase(
+    return editImagesNewApiFireflyWithRouteFallback(
       naBase,
       naKey,
       base64Images,

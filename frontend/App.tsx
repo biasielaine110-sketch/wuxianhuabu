@@ -8,6 +8,7 @@ import {
   DEFAULT_OPENAI_BASE_URL,
   getAiSettingsSnapshot,
   getJunlanSavedKey,
+  getNewApiSavedKey,
   migrateAiSettingsIfLegacy,
   persistAiSettings,
 } from './services/aiSettings';
@@ -690,9 +691,11 @@ function I2iPresetCategorySelect({
   );
 }
 
-/** 已配置君澜密钥时默认君澜；否则默认 ToAPIs/OpenAI 主通道的 gpt-image-2，避免未填密钥即失败 */
+/** 君澜 → New API（Firefly）→ ToAPIs，与下拉选项顺序一致 */
 function defaultCanvasImageModel(): string {
-  return getJunlanSavedKey().trim() ? 'gpt-image-2-junlan' : 'gpt-image-2';
+  if (getJunlanSavedKey().trim()) return 'gpt-image-2-junlan';
+  if (getNewApiSavedKey().trim()) return 'firefly-nano-banana-pro-newapi';
+  return 'gpt-image-2';
 }
 
 /** 画布节点 Firefly（New API）模型 id */
