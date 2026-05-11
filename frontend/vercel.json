@@ -3,6 +3,11 @@
   "installCommand": "npm install",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "functions": {
+    "api/yunzhi-proxy/[...path].js": {
+      "maxDuration": 300
+    }
+  },
   "headers": [
     {
       "source": "/assets/(.*)",

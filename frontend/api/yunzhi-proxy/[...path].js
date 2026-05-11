@@ -1,8 +1,9 @@
 /**
- * 与仓库根目录 `api/yunzhi-proxy/[...path].js` 一致（Vercel Root=frontend 时使用）。
+ * 与仓库根目录 `api/yunzhi-proxy/[...path].js` 行为一致。
+ * 父级 `frontend/package.json` 为 `"type": "module"`，此处须用 ESM，否则 Vercel 可能无法注册该 Serverless 路由（表现为 /api/yunzhi-proxy/* 404）。
  */
-const { Readable } = require('node:stream');
-const { pipeline } = require('node:stream/promises');
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
 const UPSTREAM_ORIGIN = 'https://yunzhi-ai.top';
 
@@ -21,7 +22,14 @@ function isHopByHopHeader(name) {
   ]).has(n);
 }
 
-module.exports = async function handler(req, res) {
+export const config = {
+  maxDuration: 300,
+  api: {
+    bodyParser: false,
+  },
+};
+
+export default async function handler(req, res) {
   const host = req.headers.host || 'localhost';
   const url = new URL(req.url || '/', `http://${host}`);
   let sub = url.pathname.replace(/^\/api\/yunzhi-proxy\/?/, '').replace(/^\/+/, '');
@@ -96,11 +104,4 @@ module.exports = async function handler(req, res) {
       }
     }
   }
-};
-
-module.exports.config = {
-  maxDuration: 300,
-  api: {
-    bodyParser: false,
-  },
-};
+}

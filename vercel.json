@@ -3,6 +3,11 @@
   "installCommand": "npm install --include=dev",
   "buildCommand": "npm run build --workspace=ai-frontend",
   "outputDirectory": "frontend/dist",
+  "functions": {
+    "api/yunzhi-proxy/[...path].js": {
+      "maxDuration": 300
+    }
+  },
   "headers": [
     {
       "source": "/assets/(.*)",
