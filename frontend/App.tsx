@@ -239,6 +239,47 @@ const INPUT_NODE_TYPES: NodeType[] = ['t2i', 'i2i', 'image', 'panorama', 'annota
 
 type CanvasProject = CanvasProjectSnapshot;
 
+/**
+ * 旧版会在初始画布 / 清空 / 新建项目时自动放一个 320×560 空白文生图（或 id 为 t2i-initial）。
+ * 从本地草稿恢复时不应再显示；右键菜单新建的文生图为 480×560，不会被误判。
+ */
+function normalizeLegacyAutoEmptyT2iCanvas(
+  nodes: CanvasNode[],
+  edges: Edge[]
+): { nodes: CanvasNode[]; edges: Edge[]; stripped: boolean } {
+  if (nodes.length !== 1) return { nodes, edges, stripped: false };
+  const n = nodes[0];
+  if (n.type !== 't2i') return { nodes, edges, stripped: false };
+  if ((n.prompt || '').trim() !== '') return { nodes, edges, stripped: false };
+  if (n.images && n.images.length > 0) return { nodes, edges, stripped: false };
+  const legacy =
+    n.id === 't2i-initial' || ((n.width ?? 0) === 320 && (n.height ?? 0) === 560);
+  if (!legacy) return { nodes, edges, stripped: false };
+  return { nodes: [], edges: [], stripped: true };
+}
+
+function normalizeProjectStripLegacyAutoT2i(p: CanvasProject): { project: CanvasProject; stripped: boolean } {
+  const norm = normalizeLegacyAutoEmptyT2iCanvas(p.nodes || [], p.edges || []);
+  if (!norm.stripped) return { project: p, stripped: false };
+  return {
+    project: { ...p, nodes: norm.nodes, edges: norm.edges, updatedAt: Date.now() },
+    stripped: true,
+  };
+}
+
+function normalizeLibraryProjectsStripLegacyAutoT2i(projects: CanvasProject[]): {
+  next: CanvasProject[];
+  changed: boolean;
+} {
+  let changed = false;
+  const next = projects.map((p) => {
+    const { project, stripped } = normalizeProjectStripLegacyAutoT2i(p);
+    if (stripped) changed = true;
+    return project;
+  });
+  return { next, changed };
+}
+
 function cloneCanvasForProject(nodes: CanvasNode[], edges: Edge[], transform: Transform) {
   let nodesClone: CanvasNode[];
   let edgesClone: Edge[];
@@ -1483,10 +1524,19 @@ export default function App() {
     const target = projectsRef.current.find((p) => p.id === projectId);
     if (!target) return;
     saveCurrentProject();
+    const { project: normalizedTarget, stripped } = normalizeProjectStripLegacyAutoT2i(target);
+    if (stripped) {
+      const next = projectsRef.current.map((p) => (p.id === projectId ? normalizedTarget : p));
+      setProjects(next);
+      projectsRef.current = next;
+      void saveProjectLibrary(next, projectId).then((ok) => {
+        if (!ok) console.warn('[canvas] 切换项目时已剥离旧版默认文生图占位，但写回草稿库失败');
+      });
+    }
     setActiveProjectId(projectId);
-    setNodes(target.nodes);
-    setEdges(target.edges);
-    setTransform(target.transform);
+    setNodes(normalizedTarget.nodes || []);
+    setEdges(normalizedTarget.edges || []);
+    setTransform(normalizedTarget.transform || { x: 0, y: 0, scale: 1 });
     void getProjectBackupFileHandle(projectId).then((h) => {
       lastJsonFileHandleRef.current = h ?? null;
       lastZipFileHandleRef.current = null;
@@ -1505,19 +1555,23 @@ export default function App() {
     if (curActive === projectId) {
       const fallback = remained[0];
       if (!fallback) return;
-      setProjects(remained);
-      projectsRef.current = remained;
-        setActiveProjectId(fallback.id);
-        setNodes(fallback.nodes);
-        setEdges(fallback.edges);
-        setTransform(fallback.transform);
-      void getProjectBackupFileHandle(fallback.id).then((h) => {
+      const { project: fbNorm, stripped } = normalizeProjectStripLegacyAutoT2i(fallback);
+      const nextRemained = stripped
+        ? remained.map((p) => (p.id === fbNorm.id ? fbNorm : p))
+        : remained;
+      setProjects(nextRemained);
+      projectsRef.current = nextRemained;
+      setActiveProjectId(fbNorm.id);
+      setNodes(fbNorm.nodes || []);
+      setEdges(fbNorm.edges || []);
+      setTransform(fbNorm.transform || { x: 0, y: 0, scale: 1 });
+      void getProjectBackupFileHandle(fbNorm.id).then((h) => {
         lastJsonFileHandleRef.current = h ?? null;
         lastZipFileHandleRef.current = null;
         lastDiskWriteFormatRef.current = h ? 'json' : null;
         setLastJsonFilename(h?.name ?? '');
       });
-      void saveProjectLibrary(remained, fallback.id).then((ok) => {
+      void saveProjectLibrary(nextRemained, fbNorm.id).then((ok) => {
         if (!ok) alert('项目已删除，但更新草稿库失败，请尝试导出 ZIP/JSON 备份。');
       });
       return;
@@ -1861,13 +1915,22 @@ export default function App() {
         const lib = await loadProjectLibrary();
         if (cancelled) return;
         if (lib && lib.projects.length > 0) {
-          const initial = lib.projects.find((p) => p.id === lib.activeProjectId) || lib.projects[0];
-          setProjects(lib.projects);
-          projectsRef.current = lib.projects;
+          const { next: patchedProjects, changed: libStrippedLegacy } =
+            normalizeLibraryProjectsStripLegacyAutoT2i(lib.projects);
+          const activeId = lib.activeProjectId || patchedProjects[0].id;
+          const initial =
+            patchedProjects.find((p) => p.id === activeId) || patchedProjects[0];
+          setProjects(patchedProjects);
+          projectsRef.current = patchedProjects;
           setActiveProjectId(initial.id);
           setNodes(initial.nodes || []);
           setEdges(initial.edges || []);
           setTransform(initial.transform || { x: 0, y: 0, scale: 1 });
+          if (libStrippedLegacy) {
+            void saveProjectLibrary(patchedProjects, initial.id).then((ok) => {
+              if (!ok) console.warn('[canvas] 已剥离旧版默认文生图占位，但写回草稿库失败');
+            });
+          }
           setProjectStoreReady(true);
           void getProjectBackupFileHandle(initial.id).then((h) => {
             if (cancelled) return;
