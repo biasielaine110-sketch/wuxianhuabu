@@ -16,8 +16,16 @@ function normalizeBaseUrl(url: string): string {
 
 /**
  * 部分自建 OpenAI 兼容网关（如 yunzhi-ai.top）未返回 Access-Control-Allow-Origin，浏览器会拦截。
- * 开发环境走 Vite `server.proxy`，生产走 Vercel `rewrites`，将请求变为与前端同源后再转发到上游。
+ * 开发环境走 Vite `server.proxy`（/yunzhi-openai 或 /api/yunzhi-proxy）。
+ * 生产构建（import.meta.env.PROD）直接请求 /api/yunzhi-proxy/...，由 Vercel Serverless 转发，避免部分环境下 /yunzhi-openai rewrite 对 POST 仍 405。
  */
+function yunzhiSameOriginProxyPathPrefix(): '/api/yunzhi-proxy' | '/yunzhi-openai' {
+  if (typeof import.meta !== 'undefined' && import.meta.env?.PROD) {
+    return '/api/yunzhi-proxy';
+  }
+  return '/yunzhi-openai';
+}
+
 function rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNormalized: string): string {
   if (typeof window === 'undefined') return baseNormalized;
   try {
@@ -25,7 +33,7 @@ function rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNormalized: string): st
     if (u.hostname.toLowerCase() !== 'yunzhi-ai.top') return baseNormalized;
     let pathname = u.pathname.replace(/\/+$/, '');
     if (!pathname) pathname = '/v1';
-    return `${window.location.origin}/yunzhi-openai${pathname}`;
+    return `${window.location.origin}${yunzhiSameOriginProxyPathPrefix()}${pathname}`;
   } catch {
     return baseNormalized;
   }
@@ -196,7 +204,7 @@ function rewriteYunzhiAssetUrlToSameOriginProxy(imageUrl: string): string {
   try {
     const u = new URL(imageUrl);
     if (u.hostname.toLowerCase() === 'yunzhi-ai.top') {
-      return `${window.location.origin}/yunzhi-openai${u.pathname}${u.search}`;
+      return `${window.location.origin}${yunzhiSameOriginProxyPathPrefix()}${u.pathname}${u.search}`;
     }
   } catch {
     /* ignore */

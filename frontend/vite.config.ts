@@ -54,6 +54,29 @@ const toapisFileCdnProxy = {
       return stripped.length ? stripped : '/';
     },
   },
+  /** 与 /yunzhi-openai 相同上游；生产包请求 /api/yunzhi-proxy 时本地 preview 需此代理 */
+  '/api/yunzhi-proxy': {
+    target: 'https://yunzhi-ai.top',
+    changeOrigin: true,
+    secure: true,
+    timeout: 1_800_000,
+    proxyTimeout: 1_800_000,
+    configure(proxy) {
+      proxy.on('error', (err, _req, res) => {
+        console.error('[vite proxy /api/yunzhi-proxy]', err);
+        const r = res as { headersSent?: boolean; writeHead?: (c: number, h?: unknown) => void; end?: (s?: string) => void };
+        if (r && !r.headersSent && typeof r.writeHead === 'function') {
+          r.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
+          r.end?.(`云智代理错误: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      });
+    },
+    rewrite: (p: string) => {
+      const path = p.startsWith('/') ? p : `/${p}`;
+      const stripped = path.replace(/^\/api\/yunzhi-proxy(?=\/|$)/, '');
+      return stripped.length ? stripped : '/';
+    },
+  },
 } as const;
 
 export default defineConfig(({ mode }) => {
