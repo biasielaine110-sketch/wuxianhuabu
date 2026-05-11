@@ -1,9 +1,9 @@
 /**
- * 云智同源代理：匹配 /api/yunzhi-proxy/v1/...（vercel.json 将 /yunzhi-openai/(.*) 转到 /api/yunzhi-proxy/$1）。
- * 避免 ?__p= 查询串中含未编码 / 时被错误解析，导致未命中函数、POST 落到 SPA → 405。
+ * 云智同源代理（共享逻辑）；与仓库根 `api/_lib/yunzhi-proxy-handler.cjs` 一致。
+ * Vercel 非 Next 项目不支持 api 下多段 [...catch]，须拆成显式路径并共用此模块。
  */
-const { Readable } = require('node:stream');
-const { pipeline } = require('node:stream/promises');
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
 const UPSTREAM_ORIGIN = 'https://yunzhi-ai.top';
 
@@ -22,7 +22,7 @@ function isHopByHopHeader(name) {
   ]).has(n);
 }
 
-module.exports = async function handler(req, res) {
+async function handler(req, res) {
   const host = req.headers.host || 'localhost';
   const url = new URL(req.url || '/', `http://${host}`);
   let sub = url.pathname.replace(/^\/api\/yunzhi-proxy\/?/, '').replace(/^\/+/, '');
@@ -97,11 +97,13 @@ module.exports = async function handler(req, res) {
       }
     }
   }
-};
+}
 
-module.exports.config = {
+export const config = {
   maxDuration: 300,
   api: {
     bodyParser: false,
   },
 };
+
+export default handler;

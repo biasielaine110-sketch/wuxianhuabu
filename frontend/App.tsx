@@ -5716,7 +5716,7 @@ export default function App() {
                       <span className="text-gray-600"> Vercel 部署：项目 Root 为仓库根时用根目录 vercel.json；Root 为 </span>
                       <span className="text-gray-400">frontend</span>
                       <span className="text-gray-600">
-                        时必须包含本仓库的 frontend/vercel.json 与 frontend/api/yunzhi-proxy/（否则 POST /yunzhi-openai 易 405）。
+                        时必须包含本仓库的 frontend/vercel.json 与 frontend/api/yunzhi-proxy/v1/… 各路由文件（Vercel 非 Next 不支持 api 下多段 [...] catch-all，否则 /api/yunzhi-proxy/v1/chat/completions 会 404）。
                       </span>
                     </p>
                     <label className="text-xs text-gray-500 block mb-1">New API Base URL</label>
