@@ -71,48 +71,6 @@ export const DEFAULT_CREDIT_PRICING_ROWS: CreditPricingRow[] = [
     specLabel: '4k',
     credits: 8,
   },
-  {
-    id: 'default-row-na-grok-imagine-video',
-    category: '视频生成',
-    modelName: 'grok-imagine-video-newapi',
-    specLabel: 'New API',
-    credits: 20,
-  },
-  {
-    id: 'default-row-na-firefly-veo31-ref',
-    category: '视频生成',
-    modelName: 'firefly-veo31-ref-newapi',
-    specLabel: 'New API',
-    credits: 20,
-  },
-  {
-    id: 'default-row-na-firefly-sora2',
-    category: '视频生成',
-    modelName: 'firefly-sora2-newapi',
-    specLabel: 'New API',
-    credits: 20,
-  },
-  {
-    id: 'default-row-na-firefly-sora2-pro',
-    category: '视频生成',
-    modelName: 'firefly-sora2-pro-newapi',
-    specLabel: 'New API',
-    credits: 24,
-  },
-  {
-    id: 'default-row-na-firefly-kling30omni',
-    category: '视频生成',
-    modelName: 'firefly-kling30omni-newapi',
-    specLabel: 'New API',
-    credits: 20,
-  },
-  {
-    id: 'default-row-na-firefly-kling30',
-    category: '视频生成',
-    modelName: 'firefly-kling30-newapi',
-    specLabel: 'New API',
-    credits: 18,
-  },
 ];
 
 function isRecord(v: unknown): v is Record<string, unknown> {

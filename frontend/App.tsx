@@ -35,11 +35,9 @@ import type { CanvasProjectSnapshot } from './services/projectPersistence';
 import {
   callGeminiChatWithHistory,
   editExistingImage,
-  generateCanvasVideoNewApi,
   generateCanvasVideoViaToApis,
   generateNewImage,
   initGeminiClientFromStorage,
-  isNewApiVideoCanvasModel,
 } from './services/geminiService';
 import {
   buildIncomingRefSlots,
@@ -122,29 +120,43 @@ function sniffImageMimeFromBase64(raw: string): string {
   return 'image/jpeg';
 }
 
+/** 视频节点：下拉仅 ToAPIs；旧工程里曾存的 New API 画布 id 映射为等价 ToAPIs 模型 */
+function videoNodeModelToToApis(m?: string): 'grok-video-3' | 'sora-2-vvip' | 'veo3.1-fast' {
+  const vm = (m || '').trim();
+  if (vm === 'sora-2-vvip' || vm === 'firefly-sora2-newapi' || vm === 'firefly-sora2-pro-newapi') {
+    return 'sora-2-vvip';
+  }
+  if (isVeo31FastVideoModel(vm) || vm === 'firefly-veo31-ref-newapi') {
+    return 'veo3.1-fast';
+  }
+  return 'grok-video-3';
+}
+
 /** 视频节点 Veo：当前存 `veo3.1-fast`；旧工程可能仍为 `veo3.1-fast-official` */
 function isVeo31FastVideoModel(m?: string): boolean {
   return m === 'veo3.1-fast' || m === 'veo3.1-fast-official';
 }
 
-/** 视频节点 Veo：ToAPIs 或 New API firefly-veo31-ref */
+/** 视频节点 Veo：ToAPIs 或旧工程中的 firefly-veo31-ref-newapi */
 function isVideoVeoStyleModel(m?: string): boolean {
   return isVeo31FastVideoModel(m) || m === 'firefly-veo31-ref-newapi';
 }
 
-/** 视频节点 Sora：ToAPIs 或 New API firefly-sora2* */
+/** 视频节点 Sora：ToAPIs 或旧工程中的 firefly-sora2* */
 function isVideoSoraStyleModel(m?: string): boolean {
   return m === 'sora-2-vvip' || m === 'firefly-sora2-newapi' || m === 'firefly-sora2-pro-newapi';
 }
 
-/** 视频节点 Grok 秒数档：ToAPIs Grok3 / New API grok-imagine（不含 Kling，Kling 单独 3/10/15 秒） */
+/** 视频节点 Grok 秒数档：ToAPIs Grok3；旧工程可能仍为 grok-imagine-newapi / Kling id */
 function isVideoGrokDurationStyleModel(m?: string): boolean {
-  return !m || m === 'grok-video-3' || m === 'grok-imagine-video-newapi';
-}
-
-/** New API：Firefly Kling 3.0 / Omni，时长仅 3 / 10 / 15 秒 */
-function isVideoKling30NewApiModel(m?: string): boolean {
-  return m === 'firefly-kling30-newapi' || m === 'firefly-kling30omni-newapi';
+  const x = (m || '').trim();
+  return (
+    !x ||
+    x === 'grok-video-3' ||
+    x === 'grok-imagine-video-newapi' ||
+    x === 'firefly-kling30-newapi' ||
+    x === 'firefly-kling30omni-newapi'
+  );
 }
 
 function base64ToImageDataUrl(raw: string): string {
@@ -3094,7 +3106,7 @@ export default function App() {
             currentVideoIndex: 0,
             videoDuration: 8,
             videoResolution: '720p' as const,
-            model: getNewApiSavedKey().trim() ? 'grok-imagine-video-newapi' : 'veo3.1-fast',
+            model: 'veo3.1-fast',
           }
         : {}),
     };
@@ -3482,53 +3494,27 @@ export default function App() {
       const { base64s: imageInputs } = await resolveSlotImagesForIndices(slots, pickIndices);
 
       let videoUrl: string;
-      if (isNewApiVideoCanvasModel(node.model || '')) {
-        videoUrl = await generateCanvasVideoNewApi(combinedPrompt, {
-          canvasVideoModelId: node.model!.trim(),
-          durationSeconds:
-            node.videoDuration ??
-            (node.model?.startsWith('firefly-veo31-ref') || isVideoSoraStyleModel(node.model) ? 8 : 10),
-          aspectRatio: node.aspectRatio || '16:9',
-          resolution: node.model?.startsWith('firefly-veo31-ref')
-            ? ['1080p', '4k'].includes(node.videoResolution || '')
-              ? (node.videoResolution as '1080p' | '4k')
-              : '720p'
-            : isVideoSoraStyleModel(node.model)
-              ? '720p'
-              : node.videoResolution === '480p'
-                ? '480p'
-                : '720p',
-          referenceImagesBase64: imageInputs.slice(0, 3),
-          signal: ac.signal,
-        });
-      } else {
-        const videoModel: 'grok-video-3' | 'sora-2-vvip' | 'veo3.1-fast' =
-          node.model === 'sora-2-vvip'
-            ? 'sora-2-vvip'
-            : isVeo31FastVideoModel(node.model)
-              ? 'veo3.1-fast'
-              : 'grok-video-3';
+      const videoModel = videoNodeModelToToApis(node.model);
 
-        const resolution: '480p' | '720p' | '1080p' | '4k' =
-          videoModel === 'veo3.1-fast'
-            ? (['1080p', '4k'].includes(node.videoResolution || '') ? (node.videoResolution as '1080p' | '4k') : '720p')
-            : videoModel === 'sora-2-vvip'
-              ? '720p'
-              : node.videoResolution === '480p'
-                ? '480p'
-                : '720p';
+      const resolution: '480p' | '720p' | '1080p' | '4k' =
+        videoModel === 'veo3.1-fast'
+          ? (['1080p', '4k'].includes(node.videoResolution || '') ? (node.videoResolution as '1080p' | '4k') : '720p')
+          : videoModel === 'sora-2-vvip'
+            ? '720p'
+            : node.videoResolution === '480p'
+              ? '480p'
+              : '720p';
 
-        videoUrl = await generateCanvasVideoViaToApis(combinedPrompt, {
-          videoModel,
-          durationSeconds:
-            node.videoDuration ??
-            (videoModel === 'sora-2-vvip' || videoModel === 'veo3.1-fast' ? 8 : 10),
-          aspectRatio: node.aspectRatio || '16:9',
-          resolution,
-          referenceImagesBase64: imageInputs.slice(0, 3),
-          signal: ac.signal,
-        });
-      }
+      videoUrl = await generateCanvasVideoViaToApis(combinedPrompt, {
+        videoModel,
+        durationSeconds:
+          node.videoDuration ??
+          (videoModel === 'sora-2-vvip' || videoModel === 'veo3.1-fast' ? 8 : 10),
+        aspectRatio: node.aspectRatio || '16:9',
+        resolution,
+        referenceImagesBase64: imageInputs.slice(0, 3),
+        signal: ac.signal,
+      });
 
       const prevVideos = node.videos || [];
       const newVideos = [...prevVideos, videoUrl];
@@ -3909,15 +3895,10 @@ export default function App() {
 
         {node.type === 'video' && (() => {
           const vm = node.model || '';
-          const isNaVideo = isNewApiVideoCanvasModel(vm);
+          const modelSelectValue = videoNodeModelToToApis(vm);
           const isSora = isVideoSoraStyleModel(vm);
           const isVeo = isVideoVeoStyleModel(vm);
-          const isKling30Na = isVideoKling30NewApiModel(vm);
           const isGroDur = isVideoGrokDurationStyleModel(vm);
-          const modelSelectValue =
-            vm === 'sora-2-vvip' || isVeo31FastVideoModel(vm) || vm === 'grok-video-3' || isNaVideo
-              ? vm || 'grok-video-3'
-              : 'grok-video-3';
           return (
           <div className="flex flex-col gap-1.5 p-2 bg-[#252525] border-b border-[#333] text-xs shrink-0">
             {(() => {
@@ -3992,18 +3973,14 @@ export default function App() {
               );
             })()}
             <div className="text-[10px] text-gray-500 px-1">
-              {isNaVideo
-                ? '使用「设置 → API」中 New API 密钥与 Base URL（与 ToAPIs 主通道分离）。最多 3 张参考图（视频将截取关键帧）。'
-                : '需 OpenAI 兼容 + ToAPIs Base URL。最多 3 张参考图（视频将截取关键帧）。'}
+              需 OpenAI 兼容 + ToAPIs Base URL。最多 3 张参考图（视频将截取关键帧）。
               {isVeo
                 ? ' · Veo：固定 8 秒；画幅 16:9 或 9:16；720p/1080p/4k'
                 : isSora
                   ? ' · Sora 系：4/8/12 秒、16:9 或 9:16、720p'
-                  : isKling30Na
-                    ? ' · Kling：3 / 10 / 15 秒'
-                    : isGroDur
-                      ? ' · Grok / Imagine：多档秒数与画幅'
-                      : ''}
+                  : isGroDur
+                    ? ' · Grok：多档秒数与画幅'
+                    : ''}
             </div>
             {!isSora && !isVeo && isGroDur && (
               <div className="text-[9px] text-amber-600/95 px-1 leading-snug">
@@ -4017,13 +3994,13 @@ export default function App() {
                 onChange={(e) => {
                   const m = e.target.value;
                   const updates: Partial<CanvasNode> = { model: m };
-                  if (m === 'sora-2-vvip' || m === 'firefly-sora2-newapi' || m === 'firefly-sora2-pro-newapi') {
+                  if (m === 'sora-2-vvip') {
                     updates.videoResolution = '720p';
                     const d = node.videoDuration ?? 10;
                     updates.videoDuration = d === 4 || d === 8 || d === 12 ? d : 8;
                     const ar = node.aspectRatio || '16:9';
                     if (ar !== '16:9' && ar !== '9:16') updates.aspectRatio = '16:9';
-                  } else if (m === 'veo3.1-fast' || m === 'firefly-veo31-ref-newapi') {
+                  } else if (m === 'veo3.1-fast') {
                     updates.videoDuration = 8;
                     updates.videoResolution =
                       node.videoResolution === '1080p' || node.videoResolution === '4k'
@@ -4031,12 +4008,6 @@ export default function App() {
                         : '720p';
                     const ar = node.aspectRatio || '16:9';
                     if (!['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].includes(ar)) updates.aspectRatio = '16:9';
-                  } else if (m === 'firefly-kling30-newapi' || m === 'firefly-kling30omni-newapi') {
-                    const d = node.videoDuration ?? 10;
-                    updates.videoDuration = [3, 10, 15].includes(d) ? d : 10;
-                    if (node.videoResolution === '1080p' || node.videoResolution === '4k') {
-                      updates.videoResolution = '720p';
-                    }
                   } else {
                     const d = node.videoDuration ?? 8;
                     if (d === 4 || d === 8 || d === 12) updates.videoDuration = 10;
@@ -4048,14 +4019,6 @@ export default function App() {
                 }}
               onPointerDown={e => e.stopPropagation()}
             >
-                <optgroup label="New API（独立密钥）">
-                  <option value="grok-imagine-video-newapi">Grok Imagine Video</option>
-                  <option value="firefly-veo31-ref-newapi">Firefly Veo 3.1 Ref</option>
-                  <option value="firefly-sora2-newapi">Firefly Sora 2</option>
-                  <option value="firefly-sora2-pro-newapi">Firefly Sora 2 Pro</option>
-                  <option value="firefly-kling30omni-newapi">Firefly Kling 3.0 Omni</option>
-                  <option value="firefly-kling30-newapi">Firefly Kling 3.0</option>
-                </optgroup>
                 <optgroup label="ToAPIs">
                   <option value="veo3.1-fast">Veo 3.1 Fast</option>
                   <option value="grok-video-3">Grok Video 3</option>
@@ -4077,17 +4040,6 @@ export default function App() {
                   <option value={8}>8 秒</option>
                   <option value={12}>12 秒</option>
             </select>
-              ) : isKling30Na ? (
-                <select
-                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={[3, 10, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 10}
-                  onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
-                  onPointerDown={e => e.stopPropagation()}
-                >
-                  <option value={3}>3 秒</option>
-                  <option value={10}>10 秒</option>
-                  <option value={15}>15 秒</option>
-                </select>
               ) : (
             <select
                   className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
