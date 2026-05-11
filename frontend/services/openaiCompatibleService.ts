@@ -854,6 +854,134 @@ function newApiKling30VideoDuration(ui: number): 3 | 10 | 15 {
   return 15;
 }
 
+/** 云智视频文档：Sora2 时长 4/6/8/10/12 秒 */
+function yunzhiSora2VideoDuration(uiSeconds: number): number {
+  const allowed = [4, 6, 8, 10, 12];
+  const n = Math.round(uiSeconds);
+  let best = allowed[0];
+  let bestDiff = Math.abs(n - best);
+  for (const d of allowed) {
+    const diff = Math.abs(n - d);
+    if (diff < bestDiff) {
+      best = d;
+      bestDiff = diff;
+    }
+  }
+  return best;
+}
+
+/** 云智视频文档：Veo3.1 时长 4/6/8/10 秒 */
+function yunzhiVeo31VideoDuration(uiSeconds: number): number {
+  const allowed = [4, 6, 8, 10];
+  const n = Math.round(uiSeconds);
+  let best = allowed[0];
+  let bestDiff = Math.abs(n - best);
+  for (const d of allowed) {
+    const diff = Math.abs(n - d);
+    if (diff < bestDiff) {
+      best = d;
+      bestDiff = diff;
+    }
+  }
+  return best;
+}
+
+/** 云智视频文档：aspect_ratio 仅 16:9、9:16、1:1 */
+function yunzhiVideoDocAspectRatio(aspectRatio: string): '16:9' | '9:16' | '1:1' {
+  const s = (aspectRatio || '16:9').trim();
+  if (s === '9:16' || s === '1:1') return s;
+  return '16:9';
+}
+
+/** 云智视频文档：quality 为 720p / 1080p / 2k */
+function yunzhiVideoDocQuality(res: '480p' | '720p' | '1080p' | '4k'): string {
+  if (res === '4k') return '2k';
+  if (res === '1080p') return '1080p';
+  if (res === '480p' || res === '720p') return '720p';
+  return '720p';
+}
+
+/** 画布 Firefly 视频 id → 云智文档 API model / variant */
+function yunzhiVideoDocModelFromCanvasId(canvasId: string): { docModel: string; variant?: string } {
+  const id = (canvasId || '').trim();
+  if (id.startsWith('firefly-sora2-pro')) return { docModel: 'firefly-sora2', variant: 'pro' };
+  if (id.startsWith('firefly-sora2')) return { docModel: 'firefly-sora2', variant: 'standard' };
+  if (id.startsWith('firefly-veo31-ref')) return { docModel: 'firefly-veo31', variant: 'fast' };
+  if (id.startsWith('firefly-kling30')) return { docModel: 'firefly-kling30' };
+  throw new Error('未支持的云智视频画布模型');
+}
+
+function yunzhiNewApiVideoUsesYunzhiChatDoc(canvasId: string): boolean {
+  const id = (canvasId || '').trim();
+  return (
+    id.startsWith('firefly-sora2') ||
+    id.startsWith('firefly-veo31-ref') ||
+    id.startsWith('firefly-kling30')
+  );
+}
+
+function yunzhiNewApiVideoDurationForCanvas(canvasId: string, uiSeconds: number): number {
+  const id = (canvasId || '').trim();
+  if (id.startsWith('firefly-veo31-ref')) return yunzhiVeo31VideoDuration(uiSeconds);
+  if (id.startsWith('firefly-sora2')) return yunzhiSora2VideoDuration(uiSeconds);
+  if (id.startsWith('firefly-kling30')) return newApiKling30VideoDuration(uiSeconds);
+  return 6;
+}
+
+/**
+ * 云智 New API 视频：POST /v1/chat/completions + SSE，与官方视频文档一致（data URI 参考图、顶层 duration/quality/variant）。
+ * @see 云智API视频调用文档.md
+ */
+async function yunzhiNewApiCanvasVideoGenerateViaChatCompletions(params: {
+  baseNorm: string;
+  apiKey: string;
+  canvasId: string;
+  prompt: string;
+  durationSeconds: number;
+  aspectRatio: string;
+  resolution: '480p' | '720p' | '1080p' | '4k';
+  referenceImagesBase64: string[];
+  signal?: AbortSignal;
+}): Promise<string> {
+  const { docModel, variant } = yunzhiVideoDocModelFromCanvasId(params.canvasId);
+  const aspect_ratio = yunzhiVideoDocAspectRatio(params.aspectRatio);
+  const quality = yunzhiVideoDocQuality(params.resolution);
+  const duration = yunzhiNewApiVideoDurationForCanvas(params.canvasId, params.durationSeconds);
+
+  const content: Array<
+    { type: 'image_url'; image_url: { url: string } } | { type: 'text'; text: string }
+  > = [];
+  for (const img of params.referenceImagesBase64.filter(Boolean).slice(0, 6)) {
+    const parsed = parseBase64ImageInput(img);
+    const mime = parsed.mime || 'image/jpeg';
+    content.push({
+      type: 'image_url',
+      image_url: { url: `data:${mime};base64,${parsed.raw}` },
+    });
+  }
+  const text = (params.prompt || '').trim() || ' ';
+  content.push({ type: 'text', text });
+
+  const body: Record<string, unknown> = {
+    model: docModel,
+    messages: [{ role: 'user', content }],
+    stream: true,
+    aspect_ratio,
+    duration,
+    quality,
+  };
+  if (variant) body.variant = variant;
+
+  const rawUrl = await yunzhiOpenAiCompatStreamChatCompletionsToUrl(
+    params.baseNorm,
+    params.apiKey,
+    body,
+    'video',
+    params.signal
+  );
+  return rewriteKnownImageCdnToSameOrigin(rewriteYunzhiAssetUrlToSameOriginProxy(rawUrl));
+}
+
 async function newApiUploadVideoReferenceImageUrls(
   baseNorm: string,
   apiKey: string,
@@ -1018,6 +1146,21 @@ export async function newApiCanvasVideoGenerate(params: {
     throw new Error('无效的 New API 视频模型 id。');
   }
   const model = newApiVideoUpstreamModelId(canvasId);
+
+  if (isYunzhiOpenAiCompatBase(baseNorm) && yunzhiNewApiVideoUsesYunzhiChatDoc(canvasId)) {
+    return yunzhiNewApiCanvasVideoGenerateViaChatCompletions({
+      baseNorm,
+      apiKey: naKey,
+      canvasId,
+      prompt: params.prompt,
+      durationSeconds: params.durationSeconds,
+      aspectRatio: params.aspectRatio,
+      resolution: params.resolution,
+      referenceImagesBase64: params.referenceImagesBase64 || [],
+      signal: params.signal,
+    });
+  }
+
   const imageUrls = await newApiUploadVideoReferenceImageUrls(
     baseNorm,
     naKey,
@@ -1261,16 +1404,28 @@ function extractImageUrlFromYunzhiChatSseAccumulated(acc: string): string | null
   return ext ? ext[1] : null;
 }
 
-/**
- * 云智图片（文生图/图生图）：POST /v1/chat/completions，stream:true，从 SSE 增量里解析 Markdown 图片或直链。
- * @see 云智API调用文档.md
- */
-async function yunzhiOpenAiCompatStreamChatToFirstImageUrl(
+/** 云智视频 SSE：Markdown /storage/videos/ 或 .mp4 直链 @see 云智API视频调用文档.md */
+function extractVideoUrlFromYunzhiChatSseAccumulated(acc: string): string | null {
+  const mdBang = acc.match(/!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/);
+  if (mdBang) return mdBang[1];
+  const mdBracket = acc.match(/\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/);
+  if (mdBracket) return mdBracket[1];
+  const storage = acc.match(/(https?:\/\/yunzhi-ai\.top\/storage\/videos\/[^\s"'<>)\]]+)/i);
+  if (storage) return storage[1];
+  const mp4 = acc.match(/(https?:\/\/[^\s"'<>)]+\.mp4(?:\?[^\s"'<>)]*)?)/i);
+  return mp4 ? mp4[1] : null;
+}
+
+async function yunzhiOpenAiCompatStreamChatCompletionsToUrl(
   baseNorm: string,
   apiKey: string,
   body: Record<string, unknown>,
+  kind: 'image' | 'video',
   signal?: AbortSignal
 ): Promise<string> {
+  const label = kind === 'video' ? '云智视频生成' : '云智图片生成';
+  const extract =
+    kind === 'video' ? extractVideoUrlFromYunzhiChatSseAccumulated : extractImageUrlFromYunzhiChatSseAccumulated;
   const fetchBase = rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm);
   const key = apiKey.trim();
   const res = await fetch(`${fetchBase}/chat/completions`, {
@@ -1284,9 +1439,9 @@ async function yunzhiOpenAiCompatStreamChatToFirstImageUrl(
   });
   if (!res.ok) {
     const t = await res.text();
-    throw new Error(`云智图片生成 (${res.status}): ${t.slice(0, 800)}`);
+    throw new Error(`${label} (${res.status}): ${t.slice(0, 800)}`);
   }
-  if (!res.body) throw new Error('云智图片生成：响应不支持流式读取。');
+  if (!res.body) throw new Error(`${label}：响应不支持流式读取。`);
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let lineBuf = '';
@@ -1304,7 +1459,7 @@ async function yunzhiOpenAiCompatStreamChatToFirstImageUrl(
         if (!s.startsWith('data:')) continue;
         const data = s.slice(5).trim();
         if (data === '[DONE]') {
-          const u = extractImageUrlFromYunzhiChatSseAccumulated(acc);
+          const u = extract(acc);
           if (u) return u;
           continue;
         }
@@ -1317,7 +1472,7 @@ async function yunzhiOpenAiCompatStreamChatToFirstImageUrl(
           const content = chunk.choices?.[0]?.delta?.content;
           if (typeof content === 'string' && content) {
             acc += content;
-            const u = extractImageUrlFromYunzhiChatSseAccumulated(acc);
+            const u = extract(acc);
             if (u) return u;
           }
         } catch (e) {
@@ -1325,12 +1480,25 @@ async function yunzhiOpenAiCompatStreamChatToFirstImageUrl(
         }
       }
     }
-    const u = extractImageUrlFromYunzhiChatSseAccumulated(acc);
+    const u = extract(acc);
     if (u) return u;
-    throw new Error(`云智图片生成：流式响应中未解析到图片 URL。文本片段：${acc.slice(0, 500)}`);
+    throw new Error(`${label}：流式响应中未解析到媒体 URL。文本片段：${acc.slice(0, 500)}`);
   } finally {
     reader.releaseLock();
   }
+}
+
+/**
+ * 云智图片（文生图/图生图）：POST /v1/chat/completions，stream:true，从 SSE 增量里解析 Markdown 图片或直链。
+ * @see 云智API调用文档.md
+ */
+async function yunzhiOpenAiCompatStreamChatToFirstImageUrl(
+  baseNorm: string,
+  apiKey: string,
+  body: Record<string, unknown>,
+  signal?: AbortSignal
+): Promise<string> {
+  return yunzhiOpenAiCompatStreamChatCompletionsToUrl(baseNorm, apiKey, body, 'image', signal);
 }
 
 function buildYunzhiI2iUserText(params: {
