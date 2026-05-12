@@ -31,15 +31,16 @@ export function buildIncomingRefSlots(
     const src = nodes.find((x) => x.id === edge.sourceId);
     if (!src) continue;
     const prefix = shortSourceLabel(src);
+    /** 多图 / 多视频源节点：仅当前展示的一张图（或一个视频）作为该连线的参考，不展开全部媒体 */
     if (src.images?.length) {
-      for (let i = 0; i < src.images.length; i++) {
-        const img = src.images[i];
-        if (!img) continue;
+      const idx = Math.min(Math.max(0, src.currentImageIndex ?? 0), src.images.length - 1);
+      const img = src.images[idx];
+      if (img) {
         n += 1;
         slots.push({
           n,
           kind: 'image',
-          label: `${prefix}·图${i + 1}`,
+          label: `${prefix}·图${idx + 1}`,
           imageBase64: img,
           edgeId: edge.id,
           sourceNodeId: src.id,
@@ -47,14 +48,14 @@ export function buildIncomingRefSlots(
       }
     }
     if (src.type === 'video' && src.videos?.length) {
-      for (let i = 0; i < src.videos.length; i++) {
-        const u = src.videos[i];
-        if (!u) continue;
+      const vidx = Math.min(Math.max(0, src.currentVideoIndex ?? 0), src.videos.length - 1);
+      const u = src.videos[vidx];
+      if (u) {
         n += 1;
         slots.push({
           n,
           kind: 'video',
-          label: `${prefix}·成片${i + 1}`,
+          label: `${prefix}·成片${vidx + 1}`,
           videoUrl: u,
           edgeId: edge.id,
           sourceNodeId: src.id,

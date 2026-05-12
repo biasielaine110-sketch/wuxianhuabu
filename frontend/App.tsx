@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
-import { CanvasNode, Edge, Transform, Tool, NodeType, Annotation, AnnotationNode, PanoramaNode, GridSplitNode, GridMergeNode, Director3DNode, Figure3D, ChatNode, ChatMessage } from './types';
+import { CanvasNode, Edge, Transform, Tool, NodeType, Annotation, AnnotationNode, PanoramaNode, GridSplitNode, GridMergeNode, PanoramaT2iNode, Director3DNode, Figure3D, ChatNode, ChatMessage } from './types';
 import type { AiProvider } from './services/aiSettings';
 import {
   DEFAULT_CODESONLINE_IMAGE_BASE_URL,
@@ -198,7 +198,56 @@ const upscaleImage = (base64Str: string, targetRes: string): Promise<string> => 
 };
 
 const thumbnailCache = new Map<string, string>();
-const THUMB_MAX_CACHE = 300;
+const THUMB_MAX_CACHE = 120;
+
+/** 单份画布 base64 总字符量超过此值时不再压入撤销栈（避免 structuredClone 直接 OOM） */
+const CANVAS_HISTORY_SKIP_PAYLOAD_CHARS = 22_000_000;
+
+/**
+ * 估算节点内大块 base64 字符串体量（字符数），用于动态限制撤销深度。
+ * 多步撤销 = 多份完整克隆，体量会近似「单步 × 步数」。
+ */
+function estimateCanvasBase64PayloadChars(nodes: CanvasNode[]): number {
+  let w = 0;
+  const add = (s: string | undefined) => {
+    if (typeof s === 'string') w += s.length;
+  };
+  for (const n of nodes) {
+    if (n.images?.length) for (const im of n.images) add(im);
+    add((n as PanoramaNode).panoramaImage);
+    add((n as Director3DNode).backgroundImage);
+    add((n as AnnotationNode).sourceImage);
+    add((n as GridSplitNode).inputImage);
+    const splitOuts = (n as GridSplitNode).outputImages;
+    if (splitOuts) for (const im of splitOuts) add(im);
+    const mergeIns = (n as GridMergeNode).inputImages;
+    if (mergeIns) for (const im of mergeIns) add(im);
+    add((n as GridMergeNode).outputImage);
+    add((n as PanoramaT2iNode).panoramaImage);
+    if (n.type === 'chat') {
+      const msgs = (n as ChatNode).messages;
+      if (msgs) {
+        for (const m of msgs) {
+          if (m.images?.length) for (const im of m.images) add(im);
+          add(m.image);
+        }
+      }
+    }
+    if (n.type === 'director3d' && (n as Director3DNode).figures?.length) {
+      for (const f of (n as Director3DNode).figures!) add(f.image);
+    }
+  }
+  return w;
+}
+
+/** 根据当前画布体量返回撤销栈最大步数（每步一份完整克隆） */
+function canvasHistoryMaxSteps(payloadChars: number): number {
+  if (payloadChars > 16_000_000) return 2;
+  if (payloadChars > 7_000_000) return 3;
+  if (payloadChars > 3_000_000) return 5;
+  if (payloadChars > 1_200_000) return 7;
+  return 10;
+}
 
 /** 清理节点预览用的缩略图内存缓存（不涉及项目本地存档） */
 function clearCanvasThumbnailCache(): void {
@@ -282,7 +331,7 @@ type CanvasProject = CanvasProjectSnapshot;
 
 /**
  * 旧版会在初始画布 / 清空 / 新建项目时自动放一个 320×560 空白文生图（或 id 为 t2i-initial）。
- * 从本地草稿恢复时不应再显示；右键菜单新建的文生图为 480×560，不会被误判。
+ * 从本地草稿恢复时不应再显示；右键菜单新建的文生图为 720×840，不会被误判。
  */
 function normalizeLegacyAutoEmptyT2iCanvas(
   nodes: CanvasNode[],
@@ -696,7 +745,7 @@ function I2iPresetCategorySelect({
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[10px] text-gray-500 shrink-0">分类</span>
         <select
-          className="bg-[#121212] border border-[#444] rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-amber-500 min-w-[72px]"
+          className="i2i-preset-select bg-[#121212] border border-[#444] rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-amber-500 min-w-[72px]"
           value={category}
           onPointerDown={(e) => e.stopPropagation()}
           onChange={(e) => {
@@ -711,7 +760,7 @@ function I2iPresetCategorySelect({
         </select>
         <span className="text-[10px] text-gray-500 shrink-0">预设</span>
         <select
-          className="flex-1 min-w-[120px] bg-[#121212] border border-[#444] rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-amber-500"
+          className="i2i-preset-select flex-1 min-w-[120px] bg-[#121212] border border-[#444] rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-amber-500"
           value={presetSelectValue}
           onPointerDown={(e) => e.stopPropagation()}
           onChange={(e) => {
@@ -749,6 +798,28 @@ function isGptImage2CanvasModelId(id: string): boolean {
   return id === 'gpt-image-2-junlan' || id === 'gpt-image-2-codesonline' || id === 'gpt-image-2';
 }
 
+/** 画布主界面快捷键说明（与 window keydown / paste 逻辑一致） */
+const CANVAS_SHORTCUT_HELP_ROWS: readonly { combo: string; detail: string }[] = [
+  { combo: 'V', detail: '选择工具' },
+  { combo: 'B', detail: '框选工具' },
+  { combo: '空格（按住）', detail: '临时切换到平移；松开后恢复选择工具' },
+  { combo: 'Q', detail: '在视图中心新建「AI 对话」节点（无 Ctrl / ⌘ / Alt；不在输入框内）' },
+  { combo: 'W', detail: '新建「文生图」节点' },
+  { combo: 'E', detail: '新建「图生图」节点' },
+  { combo: 'R', detail: '新建「图片标注」节点' },
+  { combo: 'X', detail: '将当前选中节点设为吸管目标；无选中则取消吸管' },
+  { combo: 'Esc', detail: '关闭本快捷键窗口（若已打开）；否则取消选中、关闭菜单与草稿连线、退出全屏图、取消吸管' },
+  { combo: 'Delete / Backspace', detail: '删除当前选中的节点（非全屏预览图时）' },
+  { combo: 'Alt + Q', detail: '删除当前选中的节点（同上）' },
+  { combo: 'Ctrl + C / ⌘ + C', detail: '复制节点（仅当选中恰好 1 个节点时）' },
+  { combo: 'Ctrl + V / ⌘ + V', detail: '粘贴（输入框外；优先粘贴图片为新节点，否则粘贴已复制节点）' },
+  { combo: 'Ctrl + S / ⌘ + S', detail: '保存当前项目' },
+  { combo: 'Ctrl + Alt + S / ⌘ + ⌥ + S', detail: '另存 JSON 草稿（不改变当前 Ctrl+S 绑定）' },
+  { combo: 'Ctrl + Z / ⌘ + Z', detail: '撤销画布操作' },
+  { combo: 'Ctrl + A / ⌘ + A', detail: '全选画布上的节点' },
+  { combo: 'F', detail: '视口缩放并居中到当前选中节点（需先选中；非输入框）' },
+];
+
 // --- Main App Component ---
 
 export default function App() {
@@ -775,6 +846,8 @@ export default function App() {
   const isApplyingCanvasHistoryRef = useRef(false);
   const historyDebounceTimerRef = useRef<number | null>(null);
   const historyInitializedRef = useRef(false);
+  /** 因体量过大未建立撤销栈时，只提示一次 */
+  const canvasHistoryOversizedWarnedRef = useRef(false);
   const lastCanvasHistorySignatureRef = useRef('');
 
   // Connection Drafting
@@ -796,6 +869,7 @@ export default function App() {
   const [projects, setProjects] = useState<CanvasProject[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string>('');
   const [showProjectModal, setShowProjectModal] = useState(false);
+  const [showShortcutsPanel, setShowShortcutsPanel] = useState(false);
   const [projectExportMenuOpen, setProjectExportMenuOpen] = useState(false);
   const [projectStoreReady, setProjectStoreReady] = useState(false);
   const [autosaveIntervalMin, setAutosaveIntervalMin] = useState<0 | 5 | 10 | 20 | 30>(() => {
@@ -944,6 +1018,9 @@ export default function App() {
     setSelectedIds([]);
     canvasHistoryRef.current = [];
     canvasHistoryIndexRef.current = -1;
+    historyInitializedRef.current = false;
+    canvasHistoryOversizedWarnedRef.current = false;
+    lastCanvasHistorySignatureRef.current = '';
     generationAbortControllersRef.current.clear();
     generationStartedAtRef.current.clear();
     clearCanvasThumbnailCache();
@@ -1033,12 +1110,12 @@ export default function App() {
     );
   }, [classifyError, handleUpdateNode]);
 
-  // Handle canvas click for eyedropper - 创建连线而非复制图片
-  const handleCanvasEyedropper = useCallback((sourceNodeId: string, targetNodeId: string) => {
-    if (!targetNodeId) return;
+  // Handle canvas click for eyedropper - 创建连线而非复制图片（成功返回 true）
+  const handleCanvasEyedropper = useCallback((sourceNodeId: string, targetNodeId: string): boolean => {
+    if (!targetNodeId) return false;
     const sourceNode = nodes.find(n => n.id === sourceNodeId);
     const targetNode = nodes.find(n => n.id === targetNodeId);
-    if (!sourceNode || !targetNode) return;
+    if (!sourceNode || !targetNode) return false;
 
     const canReceiveConnection = (node: CanvasNode) => INPUT_NODE_TYPES.includes(node.type);
     const canConnectNodes = (source: CanvasNode, target: CanvasNode) => {
@@ -1058,7 +1135,7 @@ export default function App() {
     };
     if (!canConnectNodes(sourceNode, targetNode)) {
       setEyedropperTargetNodeId(null);
-      return;
+      return false;
     }
 
     // 检查是否已存在连线
@@ -1069,7 +1146,7 @@ export default function App() {
     if (existingEdge) {
       // 已存在连线，取消吸取模式
       setEyedropperTargetNodeId(null);
-      return;
+      return false;
     }
 
     // 创建新的连线
@@ -1080,30 +1157,41 @@ export default function App() {
     };
     setEdges(prev => [...prev, newEdge]);
     setEyedropperTargetNodeId(null);
+    return true;
   }, [nodes, edges]);
 
-  // 默认节点尺寸映射
+  // 默认节点尺寸映射（新建 / 重置窗口；文生图宽:高≈3:4；图生图 高:宽≈1.4；图片标注宽:高≈4:5；AI对话更高且内部分区 2:1；全景图生成等仍偏横向）
   const DEFAULT_NODE_SIZES: Record<string, { width: number, height: number }> = {
-    't2i': { width: 480, height: 560 },
-    'i2i': { width: 480, height: 560 },
-    'panorama': { width: 560, height: 420 },
-    'panoramaT2i': { width: 480, height: 560 },
-    'annotation': { width: 560, height: 480 },
-    'director3d': { width: 600, height: 520 },
-    'chat': { width: 720, height: 1440 },
-    'text': { width: 280, height: 200 },
-    'image': { width: 320, height: 300 },
-    'gridSplit': { width: 420, height: 300 },
-    'gridMerge': { width: 420, height: 300 },
-    'video': { width: 480, height: 560 },
+    /** 文生图：竖向窗，宽:高 = 3:4（与常见文生图界面比例接近） */
+    't2i': { width: 900, height: 1200 },
+    /** 图生图：高:宽 ≈ 1.4:1（较 2:3 略矮，贴近参考界面） */
+    'i2i': { width: 900, height: 1260 },
+    'panorama': { width: 840, height: 630 },
+    'panoramaT2i': { width: 880, height: 960 },
+    /** 图片标注：近方形略竖长，宽:高 = 4:5（介于 4:5～5:6） */
+    'annotation': { width: 960, height: 1200 },
+    'director3d': { width: 900, height: 780 },
+    /** AI 对话：竖向更高；内容区消息列表:底部输入带 = 2:1 */
+    'chat': { width: 920, height: CHAT_NODE_DEFAULT_PIXEL_HEIGHT },
+    'text': { width: 420, height: 300 },
+    'image': { width: 480, height: 528 },
+    'gridSplit': { width: 840, height: 600 },
+    'gridMerge': { width: 840, height: 600 },
+    'video': { width: 720, height: 840 },
   };
 
-  // 节点最小尺寸限制（按类型）
+  // 节点最小尺寸限制（按类型；与默认倍率一致）
   const MIN_NODE_SIZES: Record<string, { width: number, height: number }> = {
-    image: { width: 280, height: 260 },
-    gridSplit: { width: 360, height: 280 },
-    gridMerge: { width: 360, height: 280 },
-    chat: { width: 600, height: 1120 },
+    image: { width: 420, height: 390 },
+    gridSplit: { width: 720, height: 560 },
+    gridMerge: { width: 720, height: 560 },
+    /** 文生图：与默认 3:4 比例一致 */
+    t2i: { width: 720, height: 960 },
+    /** 图生图：与默认 高:宽≈1.4 一致 */
+    i2i: { width: 600, height: 840 },
+    /** 图片标注：与默认 4:5 比例一致 */
+    annotation: { width: 640, height: 800 },
+    chat: { width: 640, height: 1200 },
   };
 
   // 重置节点大小
@@ -1179,8 +1267,8 @@ export default function App() {
       let changed = false;
       const next = prev.map(n => {
         if (n.type !== 'panorama') return n;
-        const targetWidth = 560;
-        const targetHeight = 420;
+        const targetWidth = 840;
+        const targetHeight = 630;
         if (n.width !== targetWidth || n.height !== targetHeight) {
           changed = true;
           return { ...n, width: targetWidth, height: targetHeight };
@@ -2305,10 +2393,10 @@ export default function App() {
     const newNodes: CanvasNode[] = images.map((img, idx) => ({
       id: `image-${Date.now()}-${idx}`,
       type: 'image' as const,
-      x: node.x + node.width + 50 + idx * 340,
+      x: node.x + node.width + 50 + idx * 510,
       y: node.y,
-      width: 320,
-      height: 352,
+      width: 480,
+      height: 528,
       prompt: '',
       images: [img],
       viewMode: 'single' as const,
@@ -2451,9 +2539,41 @@ export default function App() {
   const pushCanvasHistorySnapshot = useCallback((snapshot: CanvasHistoryEntry) => {
     const signature = buildCanvasHistorySignature(snapshot);
     if (signature === lastCanvasHistorySignatureRef.current) return;
-    const historyBefore = canvasHistoryRef.current.slice(0, canvasHistoryIndexRef.current + 1);
-    historyBefore.push(structuredClone(snapshot));
-    const cappedHistory = historyBefore.length > 80 ? historyBefore.slice(historyBefore.length - 80) : historyBefore;
+    const payloadChars = estimateCanvasBase64PayloadChars(snapshot.nodes);
+    const historyEmpty = canvasHistoryRef.current.length === 0;
+    if (!historyEmpty && payloadChars > CANVAS_HISTORY_SKIP_PAYLOAD_CHARS) {
+      lastCanvasHistorySignatureRef.current = signature;
+      console.warn(
+        '[canvas] 当前画布图片数据过大，已跳过本步撤销记录以降低崩溃风险（建议拆分项目或导出备份）。'
+      );
+      return;
+    }
+    const maxSteps = canvasHistoryMaxSteps(payloadChars);
+    let historyBefore = canvasHistoryRef.current.slice(0, canvasHistoryIndexRef.current + 1);
+    if (historyBefore.length > maxSteps - 1) {
+      historyBefore = historyBefore.slice(historyBefore.length - (maxSteps - 1));
+    }
+    let cloned: CanvasHistoryEntry;
+    try {
+      cloned = structuredClone(snapshot);
+    } catch (e) {
+      console.warn('[canvas] 撤销快照克隆失败，释放旧历史后重试', e);
+      canvasHistoryRef.current = canvasHistoryRef.current.slice(-2);
+      canvasHistoryIndexRef.current = canvasHistoryRef.current.length - 1;
+      historyBefore = canvasHistoryRef.current.slice(0, canvasHistoryIndexRef.current + 1);
+      if (historyBefore.length > maxSteps - 1) {
+        historyBefore = historyBefore.slice(historyBefore.length - (maxSteps - 1));
+      }
+      try {
+        cloned = structuredClone(snapshot);
+      } catch (e2) {
+        console.warn('[canvas] 已跳过本次撤销记录', e2);
+        lastCanvasHistorySignatureRef.current = signature;
+        return;
+      }
+    }
+    const merged = [...historyBefore, cloned];
+    const cappedHistory = merged.length > maxSteps ? merged.slice(merged.length - maxSteps) : merged;
     canvasHistoryRef.current = cappedHistory;
     canvasHistoryIndexRef.current = cappedHistory.length - 1;
     lastCanvasHistorySignatureRef.current = signature;
@@ -2464,12 +2584,24 @@ export default function App() {
     const prevIndex = canvasHistoryIndexRef.current - 1;
     const snapshot = canvasHistoryRef.current[prevIndex];
     if (!snapshot) return;
+    let nodesN: CanvasNode[];
+    let edgesN: Edge[];
+    let selN: string[];
+    try {
+      nodesN = structuredClone(snapshot.nodes);
+      edgesN = structuredClone(snapshot.edges);
+      selN = structuredClone(snapshot.selectedIds);
+    } catch (e) {
+      console.warn('[canvas] 撤销还原克隆失败', e);
+      alert('撤销失败：内存不足，请刷新页面后从最近保存的项目恢复。');
+      return;
+    }
     isApplyingCanvasHistoryRef.current = true;
     canvasHistoryIndexRef.current = prevIndex;
     lastCanvasHistorySignatureRef.current = buildCanvasHistorySignature(snapshot);
-    setNodes(structuredClone(snapshot.nodes));
-    setEdges(structuredClone(snapshot.edges));
-    setSelectedIds(structuredClone(snapshot.selectedIds));
+    setNodes(nodesN);
+    setEdges(edgesN);
+    setSelectedIds(selN);
     window.setTimeout(() => {
       isApplyingCanvasHistoryRef.current = false;
     }, 0);
@@ -2480,7 +2612,15 @@ export default function App() {
     const snapshot: CanvasHistoryEntry = { nodes, edges, selectedIds };
     if (!historyInitializedRef.current) {
       pushCanvasHistorySnapshot(snapshot);
-      historyInitializedRef.current = true;
+      if (canvasHistoryRef.current.length > 0) {
+        historyInitializedRef.current = true;
+      } else {
+        historyInitializedRef.current = true;
+        if (!canvasHistoryOversizedWarnedRef.current) {
+          canvasHistoryOversizedWarnedRef.current = true;
+          console.warn('[canvas] 画布图片数据过大，无法建立撤销栈（Ctrl+Z 不可用）；建议拆分项目或导出后再编辑。');
+        }
+      }
       return;
     }
     if (historyDebounceTimerRef.current) {
@@ -2489,7 +2629,7 @@ export default function App() {
     }
     historyDebounceTimerRef.current = window.setTimeout(() => {
       pushCanvasHistorySnapshot(snapshot);
-    }, 160);
+    }, 480);
     return () => {
       if (historyDebounceTimerRef.current) {
         clearTimeout(historyDebounceTimerRef.current);
@@ -2833,15 +2973,15 @@ export default function App() {
     const rect = containerRef.current?.getBoundingClientRect();
     const centerClientX = rect ? rect.width / 2 : window.innerWidth / 2;
     const centerClientY = rect ? rect.height / 2 : window.innerHeight / 2;
-    const x = (centerClientX - transform.x) / transform.scale - 160;
-    const y = (centerClientY - transform.y) / transform.scale - 150;
+    const x = (centerClientX - transform.x) / transform.scale - 240;
+    const y = (centerClientY - transform.y) / transform.scale - 264;
     const newNode: CanvasNode = {
       id: `image-${Date.now()}`,
       type: 'image',
       x: Math.max(0, x),
       y: Math.max(0, y),
-      width: 320,
-      height: 300,
+      width: 480,
+      height: 528,
       prompt: '',
       images: [base64],
       viewMode: 'single',
@@ -2850,6 +2990,40 @@ export default function App() {
     setNodes(prev => [...prev, newNode]);
     setSelectedIds([newNode.id]);
   }, [transform]);
+
+  /** 缩放并平移视口，使当前选中节点的外接矩形尽量占满画布区域（无选中时不做） */
+  const fitViewportToSelectedNodes = useCallback(() => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect || rect.width < 8 || rect.height < 8) return;
+    const pad = 48;
+    const availW = Math.max(40, rect.width - pad * 2);
+    const availH = Math.max(40, rect.height - pad * 2);
+    const selIds = selectedIdsRef.current;
+    if (selIds.length === 0) return;
+    const list = nodesRef.current.filter((n) => selIds.includes(n.id));
+    if (list.length === 0) return;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const n of list) {
+      minX = Math.min(minX, n.x);
+      minY = Math.min(minY, n.y);
+      maxX = Math.max(maxX, n.x + n.width);
+      maxY = Math.max(maxY, n.y + n.height);
+    }
+    const bw = Math.max(1, maxX - minX);
+    const bh = Math.max(1, maxY - minY);
+    const scaleX = availW / bw;
+    const scaleY = availH / bh;
+    let newScale = Math.min(scaleX, scaleY, 5);
+    newScale = Math.max(0.1, newScale);
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const newX = rect.width / 2 - cx * newScale;
+    const newY = rect.height / 2 - cy * newScale;
+    setTransform({ x: newX, y: newY, scale: newScale });
+  }, []);
 
   // --- Keyboard Shortcuts ---
   useEffect(() => {
@@ -2867,7 +3041,7 @@ export default function App() {
       const placeNewNodeCentered = (type: NodeType) => {
         const rect = containerRef.current?.getBoundingClientRect();
         if (!rect) return;
-        const defaultSize = DEFAULT_NODE_SIZES[type] || { width: 280, height: 200 };
+        const defaultSize = DEFAULT_NODE_SIZES[type] || { width: 420, height: 300 };
         const tf = transformRef.current;
         const canvasX = (rect.width / 2 - tf.x) / tf.scale - defaultSize.width / 2;
         const canvasY = (rect.height / 2 - tf.y) / tf.scale - defaultSize.height / 2;
@@ -2910,6 +3084,10 @@ export default function App() {
         const id = sel[0];
         setEyedropperTargetNodeId((prev) => (prev === id ? null : id));
       } else if (e.code === 'Escape') {
+        if (showShortcutsPanel) {
+          setShowShortcutsPanel(false);
+          return;
+        }
         setSelectedIds([]);
         setContextMenu(null);
         setDraftEdge(null);
@@ -2917,6 +3095,19 @@ export default function App() {
         setEyedropperTargetNodeId(null);
       } else if ((e.code === 'Backspace' || e.code === 'Delete') && !isInput && !fullscreenImage) {
         selectedIdsRef.current.forEach(id => handleDeleteNode(id));
+      } else if (
+        e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        e.code === 'KeyQ' &&
+        !isInput &&
+        !isContentEditable &&
+        !fullscreenImage
+      ) {
+        e.preventDefault();
+        const sel = selectedIdsRef.current;
+        if (sel.length === 0) return;
+        sel.forEach((id) => handleDeleteNode(id));
       } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC' && !isInput) {
         if (selectedIdsRef.current.length === 1) {
           const node = nodes.find(n => n.id === selectedIdsRef.current[0]);
@@ -2933,6 +3124,25 @@ export default function App() {
       } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.code === 'KeyZ' && !isInput && !fullscreenImage) {
         e.preventDefault();
         undoCanvasState();
+      } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyA' && !isInput && !isContentEditable) {
+        e.preventDefault();
+        const all = nodesRef.current;
+        if (all.length === 0) return;
+        const ids = all.map((n) => n.id);
+        selectedIdsRef.current = ids;
+        setSelectedIds(ids);
+      } else if (
+        e.code === 'KeyF' &&
+        !isInput &&
+        !isContentEditable &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !fullscreenImage &&
+        !e.repeat
+      ) {
+        e.preventDefault();
+        fitViewportToSelectedNodes();
       }
     };
 
@@ -2986,7 +3196,18 @@ export default function App() {
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('paste', handlePaste);
     };
-  }, [selectedIds, nodes, clipboard, fullscreenImage, createImageNodeFromBase64, undoCanvasState, saveCurrentProject, handleSaveDraftJsonSaveAs]);
+  }, [
+    selectedIds,
+    nodes,
+    clipboard,
+    fullscreenImage,
+    showShortcutsPanel,
+    createImageNodeFromBase64,
+    undoCanvasState,
+    saveCurrentProject,
+    handleSaveDraftJsonSaveAs,
+    fitViewportToSelectedNodes,
+  ]);
 
   // --- Fullscreen Modal Handlers ---
   useEffect(() => {
@@ -3179,6 +3400,16 @@ export default function App() {
       !!targetEl?.closest(
         'input, textarea, select, button, a, [role="button"], [role="slider"], [role="listbox"], [contenteditable="true"]'
       );
+
+    /** 吸管模式：点击节点窗口任意非表单区域即可与「吸取目标」节点连线（与预览区点击行为一致） */
+    const eyeT = eyedropperTargetNodeIdRef.current;
+    if (eyeT && eyeT !== id && !isInteractiveSurface) {
+      if (handleCanvasEyedropper(id, eyeT)) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+    }
     
     // 如果正在拖拽其他节点，取消当前拖拽并切换到新节点
     if (activePointerTypeRef.current === 'node' && draggingNodeIdRef.current !== id) {
@@ -3286,7 +3517,7 @@ export default function App() {
 
     const videoFiles = files.filter(isVideoFile);
     if (videoFiles.length > 0) {
-      const def = DEFAULT_NODE_SIZES.video || { width: 480, height: 560 };
+      const def = DEFAULT_NODE_SIZES.video || { width: 720, height: 840 };
       try {
         const urls = videoFiles.map((f) => URL.createObjectURL(f));
         const stripName = (name: string) =>
@@ -3333,10 +3564,10 @@ export default function App() {
         const newNode: CanvasNode = {
           id: `image-${Date.now()}`,
           type: 'image',
-          x: mouseX - 160, // Center the node (width 320/2)
-          y: mouseY - 176, // Center the node (height 352/2)
-          width: 320,
-          height: 352,
+          x: mouseX - 240, // Center the node (width 480/2)
+          y: mouseY - 264, // Center the node (height 528/2)
+          width: 480,
+          height: 528,
           prompt: '',
           images: [base64],
           viewMode: 'single',
@@ -3351,7 +3582,7 @@ export default function App() {
 
   // --- Node Actions ---
   const addNodeAtCanvasPosition = useCallback((type: NodeType, canvasX: number, canvasY: number) => {
-    const defaultSize = DEFAULT_NODE_SIZES[type] || { width: 280, height: 200 };
+    const defaultSize = DEFAULT_NODE_SIZES[type] || { width: 420, height: 300 };
     const newId = `${type}-${Date.now()}`;
     const newNode: CanvasNode = {
       id: newId,
@@ -3392,7 +3623,7 @@ export default function App() {
             messages: [],
             model: DEFAULT_DEEPSEEK_CHAT_MODEL_ID,
             isGenerating: false,
-            chatInputHeight: Math.round(304 * CHAT_PANEL_FONT_SCALE),
+            chatInputHeight: Math.round((304 * CHAT_NODE_DEFAULT_PIXEL_HEIGHT) / 1800 * CHAT_PANEL_FONT_SCALE),
           }
         : {}),
       ...(type === 'video'
@@ -3453,8 +3684,8 @@ export default function App() {
           type: 'image',
           x: importPosRef.current.x,
           y: importPosRef.current.y,
-          width: 320,
-          height: 352,
+          width: 480,
+          height: 528,
           prompt: '',
           images: [base64],
           viewMode: 'single',
@@ -3716,7 +3947,13 @@ export default function App() {
             .map(e => nodes.find(n => n.id === e.sourceId))
             .filter(Boolean) as CanvasNode[];
           
-          const sourceImages = sourceNodes.flatMap(n => n.images || []).filter(Boolean);
+          const sourceImages = sourceNodes.flatMap((n) => {
+            const imgs = n.images || [];
+            if (!imgs.length) return [];
+            const idx = Math.min(Math.max(0, n.currentImageIndex ?? 0), imgs.length - 1);
+            const b = imgs[idx];
+            return b ? [b] : [];
+          });
           
           if (sourceImages.length > 0) {
             // 更新可接收图片输入的节点
@@ -3891,12 +4128,12 @@ export default function App() {
       borderColor = isSelected ? 'border-orange-500' : 'border-[#333]';
       shadowColor = isSelected ? 'shadow-orange-900/30' : '';
     } else if (node.type === 'gridSplit') {
-      headerIcon = <GridIcon size={14} className="text-teal-400" />;
+      headerIcon = <GridIcon size={21} className="text-teal-400" />;
       headerTitle = '宫格拆分';
       borderColor = isSelected ? 'border-teal-500' : 'border-[#333]';
       shadowColor = isSelected ? 'shadow-teal-900/30' : '';
     } else if (node.type === 'gridMerge') {
-      headerIcon = <GridMergeIcon size={14} className="text-teal-400" />;
+      headerIcon = <GridMergeIcon size={21} className="text-teal-400" />;
       headerTitle = '宫格合并';
       borderColor = isSelected ? 'border-teal-500' : 'border-[#333]';
       shadowColor = isSelected ? 'shadow-teal-900/30' : '';
@@ -3937,7 +4174,7 @@ export default function App() {
       <div
         key={node.id}
         data-node-root="true"
-        className={`absolute flex flex-col bg-[#1e1e1e] rounded-xl border-2 shadow-2xl transition-shadow ${borderColor} ${shadowColor} ${isSelected ? 'z-20' : 'z-10 hover:border-[#555]'}`}
+        className={`absolute flex flex-col bg-[#1e1e1e] rounded-xl border-2 shadow-2xl transition-shadow ${borderColor} ${shadowColor} ${isSelected ? 'z-20' : 'z-10 hover:border-[#555]'} ${node.type === 'chat' ? 'canvas-node-root--chat' : 'canvas-node-font-195'}${node.type === 'gridSplit' || node.type === 'gridMerge' ? ' canvas-node-grid-tool-150' : ''}`}
         style={{ left: node.x, top: node.y, width: node.width, height: node.height }}
         onPointerDown={(e) => handleNodePointerDown(e, node.id)}
       >
@@ -4037,21 +4274,42 @@ export default function App() {
         )}
 
         {/* Header */}
-        <div className="h-8 bg-[#252525] rounded-t-xl border-b border-[#333] flex items-center justify-between px-3 cursor-grab active:cursor-grabbing shrink-0">
+        <div className="min-h-8 py-1.5 bg-[#252525] rounded-t-xl border-b border-[#333] flex items-center justify-between px-3 cursor-grab active:cursor-grabbing shrink-0">
           <div className="flex items-center gap-2">
             {headerIcon}
-            <span className="text-xs text-gray-300 font-medium">{headerTitle}</span>
+            <span
+              className={
+                node.type === 'chat'
+                  ? 'canvas-node-window-title text-gray-300 font-medium'
+                  : 'canvas-node-window-title text-xs text-gray-300 font-medium'
+              }
+            >
+              {headerTitle}
+            </span>
           </div>
           <div className="flex items-center gap-1">
             <button
-              onPointerDown={(e) => { e.stopPropagation(); handleResetNodeSize(node.id); }}
-              className="text-gray-500 hover:text-blue-400 transition-colors p-1"
-              title="重置窗口大小"
+              type="button"
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                handleResetNodeSize(node.id);
+              }}
+              className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] text-gray-400 transition-colors hover:bg-[#333] hover:text-blue-400"
+              title="恢复为默认宽高"
             >
-              <MaximizeIcon size={14} />
+              <MaximizeIcon size={node.type === 'gridSplit' || node.type === 'gridMerge' ? 15 : 12} />
+              <span className="whitespace-nowrap">重置大小</span>
             </button>
-            <button onPointerDown={(e) => { e.stopPropagation(); handleDeleteNode(node.id); }} className="text-gray-500 hover:text-red-400 transition-colors p-1">
-              <TrashIcon size={14} />
+            <button
+              type="button"
+              title="删除节点（Alt+Q）"
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                handleDeleteNode(node.id);
+              }}
+              className="text-gray-500 hover:text-red-400 transition-colors p-1"
+            >
+              <TrashIcon size={node.type === 'gridSplit' || node.type === 'gridMerge' ? 21 : 14} />
             </button>
           </div>
         </div>
@@ -4113,7 +4371,7 @@ export default function App() {
             })()}
             <div className="flex flex-wrap items-center gap-1.5">
               <select
-                className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-blue-500 flex-1 min-w-[100px]"
+                className="nodemodel-select bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-blue-500 flex-1 min-w-[100px]"
                 value={node.model || (node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' || node.type === 'panorama' ? defaultCanvasImageModel() : 'gemini-3.1-flash-image-preview')}
                 onChange={(e) => {
                   const m = e.target.value;
@@ -4149,6 +4407,7 @@ export default function App() {
                   </>
                 )}
               </select>
+              <div className="nodemeta-skip-scale flex flex-wrap items-center gap-1.5">
               <select
                 className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-blue-500"
                 value={node.aspectRatio || (node.type === 'panoramaT2i' ? '2:1' : (node.type === 't2i' || node.type === 'i2i' || node.type === 'panorama' ? '16:9' : '1:1'))}
@@ -4191,6 +4450,7 @@ export default function App() {
                 <option value={2}>2张</option>
                 <option value={4}>4张</option>
               </select>
+              </div>
             </div>
           </div>
         )}
@@ -4291,7 +4551,7 @@ export default function App() {
             )}
             <div className="flex flex-wrap items-center gap-1.5">
             <select
-                className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500 min-w-[140px]"
+                className="nodemodel-select bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500 min-w-[140px]"
                 value={modelSelectValue}
                 onChange={(e) => {
                   const m = e.target.value;
@@ -4327,6 +4587,7 @@ export default function App() {
                   <option value="sora-2-vvip">Sora2 VVIP</option>
                 </optgroup>
             </select>
+              <div className="nodemeta-skip-scale flex flex-wrap items-center gap-1.5">
               {isVeo ? (
                 <span className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-400 text-xs whitespace-nowrap">
                   8 秒（固定）
@@ -4430,6 +4691,7 @@ export default function App() {
                   <option value="720p">720p</option>
                 </select>
               )}
+              </div>
             </div>
           </div>
           );
@@ -4443,7 +4705,13 @@ export default function App() {
           
           {/* Image Area */}
           {(node.type === 't2i' || node.type === 'i2i' || node.type === 'image' || node.type === 'panoramaT2i') && (
-            <div className={`w-full bg-black relative border-b border-[#333] overflow-hidden group ${node.type === 'image' ? 'flex-1 min-h-[160px]' : 'h-[240px] shrink-0'}`}>
+            <div
+              className={`w-full bg-black relative border-b border-[#333] overflow-hidden group flex flex-col min-h-0 ${
+                node.type === 'image'
+                  ? 'flex-1 min-h-[160px]'
+                  : 'flex-[5] min-h-[240px] basis-0 min-w-0'
+              }`}
+            >
               {images.length > 0 ? (
                 <>
                   {/* Top right controls */}
@@ -4478,10 +4746,10 @@ export default function App() {
                           const newNode: CanvasNode = {
                             id: newNodeId,
                             type: 'image',
-                            x: node.x + 350,
+                            x: node.x + 525,
                             y: node.y,
-                            width: 320,
-                            height: 352,
+                            width: 480,
+                            height: 528,
                             images: [imgData],
                             currentImageIndex: 0,
                           };
@@ -4503,12 +4771,12 @@ export default function App() {
                   </div>
 
                   {viewMode === 'grid' ? (
-                    <div className="grid grid-cols-2 gap-1 h-full overflow-y-auto p-1" style={{ maxHeight: '240px' }}>
+                    <div className="grid min-h-0 flex-1 grid-cols-2 gap-1 overflow-y-auto p-1 content-start">
                       {images.map((img, idx) => (
                         <div key={idx} className="relative w-full h-full group/item">
                           <OptimizedImage
                             base64={img}
-                            maxSide={420}
+                            maxSide={630}
                             quality={0.58}
                             className={`w-full h-full object-contain bg-[#111] rounded transition-opacity ${eyedropperTargetNodeId ? 'cursor-cyan-400 hover:opacity-100' : 'cursor-pointer hover:opacity-80'}`}
                             onClick={(e) => {
@@ -4536,7 +4804,7 @@ export default function App() {
                     <div className="relative w-full h-full flex items-center justify-center group/single">
                       <OptimizedImage
                         base64={images[currentIndex]}
-                        maxSide={560}
+                        maxSide={1200}
                         quality={0.6}
                         className={`max-w-full max-h-full object-contain ${eyedropperTargetNodeId ? 'cursor-cyan-400' : ''}`}
                         onClick={(e) => {
@@ -4819,8 +5087,8 @@ export default function App() {
                   type: 'image',
                   x,
                   y,
-                  width: 320,
-                  height: 352,
+                  width: 480,
+                  height: 528,
                   prompt: '',
                   images,
                   viewMode: 'single',
@@ -4845,8 +5113,8 @@ export default function App() {
                   type: 'image',
                   x,
                   y,
-                  width: 320,
-                  height: 352,
+                  width: 480,
+                  height: 528,
                   prompt: '',
                   images,
                   viewMode: 'single',
@@ -4872,8 +5140,8 @@ export default function App() {
                   type: 'image',
                   x,
                   y,
-                  width: 320,
-                  height: 352,
+                  width: 480,
+                  height: 528,
                   prompt: '',
                   images,
                   viewMode: 'single',
@@ -4898,10 +5166,10 @@ export default function App() {
                   const newNode: CanvasNode = {
                     id: `image-${Date.now()}-${idx}`,
                     type: 'image',
-                    x: x + idx * 340,
+                    x: x + idx * 510,
                     y,
-                    width: 320,
-                    height: 352,
+                    width: 480,
+                    height: 528,
                     prompt: '',
                     images: [img],
                     viewMode: 'single',
@@ -4928,8 +5196,8 @@ export default function App() {
                   type: 'image',
                   x,
                   y,
-                  width: 320,
-                  height: 352,
+                  width: 480,
+                  height: 528,
                   prompt: '',
                   images: [image],
                   viewMode: 'single',
@@ -4964,7 +5232,11 @@ export default function App() {
 
           {/* Text Area - panoramaT2i 使用内置提示词，不显示输入框 */}
           {(node.type === 't2i' || node.type === 'i2i' || node.type === 'text' || node.type === 'video') && (
-            <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+            <div
+              className={`flex flex-col min-h-0 overflow-hidden ${
+                node.type === 't2i' || node.type === 'i2i' ? 'flex-[3] basis-0' : 'flex-1'
+              }`}
+            >
               {/* 预设按钮区域 - i2i节点 */}
               {node.type === 'i2i' && (
                 <I2iPresetCategorySelect
@@ -5072,7 +5344,7 @@ export default function App() {
           )}
           {/* 全景图生成节点 - 预设按钮 + 提示词可修改 */}
           {node.type === 'panoramaT2i' && (
-            <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+            <div className="flex flex-col flex-[3] basis-0 min-h-0 overflow-hidden">
               {/* 工具栏 */}
               <div className="flex items-center gap-1 p-2 bg-[#252525] border-b border-[#333] shrink-0">
                 <button
@@ -5406,7 +5678,7 @@ export default function App() {
             style={{ zIndex: 50 }}
           >
             {/* 点击提示 - 只在顶部显示提示文字，不遮挡内容 */}
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-cyan-600 text-white text-xs font-medium rounded-lg shadow-lg flex items-center gap-2 pointer-events-auto" style={{ zIndex: 100 }}>
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-cyan-600 text-white text-xs font-medium rounded-lg shadow-lg flex items-center gap-2 pointer-events-auto canvas-chrome-150" style={{ zIndex: 100 }}>
               <EyedropperIcon size={14} /> 点击节点连线吸取 · 快捷键 X · ESC 取消
             </div>
           </div>
@@ -5416,7 +5688,7 @@ export default function App() {
     {/* Context Menu */}
     {contextMenu && (
       <div
-        className="absolute z-50 bg-[#252525] border border-[#444] rounded-lg shadow-2xl py-1 min-w-[160px] overflow-hidden"
+        className="absolute z-50 bg-[#252525] border border-[#444] rounded-lg shadow-2xl py-1 min-w-[160px] overflow-hidden canvas-chrome-150"
         style={{ left: contextMenu.x, top: contextMenu.y }}
         onPointerDown={e => e.stopPropagation()}
       >
@@ -5462,33 +5734,53 @@ export default function App() {
         </div>
       )}
 
-      {/* UI Overlay: Toolbar (Top Left) */}
-      <div className="absolute top-6 left-6 bg-[#1e1e1e]/90 backdrop-blur-md p-1.5 rounded-xl shadow-2xl border border-[#333] flex flex-col gap-1 z-40">
-        <button 
-          onPointerDown={(e) => { e.stopPropagation(); setActiveTool('select'); }}
-          className={`p-2.5 rounded-lg transition-colors ${activeTool === 'select' ? 'bg-blue-600 text-white' : 'hover:bg-[#333] text-gray-400 hover:text-white'}`}
-          title="选择工具 (V)"
-        >
-          <MousePointerIcon size={18} />
-        </button>
-        <button 
-          onPointerDown={(e) => { e.stopPropagation(); setActiveTool('pan'); }}
-          className={`p-2.5 rounded-lg transition-colors ${activeTool === 'pan' ? 'bg-blue-600 text-white' : 'hover:bg-[#333] text-gray-400 hover:text-white'}`}
-          title="平移工具 (空格)"
-        >
-          <HandIcon size={18} />
-        </button>
+      {/* UI Overlay: 快捷键 + 工具栏（左上） */}
+      <div className="absolute top-6 left-6 z-40 flex flex-col gap-1.5">
         <button
-          onPointerDown={(e) => { e.stopPropagation(); setActiveTool('boxSelect'); }}
-          className={`p-2.5 rounded-lg transition-colors ${activeTool === 'boxSelect' ? 'bg-blue-600 text-white' : 'hover:bg-[#333] text-gray-400 hover:text-white'}`}
-          title="框选工具 (B)"
+          type="button"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => setShowShortcutsPanel(true)}
+          className="canvas-chrome-150 bg-[#1e1e1e]/90 backdrop-blur-md p-2.5 rounded-xl shadow-2xl border border-[#333] hover:bg-[#333] transition-colors text-gray-400 hover:text-white flex items-center justify-center"
+          title="快捷键说明"
         >
-          <BoxSelectIcon size={18} />
+          <KeyIcon size={18} />
         </button>
+        <div className="canvas-chrome-150 bg-[#1e1e1e]/90 backdrop-blur-md p-1.5 rounded-xl shadow-2xl border border-[#333] flex flex-col gap-1">
+          <button
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              setActiveTool('select');
+            }}
+            className={`p-2.5 rounded-lg transition-colors ${activeTool === 'select' ? 'bg-blue-600 text-white' : 'hover:bg-[#333] text-gray-400 hover:text-white'}`}
+            title="选择工具 (V)"
+          >
+            <MousePointerIcon size={18} />
+          </button>
+          <button
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              setActiveTool('pan');
+            }}
+            className={`p-2.5 rounded-lg transition-colors ${activeTool === 'pan' ? 'bg-blue-600 text-white' : 'hover:bg-[#333] text-gray-400 hover:text-white'}`}
+            title="平移工具 (空格)"
+          >
+            <HandIcon size={18} />
+          </button>
+          <button
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              setActiveTool('boxSelect');
+            }}
+            className={`p-2.5 rounded-lg transition-colors ${activeTool === 'boxSelect' ? 'bg-blue-600 text-white' : 'hover:bg-[#333] text-gray-400 hover:text-white'}`}
+            title="框选工具 (B)"
+          >
+            <BoxSelectIcon size={18} />
+          </button>
+        </div>
       </div>
 
-      {/* Settings + project actions (top left, single row) */}
-      <div className="absolute top-6 left-24 z-40 flex flex-wrap items-center gap-2">
+      {/* Settings + project actions（左上第二列） */}
+      <div className="canvas-chrome-150 absolute top-6 left-28 z-40 flex flex-wrap items-center gap-2">
       <button
         onClick={() => {
           setSettingsTab('api');
@@ -5528,6 +5820,55 @@ export default function App() {
           <span className="text-amber-500/90 text-xs font-medium whitespace-nowrap">清预览缓存</span>
       </button>
       </div>
+
+      {showShortcutsPanel && (
+        <div
+          className="fixed inset-0 z-[205] flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setShowShortcutsPanel(false)}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <div
+            className="canvas-chrome-150 flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-[#444] bg-[#1a1a1a] shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-[#333] px-4 py-3">
+              <h2 className="text-base font-semibold text-white">快捷键</h2>
+              <button
+                type="button"
+                className="rounded p-1 text-gray-400 transition-colors hover:bg-[#333] hover:text-white"
+                title="关闭"
+                onClick={() => setShowShortcutsPanel(false)}
+              >
+                <XIcon size={20} />
+              </button>
+            </div>
+            <div className="overflow-y-auto p-4">
+              <p className="mb-3 text-xs leading-relaxed text-gray-500">
+                以下快捷键在画布区域生效；当焦点在<strong className="text-gray-400">输入框</strong>、
+                <strong className="text-gray-400">文本域</strong>或<strong className="text-gray-400">下拉框</strong>
+                内时，其中大部分不会拦截（各行括号内另有说明）。
+              </p>
+              <table className="w-full border-collapse text-left text-sm text-gray-200">
+                <thead>
+                  <tr className="border-b border-[#333] text-gray-500">
+                    <th className="w-[38%] py-2 pr-3 font-medium">按键</th>
+                    <th className="py-2 font-medium">说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {CANVAS_SHORTCUT_HELP_ROWS.map((row) => (
+                    <tr key={row.combo} className="border-b border-[#2a2a2a]">
+                      <td className="whitespace-nowrap py-2 pr-3 align-top font-mono text-xs text-cyan-200/95">{row.combo}</td>
+                      <td className="py-2 align-top text-xs text-gray-300">{row.detail}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Center — current draft / project title（双击改项目名，与草稿展示同步并写回 IndexedDB） */}
       {activeProjectId ? (() => {
@@ -7011,8 +7352,13 @@ function PanoramaNodeContent({
       camera.position.set(0, 0, 0.1);
       cameraRef.current = camera;
 
-      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      const renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: true,
+        preserveDrawingBuffer: true,
+        powerPreference: 'low-power',
+      });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.2));
       renderer.setSize(width, height);
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.setClearColor(0x1a1a1a, 1);
@@ -7097,16 +7443,43 @@ function PanoramaNodeContent({
         setPhi: (p: number) => { phi = p; }
       };
 
+      let animLoopActive = false;
       const animate = () => {
+        if (!animLoopActive) return;
         animationFrameRef.current = requestAnimationFrame(animate);
         renderer.render(scene, camera);
       };
-      animate();
+      const startAnim = () => {
+        if (animLoopActive) return;
+        animLoopActive = true;
+        animate();
+      };
+      const stopAnim = () => {
+        animLoopActive = false;
+        cancelAnimationFrame(animationFrameRef.current);
+      };
+      let inViewport = true;
+      const syncAnimState = () => {
+        if (document.hidden || !inViewport) stopAnim();
+        else startAnim();
+      };
+      document.addEventListener('visibilitychange', syncAnimState);
+      const io = new IntersectionObserver(
+        (entries) => {
+          inViewport = entries[0]?.isIntersecting ?? false;
+          syncAnimState();
+        },
+        { root: null, rootMargin: '100px', threshold: 0 }
+      );
+      io.observe(container);
+      syncAnimState();
 
       updateCamera();
 
       cleanupFn = () => {
-        cancelAnimationFrame(animationFrameRef.current);
+        io.disconnect();
+        document.removeEventListener('visibilitychange', syncAnimState);
+        stopAnim();
         controlsRef.current?.dispose();
         renderer.dispose();
         if (container.contains(renderer.domElement)) {
@@ -7448,7 +7821,7 @@ function PanoramaNodeContent({
     document.body.appendChild(container);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.appendChild(renderer.domElement);
@@ -8008,11 +8381,6 @@ function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onEyedropp
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [selectedFigureId, setSelectedFigureId] = useState<string | null>(null);
   const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'scale'>('translate');
-  const renderCountRef = useRef(0);
-  renderCountRef.current++;
-  const currentRenderCount = renderCountRef.current;
-
-  // 拖拽状态
   const isDraggingFigureRef = useRef(false);
   const draggingFigureIdRef = useRef<string | null>(null);
 
@@ -8021,7 +8389,6 @@ function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onEyedropp
 
   const backgroundImage = node.backgroundImage ?? '';
   const figures = node.figures ?? [];
-  console.log('Director3DNodeContent render #' + currentRenderCount + ', node.id:', node.id, 'figures:', figures.length);
 
   // 处理全屏截图
   useEffect(() => {
@@ -8074,8 +8441,13 @@ function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onEyedropp
       camera.lookAt(0, 0, 0);
       cameraRef.current = camera;
 
-      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      const renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: true,
+        preserveDrawingBuffer: true,
+        powerPreference: 'low-power',
+      });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.2));
       renderer.setSize(width, height);
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.setClearColor(0x333333, 1);
@@ -8355,20 +8727,46 @@ function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onEyedropp
         setPhi: (p: number) => { phi = p; }
       };
 
+      let animLoopActive = false;
       const animate = () => {
+        if (!animLoopActive) return;
         animationFrameRef.current = requestAnimationFrame(animate);
-        // TransformControls 需要在渲染后手动更新才能显示操纵轴
         if (transformControls.object) {
           transformControls.update();
         }
         renderer.render(scene, camera);
       };
-      animate();
+      const startAnim = () => {
+        if (animLoopActive) return;
+        animLoopActive = true;
+        animate();
+      };
+      const stopAnim = () => {
+        animLoopActive = false;
+        cancelAnimationFrame(animationFrameRef.current);
+      };
+      let inViewport = true;
+      const syncAnimState = () => {
+        if (document.hidden || !inViewport) stopAnim();
+        else startAnim();
+      };
+      document.addEventListener('visibilitychange', syncAnimState);
+      const io = new IntersectionObserver(
+        (entries) => {
+          inViewport = entries[0]?.isIntersecting ?? false;
+          syncAnimState();
+        },
+        { root: null, rootMargin: '100px', threshold: 0 }
+      );
+      io.observe(container);
+      syncAnimState();
 
       updateCamera();
 
       cleanupFn = () => {
-        cancelAnimationFrame(animationFrameRef.current);
+        io.disconnect();
+        document.removeEventListener('visibilitychange', syncAnimState);
+        stopAnim();
         controlsRef.current?.dispose();
         if (textureRef.current) {
           textureRef.current.dispose();
@@ -9035,10 +9433,12 @@ function GridSplitNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEy
     const sourceIds = incomingEdges.map(e => e.sourceId);
     const sourceNodes = nodes.filter(n => sourceIds.includes(n.id));
 
-    // 从源节点获取第一张图片
+    // 从源节点取当前展示的一张图（与参考槽 / 生成逻辑一致）
     for (const n of sourceNodes) {
-      if (n.images && n.images.length > 0) {
-        return n.images[0];
+      const imgs = n.images;
+      if (imgs && imgs.length > 0) {
+        const idx = Math.min(Math.max(0, n.currentImageIndex ?? 0), imgs.length - 1);
+        return imgs[idx];
       }
     }
     return undefined;
@@ -9149,7 +9549,7 @@ function GridSplitNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEy
   return (
     <div className="flex flex-col h-full min-h-0 gap-1 p-2 overflow-y-auto">
       {/* 图片预览带宫格框：随节点窗口高度伸缩 */}
-      <div ref={previewRef} className="relative w-full flex-1 min-h-[120px] min-w-0 rounded-lg border border-[#333] bg-[#111] overflow-hidden">
+      <div ref={previewRef} className="relative w-full flex-1 min-h-[240px] min-w-0 rounded-lg border border-[#333] bg-[#111] overflow-hidden">
         <div className="absolute inset-0 flex items-center justify-center p-1 min-h-0">
           <div
             className="relative rounded border border-[#333] bg-[#111] overflow-hidden mx-auto"
@@ -9163,7 +9563,7 @@ function GridSplitNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEy
               <>
                 <OptimizedImage
                   base64={displayImage}
-                  maxSide={960}
+                  maxSide={1440}
                   quality={0.62}
                   className="w-full h-full object-cover"
                   alt="待拆分图片"
@@ -9247,7 +9647,7 @@ function GridSplitNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEy
           className={`py-1 px-2 rounded text-[10px] flex items-center gap-1 ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600 text-white' : 'bg-cyan-700 hover:bg-cyan-600 text-white'}`}
           title={eyedropperTargetNodeId === node.id ? "取消吸取" : "吸取图片"}
         >
-          <EyedropperIcon size={10} /> 吸管
+          <EyedropperIcon size={15} /> 吸管
         </button>
         <button
           onPointerDown={(e) => e.stopPropagation()}
@@ -9327,7 +9727,13 @@ function GridMergeNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEy
     const sourceNodes = nodes.filter(n => sourceIds.includes(n.id));
 
     // 从源节点获取所有图片
-    return sourceNodes.flatMap(n => n.images ?? []);
+    return sourceNodes.flatMap((n) => {
+      const imgs = n.images ?? [];
+      if (!imgs.length) return [];
+      const idx = Math.min(Math.max(0, n.currentImageIndex ?? 0), imgs.length - 1);
+      const b = imgs[idx];
+      return b ? [b] : [];
+    });
   })();
 
   // 导入多张图片
@@ -9436,7 +9842,7 @@ function GridMergeNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEy
   return (
     <div className="flex flex-col h-full min-h-0 gap-1 p-2 overflow-y-auto">
       {/* 图片预览带宫格框：随节点窗口高度伸缩 */}
-      <div ref={previewRef} className="relative w-full flex-1 min-h-[120px] min-w-0 rounded-lg border border-[#333] bg-[#111] overflow-hidden">
+      <div ref={previewRef} className="relative w-full flex-1 min-h-[240px] min-w-0 rounded-lg border border-[#333] bg-[#111] overflow-hidden">
         <div className="absolute inset-0 flex items-center justify-center p-1 min-h-0">
           <div
             className="relative rounded border border-[#333] bg-[#111] overflow-hidden mx-auto"
@@ -9467,7 +9873,7 @@ function GridMergeNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEy
                           <>
                             <OptimizedImage
                               base64={img}
-                              maxSide={960}
+                              maxSide={1440}
                               quality={0.62}
                               className="w-full h-full object-cover"
                               alt={`格${idx + 1}`}
@@ -9551,7 +9957,7 @@ function GridMergeNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEy
           className={`py-1 px-2 rounded text-[10px] flex items-center gap-1 ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600 text-white' : 'bg-cyan-700 hover:bg-cyan-600 text-white'}`}
           title={eyedropperTargetNodeId === node.id ? "取消吸取" : "吸取图片"}
         >
-          <EyedropperIcon size={10} /> 吸管
+          <EyedropperIcon size={15} /> 吸管
         </button>
         <button
           onPointerDown={(e) => e.stopPropagation()}
@@ -9604,7 +10010,7 @@ function RefPickBar({
   slots: IncomingRefSlot[];
   disabled?: boolean;
   onInsert: (token: string) => void;
-  /** 仅 AI 对话节点传 1.5；其它节点默认 1 */
+  /** 仅 AI 对话节点传 CHAT_PANEL_FONT_SCALE；其它节点默认 1 */
   uiScale?: number;
 }) {
   if (!slots.length) return null;
@@ -9634,8 +10040,10 @@ function RefPickBar({
 }
 
 // ==================== 对话节点组件 ====================
-/** AI 对话节点界面文字相对原设计的倍数（与「字号」存盘值相乘） */
-const CHAT_PANEL_FONT_SCALE = 1.5;
+/** AI 对话节点界面文字相对原设计的倍数（与「字号」存盘值相乘；与节点内 1.95×1.5 对齐） */
+const CHAT_PANEL_FONT_SCALE = 2.925;
+/** 新建 / 重置时 AI 对话节点默认高度（与下方 chatInputHeight 比例公式一致） */
+const CHAT_NODE_DEFAULT_PIXEL_HEIGHT = 1840;
 const CHAT_FONT_LS_KEY = 'wxcanvas-chat-font-px';
 function clampChatFontPx(n: number): number {
   if (!Number.isFinite(n)) return 14;
@@ -10119,10 +10527,13 @@ function ChatNodeContent({
       </div>
 
       {/* 模型选择 */}
-      <div className="flex items-center gap-2 px-3 py-2 bg-[#252525] border-b border-[#333]" style={{ fontSize: fs(12) }}>
+      <div
+        className="flex items-center gap-2 px-3 py-2 bg-[#252525] border-b border-[#333]"
+        style={{ fontSize: 27 }}
+      >
         <span className="text-gray-400">模型:</span>
         <select
-          className="bg-[#121212] border border-[#444] rounded px-2 py-1 text-gray-300 outline-none focus:border-rose-500 max-w-[330px]"
+          className="nodemodel-select bg-[#121212] border border-[#444] rounded px-2 py-1 text-gray-300 outline-none focus:border-rose-500 max-w-[330px]"
           value={normalizeDeepSeekChatModelId(node.model || DEFAULT_DEEPSEEK_CHAT_MODEL_ID).trim()}
           onChange={(e) => onUpdate({ model: e.target.value })}
           onPointerDown={(e) => e.stopPropagation()}
@@ -10169,9 +10580,10 @@ function ChatNodeContent({
         </button>
       </div>
 
-      {/* 消息列表 */}
+      {/* 消息列表 : 底部输入区（功能+引用+文本框）垂直空间 = 2 : 1 */}
+      <div className="flex min-h-0 flex-1 flex-col">
       <div
-        className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0 chat-messages"
+        className="chat-messages min-h-0 flex-[2_1_0%] overflow-y-auto p-3 space-y-3"
         style={{ userSelect: 'text' }}
         onPointerDown={(e) => e.stopPropagation()}
       >
@@ -10369,8 +10781,8 @@ function ChatNodeContent({
         )}
       </div>
 
-      {/* 输入区域 */}
-      <div className="p-2 bg-[#252525] border-t border-[#333] shrink-0">
+      {/* 输入区域（与上方消息区 flex 2:1） */}
+      <div className="flex min-h-0 flex-[1_1_0%] flex-col overflow-y-auto border-t border-[#333] bg-[#252525] p-2">
         {/* 快捷功能：置于文字输入框上方 */}
         <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-md border border-[#333] bg-[#222] px-2 py-1.5" style={{ fontSize: fs(10) }}>
           <span className="shrink-0 text-gray-500">功能</span>
@@ -10456,6 +10868,7 @@ function ChatNodeContent({
             <SendIcon size={fs(14)} />
           </button>
         </div>
+      </div>
       </div>
     </div>
   );

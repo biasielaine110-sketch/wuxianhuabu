@@ -2,6 +2,202 @@
 @tailwind components;
 @tailwind utilities;
 
+/**
+ * 画布节点内正文字号：在 Tailwind text-* 基础上 ×1.95×1.5（相对原始再 ×1.5；画幅/分辨率/张数见 .nodemeta-skip-scale）。
+ * AI 对话节点用 CHAT_PANEL_FONT_SCALE（与 1.95×1.5 对齐）；顶栏标题单独规则。
+ */
+@layer utilities {
+  .canvas-node-font-195 :where(.text-xs) {
+    font-size: calc(0.75rem * 1.95 * 1.5) !important;
+    line-height: calc(1rem * 1.95 * 1.5) !important;
+  }
+  .canvas-node-font-195 :where(.text-sm) {
+    font-size: calc(0.875rem * 1.95 * 1.5) !important;
+    line-height: calc(1.25rem * 1.95 * 1.5) !important;
+  }
+  .canvas-node-font-195 :where(.text-base) {
+    font-size: calc(1rem * 1.95 * 1.5) !important;
+    line-height: calc(1.5rem * 1.95 * 1.5) !important;
+  }
+  .canvas-node-font-195 :where(.text-lg) {
+    font-size: calc(1.125rem * 1.95 * 1.5) !important;
+    line-height: calc(1.75rem * 1.95 * 1.5) !important;
+  }
+  .canvas-node-font-195 :where(.text-xl) {
+    font-size: calc(1.25rem * 1.95 * 1.5) !important;
+    line-height: calc(1.75rem * 1.95 * 1.5) !important;
+  }
+  .canvas-node-font-195 :where(.text-2xl) {
+    font-size: calc(1.5rem * 1.95 * 1.5) !important;
+    line-height: calc(2rem * 1.95 * 1.5) !important;
+  }
+  .canvas-node-font-195 :where(.text-\[6px\]) {
+    font-size: calc(6px * 1.95 * 1.5) !important;
+  }
+  .canvas-node-font-195 :where(.text-\[7px\]) {
+    font-size: calc(7px * 1.95 * 1.5) !important;
+  }
+  .canvas-node-font-195 :where(.text-\[8px\]) {
+    font-size: calc(8px * 1.95 * 1.5) !important;
+  }
+  .canvas-node-font-195 :where(.text-\[9px\]) {
+    font-size: calc(9px * 1.95 * 1.5) !important;
+  }
+  .canvas-node-font-195 :where(.text-\[10px\]) {
+    font-size: calc(10px * 1.95 * 1.5) !important;
+  }
+  .canvas-node-font-195 :where(.text-\[11px\]) {
+    font-size: calc(11px * 1.95 * 1.5) !important;
+  }
+  .canvas-node-font-195 :where(.text-\[12px\]) {
+    font-size: calc(12px * 1.95 * 1.5) !important;
+  }
+
+  /**
+   * 宫格拆分 / 宫格合并：在节点内通用 ×1.95×1.5 基础上，正文字号再 ×1.5
+   */
+  .canvas-node-font-195.canvas-node-grid-tool-150 :where(.text-xs) {
+    font-size: calc(0.75rem * 1.95 * 1.5 * 1.5) !important;
+    line-height: calc(1rem * 1.95 * 1.5 * 1.5) !important;
+  }
+  .canvas-node-font-195.canvas-node-grid-tool-150 :where(.text-sm) {
+    font-size: calc(0.875rem * 1.95 * 1.5 * 1.5) !important;
+    line-height: calc(1.25rem * 1.95 * 1.5 * 1.5) !important;
+  }
+  .canvas-node-font-195.canvas-node-grid-tool-150 :where(.text-base) {
+    font-size: calc(1rem * 1.95 * 1.5 * 1.5) !important;
+    line-height: calc(1.5rem * 1.95 * 1.5 * 1.5) !important;
+  }
+  .canvas-node-font-195.canvas-node-grid-tool-150 :where(.text-lg) {
+    font-size: calc(1.125rem * 1.95 * 1.5 * 1.5) !important;
+    line-height: calc(1.75rem * 1.95 * 1.5 * 1.5) !important;
+  }
+  .canvas-node-font-195.canvas-node-grid-tool-150 :where(.text-xl) {
+    font-size: calc(1.25rem * 1.95 * 1.5 * 1.5) !important;
+    line-height: calc(1.75rem * 1.95 * 1.5 * 1.5) !important;
+  }
+  .canvas-node-font-195.canvas-node-grid-tool-150 :where(.text-2xl) {
+    font-size: calc(1.5rem * 1.95 * 1.5 * 1.5) !important;
+    line-height: calc(2rem * 1.95 * 1.5 * 1.5) !important;
+  }
+  .canvas-node-font-195.canvas-node-grid-tool-150 :where(.text-\[6px\]) {
+    font-size: calc(6px * 1.95 * 1.5 * 1.5) !important;
+  }
+  .canvas-node-font-195.canvas-node-grid-tool-150 :where(.text-\[7px\]) {
+    font-size: calc(7px * 1.95 * 1.5 * 1.5) !important;
+  }
+  .canvas-node-font-195.canvas-node-grid-tool-150 :where(.text-\[8px\]) {
+    font-size: calc(8px * 1.95 * 1.5 * 1.5) !important;
+  }
+  .canvas-node-font-195.canvas-node-grid-tool-150 :where(.text-\[9px\]) {
+    font-size: calc(9px * 1.95 * 1.5 * 1.5) !important;
+  }
+  .canvas-node-font-195.canvas-node-grid-tool-150 :where(.text-\[10px\]) {
+    font-size: calc(10px * 1.95 * 1.5 * 1.5) !important;
+  }
+  .canvas-node-font-195.canvas-node-grid-tool-150 :where(.text-\[11px\]) {
+    font-size: calc(11px * 1.95 * 1.5 * 1.5) !important;
+  }
+  .canvas-node-font-195.canvas-node-grid-tool-150 :where(.text-\[12px\]) {
+    font-size: calc(12px * 1.95 * 1.5 * 1.5) !important;
+  }
+  .canvas-node-font-195.canvas-node-grid-tool-150 .canvas-node-window-title {
+    font-size: calc(0.75rem * 1.95 * 1.2 * 1.5) !important;
+    line-height: calc(1rem * 1.95 * 1.2 * 1.5) !important;
+  }
+
+  /** 节点顶栏标题：在正文 text-xs×1.95 基础上再 ×1.2（与非对话「文生图」等标题一致） */
+  .canvas-node-font-195 .canvas-node-window-title {
+    font-size: calc(0.75rem * 1.95 * 1.2) !important;
+    line-height: calc(1rem * 1.95 * 1.2) !important;
+  }
+
+  /** AI 对话节点顶栏「AI对话」：原 0.75rem×2 再 ×1.2 */
+  .canvas-node-root--chat .canvas-node-window-title {
+    font-size: calc(0.75rem * 2 * 1.2) !important;
+    line-height: calc(1rem * 2 * 1.2) !important;
+  }
+
+  /**
+   * 画幅比、分辨率、张数（及同类 meta 控件）：维持 ×1.95，不参与节点内再 ×1.5
+   */
+  .canvas-node-font-195 .nodemeta-skip-scale,
+  .canvas-node-font-195 .nodemeta-skip-scale select,
+  .canvas-node-font-195 .nodemeta-skip-scale option,
+  .canvas-node-font-195 .nodemeta-skip-scale optgroup,
+  .canvas-node-font-195 .nodemeta-skip-scale span {
+    font-size: calc(0.75rem * 1.95) !important;
+    line-height: calc(1rem * 1.95) !important;
+  }
+
+  /**
+   * 「模型」主下拉：闭合框文字 ×1.5；展开列表 option/optgroup 相对原 17px 基准 ÷1.5（原生列表在部分系统上仍可能不完全跟 CSS）
+   */
+  .canvas-node-font-195 select.nodemodel-select {
+    font-size: calc(17px * 1.5) !important;
+    line-height: 1.35 !important;
+    font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+  }
+  .canvas-node-font-195 select.nodemodel-select option,
+  .canvas-node-font-195 select.nodemodel-select optgroup {
+    font-size: calc(17px / 1.5) !important;
+    line-height: 1.35 !important;
+    font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+  }
+  .canvas-node-font-195 select.nodemodel-select optgroup {
+    font-weight: 600 !important;
+  }
+  .canvas-node-root--chat select.nodemodel-select {
+    font-size: calc(18px * 1.5) !important;
+    line-height: 1.35 !important;
+    font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+  }
+  .canvas-node-root--chat select.nodemodel-select option,
+  .canvas-node-root--chat select.nodemodel-select optgroup {
+    font-size: calc(18px / 1.5) !important;
+    line-height: 1.35 !important;
+    font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+  }
+  .canvas-node-root--chat select.nodemodel-select optgroup {
+    font-weight: 600 !important;
+  }
+
+  /**
+   * 图生图：分类 / 预设下拉 — 展开列表相对节点内 text-xs 倍率（0.75rem×1.95×1.5）再 ÷1.5
+   */
+  .canvas-node-font-195 select.i2i-preset-select option,
+  .canvas-node-font-195 select.i2i-preset-select optgroup {
+    font-size: calc(0.75rem * 1.95) !important;
+    line-height: calc(1rem * 1.95) !important;
+    font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+  }
+
+  /**
+   * 画布外沿工具区（左侧工具、设置/项目行、吸管提示、右键菜单）：常用字阶 ×1.5
+   */
+  .canvas-chrome-150 :where(.text-xs) {
+    font-size: calc(0.75rem * 1.5) !important;
+    line-height: calc(1rem * 1.5) !important;
+  }
+  .canvas-chrome-150 :where(.text-sm) {
+    font-size: calc(0.875rem * 1.5) !important;
+    line-height: calc(1.25rem * 1.5) !important;
+  }
+  .canvas-chrome-150 :where(.text-base) {
+    font-size: calc(1rem * 1.5) !important;
+    line-height: calc(1.5rem * 1.5) !important;
+  }
+  .canvas-chrome-150 :where(.text-\[9px\]) {
+    font-size: calc(9px * 1.5) !important;
+  }
+  .canvas-chrome-150 :where(.text-\[10px\]) {
+    font-size: calc(10px * 1.5) !important;
+  }
+  .canvas-chrome-150 :where(.text-\[11px\]) {
+    font-size: calc(11px * 1.5) !important;
+  }
+}
+
 @layer base {
   body {
     margin: 0;
