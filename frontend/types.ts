@@ -1,4 +1,4 @@
-export type NodeType = 'text' | 'image' | 't2i' | 'i2i' | 'panorama' | 'annotation' | 'gridSplit' | 'gridMerge' | 'panoramaT2i' | 'director3d' | 'chat' | 'video';
+export type NodeType = 'text' | 'image' | 't2i' | 'i2i' | 'panorama' | 'annotation' | 'gridSplit' | 'gridMerge' | 'panoramaT2i' | 'director3d' | 'chat' | 'video' | 'audio';
 
 // 3D导演台节点
 export interface Director3DNode extends CanvasNode {
@@ -96,6 +96,12 @@ export interface CanvasNode {
   /** 视频时长（秒）：grok-video-3 为 5–30 档；sora-2-vvip 仅 4 / 8 / 12；veo3.1-fast 在 ToAPIs 文档为固定 8 秒 */
   videoDuration?: number;
   videoResolution?: '480p' | '720p' | '1080p' | '4k';
+  /** 语音参考：音频 base64 数据 */
+  audio?: string;
+  /** 语音参考：音频 URL（上传后获得） */
+  audioUrl?: string;
+  /** 语音参考：音频时长（秒） */
+  audioDuration?: number;
 }
 
 export interface Edge {
@@ -156,4 +162,15 @@ export interface ChatMessage {
   image?: string; // 可选的图片内容（单图；与 images 二选一或并存时优先 images）
   /** 多参考图（用户消息）；展示与历史回放用 */
   images?: string[];
+}
+
+// 语音/音频节点
+export interface AudioNode extends CanvasNode {
+  type: 'audio';
+  /** 音频 base64 数据 */
+  audio?: string;
+  /** 音频时长（秒） */
+  audioDuration?: number;
+  /** 音频名称（文件名） */
+  audioName?: string;
 }

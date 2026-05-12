@@ -1,12 +1,17 @@
 import type { CanvasNode, Edge } from './types';
 
-/** 汇入某一节点的参考槽（图 / 视频），编号 @R1、@R2… 与连线顺序一致 */
+/** 汇入某一节点的参考槽（图 / 视频 / 语音），编号 @R1、@R2… 与连线顺序一致 */
 export type IncomingRefSlot = {
   n: number;
-  kind: 'image' | 'video';
+  kind: 'image' | 'video' | 'audio';
   label: string;
   imageBase64?: string;
+  imageBase64s?: string[]; // 多图模式：返回所有图片
   videoUrl?: string;
+  /** 语音参考：音频 base64 */
+  audioBase64?: string;
+  /** 语音参考：音频时长（秒） */
+  audioDuration?: number;
   edgeId: string;
   sourceNodeId: string;
 };
@@ -14,6 +19,7 @@ export type IncomingRefSlot = {
 function shortSourceLabel(src: CanvasNode): string {
   if (src.type === 'text') return '文本';
   if (src.type === 'video') return '视频';
+  if (src.type === 'audio') return '语音';
   if (src.type === 'image') return '图片';
   if (src.type === 't2i' || src.type === 'i2i') return src.type === 't2i' ? '文生图' : '图生图';
   return src.type;
@@ -31,17 +37,18 @@ export function buildIncomingRefSlots(
     const src = nodes.find((x) => x.id === edge.sourceId);
     if (!src) continue;
     const prefix = shortSourceLabel(src);
-    /** 多图 / 多视频源节点：仅当前展示的一张图（或一个视频）作为该连线的参考，不展开全部媒体 */
+    /** 多图源节点：返回该连线源节点的所有图片，供图生图多图参考使用 */
     if (src.images?.length) {
-      const idx = Math.min(Math.max(0, src.currentImageIndex ?? 0), src.images.length - 1);
-      const img = src.images[idx];
-      if (img) {
+      // 收集所有非空图片
+      const allImages = src.images.filter(img => img && img !== '');
+      if (allImages.length > 0) {
         n += 1;
         slots.push({
           n,
           kind: 'image',
-          label: `${prefix}·图${idx + 1}`,
-          imageBase64: img,
+          label: `${prefix}·${allImages.length}张图`,
+          imageBase64: allImages[0], // 保留第一张作为兼容性字段
+          imageBase64s: allImages,    // 新增：返回所有图片数组
           edgeId: edge.id,
           sourceNodeId: src.id,
         });
@@ -61,6 +68,19 @@ export function buildIncomingRefSlots(
           sourceNodeId: src.id,
         });
       }
+    }
+    /** 语音参考节点 */
+    if (src.type === 'audio' && src.audio) {
+      n += 1;
+      slots.push({
+        n,
+        kind: 'audio',
+        label: `${prefix}${src.audioDuration ? `·${formatDuration(src.audioDuration)}` : ''}`,
+        audioBase64: src.audio,
+        audioDuration: src.audioDuration,
+        edgeId: edge.id,
+        sourceNodeId: src.id,
+      });
     }
   }
   return slots;
@@ -169,8 +189,15 @@ export async function resolveSlotImagesForIndices(
       missing.push(num);
       continue;
     }
-    if (s.kind === 'image' && s.imageBase64) {
-      base64s.push(s.imageBase64);
+    if (s.kind === 'image') {
+      // 优先使用多图数组 imageBase64s
+      if (s.imageBase64s && s.imageBase64s.length > 0) {
+        base64s.push(...s.imageBase64s);
+      } else if (s.imageBase64) {
+        base64s.push(s.imageBase64);
+      } else {
+        missing.push(num);
+      }
       continue;
     }
     if (s.kind === 'video' && s.videoUrl) {
@@ -182,4 +209,25 @@ export async function resolveSlotImagesForIndices(
     missing.push(num);
   }
   return { base64s, missing };
+}
+
+/** 格式化时长（秒）为 MM:SS 格式 */
+function formatDuration(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+/** 从参考槽中解析语音参考（base64 格式） */
+export function resolveSlotAudios(slots: IncomingRefSlot[]): { base64: string; duration?: number }[] {
+  const audios: { base64: string; duration?: number }[] = [];
+  for (const slot of slots) {
+    if (slot.kind === 'audio' && slot.audioBase64) {
+      audios.push({
+        base64: slot.audioBase64,
+        duration: slot.audioDuration,
+      });
+    }
+  }
+  return audios;
 }

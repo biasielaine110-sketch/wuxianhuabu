@@ -44,6 +44,7 @@ import {
   parseRefPickIndices,
   stripRefMarkers,
   resolveSlotImagesForIndices,
+  resolveSlotAudios,
   type IncomingRefSlot,
 } from './referenceSlots';
 import type { DownloadPathPersisted } from './services/downloadPathSettings';
@@ -103,6 +104,8 @@ const CopyIcon = ({ size = 16 }) => <svg xmlns="http://www.w3.org/2000/svg" widt
 const MessageIcon = ({ size = 16 }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
 // 发送图标
 const SendIcon = ({ size = 16 }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>;
+// 语音/音频图标
+const AudioIcon = ({ size = 16 }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>;
 
 /** ToAPIs 等返回的 base64 可能是 PNG/WebP，一律按魔数识别后再喂给 Image/canvas */
 function sniffImageMimeFromBase64(raw: string): string {
@@ -325,7 +328,7 @@ function OptimizedImage({
   return <img src={src} className={className} alt={alt} onClick={onClick} onDoubleClick={onDoubleClick} draggable={draggable} />;
 }
 
-const INPUT_NODE_TYPES: NodeType[] = ['t2i', 'i2i', 'image', 'panorama', 'annotation', 'gridSplit', 'gridMerge', 'panoramaT2i', 'director3d', 'chat', 'video'];
+const INPUT_NODE_TYPES: NodeType[] = ['t2i', 'i2i', 'image', 'panorama', 'annotation', 'gridSplit', 'gridMerge', 'panoramaT2i', 'director3d', 'chat', 'video', 'audio'];
 
 type CanvasProject = CanvasProjectSnapshot;
 
@@ -1177,7 +1180,8 @@ export default function App() {
     'image': { width: 480, height: 528 },
     'gridSplit': { width: 840, height: 600 },
     'gridMerge': { width: 840, height: 600 },
-    'video': { width: 720, height: 840 },
+    'video': { width: 800, height: 1000 },
+    'audio': { width: 400, height: 300 },
   };
 
   // 节点最小尺寸限制（按类型；与默认倍率一致）
@@ -4032,6 +4036,10 @@ export default function App() {
       const combinedPrompt = stripRefMarkers(combinedRaw) || combinedRaw;
       const { base64s: imageInputs } = await resolveSlotImagesForIndices(slots, pickIndices);
 
+      // 解析语音参考
+      const audioRefs = resolveSlotAudios(slots);
+      const audioBase64 = audioRefs.length > 0 ? audioRefs[0].base64 : undefined;
+
       let videoUrl: string;
       const videoModel = videoNodeModelToToApis(node.model);
 
@@ -4052,6 +4060,7 @@ export default function App() {
         aspectRatio: node.aspectRatio || '16:9',
         resolution,
         referenceImagesBase64: imageInputs.slice(0, 3),
+        referenceAudioBase64: audioBase64,
         signal: ac.signal,
       });
 
@@ -4152,6 +4161,11 @@ export default function App() {
       headerTitle = '视频生成';
       borderColor = isSelected ? 'border-amber-500' : 'border-[#333]';
       shadowColor = isSelected ? 'shadow-amber-900/30' : '';
+    } else if (node.type === 'audio') {
+      headerIcon = <AudioIcon size={14} className="text-blue-400" />;
+      headerTitle = '语音节点';
+      borderColor = isSelected ? 'border-blue-500' : 'border-[#333]';
+      shadowColor = isSelected ? 'shadow-blue-900/30' : '';
     } else if (node.type === 'chat') {
       headerIcon = <MessageIcon size={14} className="text-rose-400" />;
       headerTitle = 'AI对话';
@@ -4461,26 +4475,29 @@ export default function App() {
           const isSora = isVideoSoraStyleModel(vm);
           const isVeo = isVideoVeoStyleModel(vm);
           const isGroDur = isVideoGrokDurationStyleModel(vm);
+          const vSlots = buildIncomingRefSlots(node.id, edges, nodes);
+          const imageSlots = vSlots.filter((s) => s.kind === 'image');
+          const videoSlots = vSlots.filter((s) => s.kind === 'video');
+          const audioSlots = vSlots.filter((s) => s.kind === 'audio');
           return (
-          <div className="flex flex-col gap-1.5 p-2 bg-[#252525] border-b border-[#333] text-xs shrink-0">
+          <div className="flex flex-col gap-3 p-3 bg-[#252525] border-b border-[#333] text-xs shrink-0">
             {(() => {
-              const vSlots = buildIncomingRefSlots(node.id, edges, nodes);
               return (
-                <div className="flex items-center gap-2 px-2 py-1 bg-[#1a1a1a] rounded text-[10px]">
-                  <span className="text-gray-400 shrink-0">参考:</span>
-                  <span className="text-green-400 font-medium shrink-0">
-                    {vSlots.filter((s) => s.kind === 'image').length}图
-                    {vSlots.some((s) => s.kind === 'video') ? (
-                      <span className="text-amber-400">
-                        {' '}
-                        · {vSlots.filter((s) => s.kind === 'video').length}视频
-                      </span>
-                    ) : null}
+                <div className="flex items-center gap-3 px-3 py-2 bg-[#1a1a1a] rounded-lg text-xs">
+                  <span className="text-gray-400 shrink-0 font-medium">参考素材:</span>
+                  <span className="text-green-400 font-semibold shrink-0">
+                    {imageSlots.length} 图
+                    {videoSlots.length > 0 && (
+                      <span className="text-amber-400"> · {videoSlots.length} 视频</span>
+                    )}
+                    {audioSlots.length > 0 && (
+                      <span className="text-blue-400"> · {audioSlots.length} 语音</span>
+                    )}
                   </span>
-                  <div className="flex gap-1 ml-2 flex-wrap">
+                  <div className="flex gap-2 ml-2 flex-wrap">
                     {vSlots.slice(0, 6).map((slot) => (
                       <div key={`${node.id}-vslot-${slot.n}`} className="relative group">
-                        <div className="absolute -top-0.5 left-0 z-[1] rounded bg-black/70 px-0.5 text-[7px] font-bold leading-none text-cyan-300">
+                        <div className="absolute -top-1 left-0 z-[1] rounded bg-black/70 px-1 text-[8px] font-bold leading-none text-cyan-300">
                           R{slot.n}
                         </div>
                         {slot.kind === 'image' && slot.imageBase64 ? (
@@ -4489,18 +4506,26 @@ export default function App() {
                             maxSide={128}
                             quality={0.7}
                             alt={slot.label}
-                            className="h-6 w-6 rounded border border-[#444] object-cover"
+                            className="h-8 w-8 rounded border border-[#444] object-cover"
                           />
                         ) : slot.kind === 'video' && slot.videoUrl ? (
                           <video
                             src={slot.videoUrl}
-                            className="h-6 w-6 rounded border border-[#444] object-cover"
+                            className="h-8 w-8 rounded border border-[#444] object-cover"
                             muted
                             playsInline
                             preload="metadata"
                           />
+                        ) : slot.kind === 'audio' ? (
+                          <div className="h-8 w-8 rounded border border-[#444] bg-[#333] flex items-center justify-center" title={slot.label}>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+                              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                              <line x1="12" x2="12" y1="19" y2="22"/>
+                            </svg>
+                          </div>
                         ) : (
-                          <div className="h-6 w-6 rounded border border-[#444] bg-[#333]" title={slot.label} />
+                          <div className="h-8 w-8 rounded border border-[#444] bg-[#333]" title={slot.label} />
                         )}
                         <button
                           onPointerDown={(e) => {
@@ -4510,10 +4535,10 @@ export default function App() {
                             e.stopPropagation();
                             handleDeleteEdge(slot.edgeId);
                           }}
-                          className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-red-600 text-white opacity-0 transition-opacity hover:bg-red-500 group-hover:opacity-100"
+                          className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-white opacity-0 transition-opacity hover:bg-red-500 group-hover:opacity-100"
                           title="取消引用"
                         >
-                          <span className="text-[6px] leading-none">×</span>
+                          <span className="text-[7px] leading-none">×</span>
                         </button>
                       </div>
                     ))}
@@ -4526,16 +4551,16 @@ export default function App() {
                       e.stopPropagation();
                       setEyedropperTargetNodeId(node.id);
                     }}
-                    className={`ml-auto shrink-0 rounded px-2 py-0.5 text-white ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
-                    title={eyedropperTargetNodeId === node.id ? '取消吸取' : '吸取参考（图片 / 视频节点）'}
+                    className={`ml-auto shrink-0 rounded-lg px-3 py-1.5 text-white text-xs font-medium ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
+                    title={eyedropperTargetNodeId === node.id ? '取消吸取' : '吸取参考（图片 / 视频 / 语音节点）'}
                   >
-                    <EyedropperIcon size={12} />
+                    <EyedropperIcon size={14} />
                   </button>
                 </div>
               );
             })()}
-            <div className="text-[10px] text-gray-500 px-1">
-              需 OpenAI 兼容 + ToAPIs Base URL。最多 3 张参考图（视频将截取关键帧）。
+            <div className="text-xs text-gray-500 px-1 leading-relaxed">
+              需 OpenAI 兼容 + ToAPIs Base URL。最多 3 张参考图（视频将截取关键帧）{audioSlots.length > 0 && <span className="text-blue-400 font-medium">· 已连接语音参考</span>}。
               {isVeo
                 ? ' · Veo：固定 8 秒；画幅 16:9 或 9:16；720p/1080p/4k'
                 : isSora
@@ -4549,9 +4574,9 @@ export default function App() {
                 分辨率：Grok 系路径已随请求发送 resolution；若成品仍为 480p，多为上游默认。
               </div>
             )}
-            <div className="flex flex-wrap items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-3">
             <select
-                className="nodemodel-select bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500 min-w-[140px]"
+                className="nodemodel-select bg-[#121212] border border-[#444] rounded-lg px-3 py-2 text-gray-300 outline-none focus:border-amber-500 min-w-[160px] text-sm"
                 value={modelSelectValue}
                 onChange={(e) => {
                   const m = e.target.value;
@@ -4980,7 +5005,7 @@ export default function App() {
           )}
 
           {node.type === 'video' && (
-            <div className="w-full h-[240px] shrink-0 bg-black relative border-b border-[#333] overflow-hidden group">
+            <div className="w-full h-[480px] shrink-0 bg-black relative border-b border-[#333] overflow-hidden group">
               {videoUrls.length > 0 ? (
                 <>
                 <video
@@ -5060,6 +5085,84 @@ export default function App() {
                   ) : (
                     <span className="relative z-[2]">生成后在此预览（链接约 24 小时内有效）</span>
                   )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 语音节点内容 */}
+          {node.type === 'audio' && (
+            <div className="flex flex-col gap-2 p-3 bg-[#1a1a1a] shrink-0">
+              {node.audio ? (
+                <div className="flex flex-col gap-2">
+                  <audio
+                    src={node.audio}
+                    controls
+                    className="w-full h-8"
+                  />
+                  <div className="flex items-center justify-between text-[10px] text-gray-400">
+                    <span>{node.audioName || '音频文件'}</span>
+                    {node.audioDuration && (
+                      <span>{Math.floor(node.audioDuration / 60)}:{String(Math.floor(node.audioDuration % 60)).padStart(2, '0')}</span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={() => {
+                      if (confirm('确定要删除音频吗？')) {
+                        handleUpdateNode(node.id, { audio: undefined, audioDuration: undefined, audioName: undefined });
+                      }
+                    }}
+                    className="text-xs text-red-400 hover:text-red-300 px-2 py-1 border border-red-600/30 rounded hover:bg-red-900/20"
+                  >
+                    删除音频
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <div className="text-[10px] text-gray-500 text-center py-2">
+                    上传或录制音频作为视频生成的语音参考
+                  </div>
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    id={`audio-upload-${node.id}`}
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                          const base64 = ev.target?.result as string;
+                          // 获取音频时长
+                          const audio = new Audio();
+                          audio.onloadedmetadata = () => {
+                            handleUpdateNode(node.id, {
+                              audio: base64,
+                              audioDuration: audio.duration,
+                              audioName: file.name,
+                            });
+                          };
+                          audio.src = base64;
+                        };
+                        reader.readAsDataURL(file);
+                      }
+                      e.target.value = '';
+                    }}
+                  />
+                  <label
+                    htmlFor={`audio-upload-${node.id}`}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className="flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded cursor-pointer"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="17 8 12 3 7 8"/>
+                      <line x1="12" x2="12" y1="3" y2="15"/>
+                    </svg>
+                    上传音频
+                  </label>
                 </div>
               )}
             </div>
@@ -5260,7 +5363,7 @@ export default function App() {
                   />
                 )}
                 <textarea
-                  className="w-full h-full bg-[#121212] text-gray-200 text-sm p-2 rounded border border-[#333] focus:outline-none focus:border-blue-500 transition-colors resize-none"
+                  className="w-full h-full bg-[#121212] text-gray-200 text-sm p-3 rounded-lg border border-[#444] focus:outline-none focus:border-blue-500 transition-colors resize-none leading-relaxed"
                   value={node.prompt}
                   onChange={(e) => handleUpdateNode(node.id, { prompt: e.target.value })}
                   placeholder={
@@ -5273,7 +5376,7 @@ export default function App() {
                           : '输入编辑指令；可用 @R1 引用参考图或视频帧…'
                   }
                   onPointerDown={(e) => e.stopPropagation()}
-                  style={{ minHeight: node.type === 'i2i' ? '72px' : '96px' }}
+                  style={{ minHeight: node.type === 'i2i' ? '80px' : '120px' }}
                 />
               </div>
               {(node.type === 't2i' || node.type === 'i2i') && (
@@ -5700,6 +5803,9 @@ export default function App() {
         </button>
         <button className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-amber-600 hover:text-white flex items-center gap-2" onPointerDown={() => handleAddNode('video')}>
           <VideoIcon size={14} /> 新建视频生成节点
+        </button>
+        <button className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-blue-600 hover:text-white flex items-center gap-2" onPointerDown={() => handleAddNode('audio')}>
+          <AudioIcon size={14} /> 新建语音节点
         </button>
         <button className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-blue-600 hover:text-white flex items-center gap-2" onPointerDown={() => handleAddNode('text')}>
           <TextIcon size={14} /> 新建文本节点
@@ -10016,8 +10122,8 @@ function RefPickBar({
   if (!slots.length) return null;
   const sp = (px: number) => Math.round(px * uiScale);
   return (
-    <div className="flex flex-wrap items-center gap-1 px-0.5 pt-1" style={{ fontSize: sp(10) }}>
-      <span className="text-gray-500 shrink-0">引用参考</span>
+    <div className="flex flex-wrap items-center gap-2 px-1 pt-1.5 pb-1" style={{ fontSize: sp(11) }}>
+      <span className="text-gray-500 shrink-0 font-medium">引用参考:</span>
       {slots.map((s) => (
         <button
           key={`${s.edgeId}-r${s.n}-${s.kind}`}
@@ -10028,13 +10134,13 @@ function RefPickBar({
             e.stopPropagation();
             onInsert(`@R${s.n}`);
           }}
-          className="rounded border border-cyan-900/55 bg-cyan-950/35 px-1.5 py-0.5 font-medium text-cyan-100 hover:bg-cyan-900/45 disabled:cursor-not-allowed disabled:opacity-35"
+          className="rounded-lg border border-cyan-800/60 bg-cyan-950/40 px-2 py-1 font-semibold text-cyan-200 hover:bg-cyan-900/50 disabled:cursor-not-allowed disabled:opacity-35 text-xs"
           title={s.label}
         >
           @R{s.n}
         </button>
       ))}
-      <span className="text-gray-600 leading-snug">点选插入；亦可键盘输入 @R 序号筛选参考项</span>
+      <span className="text-gray-600 leading-snug">点击插入 / 键盘输入 @R</span>
     </div>
   );
 }
@@ -10450,13 +10556,14 @@ function ChatNodeContent({
     };
   })();
 
+  const totalRefImages = refSlots.reduce((sum, slot) => sum + (slot.imageBase64s?.length || (slot.imageBase64 ? 1 : 0)), 0);
   return (
     <div className="flex flex-col h-full bg-[#1a1a1a] rounded-b-xl overflow-hidden">
       {/* 参考区：图片 + 视频 */}
       <div className="flex items-center gap-2 px-2 py-1.5 bg-[#252525] border-b border-[#333] shrink-0" style={{ fontSize: fs(10) }}>
         <span className="text-gray-400 shrink-0">参考:</span>
         <span className="text-green-400 font-medium shrink-0">
-          {refSlots.filter((s) => s.kind === 'image').length}图
+          {totalRefImages}图
           {refSlots.some((s) => s.kind === 'video') ? (
             <span className="text-amber-400"> · {refSlots.filter((s) => s.kind === 'video').length}视频</span>
           ) : null}
@@ -10465,9 +10572,27 @@ function ChatNodeContent({
           {(showAllRefs ? refSlots : refSlots.slice(0, 6)).map((slot) => (
             <div key={`${slot.edgeId}-slot-${slot.n}`} className="relative group">
               <div className="absolute -top-0.5 left-0 z-[1] rounded bg-black/70 px-0.5 font-bold leading-none text-cyan-300" style={{ fontSize: fs(7) }}>
-                R{slot.n}
+                R{slot.n}{slot.imageBase64s && slot.imageBase64s.length > 1 ? `(${slot.imageBase64s.length})` : ''}
               </div>
-              {slot.kind === 'image' && slot.imageBase64 ? (
+              {slot.imageBase64s && slot.imageBase64s.length > 0 ? (
+                <div className="flex gap-0.5">
+                  {slot.imageBase64s.slice(0, 4).map((img, imgIdx) => (
+                    <OptimizedImage
+                      key={`${slot.edgeId}-img-${imgIdx}`}
+                      base64={img}
+                      maxSide={80}
+                      quality={0.72}
+                      alt={`${slot.label}图${imgIdx + 1}`}
+                      className="w-9 h-9 object-cover rounded border border-[#444]"
+                    />
+                  ))}
+                  {slot.imageBase64s.length > 4 && (
+                    <div className="w-9 h-9 rounded border border-[#444] bg-[#333] flex items-center justify-center text-gray-400 text-[8px]">
+                      +{slot.imageBase64s.length - 4}
+                    </div>
+                  )}
+                </div>
+              ) : slot.kind === 'image' && slot.imageBase64 ? (
                 <OptimizedImage
                   base64={slot.imageBase64}
                   maxSide={192}

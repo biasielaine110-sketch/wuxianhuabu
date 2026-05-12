@@ -460,6 +460,56 @@ async function toApisUploadImageBlob(blob: Blob, filename: string, signal?: Abor
   return openAiCompatUploadImageBlob(normalizeBaseUrl(getOpenAiBaseUrl()), apiKey, blob, filename, signal);
 }
 
+/**
+ * ToAPIs：上传音频文件，返回音频 URL。
+ * 用于视频生成时的语音参考。
+ */
+async function toApisUploadAudioBlob(
+  blob: Blob,
+  filename: string,
+  signal?: AbortSignal
+): Promise<string> {
+  const apiKey = getOpenAiSavedKey();
+  if (!apiKey) throw new Error('未配置 API Key。');
+
+  const base = normalizeBaseUrl(getOpenAiBaseUrl());
+  const formData = new FormData();
+  formData.append('file', blob, filename);
+  formData.append('purpose', 'audio'); // 或根据 API 要求调整
+
+  let lastFail = '';
+  for (let attempt = 0; attempt < 3; attempt++) {
+    assertNotAborted(signal);
+    try {
+      const res = await fetch(`${base}/uploads/audios`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: formData,
+        signal,
+      });
+      if (res.ok) {
+        const json = (await res.json()) as { url?: string; id?: string };
+        const url = json.url;
+        if (url) return url;
+        lastFail = await res.text();
+      } else {
+        lastFail = await res.text();
+        if (res.status === 503) {
+          await sleepInterruptible(3_000, signal);
+          continue;
+        }
+      }
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') throw err;
+      lastFail = String(err);
+      await sleepInterruptible(2_000, signal);
+    }
+  }
+  throw new Error(`语音参考上传失败 (404) ${lastFail}`);
+}
+
 async function toApisEditImage(
   base64Images: string[],
   prompt: string,
@@ -776,6 +826,8 @@ export async function toApisGrokVideoGenerate(params: {
   resolution: '480p' | '720p';
   /** 最多 3 张（ToAPIs 文档）；多张会先上传再传 URL */
   referenceImagesBase64?: string[];
+  /** 语音参考：音频 base64 */
+  referenceAudioBase64?: string;
   signal?: AbortSignal;
 }): Promise<string> {
   if (getAiProvider() !== 'openai-compatible') {
@@ -799,6 +851,14 @@ export async function toApisGrokVideoGenerate(params: {
     params.signal
   );
 
+  // 上传语音参考
+  let audioUrl: string | undefined;
+  if (params.referenceAudioBase64) {
+    const { raw, mime } = parseBase64ImageInput(params.referenceAudioBase64);
+    const blob = base64ToBlob(raw, mime || 'audio/mp4');
+    audioUrl = await toApisUploadAudioBlob(blob, 'reference-audio.mp4', params.signal);
+  }
+
   const resolution = params.resolution === '480p' ? '480p' : '720p';
   const body: Record<string, unknown> = {
     model: 'grok-video-3',
@@ -810,6 +870,7 @@ export async function toApisGrokVideoGenerate(params: {
     resolution_name: resolution,
   };
   if (imageUrls.length) body.images = imageUrls;
+  if (audioUrl) body.audio = audioUrl;
 
   const { id } = await toApisSubmitVideoGeneration(body, params.signal);
   return toApisPollVideoTaskToPlayableUrl(id, params.signal);
@@ -827,6 +888,8 @@ export async function toApisSora2VvipVideoGenerate(params: {
   /** 固定按产品需求走 720p；同时写入 resolution 供网关透传 */
   resolution: '480p' | '720p';
   referenceImagesBase64?: string[];
+  /** 语音参考：音频 base64 */
+  referenceAudioBase64?: string;
   signal?: AbortSignal;
 }): Promise<string> {
   if (getAiProvider() !== 'openai-compatible') {
@@ -849,6 +912,14 @@ export async function toApisSora2VvipVideoGenerate(params: {
     params.signal
   );
 
+  // 上传语音参考
+  let audioUrl: string | undefined;
+  if (params.referenceAudioBase64) {
+    const { raw, mime } = parseBase64ImageInput(params.referenceAudioBase64);
+    const blob = base64ToBlob(raw, mime || 'audio/mp4');
+    audioUrl = await toApisUploadAudioBlob(blob, 'reference-audio.mp4', params.signal);
+  }
+
   const res = params.resolution === '480p' ? '480p' : '720p';
   const body: Record<string, unknown> = {
     model: 'sora-2-vvip',
@@ -859,6 +930,7 @@ export async function toApisSora2VvipVideoGenerate(params: {
     resolution_name: res,
   };
   if (imageUrls.length) body.image_urls = imageUrls;
+  if (audioUrl) body.audio = audioUrl;
 
   const { id } = await toApisSubmitVideoGeneration(body, params.signal);
   return toApisPollVideoTaskToPlayableUrl(id, params.signal);
@@ -875,6 +947,8 @@ async function toApisVeo31FastVideoGenerate(params: {
   aspectRatio: string;
   resolution: '720p' | '1080p' | '4k';
   referenceImagesBase64?: string[];
+  /** 语音参考：音频 base64 */
+  referenceAudioBase64?: string;
   signal?: AbortSignal;
 }): Promise<string> {
   if (getAiProvider() !== 'openai-compatible') {
@@ -899,6 +973,14 @@ async function toApisVeo31FastVideoGenerate(params: {
     params.signal
   );
 
+  // 上传语音参考
+  let audioUrl: string | undefined;
+  if (params.referenceAudioBase64) {
+    const { raw, mime } = parseBase64ImageInput(params.referenceAudioBase64);
+    const blob = base64ToBlob(raw, mime || 'audio/mp4');
+    audioUrl = await toApisUploadAudioBlob(blob, 'reference-audio.mp4', params.signal);
+  }
+
   const body: Record<string, unknown> = {
     model: 'veo3.1-fast',
     prompt: params.prompt,
@@ -910,6 +992,7 @@ async function toApisVeo31FastVideoGenerate(params: {
     },
   };
   if (imageUrls.length) body.image_urls = imageUrls;
+  if (audioUrl) body.audio = audioUrl;
 
   const { id } = await toApisSubmitVideoGeneration(body, params.signal);
   return toApisPollVideoTaskToPlayableUrl(id, params.signal);
@@ -922,6 +1005,8 @@ export async function toApisCanvasVideoGenerate(params: {
   aspectRatio: string;
   resolution: '480p' | '720p' | '1080p' | '4k';
   referenceImagesBase64?: string[];
+  /** 语音参考：音频 base64 */
+  referenceAudioBase64?: string;
   signal?: AbortSignal;
 }): Promise<string> {
   if (params.videoModel === 'veo3.1-fast') {
@@ -934,6 +1019,7 @@ export async function toApisCanvasVideoGenerate(params: {
       aspectRatio: params.aspectRatio,
       resolution: res,
       referenceImagesBase64: params.referenceImagesBase64,
+      referenceAudioBase64: params.referenceAudioBase64,
       signal: params.signal,
     });
   }
@@ -944,6 +1030,7 @@ export async function toApisCanvasVideoGenerate(params: {
       aspectRatio: params.aspectRatio,
       resolution: params.resolution === '480p' ? '480p' : '720p',
       referenceImagesBase64: params.referenceImagesBase64,
+      referenceAudioBase64: params.referenceAudioBase64,
       signal: params.signal,
     });
   }
@@ -953,6 +1040,7 @@ export async function toApisCanvasVideoGenerate(params: {
     aspectRatio: params.aspectRatio,
     resolution: params.resolution === '480p' ? '480p' : '720p',
     referenceImagesBase64: params.referenceImagesBase64,
+    referenceAudioBase64: params.referenceAudioBase64,
     signal: params.signal,
   });
 }
@@ -1612,9 +1700,12 @@ async function editImagesNewApiFireflyWithRouteFallback(
   const sizeModel = modelCandidates[0];
   const size = aspectRatioToOpenAiSize(aspectRatio, sizeModel);
   const enhancedPrompt = buildPromptWithDimensions(prompt, aspectRatio);
-  const pngBlob = await jpegBase64ToPngBlob(base64Images[0]);
+  // 支持多图：转换所有 base64 为 PNG blob
+  const pngBlobs: Blob[] = [];
+  for (const base64 of base64Images) {
+    pngBlobs.push(await jpegBase64ToPngBlob(base64));
+  }
   const parsedRef = parseBase64ImageInput(base64Images[0]);
-  const rawB64 = parsedRef.raw;
   const refDataUrl = `data:${parsedRef.mime || 'image/jpeg'};base64,${parsedRef.raw}`;
   const results: string[] = [];
   const count = Math.min(Math.max(numberOfImages, 1), 4);
@@ -1627,8 +1718,14 @@ async function editImagesNewApiFireflyWithRouteFallback(
     for (const tryModel of modelCandidates) {
       for (const useBracket of [true, false] as const) {
         const form = new FormData();
-        if (useBracket) form.append('image[]', pngBlob, 'ref.png');
-        else form.append('image', pngBlob, 'ref.png');
+        // 多图参考：发送所有图片
+        if (useBracket) {
+          for (let imgIdx = 0; imgIdx < pngBlobs.length; imgIdx++) {
+            form.append('image[]', pngBlobs[imgIdx], `ref${imgIdx}.png`);
+          }
+        } else {
+          form.append('image', pngBlobs[0], 'ref.png');
+        }
         form.append('prompt', enhancedPrompt);
         form.append('model', tryModel);
         form.append('n', '1');
@@ -1658,11 +1755,11 @@ async function editImagesNewApiFireflyWithRouteFallback(
     }
     if (!done) {
       const refAnchoredPrompt = `【必须以上传参考图中的人物/场景/构图/色调为基准进行编辑或重绘，禁止换成无关角色或全新场景；仅可按文字指令微调姿态、细节与风格。】\n\n${enhancedPrompt}`;
-      const refPngDataUrl = await blobToDataUrl(pngBlob);
+      const refPngDataUrl = await blobToDataUrl(pngBlobs[0]);
       let refUploadUrl: string | null = null;
       let refUpload404 = false;
       try {
-        refUploadUrl = await openAiCompatUploadImageBlob(baseNorm, apiKey, pngBlob, 'ref.png', signal);
+        refUploadUrl = await openAiCompatUploadImageBlob(baseNorm, apiKey, pngBlobs[0], 'ref.png', signal);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         refUpload404 = msg.includes('(404)') || msg.includes(' 404');
@@ -1819,10 +1916,17 @@ async function editImagesAtOpenAiCompatibleBase(
   const size = aspectRatioToOpenAiSize(aspectRatio, resolvedEditModel);
   const enhancedPrompt = buildPromptWithDimensions(prompt, aspectRatio);
   const useCodesonlineCap = isCodesonlineOpenAiCompatBase(baseNorm);
-  const editBlob = useCodesonlineCap
-    ? await jpegBlobUnderBytesForImageEdit(base64Images[0], CODESONLINE_EDIT_IMAGE_MAX_BYTES, signal)
-    : await jpegBase64ToPngBlob(base64Images[0]);
-  const editFilename = useCodesonlineCap ? 'ref.jpg' : 'ref.png';
+  // 支持多图：将所有 base64 图片转换为 blob
+  const imageBlobs: { blob: Blob; filename: string }[] = [];
+  for (const base64 of base64Images) {
+    const blob = useCodesonlineCap
+      ? await jpegBlobUnderBytesForImageEdit(base64, CODESONLINE_EDIT_IMAGE_MAX_BYTES, signal)
+      : await jpegBase64ToPngBlob(base64);
+    imageBlobs.push({
+      blob,
+      filename: useCodesonlineCap ? 'ref.jpg' : 'ref.png'
+    });
+  }
   const results: string[] = [];
   const count = Math.min(
     Math.max(numberOfImages, 1),
@@ -1836,11 +1940,14 @@ async function editImagesAtOpenAiCompatibleBase(
   for (let i = 0; i < count; i++) {
     assertNotAborted(signal);
     const form = new FormData();
-    // dall-e-2 沿用单字段 image；gpt-image-* / firefly 等与 OpenAI 新文档一致使用 image[]（仅一张也传 image[]），否则部分网关会 404
+    // dall-e-2 沿用单字段 image；gpt-image-* / firefly 等支持多图（多张时使用 image[]）
     if (resolvedEditModel === 'dall-e-2') {
-      form.append('image', editBlob, editFilename);
+      form.append('image', imageBlobs[0].blob, imageBlobs[0].filename);
     } else {
-      form.append('image[]', editBlob, editFilename);
+      // 多图参考：发送所有图片
+      for (const { blob, filename } of imageBlobs) {
+        form.append('image[]', blob, filename);
+      }
     }
     form.append('prompt', enhancedPrompt);
     form.append('model', resolvedEditModel);
