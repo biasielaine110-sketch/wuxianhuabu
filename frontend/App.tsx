@@ -1172,7 +1172,7 @@ export default function App() {
     'panorama': { width: 840, height: 630 },
     'panoramaT2i': { width: 880, height: 960 },
     /** 图片标注：近方形略竖长，宽:高 = 4:5（介于 4:5～5:6） */
-    'annotation': { width: 960, height: 1200 },
+    'annotation': { width: 960, height: 1000 },
     'director3d': { width: 900, height: 780 },
     /** AI 对话：竖向更高；内容区消息列表:底部输入带 = 2:1 */
     'chat': { width: 920, height: CHAT_NODE_DEFAULT_PIXEL_HEIGHT },
@@ -1180,7 +1180,7 @@ export default function App() {
     'image': { width: 480, height: 528 },
     'gridSplit': { width: 840, height: 600 },
     'gridMerge': { width: 840, height: 600 },
-    'video': { width: 800, height: 1000 },
+    'video': { width: 1200, height: 1400 },
     'audio': { width: 400, height: 300 },
   };
 
@@ -3071,6 +3071,9 @@ export default function App() {
       } else if (e.code === 'KeyR' && shortcutCreatesNode) {
         e.preventDefault();
         placeNewNodeCentered('annotation');
+      } else if (e.code === 'KeyT' && shortcutCreatesNode) {
+        e.preventDefault();
+        placeNewNodeCentered('video');
       } else if (
         e.code === 'KeyX' &&
         !isInput &&
@@ -4362,10 +4365,10 @@ export default function App() {
                               handleDeleteEdge(edgeToDelete.id);
                             }
                           }}
-                          className="absolute -top-1 -right-1 w-3 h-3 bg-red-600 hover:bg-red-500 rounded-full text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          className="absolute -top-1 -right-1 w-4 h-4 bg-red-600 hover:bg-red-500 rounded-full text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                           title="取消引用"
                         >
-                          <span className="text-[6px] leading-none">×</span>
+                          <span className="text-[8px] leading-none">×</span>
                         </button>
                       </div>
                     ))}
@@ -4503,21 +4506,21 @@ export default function App() {
                         {slot.kind === 'image' && slot.imageBase64 ? (
                           <OptimizedImage
                             base64={slot.imageBase64}
-                            maxSide={128}
+                            maxSide={160}
                             quality={0.7}
                             alt={slot.label}
-                            className="h-8 w-8 rounded border border-[#444] object-cover"
+                            className="h-10 w-10 rounded border border-[#444] object-cover"
                           />
                         ) : slot.kind === 'video' && slot.videoUrl ? (
                           <video
                             src={slot.videoUrl}
-                            className="h-8 w-8 rounded border border-[#444] object-cover"
+                            className="h-10 w-10 rounded border border-[#444] object-cover"
                             muted
                             playsInline
                             preload="metadata"
                           />
                         ) : slot.kind === 'audio' ? (
-                          <div className="h-8 w-8 rounded border border-[#444] bg-[#333] flex items-center justify-center" title={slot.label}>
+                          <div className="h-10 w-10 rounded border border-[#444] bg-[#333] flex items-center justify-center" title={slot.label}>
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                               <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
                               <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
@@ -4535,10 +4538,10 @@ export default function App() {
                             e.stopPropagation();
                             handleDeleteEdge(slot.edgeId);
                           }}
-                          className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-white opacity-0 transition-opacity hover:bg-red-500 group-hover:opacity-100"
+                          className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-white opacity-0 transition-opacity hover:bg-red-500 group-hover:opacity-100"
                           title="取消引用"
                         >
-                          <span className="text-[7px] leading-none">×</span>
+                          <span className="text-[9px] leading-none">×</span>
                         </button>
                       </div>
                     ))}
@@ -4905,7 +4908,7 @@ export default function App() {
                               const newOverlays = (node.textOverlays || []).filter(o => o.id !== overlay.id);
                               handleUpdateNode(node.id, { textOverlays: newOverlays });
                             }}
-                            className="absolute -top-2 -right-2 w-4 h-4 bg-red-500 rounded-full text-white text-[10px] opacity-0 group-hover/overlay:opacity-100 transition-opacity flex items-center justify-center"
+                            className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 rounded-full text-white text-xs opacity-0 group-hover/overlay:opacity-100 transition-opacity flex items-center justify-center"
                           >
                             ×
                           </button>
@@ -5496,17 +5499,17 @@ export default function App() {
                     <div className="text-[10px] text-gray-400">生成: {node.images.length}张</div>
                     <div className="flex gap-1 overflow-x-auto pb-1">
                       {node.images.map((img, idx) => (
-                        <div key={idx} className="relative shrink-0 w-12 h-12 rounded overflow-hidden border border-[#444]">
+                        <div key={idx} className="relative shrink-0 w-14 h-14 rounded overflow-hidden border border-[#444]">
                           <OptimizedImage
                             base64={img}
-                            maxSide={128}
+                            maxSide={160}
                             quality={0.72}
                             alt={`图${idx + 1}`}
                             className="w-full h-full object-cover"
                           />
                           <button
                             onPointerDown={(e) => { e.stopPropagation(); handleCopyToImage(node.id); }}
-                            className="absolute inset-0 bg-black/50 opacity-0 hover:opacity-100 flex items-center justify-center text-white text-[10px]"
+                            className="absolute inset-0 bg-black/50 opacity-0 hover:opacity-100 flex items-center justify-center text-white text-xs"
                             title="复制"
                           >
                             复制
@@ -9435,10 +9438,10 @@ function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onEyedropp
                         e.stopPropagation();
                         deleteFigure(figure.id);
                       }}
-                      className="p-1 rounded bg-red-600/50 hover:bg-red-500 text-white"
+                      className="p-1.5 rounded bg-red-600/50 hover:bg-red-500 text-white"
                       title="删除角色"
                     >
-                      <DeleteIcon size={10} />
+                      <DeleteIcon size={14} />
                     </button>
                   </div>
                 )}
@@ -10580,14 +10583,14 @@ function ChatNodeContent({
                     <OptimizedImage
                       key={`${slot.edgeId}-img-${imgIdx}`}
                       base64={img}
-                      maxSide={80}
+                      maxSide={96}
                       quality={0.72}
                       alt={`${slot.label}图${imgIdx + 1}`}
-                      className="w-9 h-9 object-cover rounded border border-[#444]"
+                      className="w-11 h-11 object-cover rounded border border-[#444]"
                     />
                   ))}
                   {slot.imageBase64s.length > 4 && (
-                    <div className="w-9 h-9 rounded border border-[#444] bg-[#333] flex items-center justify-center text-gray-400 text-[8px]">
+                    <div className="w-11 h-11 rounded border border-[#444] bg-[#333] flex items-center justify-center text-gray-400 text-[8px]">
                       +{slot.imageBase64s.length - 4}
                     </div>
                   )}
@@ -10595,10 +10598,10 @@ function ChatNodeContent({
               ) : slot.kind === 'image' && slot.imageBase64 ? (
                 <OptimizedImage
                   base64={slot.imageBase64}
-                  maxSide={192}
+                  maxSide={200}
                   quality={0.72}
                   alt={slot.label}
-                  className="w-9 h-9 object-cover rounded border border-[#444]"
+                  className="w-11 h-11 object-cover rounded border border-[#444]"
                 />
               ) : slot.kind === 'video' && slot.videoUrl ? (
                 <video
@@ -10619,10 +10622,10 @@ function ChatNodeContent({
                   e.stopPropagation();
                   onDeleteEdge(slot.edgeId);
                 }}
-                className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-red-600 text-white opacity-0 transition-opacity hover:bg-red-500 group-hover:opacity-100"
+                className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-white opacity-0 transition-opacity hover:bg-red-500 group-hover:opacity-100"
                 title="取消引用"
               >
-                <span className="leading-none" style={{ fontSize: fs(6) }}>×</span>
+                <span className="leading-none text-[8px]">×</span>
               </button>
             </div>
           ))}
