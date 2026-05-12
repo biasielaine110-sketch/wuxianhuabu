@@ -266,6 +266,7 @@ function OptimizedImage({
   onClick,
   onDoubleClick,
   draggable = false,
+  containerRef,
 }: {
   base64: string;
   className?: string;
@@ -275,15 +276,48 @@ function OptimizedImage({
   onClick?: React.MouseEventHandler<HTMLImageElement>;
   onDoubleClick?: React.MouseEventHandler<HTMLImageElement>;
   draggable?: boolean;
+  /** 传入容器 ref 以实现响应式缩放：容器尺寸变化时自动重新计算缩略图 */
+  containerRef?: React.RefObject<HTMLDivElement | null>;
 }) {
   const [src, setSrc] = useState('');
+  const [dynamicMaxSide, setDynamicMaxSide] = useState(maxSide);
+  const maxSideRef = useRef(maxSide);
+  maxSideRef.current = maxSide;
+
+  // 响应式缩放：根据容器尺寸动态计算 maxSide
+  useEffect(() => {
+    if (!containerRef?.current) {
+      setDynamicMaxSide(maxSideRef.current);
+      return;
+    }
+
+    const updateMaxSide = () => {
+      const container = containerRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const containerMax = Math.max(rect.width, rect.height);
+      // 容器尺寸至少为 100px 才启用响应式
+      if (containerMax >= 100) {
+        setDynamicMaxSide(Math.round(containerMax));
+      }
+    };
+
+    updateMaxSide();
+    const observer = new ResizeObserver(() => {
+      requestAnimationFrame(updateMaxSide);
+    });
+    observer.observe(containerRef.current);
+
+    return () => observer.disconnect();
+  }, [containerRef]);
 
   useEffect(() => {
     if (!base64) {
       setSrc('');
       return;
     }
-    const cacheKey = `${base64.slice(0, 48)}|${base64.slice(-48)}|${base64.length}|${maxSide}|${quality}`;
+    const currentMaxSide = dynamicMaxSide;
+    const cacheKey = `${base64.slice(0, 48)}|${base64.slice(-48)}|${base64.length}|${currentMaxSide}|${quality}`;
     const cached = thumbnailCache.get(cacheKey);
     if (cached) {
       setSrc(cached);
@@ -296,12 +330,12 @@ function OptimizedImage({
     const img = new Image();
     img.onload = () => {
       const maxEdge = Math.max(img.width, img.height);
-      if (maxEdge <= maxSide) {
+      if (maxEdge <= currentMaxSide) {
         thumbnailCache.set(cacheKey, originalSrc);
         setSrc(originalSrc);
         return;
       }
-      const scale = maxSide / maxEdge;
+      const scale = currentMaxSide / maxEdge;
       const targetW = Math.max(1, Math.round(img.width * scale));
       const targetH = Math.max(1, Math.round(img.height * scale));
       const canvas = document.createElement('canvas');
@@ -322,10 +356,71 @@ function OptimizedImage({
     };
     img.onerror = () => setSrc(originalSrc);
     img.src = originalSrc;
-  }, [base64, maxSide, quality]);
+  }, [base64, dynamicMaxSide, quality]);
 
   if (!src) return null;
   return <img src={src} className={className} alt={alt} onClick={onClick} onDoubleClick={onDoubleClick} draggable={draggable} />;
+}
+
+/** 响应式图片预览组件：根据容器尺寸自动缩放图片 */
+function ResponsiveImagePreview({
+  base64,
+  className,
+  alt,
+  quality = 0.62,
+  onClick,
+  onDoubleClick,
+  draggable = false,
+  fill = 'contain',
+}: {
+  base64: string;
+  className?: string;
+  alt?: string;
+  quality?: number;
+  onClick?: React.MouseEventHandler<HTMLImageElement>;
+  onDoubleClick?: React.MouseEventHandler<HTMLImageElement>;
+  draggable?: boolean;
+  /** 图片填充方式：'contain' | 'cover' */
+  fill?: 'contain' | 'cover';
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const updateDimensions = () => {
+      const rect = container.getBoundingClientRect();
+      setDimensions({ width: rect.width, height: rect.height });
+    };
+
+    updateDimensions();
+    const observer = new ResizeObserver(() => {
+      requestAnimationFrame(updateDimensions);
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
+  const maxSide = Math.max(dimensions.width, dimensions.height, 100);
+
+  return (
+    <div ref={containerRef} className={`w-full h-full ${className || ''}`}>
+      {dimensions.width > 0 && dimensions.height > 0 && (
+        <OptimizedImage
+          base64={base64}
+          maxSide={maxSide}
+          quality={quality}
+          className={`w-full h-full object-${fill}`}
+          onClick={onClick}
+          onDoubleClick={onDoubleClick}
+          draggable={draggable}
+          alt={alt}
+        />
+      )}
+    </div>
+  );
 }
 
 const INPUT_NODE_TYPES: NodeType[] = ['t2i', 'i2i', 'image', 'panorama', 'annotation', 'gridSplit', 'gridMerge', 'panoramaT2i', 'director3d', 'chat', 'video', 'audio'];
@@ -4782,10 +4877,8 @@ export default function App() {
                     <button
                       onPointerDown={(e) => {
                         e.stopPropagation();
-                        // 复制当前图片到剪贴板，然后创建图片节点
                         const imgData = images[currentIndex];
                         if (imgData) {
-                          // 创建图片节点
                           const newNodeId = `image-${Date.now()}`;
                           const newNode: CanvasNode = {
                             id: newNodeId,
@@ -4818,11 +4911,11 @@ export default function App() {
                     <div className="grid min-h-0 flex-1 grid-cols-2 gap-1 overflow-y-auto p-1 content-start">
                       {images.map((img, idx) => (
                         <div key={idx} className="relative w-full h-full group/item">
-                          <OptimizedImage
+                          <ResponsiveImagePreview
                             base64={img}
-                            maxSide={630}
                             quality={0.58}
-                            className={`w-full h-full object-contain bg-[#111] rounded transition-opacity ${eyedropperTargetNodeId ? 'cursor-cyan-400 hover:opacity-100' : 'cursor-pointer hover:opacity-80'}`}
+                            fill="contain"
+                            className="bg-[#111] rounded transition-opacity"
                             onClick={(e) => {
                               e.stopPropagation();
                               if (eyedropperTargetNodeId) {
@@ -4846,11 +4939,11 @@ export default function App() {
                     </div>
                   ) : (
                     <div className="relative w-full h-full flex items-center justify-center group/single">
-                      <OptimizedImage
+                      <ResponsiveImagePreview
                         base64={images[currentIndex]}
-                        maxSide={1200}
                         quality={0.6}
-                        className={`max-w-full max-h-full object-contain ${eyedropperTargetNodeId ? 'cursor-cyan-400' : ''}`}
+                        fill="contain"
+                        className={eyedropperTargetNodeId ? 'cursor-cyan-400' : ''}
                         onClick={(e) => {
                           e.stopPropagation();
                           if (eyedropperTargetNodeId) {
@@ -6524,7 +6617,7 @@ export default function App() {
                     />
                   </div>
 
-                  {/* ④ ToAPIs */}
+                  {/* ⑤ ToAPIs */}
                   <div className="mt-5 pt-4 border-t border-[#333]">
                     <h3 className="text-sm font-semibold text-gray-200 mb-2">ToAPIs</h3>
                     <label className="text-xs text-gray-500 block mb-1">接口类型</label>

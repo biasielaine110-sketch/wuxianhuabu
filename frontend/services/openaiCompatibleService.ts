@@ -48,7 +48,8 @@ function rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNormalized: string): st
   let next = baseNormalized;
   try {
     const u = new URL(baseNormalized);
-    if (u.hostname.toLowerCase() === 'yunzhi-ai.top') {
+    const hostname = u.hostname.toLowerCase();
+    if (hostname === 'yunzhi-ai.top') {
       let pathname = u.pathname.replace(/\/+$/, '');
       if (!pathname) pathname = '/v1';
       next = `${window.location.origin}${yunzhiSameOriginProxyPathPrefix()}${pathname}`;
