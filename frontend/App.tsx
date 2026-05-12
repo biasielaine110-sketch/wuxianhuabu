@@ -873,6 +873,8 @@ export default function App() {
   const [activeProjectId, setActiveProjectId] = useState<string>('');
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [showShortcutsPanel, setShowShortcutsPanel] = useState(false);
+  const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
+  const saveSuccessTimerRef = useRef<number | null>(null);
   const [projectExportMenuOpen, setProjectExportMenuOpen] = useState(false);
   const [projectStoreReady, setProjectStoreReady] = useState(false);
   const [autosaveIntervalMin, setAutosaveIntervalMin] = useState<0 | 5 | 10 | 20 | 30>(() => {
@@ -1509,17 +1511,18 @@ export default function App() {
     async (
       pid: string,
       list: CanvasProject[],
-      opts?: { alertOnFailure?: boolean }
-    ): Promise<void> => {
+      opts?: { alertOnFailure?: boolean; onSaved?: (filename: string) => void }
+    ): Promise<string | null> => {
       const p = list.find((x) => x.id === pid);
-      if (!p?.diskSaveEstablished || lastDiskWriteFormatRef.current !== 'json') return;
+      if (!p?.diskSaveEstablished || lastDiskWriteFormatRef.current !== 'json') return null;
       let h = lastJsonFileHandleRef.current as FileSystemFileHandle | null;
       if (!h) {
         const fetched = await getProjectBackupFileHandle(pid);
         h = fetched ?? null;
         lastJsonFileHandleRef.current = h;
       }
-      if (!h) return;
+      if (!h) return null;
+      const savedFilename = h.name || '';
       try {
         const forWrite = { ...p };
         delete (forWrite as { diskSaveEstablished?: boolean }).diskSaveEstablished;
@@ -1527,12 +1530,15 @@ export default function App() {
         const writable = await h.createWritable();
         await writable.write(json);
         await writable.close();
-        setLastJsonFilename(h.name || '');
+        setLastJsonFilename(savedFilename);
+        opts?.onSaved?.(savedFilename);
+        return savedFilename;
       } catch (e) {
         console.warn('[canvas] 覆盖本地草稿 JSON 失败', e);
         if (opts?.alertOnFailure) {
           alert('草稿库已更新，但覆盖本地 JSON 草稿失败（文件可能被移动或无写入权限）。');
         }
+        return null;
       }
     },
     []
@@ -1574,6 +1580,11 @@ export default function App() {
           if (!ok) return false;
           await flushBoundDraftJsonToDisk(pid, nextProjects, {
             alertOnFailure: !options?.skipDiskPrompt,
+            onSaved: (filename) => {
+              setSaveSuccessMsg(`已保存至: ${filename}`);
+              if (saveSuccessTimerRef.current) clearTimeout(saveSuccessTimerRef.current);
+              saveSuccessTimerRef.current = window.setTimeout(() => setSaveSuccessMsg(null), 3000);
+            },
           });
           return true;
         })();
@@ -1734,7 +1745,9 @@ export default function App() {
 
     if (modal.mode === 'saveAs') {
       setDraftDiskModal(null);
-      alert(`已另存为：${fileHandle.name}`);
+      setSaveSuccessMsg(`已另存为: ${fileHandle.name}`);
+      if (saveSuccessTimerRef.current) clearTimeout(saveSuccessTimerRef.current);
+      saveSuccessTimerRef.current = window.setTimeout(() => setSaveSuccessMsg(null), 3000);
       return;
     }
 
@@ -1790,7 +1803,10 @@ export default function App() {
 
     resolve?.(ok);
     if (ok) {
-      alert('草稿已绑定：之后 Ctrl+S 将直接覆盖该 JSON；图片默认保存到所选文件夹。');
+      const savedPath = pathNote || fileHandle.name;
+      setSaveSuccessMsg(`草稿已绑定至: ${savedPath}`);
+      if (saveSuccessTimerRef.current) clearTimeout(saveSuccessTimerRef.current);
+      saveSuccessTimerRef.current = window.setTimeout(() => setSaveSuccessMsg(null), 4000);
     }
   }, []);
 
@@ -5604,6 +5620,16 @@ export default function App() {
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-[#0f0f0f] text-neutral-100 select-none font-sans" onContextMenu={handleContextMenu}>
+
+      {/* 保存成功提示 */}
+      {saveSuccessMsg && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-5 py-3 bg-green-600 text-white text-sm font-medium rounded-lg shadow-xl flex items-center gap-2 animate-pulse">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20,6 9,17 4,12"/>
+          </svg>
+          {saveSuccessMsg}
+        </div>
+      )}
       
       {/* Hidden File Input for Image Import */}
       <input 
