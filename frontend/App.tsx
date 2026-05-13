@@ -11106,9 +11106,16 @@ function ChatNodeContent({
       {/* 消息列表 : 底部输入区（功能+引用+文本框）垂直空间 = 2 : 1 */}
       <div className="flex min-h-0 flex-1 flex-col" style={{ order: 1 }}>
       <div
-        className="chat-messages min-h-0 flex-[2_1_0%] overflow-y-auto p-3 space-y-3"
+        className="chat-messages min-h-0 flex-[2_1_0%] overflow-y-auto p-3 space-y-3 cursor-grab active:cursor-grabbing"
         style={{ userSelect: 'text' }}
-        onPointerDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => {
+          const target = e.target as HTMLElement;
+          // 点击空白区域（消息容器本身或 padding 区域）允许拖动节点
+          if (target.classList.contains('chat-messages') || target.tagName === 'DIV' && (target.parentElement?.classList.contains('chat-messages') || target === e.currentTarget)) {
+            return; // 不阻止冒泡，让节点拖拽处理
+          }
+          e.stopPropagation();
+        }}
       >
         <style>{`
           .chat-messages::-webkit-scrollbar {
@@ -12984,12 +12991,13 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
       {/* 标注画布：双击图片区域进入全屏标注（需已导入图片）；亦可点下方「全屏标注」 */}
       <div
         ref={containerRef}
-        className="relative flex-1 min-h-[160px] bg-[#1a1a1a] rounded-lg border border-[#333] overflow-hidden"
+        className={`relative flex-1 min-h-[160px] bg-[#1a1a1a] rounded-lg border border-[#333] overflow-hidden ${!sourceImage ? 'cursor-grab active:cursor-grabbing' : ''}`}
       >
         <canvas
           ref={canvasRef}
-          className="w-full h-full cursor-crosshair"
+          className={`w-full h-full ${sourceImage ? 'cursor-crosshair' : ''}`}
           onPointerDown={(e) => {
+            if (!sourceImage) return; // 无图片时允许拖动窗口
             e.stopPropagation();
             handleMouseDown(e);
           }}
