@@ -119,10 +119,10 @@
   }
 
   /** 图片标注节点：参考区/工具栏/功能栏字体 20px */
-  .canvas-node-annotation .text-\\[10px\\] {
+  .canvas-node-annotation [class*="text-[10px]"] {
     font-size: 20px !important;
   }
-  .canvas-node-annotation .text-\\[8px\\] {
+  .canvas-node-annotation [class*="text-[8px]"] {
     font-size: 16px !important;
   }
 
@@ -139,8 +139,8 @@
   .canvas-node-root--chat button {
     font-size: 20px !important;
   }
-  .canvas-node-root--chat .text-\\[10px\\],
-  .canvas-node-root--chat .text-\\[11px\\],
+  .canvas-node-root--chat [class*="text-[10px]"],
+  .canvas-node-root--chat [class*="text-[11px]"],
   .canvas-node-root--chat .text-xs {
     font-size: 20px !important;
   }
@@ -156,7 +156,7 @@
   }
   .canvas-node-font-195 .nodemeta-skip-scale option,
   .canvas-node-font-195 .nodemeta-skip-scale optgroup {
-    font-size: 13px !important;
+    font-size: 12px !important;
     line-height: 1.35 !important;
   }
 
