@@ -1281,7 +1281,7 @@ export default function App() {
     /** AI 对话：竖向更高；内容区消息列表:底部输入带 = 2:1 */
     'chat': { width: 920, height: CHAT_NODE_DEFAULT_PIXEL_HEIGHT },
     'text': { width: 420, height: 300 },
-    'image': { width: 1920, height: 2112 },
+    'image': { width: 960, height: 1056 },
     'gridSplit': { width: 840, height: 600 },
     'gridMerge': { width: 840, height: 600 },
     'video': { width: 1200, height: 1400 },
@@ -1290,7 +1290,7 @@ export default function App() {
 
   // 节点最小尺寸限制（按类型；与默认倍率一致）
   const MIN_NODE_SIZES: Record<string, { width: number, height: number }> = {
-    image: { width: 1680, height: 1560 },
+    image: { width: 840, height: 780 },
     gridSplit: { width: 720, height: 560 },
     gridMerge: { width: 720, height: 560 },
     /** 文生图：与默认 3:4 比例一致 */
@@ -4562,7 +4562,7 @@ export default function App() {
                         className={`p-1.5 rounded text-white backdrop-blur-sm ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600 hover:bg-cyan-500' : 'bg-black/60 hover:bg-black/80'}`}
                         title={eyedropperTargetNodeId === node.id ? "取消吸取" : "吸取图片"}
                       >
-                        <EyedropperIcon size={14} />
+                        <EyedropperIcon size={25} />
                       </button>
                     )}
                     {viewMode === 'single' && (
@@ -4571,7 +4571,7 @@ export default function App() {
                         className="p-1.5 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
                         title="放大查看"
                       >
-                        <MaximizeIcon size={14}/>
+                        <MaximizeIcon size={25}/>
                       </button>
                     )}
                     <button
@@ -4596,14 +4596,14 @@ export default function App() {
                       className="p-1.5 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
                       title="复制图片"
                     >
-                      <CopyIcon size={14}/>
+                      <CopyIcon size={25}/>
                     </button>
                     <button
                       onPointerDown={(e) => { e.stopPropagation(); handleUpdateNode(node.id, { viewMode: viewMode === 'grid' ? 'single' : 'grid' }); }}
                       className="p-1.5 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
                       title="切换视图"
                     >
-                      {viewMode === 'grid' ? <SingleIcon size={14}/> : <GridIcon size={14}/>}
+                      {viewMode === 'grid' ? <SingleIcon size={25}/> : <GridIcon size={25}/>}
                     </button>
                   </div>
 
@@ -4632,7 +4632,7 @@ export default function App() {
                             className="absolute inset-0 m-auto w-8 h-8 flex items-center justify-center bg-black/60 hover:bg-black/80 rounded-full text-white backdrop-blur-sm opacity-0 group-hover/item:opacity-100 transition-opacity"
                             title="放大查看"
                           >
-                            <MaximizeIcon size={16}/>
+                            <MaximizeIcon size={25}/>
                           </button>
                         </div>
                       ))}
@@ -4665,7 +4665,7 @@ export default function App() {
                         className="absolute inset-0 m-auto w-10 h-10 flex items-center justify-center bg-black/60 hover:bg-black/80 rounded-full text-white backdrop-blur-sm opacity-0 group-hover/single:opacity-100 transition-opacity"
                         title="放大查看"
                       >
-                        <MaximizeIcon size={20}/>
+                        <MaximizeIcon size={25}/>
                       </button>
 
                       {/* Pagination Controls */}
@@ -4676,14 +4676,14 @@ export default function App() {
                             disabled={currentIndex === 0}
                             className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 bg-black/60 hover:bg-black/80 rounded-full text-white backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-30"
                           >
-                            <ChevronLeftIcon size={16}/>
+                            <ChevronLeftIcon size={25}/>
                           </button>
-                          <button 
-                            onPointerDown={(e) => { e.stopPropagation(); handleUpdateNode(node.id, { currentImageIndex: Math.min(images.length - 1, currentIndex + 1) }); }} 
+                          <button
+                            onPointerDown={(e) => { e.stopPropagation(); handleUpdateNode(node.id, { currentImageIndex: Math.min(images.length - 1, currentIndex + 1) }); }}
                             disabled={currentIndex === images.length - 1}
                             className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-black/60 hover:bg-black/80 rounded-full text-white backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-30"
                           >
-                            <ChevronRightIcon size={16}/>
+                            <ChevronRightIcon size={25}/>
                           </button>
                           <div className="absolute bottom-2 left-1/2 -translate-x-1/2 px-2 py-1 bg-black/60 rounded-full text-[10px] text-white backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity">
                             {currentIndex + 1} / {images.length}
@@ -5502,7 +5502,7 @@ export default function App() {
                   />
                 )}
                 <textarea
-                  className="w-full h-full bg-[#121212] text-gray-200 text-sm p-3 rounded-lg border border-[#444] focus:outline-none focus:border-blue-500 transition-colors resize-none leading-relaxed"
+                  className="w-full h-full bg-[#121212] text-gray-200 p-3 rounded-lg border border-[#444] focus:outline-none focus:border-blue-500 transition-colors resize-none leading-relaxed" style={{ fontSize: '100px' }}
                   value={node.prompt}
                   onChange={(e) => handleUpdateNode(node.id, { prompt: e.target.value })}
                   placeholder={
