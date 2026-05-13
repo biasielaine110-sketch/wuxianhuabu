@@ -4545,7 +4545,7 @@ export default function App() {
           {/* Image Area */}
           {(node.type === 't2i' || node.type === 'i2i' || node.type === 'image' || node.type === 'panoramaT2i') && (
             <div
-              className={`w-full bg-black relative border-b border-[#333] overflow-hidden group flex flex-col min-h-0 ${
+              className={`w-full bg-[#2a2a2a] relative border-b border-[#333] overflow-hidden group flex flex-col min-h-0 ${
                 node.type === 'image'
                   ? 'flex-1 min-h-[160px]'
                   : 'flex-[5] min-h-[240px] basis-0 min-w-0'
