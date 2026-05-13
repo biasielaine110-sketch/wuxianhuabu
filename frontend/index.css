@@ -112,18 +112,27 @@
     line-height: 1 !important;
   }
 
+  /** 文生图/图生图/360 文字输入框字体 30px */
+  .canvas-node-font-195 textarea {
+    font-size: 30px !important;
+  }
+
   /** AI 对话节点悬浮标题 */
   .canvas-node-root--chat .canvas-node-window-title {
     font-size: 50px !important;
     line-height: 1 !important;
   }
 
-  /** 图片标注节点：参考区/工具栏/功能栏字体 20px */
-  .canvas-node-annotation [class*="text-[10px]"] {
-    font-size: 20px !important;
-  }
-  .canvas-node-annotation [class*="text-[8px]"] {
-    font-size: 16px !important;
+  /** 图片标注节点：除悬浮标题外统一 30px */
+  .canvas-node-annotation select,
+  .canvas-node-annotation button,
+  .canvas-node-annotation span,
+  .canvas-node-annotation [class*="text-[10px]"],
+  .canvas-node-annotation [class*="text-[8px]"],
+  .canvas-node-annotation [class*="text-xs"],
+  .canvas-node-annotation [class*="text-sm"],
+  .canvas-node-annotation [class*="text-base"] {
+    font-size: 30px !important;
   }
 
   /** AI 对话节点：参考区/工具栏/功能栏字体 20px */
@@ -137,7 +146,7 @@
     line-height: 1.35 !important;
   }
   .canvas-node-root--chat button {
-    font-size: 20px !important;
+    font-size: 15px !important;
   }
   .canvas-node-root--chat [class*="text-[10px]"],
   .canvas-node-root--chat [class*="text-[11px]"],
