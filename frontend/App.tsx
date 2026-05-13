@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
-import { createPortal } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import { CanvasNode, Edge, Transform, Tool, NodeType, Annotation, AnnotationNode, PanoramaNode, GridSplitNode, GridMergeNode, PanoramaT2iNode, Director3DNode, Figure3D, ChatNode, ChatMessage } from './types';
 import type { AiProvider } from './services/aiSettings';
 import {
@@ -883,10 +883,7 @@ function I2iPresetCategorySelect({
 
 /** 君澜 → New API（Firefly）→ ToAPIs，与下拉选项顺序一致 */
 function defaultCanvasImageModel(): string {
-  if (getJunlanSavedKey().trim()) return 'gpt-image-2-junlan';
-  if (getCodesonlineSavedKey().trim()) return 'gpt-image-2-codesonline';
-  if (getNewApiSavedKey().trim()) return 'firefly-nano-banana-pro-newapi';
-  return 'gpt-image-2';
+  return 'gpt-image-2-codesonline';
 }
 
 /** 画布节点 Firefly（New API）模型 id */
@@ -3499,9 +3496,11 @@ export default function App() {
       // 框选工具：立即开始框选
       pressStartPosRef.current = { x: e.clientX, y: e.clientY };
       selectionModifiersRef.current = { ctrl: e.ctrlKey, alt: e.altKey };
-      setIsSelecting(true);
-      setSelectionBox({ x: e.clientX, y: e.clientY, width: 0, height: 0 });
       activePointerTypeRef.current = 'boxSelect';
+      flushSync(() => {
+        setIsSelecting(true);
+        setSelectionBox({ x: e.clientX, y: e.clientY, width: 0, height: 0 });
+      });
     } else if (activeTool === 'select') {
       const target = e.target as HTMLElement | SVGElement;
       const isCanvasClick = target.id === 'canvas-container' || target.id === 'svg-layer' || target.tagName === 'path';
@@ -3518,9 +3517,11 @@ export default function App() {
 
       longPressTimerRef.current = window.setTimeout(() => {
         // 长按触发框选
-        setIsSelecting(true);
-        setSelectionBox({ x: e.clientX, y: e.clientY, width: 0, height: 0 });
         activePointerTypeRef.current = 'selection';
+        flushSync(() => {
+          setIsSelecting(true);
+          setSelectionBox({ x: e.clientX, y: e.clientY, width: 0, height: 0 });
+        });
       }, 300);
     }
   }, [activeTool, fullscreenImage]);
@@ -5038,7 +5039,7 @@ export default function App() {
                   {viewMode === 'grid' ? (
                     <div className="grid min-h-0 flex-1 grid-cols-2 gap-1 overflow-y-auto p-1 content-start">
                       {images.map((img, idx) => (
-                        <div key={idx} className="relative w-full h-full group/item">
+                        <div key={idx} className="relative w-full group/item" style={{ aspectRatio: '1' }}>
                           <ResponsiveImagePreview
                             base64={img}
                             quality={0.58}
@@ -5896,11 +5897,11 @@ export default function App() {
         <div
           className="absolute inset-0 pointer-events-none"
           style={{
-            backgroundSize: canvasBgStyle === 'grid' ? `${32 * transform.scale}px ${32 * transform.scale}px` : canvasBgStyle === 'dots' ? `${24 * transform.scale}px ${24 * transform.scale}px` : '0',
+            backgroundSize: canvasBgStyle === 'grid' ? `${32 * transform.scale}px ${32 * transform.scale}px` : canvasBgStyle === 'dots' ? `${48 * transform.scale}px ${48 * transform.scale}px` : '0',
             backgroundImage: canvasBgStyle === 'grid'
               ? `linear-gradient(to right, ${canvasBgColor === 'dark' ? '#2a2a2a' : '#1a1a1a'} 1px, transparent 1px), linear-gradient(to bottom, ${canvasBgColor === 'dark' ? '#2a2a2a' : '#1a1a1a'} 1px, transparent 1px)`
               : canvasBgStyle === 'dots'
-                ? `radial-gradient(circle, ${canvasBgColor === 'dark' ? '#333' : '#222'} 1px, transparent 1px)`
+                ? `radial-gradient(circle, ${canvasBgColor === 'dark' ? '#333' : '#222'} 0.5px, transparent 0.5px)`
                 : 'none',
             backgroundPosition: `${transform.x}px ${transform.y}px`,
             backgroundColor: canvasBgColor === 'black' ? '#0a0a0a' : '#0f0f0f',
