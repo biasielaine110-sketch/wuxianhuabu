@@ -3626,6 +3626,14 @@ export default function App() {
     setContextMenu({ x: e.clientX, y: e.clientY, canvasX, canvasY });
   }, [transform, fullscreenImage]);
 
+  const handleCanvasDoubleClick = useCallback((e: React.MouseEvent) => {
+    if (fullscreenImage) return;
+    const rect = containerRef.current!.getBoundingClientRect();
+    const canvasX = (e.clientX - rect.left - transform.x) / transform.scale;
+    const canvasY = (e.clientY - rect.top - transform.y) / transform.scale;
+    setContextMenu({ x: e.clientX, y: e.clientY, canvasX, canvasY });
+  }, [transform, fullscreenImage]);
+
   const handleNodePointerDown = (e: React.PointerEvent, id: string) => {
     if (e.button === 2 || fullscreenImage) return;
 
@@ -5739,8 +5747,290 @@ export default function App() {
     );
   };
 
+  // 首页 / 项目列表
+  const [showHomePage, setShowHomePage] = useState(true);
+  const [homeProjects, setHomeProjects] = useState<CanvasProjectSnapshot[]>([]);
+  useEffect(() => { loadProjectLibrary().then(lib => { if (lib) setHomeProjects(lib.projects); }); }, []);
+
+  // 底部静态图片展示（可自行替换 URL）
+  const [homeImages, setHomeImages] = useState([
+    'https://images.unsplash.com/photo-1549490349-8643362247b5?w=400&h=250&fit=crop', // cyberpunk city
+    'https://images.unsplash.com/photo-1534972195531-d756b9bfa9f2?w=400&h=250&fit=crop', // tech abstract
+    'https://images.unsplash.com/photo-1515634928627-2a4e0dae3ddf?w=400&h=250&fit=crop', // neon circuit
+  ]);
+  const [editingImgIdx, setEditingImgIdx] = useState<number | null>(null);
+  const Carousel3D = () => (
+    <div className="flex items-center justify-center gap-3 -mt-[70px]" style={{ perspective: '1000px' }}>
+      {homeImages.map((src, i) => {
+        const isCenter = i === 1;
+        const isLeft = i === 0;
+        const isRight = i === 2;
+        return (
+        <div key={i} className="group relative shrink-0 rounded-xl border border-[#151515] overflow-hidden transition-all duration-500"
+          style={{
+            width: isCenter ? '340px' : '220px',
+            height: isCenter ? '210px' : '140px',
+            transform: isLeft ? 'rotateY(25deg) translateZ(-30px)' : isRight ? 'rotateY(-25deg) translateZ(-30px)' : 'translateZ(0)',
+            opacity: isCenter ? 1 : 0.6,
+            zIndex: isCenter ? 2 : 1,
+            filter: isCenter ? 'none' : 'brightness(0.5)',
+            boxShadow: isCenter ? '0 0 40px rgba(144,64,240,0.15)' : 'none',
+          }}
+        >
+          <img src={src} alt="" className="w-full h-full object-cover" draggable={false} loading="lazy" />
+          <button onClick={() => setEditingImgIdx(i)}
+            className="absolute top-2 right-2 w-6 h-6 rounded-md bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+            title="修改图片URL"
+          ><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></button>
+        </div>
+        );
+      })}
+      {editingImgIdx !== null && (
+        <div className="fixed inset-0 z-[600] bg-black/70 flex items-center justify-center" onClick={() => setEditingImgIdx(null)}>
+          <div className="bg-[#0a0a0a] border border-[#202020] rounded-2xl p-6 w-[480px]" onClick={e => e.stopPropagation()}>
+            <p className="text-sm text-white mb-3">修改图片 {editingImgIdx + 1} 的 URL</p>
+            <input autoFocus className="w-full bg-[#111] border border-[#1a1a1a] rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-[#9040F0]/30 mb-3"
+              defaultValue={homeImages[editingImgIdx]}
+              onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.trim(); if (v) { setHomeImages(prev => { const n = [...prev]; n[editingImgIdx] = v; return n; }); } setEditingImgIdx(null); } }}
+            />
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setEditingImgIdx(null)} className="px-4 py-2 rounded-xl text-sm text-[#909090] hover:text-white">取消</button>
+              <button onClick={() => { const input = document.querySelector<HTMLInputElement>('[class*=\"修改图片\"] input'); if (input) { const v = input.value.trim(); if (v) { setHomeImages(prev => { const n = [...prev]; n[editingImgIdx] = v; return n; }); } } setEditingImgIdx(null); }}
+                className="px-4 py-2 rounded-xl bg-[#9040F0] text-white text-sm font-medium">确定</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  // 首页 AI 对话
+  const [homeChatInput, setHomeChatInput] = useState('');
+  const [homeChatMessages, setHomeChatMessages] = useState<{role:string,content:string}[]>([]);
+  const [homeChatLoading, setHomeChatLoading] = useState(false);
+  const homeChatSend = async () => {
+    const q = homeChatInput.trim(); if (!q) return;
+    setHomeChatInput(''); setHomeChatLoading(true);
+    // 无论 API 是否成功，都创建项目跳转画布
+    const newId = `project-${Date.now()}`;
+    const chatNodeId = `chat-${Date.now()}`;
+    const userMsg = { id: `msg-${Date.now()}-user`, role: 'user' as const, content: q };
+    const chatNode: CanvasNode = {
+      id: chatNodeId, type: 'chat', x: 200, y: 200, width: 920, height: CHAT_NODE_DEFAULT_PIXEL_HEIGHT,
+      prompt: q, model: DEFAULT_DEEPSEEK_CHAT_MODEL_ID,
+      messages: [userMsg],
+    };
+    const newProject: CanvasProject = {
+      id: newId, name: q.substring(0, 20) || 'AI 对话', updatedAt: Date.now(),
+      nodes: [chatNode], edges: [], transform: { x: 0, y: 0, scale: 1 },
+    };
+    const lib = await loadProjectLibrary();
+    const projects = [newProject, ...(lib?.projects || [])];
+    setProjects(projects); projectsRef.current = projects;
+    setActiveProjectId(newId);
+    setNodes([chatNode]); setEdges([]); setTransform({ x: 0, y: 0, scale: 1 });
+    await saveProjectLibrary(projects, newId);
+    setShowHomePage(false);
+    // 在画布中自动触发发送
+    setTimeout(() => {
+      handleSendMessage(chatNodeId, { promptText: q });
+    }, 500);
+  };
+
+  const handleCreateProject = async () => {
+    const lib = await loadProjectLibrary();
+    const projects = lib?.projects || [];
+    const newProject: CanvasProject = {
+      id: `project-${Date.now()}`,
+      name: `项目 ${projects.length + 1}`,
+      updatedAt: Date.now(),
+      nodes: [],
+      edges: [],
+      transform: { x: 0, y: 0, scale: 1 },
+    };
+    const next = [newProject, ...projects];
+    setProjects(next); projectsRef.current = next;
+    setActiveProjectId(newProject.id);
+    setNodes([]); setEdges([]); setTransform({ x: 0, y: 0, scale: 1 });
+    await saveProjectLibrary(next, newProject.id);
+    setShowHomePage(false);
+  };
+  const handleOpenProject = async (p: CanvasProjectSnapshot) => {
+    const lib = await loadProjectLibrary();
+    const projects = lib?.projects || [];
+    const target = projects.find(x => x.id === p.id) || p;
+    setProjects(projects); projectsRef.current = projects;
+    setActiveProjectId(p.id);
+    setNodes(target.nodes || []); setEdges(target.edges || []);
+    setTransform(target.transform || { x: 0, y: 0, scale: 1 });
+    await saveProjectLibrary(projects, p.id);
+    setShowHomePage(false);
+  };
+
+  // 设置弹窗（首页+画布共用）
+  const SettingsModalShared = showSettingsModal ? (
+    <div className="fixed inset-0 z-[220] bg-black/80 flex items-center justify-center" onClick={() => setShowSettingsModal(false)}>
+      <div className="bg-[#1e1e1e] rounded-2xl p-0 w-[900px] h-[82vh] overflow-hidden flex shadow-2xl border border-[#333]" onClick={e => e.stopPropagation()}>
+        <div className="w-[200px] shrink-0 bg-[#171717] border-r border-[#333] p-3 flex flex-col gap-2">
+          {(['api','presets','downloads','credits','appearance'] as const).map(tab => (
+            <button key={tab} onClick={() => setSettingsTab(tab)} className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${settingsTab === tab ? 'bg-[#9040F0] text-white' : 'text-[#909090] hover:bg-[#222] hover:text-white'}`}>
+              {tab === 'api' ? '⚡ API' : tab === 'presets' ? '📋 预设' : tab === 'downloads' ? '📥 下载路径' : tab === 'credits' ? '💰 积分消耗' : '🎨 外观'}
+            </button>
+          ))}
+        </div>
+        <div className="flex-1 overflow-y-auto p-6">
+          <p className="text-sm text-[#909090] leading-relaxed">
+            {settingsTab === 'api' && 'API 设置 — 配置各 AI 服务的 API Key 和 Base URL。配置完成后在画布节点中即可调用对应模型。'}
+            {settingsTab === 'presets' && '预设管理 — 管理文生图、图生图的提示词预设模板。'}
+            {settingsTab === 'downloads' && '下载路径 — 设置图片导出和项目备份的默认存储位置。'}
+            {settingsTab === 'credits' && '积分消耗 — 查看各模型的积分消耗和定价信息。'}
+            {settingsTab === 'appearance' && '外观设置 — 自定义画布背景样式、颜色主题等视觉偏好。'}
+          </p>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  if (showHomePage) {
+    return (
+      <div className="w-screen h-screen bg-black text-white select-none font-sans flex flex-col relative overflow-hidden" onContextMenu={e => e.preventDefault()}>
+        {/* 呼吸感背景光效 */}
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] rounded-full pointer-events-none animate-[breathe_6s_ease-in-out_infinite]" style={{background: 'radial-gradient(circle, rgba(144,64,240,0.08) 0%, transparent 70%)'}} />
+        <div className="absolute bottom-1/3 right-1/4 w-[600px] h-[350px] rounded-full pointer-events-none animate-[breathe_8s_ease-in-out_2s_infinite]" style={{background: 'radial-gradient(circle, rgba(96,32,224,0.06) 0%, transparent 70%)'}} />
+        <div className="absolute top-1/2 left-1/3 w-[400px] h-[250px] rounded-full pointer-events-none animate-[breathe_7s_ease-in-out_4s_infinite]" style={{background: 'radial-gradient(circle, rgba(160,80,240,0.04) 0%, transparent 70%)'}} />
+        {/* 呼吸动画 keyframes */}
+        <style>{`@keyframes breathe { 0%,100% { opacity:0.6; transform:translate(-50%,0) scale(1); } 50% { opacity:1; transform:translate(-50%,0) scale(1.15); } }`}</style>
+
+        {/* 顶栏 - 毛玻璃 */}
+        <div className="relative flex items-center justify-between px-8 pt-[50px] pb-5 shrink-0 border-b border-white/[0.04] bg-black/60 backdrop-blur-xl">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#9040F0] to-[#6020E0] flex items-center justify-center shadow-lg shadow-[#9040F0]/20">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2C7 2 3 5 2 10c-1 5 1 10 4 12l1-2c1 1 2 2 5 2s4-1 5-2l1 2c3-2 5-7 4-12C21 5 17 2 12 2z" fill="url(#snakeGrad)" stroke="white"/>
+                <defs><linearGradient id="snakeGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="white" stopOpacity="0.15"/><stop offset="100%" stopColor="white" stopOpacity="0.05"/></linearGradient></defs>
+                <ellipse cx="8.5" cy="9" rx="2" ry="2.5" fill="white" stroke="none"/>
+                <ellipse cx="15.5" cy="9" rx="2" ry="2.5" fill="white" stroke="none"/>
+                <circle cx="8.5" cy="8.5" r="1" fill="#6020E0"/>
+                <circle cx="15.5" cy="8.5" r="1" fill="#6020E0"/>
+                <path d="M7 4l-3 2" strokeWidth="1.5" opacity="0.6"/>
+                <path d="M17 4l3 2" strokeWidth="1.5" opacity="0.6"/>
+                <path d="M10 13c-1 1-2 2-2 3" strokeWidth="1.5" opacity="0.7"/>
+                <path d="M14 13c1 1 2 2 2 3" strokeWidth="1.5" opacity="0.7"/>
+                <path d="M12 14v3" strokeWidth="1.2" opacity="0.5"/>
+                <path d="M5 8c0 2 1 4 3 5" strokeWidth="0.8" opacity="0.4"/>
+                <path d="M19 8c0 2-1 4-3 5" strokeWidth="0.8" opacity="0.4"/>
+              </svg>
+            </div>
+            <span className="text-[15px] font-semibold tracking-tight text-white">NwwWoW</span>
+            <span className="text-[10px] text-[#505050] bg-[#111] px-2 py-0.5 rounded-full border border-[#1a1a1a]">STORYBOARD</span>
+          </div>
+        </div>
+
+        {/* 主体 - 整体上移60px */}
+        <div className="relative flex-1 flex flex-col items-center justify-center px-8 gap-8 overflow-y-auto -mt-[460px]">
+          {/* AI 对话框 */}
+          <div className="w-full max-w-[640px] rounded-3xl border border-[#151515] bg-[#050505]/80 backdrop-blur-sm p-4 -mt-[150px]">
+            <div className="flex items-center gap-2 mb-3 px-1">
+              <div className="w-2 h-2 rounded-full bg-[#9040F0]" />
+              <span className="text-xs text-[#606060] font-medium">AI 助手 · DeepSeek</span>
+            </div>
+            {homeChatMessages.length > 0 && (
+              <div className="max-h-[320px] overflow-y-auto mb-3 space-y-2 px-1">
+                {homeChatMessages.map((m, i) => (
+                  <div key={i} className={`text-xs leading-relaxed ${m.role === 'user' ? 'text-[#909090]' : 'text-[#d0d0d0]'}`}>
+                    <span className="text-[10px] text-[#505050] mr-1">{m.role === 'user' ? 'You' : 'AI'}</span>
+                    {m.content}
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <input value={homeChatInput} onChange={e => setHomeChatInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && homeChatSend()}
+                placeholder="询问 AI 任何问题..." disabled={homeChatLoading}
+                className="flex-1 bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl px-4 py-2.5 text-sm text-white placeholder-[#404040] outline-none focus:border-[#9040F0]/30 transition-colors"
+              />
+              <button onClick={homeChatSend} disabled={homeChatLoading}
+                className="px-4 py-2.5 rounded-xl bg-[#9040F0] hover:bg-[#A050F0] text-white text-sm font-medium transition-all disabled:opacity-50"
+              >{homeChatLoading ? '...' : '发送'}</button>
+            </div>
+          </div>
+
+          {/* 项目区域 */}
+          {homeProjects.length === 0 ? (
+            <div className="flex flex-col items-center gap-4">
+              <div className="relative">
+                <div className="absolute inset-0 w-14 h-14 rounded-2xl bg-[#9040F0]/20 blur-xl" />
+                <div className="relative w-14 h-14 rounded-2xl bg-[#0a0a0a] border border-[#1a1a1a] flex items-center justify-center">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9040F0" strokeWidth="1.2"><rect x="3" y="3" width="18" height="18" rx="4"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                </div>
+              </div>
+              <p className="text-[#606060] text-sm">在无限画布上探索 AI 驱动的视觉叙事</p>
+              <button onClick={handleCreateProject}
+                className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#9040F0] to-[#7020D0] hover:from-[#A050F0] hover:to-[#8030E0] text-white text-sm font-semibold transition-all duration-300 shadow-lg shadow-[#9040F0]/20"
+              >创建第一个项目</button>
+            </div>
+          ) : (
+            <div className="w-full max-w-[960px]">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                {/* 新建卡片 */}
+                <div onClick={handleCreateProject}
+                  className="group cursor-pointer rounded-2xl border border-dashed border-[#1a1a1a] bg-transparent hover:border-[#9040F0]/30 hover:bg-[#060606] transition-all duration-300 p-6 flex flex-col items-center justify-center gap-4 min-h-[220px]"
+                >
+                  <div className="w-12 h-12 rounded-2xl bg-[#0a0a0a] border border-[#1a1a1a] group-hover:border-[#9040F0]/30 group-hover:bg-[#111] flex items-center justify-center transition-all duration-300 group-hover:scale-110">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#505050" strokeWidth="1.8" className="group-hover:stroke-[#9040F0] transition-colors"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  </div>
+                  <span className="text-sm text-[#505050] group-hover:text-[#808080] transition-colors font-medium">新建项目</span>
+                </div>
+                {/* 项目卡片 */}
+                {homeProjects.map(p => (
+                  <div key={p.id}
+                    className="group relative cursor-pointer rounded-2xl border border-[#111] bg-[#030303] hover:border-[#9040F0]/25 hover:bg-[#080808] transition-all duration-300 p-5 flex flex-col gap-4 min-h-[220px] hover:shadow-lg hover:shadow-[#9040F0]/5"
+                  >
+                    {/* 光晕效果 */}
+                    <div className="absolute inset-0 rounded-2xl bg-[#9040F0]/0 group-hover:bg-[#9040F0]/3 transition-colors duration-500 pointer-events-none" />
+                    {/* 编辑/删除 */}
+                    <div className="absolute top-3 right-3 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-all duration-200 z-10" onClick={e => e.stopPropagation()}>
+                      <button
+                        onClick={async () => { const name = prompt('项目名称', p.name); if (name?.trim()) { const lib = await loadProjectLibrary(); const projects = (lib?.projects || []).map(x => x.id === p.id ? { ...x, name: name.trim() } : x); setHomeProjects(projects); await saveProjectLibrary(projects, lib?.activeProjectId || projects[0]?.id || ''); } }}
+                        className="w-7 h-7 rounded-lg bg-black/80 backdrop-blur-sm hover:bg-[#1a1a1a] border border-[#1a1a1a] flex items-center justify-center transition-all" title="重命名"
+                      ><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#808080" strokeWidth="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></button>
+                      <button
+                        onClick={async () => { if (!confirm(`删除「${p.name}」？`)) return; const lib = await loadProjectLibrary(); const projects = (lib?.projects || []).filter(x => x.id !== p.id); setHomeProjects(projects); if (projects.length > 0) await saveProjectLibrary(projects, lib?.activeProjectId || projects[0]?.id || ''); }}
+                        className="w-7 h-7 rounded-lg bg-black/80 backdrop-blur-sm hover:bg-[#2a1111] border border-[#1a1a1a] flex items-center justify-center transition-all" title="删除"
+                      ><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#CC4444" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+                    </div>
+                    {/* 缩略图 */}
+                    <div className="relative w-full aspect-video rounded-xl bg-[#080808] border border-[#0d0d0d] group-hover:border-[#151515] overflow-hidden transition-all" onClick={() => handleOpenProject(p)}>
+                      <div className="absolute inset-0 bg-gradient-to-br from-[#0d0d0d] via-[#0a0a0a] to-[#060606] flex items-center justify-center">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#1a1a1a" strokeWidth="1.2" className="group-hover:stroke-[#2a2a2a] transition-colors"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+                      </div>
+                      {/* 底部渐变线 */}
+                      <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[#9040F0]/0 group-hover:via-[#9040F0]/30 to-transparent transition-all duration-500" />
+                    </div>
+                    {/* 信息 */}
+                    <div className="flex flex-col gap-1" onClick={() => handleOpenProject(p)}>
+                      <p className="text-sm text-[#b0b0b0] group-hover:text-white truncate font-medium">{p.name}</p>
+                      <p className="text-[11px] text-[#404040]">{new Date(p.updatedAt).toLocaleDateString('zh-CN', { month:'short', day:'numeric' })}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        {/* 底部图片轮播 */}
+        <div className="relative shrink-0 border-t border-white/[0.02] py-6 px-8 -mt-[600px]">
+          <Carousel3D />
+        </div>
+        {/* 底栏 */}
+        <div className="relative text-center py-3 text-[10px] text-[#1a1a1a] shrink-0 tracking-[0.2em]">NwwWoW · STORYBOARD</div>
+        {SettingsModalShared}
+      </div>
+    );
+  }
+
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-[#0f0f0f] text-neutral-100 select-none font-sans" onContextMenu={handleContextMenu}>
+    <div className="relative w-screen h-screen overflow-hidden bg-[#0f0f0f] text-neutral-100 select-none font-sans" onContextMenu={handleContextMenu} onDoubleClick={handleCanvasDoubleClick}>
 
       {/* 保存成功提示 */}
       {saveSuccessMsg && (
@@ -6000,7 +6290,7 @@ export default function App() {
     {contextMenu && (
       <div
         className="absolute z-50 bg-[#252525] border border-[#444] rounded-lg shadow-2xl py-1 min-w-[160px] overflow-hidden canvas-chrome-150"
-        style={{ left: contextMenu.x, top: contextMenu.y }}
+        style={{ left: contextMenu.x, top: contextMenu.y, transform: 'scale(0.5)', transformOrigin: 'top left' }}
         onPointerDown={e => e.stopPropagation()}
       >
         <button className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-rose-600 hover:text-white flex items-center gap-2" onPointerDown={() => handleAddNode('chat')}>
@@ -6059,6 +6349,14 @@ export default function App() {
         >
           <KeyIcon size={18} />
         </button>
+        <button
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => { loadProjectLibrary().then(lib => { if (lib) setHomeProjects(lib.projects); }); setShowHomePage(true); }}
+          className="canvas-chrome-150 bg-[#1e1e1e]/90 backdrop-blur-md p-2.5 rounded-xl shadow-2xl border border-[#333] hover:bg-[#9040F0]/30 transition-colors text-gray-400 hover:text-white flex items-center justify-center"
+          title="返回首页"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        </button>
         <div className="canvas-chrome-150 bg-[#1e1e1e]/90 backdrop-blur-md p-1.5 rounded-xl shadow-2xl border border-[#333] flex flex-col gap-1">
           <button
             onPointerDown={(e) => {
@@ -6094,7 +6392,7 @@ export default function App() {
       </div>
 
       {/* Settings + project actions（左上第二列） */}
-      <div className="canvas-chrome-150 absolute top-6 left-28 z-40 flex flex-wrap items-center gap-2">
+      <div className="canvas-chrome-150 absolute top-6 left-28 z-40 flex flex-wrap items-center gap-2" style={{ transform: 'scale(0.67)', transformOrigin: 'top left' }}>
       <button
         onClick={() => {
           setSettingsTab('api');
