@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { CanvasNode, Edge, Transform, Tool, NodeType, Annotation, AnnotationNode, PanoramaNode, GridSplitNode, GridMergeNode, PanoramaT2iNode, Director3DNode, Figure3D, ChatNode, ChatMessage } from './types';
 import type { AiProvider } from './services/aiSettings';
 import {
@@ -711,7 +712,8 @@ function computeNodeResizeFromPointer(
     newY = oy;
     newH = origin.height;
   } else if (direction === 'w') {
-    const edgeX = px - (grabPx - ox);
+    // 左边界钳位：不允许 edgeX < 0，同时调整 newW
+    const edgeX = Math.max(0, px - (grabPx - ox));
     newW = Math.max(minWidth, right - edgeX);
     newX = right - newW;
     newY = oy;
@@ -723,7 +725,8 @@ function computeNodeResizeFromPointer(
     newY = oy;
     newW = origin.width;
   } else if (direction === 'n') {
-    const edgeY = py - (grabPy - oy);
+    // 上边界钳位：不允许 edgeY < 0，同时调整 newH
+    const edgeY = Math.max(0, py - (grabPy - oy));
     newH = Math.max(minHeight, bottom - edgeY);
     newY = bottom - newH;
     newX = ox;
@@ -755,7 +758,8 @@ function computeNodeResizeFromPointer(
     }
   } else if (direction === 'sw') {
     newY = oy;
-    const cx = px - (grabPx - ox);
+    // 左边界钳位
+    const cx = Math.max(0, px - (grabPx - ox));
     const cy = py - (grabPy - bottom);
     newW = Math.max(minWidth, right - cx);
     newX = right - newW;
@@ -763,21 +767,20 @@ function computeNodeResizeFromPointer(
   } else if (direction === 'ne') {
     newX = ox;
     const cx = px - (grabPx - right);
-    const cy = py - (grabPy - oy);
+    // 上边界钳位
+    const cy = Math.max(0, py - (grabPy - oy));
     newW = Math.max(minWidth, cx - ox);
     newH = Math.max(minHeight, bottom - cy);
     newY = bottom - newH;
   } else if (direction === 'nw') {
-    const cx = px - (grabPx - ox);
-    const cy = py - (grabPy - oy);
+    // 左 + 上边界钳位
+    const cx = Math.max(0, px - (grabPx - ox));
+    const cy = Math.max(0, py - (grabPy - oy));
     newW = Math.max(minWidth, right - cx);
     newH = Math.max(minHeight, bottom - cy);
     newX = right - newW;
     newY = bottom - newH;
   }
-
-  newX = Math.max(0, newX);
-  newY = Math.max(0, newY);
 
   return { x: newX, y: newY, width: newW, height: newH };
 }
@@ -1057,6 +1060,12 @@ export default function App() {
   useEffect(() => {
     eyedropperTargetNodeIdRef.current = eyedropperTargetNodeId;
   }, [eyedropperTargetNodeId]);
+
+  // 快捷节点面板
+  const [quickPaletteOpen, setQuickPaletteOpen] = useState(true);
+  // 画布背景样式 'dots' | 'grid' | 'none'
+  const [canvasBgStyle, setCanvasBgStyle] = useState<'dots' | 'grid' | 'none'>('dots');
+  const [canvasBgColor, setCanvasBgColor] = useState<'dark' | 'black'>('dark');
 
   // 节点缩放状态
   const [resizingNodeId, setResizingNodeId] = useState<string | null>(null);
@@ -1382,7 +1391,7 @@ export default function App() {
 
   // Unified Settings (API + Presets)
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'api' | 'presets' | 'downloads' | 'credits'>('api');
+  const [settingsTab, setSettingsTab] = useState<'api' | 'presets' | 'downloads' | 'credits' | 'appearance'>('api');
   /** 设置 → 预设：顶层大类（AI对话 / 文生图 / 图生图） */
   const [settingsPresetDomainTab, setSettingsPresetDomainTab] = useState<PresetDomainId>('i2i');
   /** 设置 → 预设：预设名 → 顶层大类手动覆盖 */
@@ -2533,6 +2542,10 @@ export default function App() {
   const draggingNodeIdRef = useRef<string | null>(null);
   const lastMousePosRef = useRef({ x: 0, y: 0 });
   const lastFsMousePosRef = useRef({ x: 0, y: 0 });
+  /** 持续追踪鼠标在画布坐标中的位置，供快捷键新建节点时定位 */
+  const canvasMouseRef = useRef({ x: 0, y: 0 });
+  /** 记录最近一次新建节点的画布坐标，用于错开叠加 */
+  const lastCreatedNodePosRef = useRef({ x: -9999, y: -9999, stagger: 0 });
   const edgeDraggingRef = useRef<{ edgeId: string, x: number, y: number, nearStart: boolean, nearEnd: boolean } | null>(null);
   
   // 节点拖拽优化：使用 ref 累积位置，只在动画帧中更新（支持多选）
@@ -2811,6 +2824,16 @@ export default function App() {
   useEffect(() => {
     const handleGlobalPointerMove = (e: PointerEvent) => {
     const pointerType = activePointerTypeRef.current;
+
+    // 始终追踪鼠标在画布坐标中的位置（供快捷键/右键菜单创建节点定位）
+    if (containerRef.current) {
+      const r = containerRef.current.getBoundingClientRect();
+      const tf = transformRef.current;
+      canvasMouseRef.current = {
+        x: (e.clientX - r.left - tf.x) / Math.max(tf.scale, 0.1),
+        y: (e.clientY - r.top - tf.y) / Math.max(tf.scale, 0.1),
+      };
+    }
 
     if (pointerType === 'canvas') {
       const dx = e.clientX - lastMousePosRef.current.x;
@@ -3153,13 +3176,11 @@ export default function App() {
         !e.metaKey &&
         !e.altKey;
 
-      const placeNewNodeCentered = (type: NodeType) => {
-        const rect = containerRef.current?.getBoundingClientRect();
-        if (!rect) return;
+      const placeNewNodeAtMouse = (type: NodeType) => {
         const defaultSize = DEFAULT_NODE_SIZES[type] || { width: 420, height: 300 };
-        const tf = transformRef.current;
-        const canvasX = (rect.width / 2 - tf.x) / tf.scale - defaultSize.width / 2;
-        const canvasY = (rect.height / 2 - tf.y) / tf.scale - defaultSize.height / 2;
+        const mp = canvasMouseRef.current;
+        const canvasX = mp.x - defaultSize.width / 2;
+        const canvasY = mp.y - defaultSize.height / 2;
         addNodeAtCanvasPositionRef.current(type, canvasX, canvasY);
       };
 
@@ -3172,19 +3193,19 @@ export default function App() {
         setActiveTool('boxSelect');
       } else if (e.code === 'KeyQ' && shortcutCreatesNode) {
         e.preventDefault();
-        placeNewNodeCentered('chat');
+        placeNewNodeAtMouse('chat');
       } else if (e.code === 'KeyW' && shortcutCreatesNode) {
         e.preventDefault();
-        placeNewNodeCentered('t2i');
+        placeNewNodeAtMouse('t2i');
       } else if (e.code === 'KeyE' && shortcutCreatesNode) {
         e.preventDefault();
-        placeNewNodeCentered('i2i');
+        placeNewNodeAtMouse('i2i');
       } else if (e.code === 'KeyR' && shortcutCreatesNode) {
         e.preventDefault();
-        placeNewNodeCentered('annotation');
+        placeNewNodeAtMouse('annotation');
       } else if (e.code === 'KeyT' && shortcutCreatesNode) {
         e.preventDefault();
-        placeNewNodeCentered('video');
+        placeNewNodeAtMouse('video');
       } else if (
         e.code === 'KeyX' &&
         !isInput &&
@@ -3261,7 +3282,101 @@ export default function App() {
       ) {
         e.preventDefault();
         fitViewportToSelectedNodes();
+      } else if (
+        (e.ctrlKey || e.metaKey) &&
+        e.shiftKey &&
+        e.code === 'KeyL' &&
+        !isInput &&
+        !isContentEditable &&
+        !fullscreenImage
+      ) {
+        e.preventDefault();
+        autoLayoutFromSelection();
       }
+    };
+
+    /** 自动排列选中节点及其连接的上下游节点为从左到右的流程布局 */
+    const autoLayoutFromSelection = () => {
+      const sel = selectedIdsRef.current;
+      if (sel.length === 0) return;
+      const nx = nodesRef.current;
+      const ex = edgesRef.current;
+      const GAP_X = 280;
+      const GAP_Y = 100;
+      // 构建邻接表
+      const outMap = new Map<string, string[]>(); // source -> targets
+      const inMap = new Map<string, string[]>(); // target -> sources
+      ex.forEach((e) => {
+        if (!outMap.has(e.sourceId)) outMap.set(e.sourceId, []);
+        outMap.get(e.sourceId)!.push(e.targetId);
+        if (!inMap.has(e.targetId)) inMap.set(e.targetId, []);
+        inMap.get(e.targetId)!.push(e.sourceId);
+      });
+      // BFS 分层：从选中节点向前（inMap）找上游层，向后（outMap）找下游层
+      const levelMap = new Map<string, number>(); // nodeId -> level (negative = upstream, 0 = root, positive = downstream)
+      const rootIds = sel.filter((id) => nx.some((n) => n.id === id));
+      rootIds.forEach((id) => levelMap.set(id, 0));
+      // 上游 BFS
+      const upQueue = rootIds.map((id) => ({ id, level: 0 }));
+      while (upQueue.length > 0) {
+        const { id, level } = upQueue.shift()!;
+        const sources = inMap.get(id) || [];
+        sources.forEach((sid) => {
+          if (!levelMap.has(sid)) { levelMap.set(sid, level - 1); upQueue.push({ id: sid, level: level - 1 }); }
+        });
+      }
+      // 下游 BFS
+      const downQueue = rootIds.map((id) => ({ id, level: 0 }));
+      while (downQueue.length > 0) {
+        const { id, level } = downQueue.shift()!;
+        const targets = outMap.get(id) || [];
+        targets.forEach((tid) => {
+          if (!levelMap.has(tid)) { levelMap.set(tid, level + 1); downQueue.push({ id: tid, level: level + 1 }); }
+        });
+      }
+      // 将孤立节点也纳入（放在同一层）
+      nx.forEach((n) => { if (!levelMap.has(n.id)) levelMap.set(n.id, 0); });
+      // 按层级分组
+      const groups = new Map<number, CanvasNode[]>();
+      levelMap.forEach((level, nodeId) => {
+        const node = nx.find((n) => n.id === nodeId);
+        if (!node) return;
+        if (!groups.has(level)) groups.set(level, []);
+        groups.get(level)!.push(node);
+      });
+      // 每层内部按 y 排序
+      groups.forEach((g) => g.sort((a, b) => a.y - b.y));
+      // 计算位置：root 层中心为原始选中节点位置
+      const rootNode = nx.find((n) => n.id === rootIds[0]);
+      const baseX = rootNode ? rootNode.x : 0;
+      const baseY = rootNode ? rootNode.y : 0;
+      const levelXs = new Map<number, number>();
+      const minLevel = Math.min(...groups.keys());
+      const maxLevel = Math.max(...groups.keys());
+      const totalLevels = maxLevel - minLevel + 1;
+      const totalWidth = totalLevels * (GAP_X + 300);
+      const startX = baseX - (totalWidth / 2);
+      for (let l = minLevel; l <= maxLevel; l++) {
+        levelXs.set(l, startX + (l - minLevel) * GAP_X);
+      }
+      // 计算每层总高度
+      const levelHeights = new Map<number, number>();
+      groups.forEach((g, level) => {
+        levelHeights.set(level, g.reduce((sum, n) => sum + n.height + GAP_Y, 0) - (g.length > 0 ? GAP_Y : 0));
+      });
+      const maxLevelHeight = Math.max(...levelHeights.values(), 100);
+      // 生成新位置
+      const updates = new Map<string, { x: number; y: number }>();
+      groups.forEach((g, level) => {
+        const x = levelXs.get(level)!;
+        const totalH = levelHeights.get(level)!;
+        let y = baseY - totalH / 2;
+        g.forEach((node) => {
+          updates.set(node.id, { x, y });
+          y += node.height + GAP_Y;
+        });
+      });
+      setNodes((prev) => prev.map((n) => updates.has(n.id) ? { ...n, ...updates.get(n.id)! } : n));
     };
 
     const handlePaste = (e: ClipboardEvent) => {
@@ -3701,12 +3816,25 @@ export default function App() {
   // --- Node Actions ---
   const addNodeAtCanvasPosition = useCallback((type: NodeType, canvasX: number, canvasY: number) => {
     const defaultSize = DEFAULT_NODE_SIZES[type] || { width: 420, height: 300 };
+    // 与上次创建的节点位置相同（阈值 30px）则向右错开 100px，避免完全叠压
+    const prev = lastCreatedNodePosRef.current;
+    const STAGGER_THRESHOLD = 30;
+    const STAGGER_X = 100;
+    let finalX = canvasX;
+    let finalY = canvasY;
+    if (Math.abs(prev.x - canvasX) < STAGGER_THRESHOLD && Math.abs(prev.y - canvasY) < STAGGER_THRESHOLD) {
+      finalX = canvasX + STAGGER_X * (prev.stagger + 1);
+      finalY = canvasY + 24 * (prev.stagger + 1);
+      lastCreatedNodePosRef.current = { x: canvasX, y: canvasY, stagger: prev.stagger + 1 };
+    } else {
+      lastCreatedNodePosRef.current = { x: canvasX, y: canvasY, stagger: 0 };
+    }
     const newId = `${type}-${Date.now()}`;
     const newNode: CanvasNode = {
       id: newId,
       type,
-      x: canvasX,
-      y: canvasY,
+      x: finalX,
+      y: finalY,
       width: defaultSize.width,
       height: defaultSize.height,
       prompt: '', // 提示词使用预设，不直接设置
@@ -5342,8 +5470,8 @@ export default function App() {
 
           {/* 图片标注节点内容 */}
           {node.type === 'annotation' && (
-            <AnnotationNodeContent 
-              node={node as AnnotationNode} 
+            <AnnotationNodeContent
+              node={node as AnnotationNode}
               nodes={nodes}
               edges={edges}
               eyedropperTargetNodeId={eyedropperTargetNodeId}
@@ -5364,6 +5492,7 @@ export default function App() {
                 };
                 setNodes(prev => [...prev, newNode]);
               }}
+              onFullscreenImage={(base64) => setFullscreenImage(base64)}
             />
           )}
 
@@ -5763,13 +5892,18 @@ export default function App() {
         onDrop={handleDrop}
         style={{ touchAction: 'none' }}
       >
-        {/* Dot Grid Background */}
-        <div 
+        {/* Canvas Background */}
+        <div
           className="absolute inset-0 pointer-events-none"
           style={{
-            backgroundSize: `${24 * transform.scale}px ${24 * transform.scale}px`,
-            backgroundImage: `radial-gradient(circle, #333 1px, transparent 1px)`,
-            backgroundPosition: `${transform.x}px ${transform.y}px`
+            backgroundSize: canvasBgStyle === 'grid' ? `${32 * transform.scale}px ${32 * transform.scale}px` : canvasBgStyle === 'dots' ? `${24 * transform.scale}px ${24 * transform.scale}px` : '0',
+            backgroundImage: canvasBgStyle === 'grid'
+              ? `linear-gradient(to right, ${canvasBgColor === 'dark' ? '#2a2a2a' : '#1a1a1a'} 1px, transparent 1px), linear-gradient(to bottom, ${canvasBgColor === 'dark' ? '#2a2a2a' : '#1a1a1a'} 1px, transparent 1px)`
+              : canvasBgStyle === 'dots'
+                ? `radial-gradient(circle, ${canvasBgColor === 'dark' ? '#333' : '#222'} 1px, transparent 1px)`
+                : 'none',
+            backgroundPosition: `${transform.x}px ${transform.y}px`,
+            backgroundColor: canvasBgColor === 'black' ? '#0a0a0a' : '#0f0f0f',
           }}
         />
 
@@ -5791,11 +5925,24 @@ export default function App() {
             }}
           >
             <defs>
-              <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-                <polygon points="0 0, 10 3.5, 0 7" fill="#4a5568" />
+              {/* 活跃连线发光滤镜 */}
+              <filter id="glow-active" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="3" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+              {/* 跃线标记（小弧形桥） */}
+              <marker id="jump-marker" markerWidth="14" markerHeight="10" refX="7" refY="5" orient="auto">
+                <path d="M 0,5 Q 7,-1 14,5" fill="none" stroke="#60a5fa" strokeWidth="2" />
+                <circle cx="7" cy="5" r="2" fill="#60a5fa" />
               </marker>
-              <marker id="arrowhead-active" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-                <polygon points="0 0, 10 3.5, 0 7" fill="#60a5fa" />
+              <marker id="arrowhead" markerWidth="12" markerHeight="8" refX="10" refY="4" orient="auto">
+                <polygon points="0 0, 12 4, 0 8" fill="#4a5568" />
+              </marker>
+              <marker id="arrowhead-active" markerWidth="12" markerHeight="8" refX="10" refY="4" orient="auto">
+                <polygon points="0 0, 12 4, 0 8" fill="#60a5fa" />
               </marker>
             </defs>
             
@@ -5849,6 +5996,46 @@ export default function App() {
                 </g>
               );
             })}
+
+            {/* 跃线标记：检测连线交叉点并绘制弧形桥 */}
+            {(() => {
+              const bridges: { x: number; y: number; id: string }[] = [];
+              const lineSegs = edges.map((edge) => {
+                const s = nodes.find((n) => n.id === edge.sourceId);
+                const t = nodes.find((n) => n.id === edge.targetId);
+                if (!s || !t) return null;
+                return {
+                  id: edge.id,
+                  x1: s.x + s.width, y1: s.y + s.height / 2,
+                  x2: t.x, y2: t.y + t.height / 2,
+                };
+              }).filter(Boolean) as { id: string; x1: number; y1: number; x2: number; y2: number }[];
+              for (let i = 0; i < lineSegs.length; i++) {
+                for (let j = i + 1; j < lineSegs.length; j++) {
+                  const a = lineSegs[i], b = lineSegs[j];
+                  const d = (b.y2 - b.y1) * (a.x2 - a.x1) - (b.x2 - b.x1) * (a.y2 - a.y1);
+                  if (Math.abs(d) < 0.001) continue;
+                  const t1 = ((b.x2 - b.x1) * (a.y1 - b.y1) - (b.y2 - b.y1) * (a.x1 - b.x1)) / d;
+                  const t2 = ((a.x2 - a.x1) * (a.y1 - b.y1) - (a.y2 - a.y1) * (a.x1 - b.x1)) / d;
+                  if (t1 > 0.05 && t1 < 0.95 && t2 > 0.05 && t2 < 0.95) {
+                    bridges.push({
+                      x: a.x1 + t1 * (a.x2 - a.x1),
+                      y: a.y1 + t1 * (a.y2 - a.y1),
+                      id: `bridge-${a.id}-${b.id}`,
+                    });
+                  }
+                }
+              }
+              return bridges.map((b) => (
+                <g key={b.id} pointerEvents="none">
+                  <circle cx={b.x} cy={b.y} r={5} fill="#1e1e1e" stroke="#60a5fa" strokeWidth={1.5} />
+                  <path
+                    d={`M ${b.x - 4} ${b.y} Q ${b.x} ${b.y - 5} ${b.x + 4} ${b.y}`}
+                    fill="none" stroke="#60a5fa" strokeWidth={1.5}
+                  />
+                </g>
+              ));
+            })()}
 
             {/* Render drafting edge */}
             {draftEdge && (() => {
@@ -6531,6 +6718,16 @@ export default function App() {
               >
                 积分消耗
               </button>
+              <button
+                onClick={() => {
+                  setSettingsPresetAuthSession(false);
+                  setSettingsPresetPwdModal({ intent: null, input: '' });
+                  setSettingsTab('appearance');
+                }}
+                className={`text-left px-3 py-2 rounded text-sm ${settingsTab === 'appearance' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-[#2a2a2a]'}`}
+              >
+                外观
+              </button>
             </div>
             <div className="flex flex-1 flex-col min-h-0 min-w-0 p-6">
               <div className="flex shrink-0 items-center justify-between mb-4">
@@ -6541,7 +6738,9 @@ export default function App() {
                       ? '提示词预设'
                       : settingsTab === 'downloads'
                         ? '下载路径'
-                        : '积分消耗'}
+                        : settingsTab === 'credits'
+                          ? '积分消耗'
+                          : '外观'}
                 </h2>
                 <button
                   onClick={() => setShowSettingsModal(false)}
@@ -7275,6 +7474,46 @@ export default function App() {
                   </button>
                 </div>
               )}
+              {settingsTab === 'appearance' && (
+                <div className="space-y-5">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white mb-2">画布背景</h3>
+                    <div className="flex gap-2 flex-wrap">
+                      {(['dots', 'grid', 'none'] as const).map((s) => (
+                        <button
+                          key={s}
+                          onClick={() => setCanvasBgStyle(s)}
+                          className={`px-4 py-2 rounded-lg text-xs transition-colors ${
+                            canvasBgStyle === s
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-[#252525] text-gray-300 hover:bg-[#333] border border-[#444]'
+                          }`}
+                        >
+                          {s === 'dots' ? '点阵' : s === 'grid' ? '方格线' : '无边线'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-white mb-2">底色</h3>
+                    <div className="flex gap-2">
+                      {(['dark', 'black'] as const).map((c) => (
+                        <button
+                          key={c}
+                          onClick={() => setCanvasBgColor(c)}
+                          className={`px-4 py-2 rounded-lg text-xs transition-colors ${
+                            canvasBgColor === c
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-[#252525] text-gray-300 hover:bg-[#333] border border-[#444]'
+                          }`}
+                        >
+                          {c === 'dark' ? '深灰（默认）' : '纯黑'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
               </div>
             </div>
           </div>
@@ -7416,6 +7655,109 @@ export default function App() {
           </button>
         </div>
       )}
+
+      {/* 快捷节点面板（左侧） */}
+      <div
+        className="absolute left-6 top-1/2 -translate-y-1/2 z-30 flex flex-col gap-1 canvas-chrome-150"
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <button
+          onClick={() => setQuickPaletteOpen((v) => !v)}
+          className="w-8 h-8 flex items-center justify-center rounded-xl bg-[#1e1e1e]/90 backdrop-blur-md border border-[#333] text-gray-400 hover:text-white hover:bg-[#333] transition-colors shadow-lg"
+          title={quickPaletteOpen ? '折叠面板' : '展开快捷节点面板'}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            {quickPaletteOpen
+              ? <><polyline points="15,18 9,12 15,6"/></>
+              : <><polyline points="9,18 15,12 9,6"/></>}
+          </svg>
+        </button>
+        {quickPaletteOpen && (
+          <div className="flex flex-col gap-0.5 bg-[#1e1e1e]/90 backdrop-blur-md rounded-xl border border-[#333] p-1.5 shadow-lg">
+            {([
+              { type: 'chat' as NodeType, label: '对话', icon: <MessageIcon size={15} />, color: 'hover:bg-rose-600' },
+              { type: 't2i' as NodeType, label: '文生图', icon: <ImageIcon size={15} />, color: 'hover:bg-purple-600' },
+              { type: 'i2i' as NodeType, label: '图生图', icon: <WandIcon size={15} />, color: 'hover:bg-blue-600' },
+              { type: 'image' as NodeType, label: '图片', icon: <ImageIcon size={15} />, color: 'hover:bg-green-600' },
+              { type: 'annotation' as NodeType, label: '标注', icon: <AnnotationIcon size={15} />, color: 'hover:bg-orange-600' },
+              { type: 'video' as NodeType, label: '视频', icon: <VideoIcon size={15} />, color: 'hover:bg-amber-600' },
+              { type: 'audio' as NodeType, label: '语音', icon: <AudioIcon size={15} />, color: 'hover:bg-blue-600' },
+              { type: 'text' as NodeType, label: '文本', icon: <TextIcon size={15} />, color: 'hover:bg-blue-600' },
+            ] as const).map((item) => (
+              <button
+                key={item.type}
+                onClick={() => {
+                  const defaultSize = DEFAULT_NODE_SIZES[item.type] || { width: 420, height: 300 };
+                  const mp = canvasMouseRef.current;
+                  addNodeAtCanvasPosition(item.type, mp.x - defaultSize.width / 2, mp.y - defaultSize.height / 2);
+                }}
+                className={`w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 ${item.color} hover:text-white transition-colors`}
+                title={`新建${item.label}节点`}
+              >
+                {item.icon}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 缩放指示器 + 控制按钮（左下角） */}
+      <div
+        className="absolute bottom-6 left-6 z-30 flex items-center gap-1 bg-[#1e1e1e]/90 backdrop-blur-md rounded-xl border border-[#333] px-2 py-1.5 shadow-lg canvas-chrome-150"
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <button
+          onClick={() => {
+            const ns = Math.max(0.05, transform.scale - 0.1);
+            setTransform((p) => ({ ...p, scale: ns }));
+          }}
+          className="w-6 h-6 flex items-center justify-center rounded text-gray-400 hover:bg-[#333] hover:text-white text-sm font-bold transition-colors"
+          title="缩小"
+        >−</button>
+        <span
+          className="text-xs text-gray-300 font-mono w-12 text-center select-none cursor-pointer hover:text-white transition-colors"
+          title="点击重置为 100%"
+          onClick={() => setTransform((p) => ({ ...p, scale: 1 }))}
+        >{Math.round(transform.scale * 100)}%</span>
+        <button
+          onClick={() => {
+            const ns = Math.min(5, transform.scale + 0.1);
+            setTransform((p) => ({ ...p, scale: ns }));
+          }}
+          className="w-6 h-6 flex items-center justify-center rounded text-gray-400 hover:bg-[#333] hover:text-white text-sm font-bold transition-colors"
+          title="放大"
+        >+</button>
+        <div className="w-px h-4 bg-[#444] mx-0.5" />
+        <button
+          onClick={() => {
+            const rect = containerRef.current?.getBoundingClientRect();
+            if (!rect || nodes.length === 0) return;
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            nodes.forEach((n) => {
+              if (n.x < minX) minX = n.x;
+              if (n.y < minY) minY = n.y;
+              if (n.x + n.width > maxX) maxX = n.x + n.width;
+              if (n.y + n.height > maxY) maxY = n.y + n.height;
+            });
+            const pad = 80;
+            const nw = maxX - minX + pad * 2;
+            const nh = maxY - minY + pad * 2;
+            const s = Math.min(rect.width / nw, rect.height / nh, 2);
+            setTransform({
+              x: rect.width / 2 - ((minX + (maxX - minX) / 2) * s),
+              y: rect.height / 2 - ((minY + (maxY - minY) / 2) * s),
+              scale: Math.max(0.05, s),
+            });
+          }}
+          className="px-1.5 py-0.5 rounded text-[10px] text-gray-400 hover:bg-[#333] hover:text-white transition-colors"
+          title="适合窗口 — 缩放并平移以显示所有节点"
+        >⊞</button>
+        <button
+          onClick={() => setTransform({ x: 0, y: 0, scale: 1 })}
+          className="px-1.5 py-0.5 rounded text-[10px] text-gray-400 hover:bg-[#333] hover:text-white transition-colors"
+          title="重置为 100%"
+        >1:1</button>
+      </div>
 
     </div>
   );
@@ -11130,9 +11472,10 @@ interface AnnotationNodeContentProps {
   onEyedropperSelect: () => void;
   onUpdate: (updates: Partial<AnnotationNode>) => void;
   onCreateImageNode: (images: string[], nodeX: number, nodeY: number) => void;
+  onFullscreenImage?: (base64: string) => void;
 }
 
-function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEyedropperSelect, onUpdate, onCreateImageNode }: AnnotationNodeContentProps) {
+function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEyedropperSelect, onUpdate, onCreateImageNode, onFullscreenImage }: AnnotationNodeContentProps) {
   // 计算链接到该节点的源图片
   const incomingEdges = edges.filter(e => e.targetId === node.id);
   const sourceNodes = incomingEdges
@@ -11589,7 +11932,7 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
     }
   };
 
-  /** 裁切蒙层：拖拽中与待确认选区 */
+  /** 裁切蒙层：拖拽中与待确认选区（保留原图可见） */
   const drawCropOverlay = (ctx: CanvasRenderingContext2D, cw: number, ch: number) => {
     let cx: number;
     let cy: number;
@@ -11610,12 +11953,25 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
       return;
     }
     if (cwid < 2 || chgt < 2) return;
+    const cached = imageCacheRef.current;
     ctx.save();
+    // 暗色遮罩盖住整张画布
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
     ctx.fillRect(0, 0, cw, ch);
+    // 裁切选区内先清再重绘原图部分，避免 clearRect 把底图擦掉
     ctx.clearRect(cx, cy, cwid, chgt);
+    if (cached) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(cx, cy, cwid, chgt);
+      ctx.clip();
+      ctx.drawImage(cached.img, cached.x, cached.y, cached.w, cached.h);
+      ctx.restore();
+    }
+    // 选区淡蓝高亮
     ctx.fillStyle = 'rgba(100, 180, 255, 0.35)';
     ctx.fillRect(cx, cy, cwid, chgt);
+    // 虚线边框
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 2;
     ctx.setLineDash([6, 4]);
@@ -11712,25 +12068,31 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
     }
   };
 
-  // 初始化 canvas
+  // 初始化 canvas（使用 canvas 自身 rect 确保 buffer 与显示一致，避免 object-fit 偏移）
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
     if (!canvas || !container) return;
 
-    // 根据容器尺寸设置 canvas 尺寸
     const updateCanvasSize = () => {
-      const rect = container.getBoundingClientRect();
+      if (!canvas.parentElement) return;
+      const rect = canvas.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
-        canvas.width = rect.width;
-        canvas.height = rect.height;
-        renderCanvas();
+        const w = Math.round(rect.width);
+        const h = Math.round(rect.height);
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+          imageCacheRef.current = null; // 重设缓存以匹配新尺寸
+          renderCanvas();
+        }
       }
     };
 
     updateCanvasSize();
-    window.addEventListener('resize', updateCanvasSize);
-    return () => window.removeEventListener('resize', updateCanvasSize);
+    const ro = new ResizeObserver(() => updateCanvasSize());
+    ro.observe(container);
+    return () => ro.disconnect();
   }, []);
 
   // 当图片或标注变化时重新渲染
@@ -12653,14 +13015,10 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
       <div
         ref={containerRef}
         className="relative flex-1 min-h-[160px] bg-[#1a1a1a] rounded-lg border border-[#333] overflow-hidden"
-        onDoubleClick={(e) => {
-          e.stopPropagation();
-          if (sourceImage) openFullscreenAnnotation();
-        }}
       >
         <canvas
           ref={canvasRef}
-          className="w-full h-full cursor-crosshair object-contain"
+          className="w-full h-full cursor-crosshair"
           onPointerDown={(e) => {
             e.stopPropagation();
             handleMouseDown(e);
@@ -12670,6 +13028,10 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
           }}
           onPointerUp={handleMouseUp}
           onPointerLeave={handleMouseUp}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            if (sourceImage) openFullscreenAnnotation();
+          }}
         />
 
         {/* 文字输入框 */}
@@ -12890,6 +13252,15 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
         </button>
         <button
           onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => { if (sourceImage && onFullscreenImage) onFullscreenImage(sourceImage); }}
+          disabled={!sourceImage}
+          className="py-1 px-2 rounded text-[10px] bg-cyan-700 hover:bg-cyan-600 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
+          title={sourceImage ? '最大化查看图片（仅看图，不含标注工具）' : '请先导入图片'}
+        >
+          <FullscreenIcon size={10} /> 最大化
+        </button>
+        <button
+          onPointerDown={(e) => e.stopPropagation()}
           onClick={openFullscreenAnnotation}
           disabled={!sourceImage}
           className="py-1 px-2 rounded text-[10px] bg-purple-700 hover:bg-purple-600 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
@@ -12934,8 +13305,8 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
         </div>
       )}
 
-      {/* 全屏标注模态框 */}
-      {isFullscreenAnnotation && (
+      {/* 全屏标注模态框（Portal 到 body 以脱离 CSS transform 层，否则 fixed inset-0 会塌陷） */}
+      {isFullscreenAnnotation && createPortal(
         <div
           className="fixed inset-0 z-[2000] bg-black/95 flex flex-col"
           onPointerDown={(e) => e.stopPropagation()}
@@ -13155,7 +13526,8 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
               </div>
             </div>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -13345,7 +13717,9 @@ function EdgePath({ edgeId, startX, startY, cp1X, cp1Y, cp2X, cp2Y, endX, endY, 
         strokeWidth={isActive ? "3" : "2"}
         fill="none"
         markerEnd={isActive ? "url(#arrowhead-active)" : "url(#arrowhead)"}
-        className={`transition-all duration-200 ${isDragging ? 'stroke-red-400' : 'hover:stroke-red-400'}`}
+        filter={isActive ? "url(#glow-active)" : undefined}
+        opacity={isActive ? 1 : 0.7}
+        className={`transition-all duration-200 ${isDragging ? 'stroke-red-400' : isActive ? '' : 'hover:stroke-red-400'}`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
