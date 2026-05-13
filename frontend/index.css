@@ -102,8 +102,8 @@
     font-size: calc(12px * 1.95 * 1.5 * 1.5) !important;
   }
   .canvas-node-font-195.canvas-node-grid-tool-150 .canvas-node-window-title {
-    font-size: calc(0.75rem * 1.95 * 1.2 * 1.5) !important;
-    line-height: calc(1rem * 1.95 * 1.2 * 1.5) !important;
+    font-size: 50px !important;
+    line-height: 1 !important;
   }
 
   /** 节点悬浮标题：大号透明字体 */
@@ -121,6 +121,14 @@
   .canvas-node-root--chat .canvas-node-window-title {
     font-size: 50px !important;
     line-height: 1 !important;
+  }
+
+  /** 节点折叠：未选中时隐藏工具栏/参考栏/文字输入区 */
+  [data-selected="false"] [class*="rounded-t-xl"][class*="border-b"] {
+    display: none !important;
+  }
+  [data-selected="false"] [class*="shrink-0"][class*="border-b"]:not([class*="rounded-b"]) {
+    display: none !important;
   }
 
   /** 图片标注节点：除悬浮标题外统一 30px */

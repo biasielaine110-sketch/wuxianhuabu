@@ -1280,10 +1280,10 @@ export default function App() {
     'director3d': { width: 900, height: 780 },
     /** AI 对话：竖向更高；内容区消息列表:底部输入带 = 2:1 */
     'chat': { width: 920, height: CHAT_NODE_DEFAULT_PIXEL_HEIGHT },
-    'text': { width: 420, height: 300 },
+    'text': { width: 1050, height: 750 },
     'image': { width: 960, height: 1056 },
-    'gridSplit': { width: 840, height: 600 },
-    'gridMerge': { width: 840, height: 600 },
+    'gridSplit': { width: 1680, height: 1200 },
+    'gridMerge': { width: 1680, height: 1200 },
     'video': { width: 1200, height: 1400 },
     'audio': { width: 400, height: 300 },
   };
@@ -4432,12 +4432,13 @@ export default function App() {
       <div
         key={node.id}
         data-node-root="true"
+        data-selected={isSelected ? 'true' : 'false'}
         className={`absolute flex flex-col bg-[#1e1e1e] rounded-xl border-2 shadow-2xl transition-shadow ${borderColor} ${shadowColor} ${isSelected ? 'z-20' : 'z-10 hover:border-[#555]'} ${node.type === 'chat' ? 'canvas-node-root--chat' : 'canvas-node-font-195'}${node.type === 'annotation' ? ' canvas-node-annotation' : ''}${node.type === 'gridSplit' || node.type === 'gridMerge' ? ' canvas-node-grid-tool-150' : ''}`}
         style={{ left: node.x, top: node.y, width: node.width, height: node.height }}
         onPointerDown={(e) => handleNodePointerDown(e, node.id)}
       >
         {/* Floating title - outside window, transparent */}
-        <div className="absolute -top-14 left-3 z-30 flex items-center gap-1.5 pointer-events-none">
+        <div className="absolute -top-14 left-3 z-30 flex items-center gap-1.5 cursor-grab active:cursor-grabbing">
           {headerIcon}
           <span className="canvas-node-window-title text-white/80 font-medium">{headerTitle}</span>
         </div>
@@ -4817,7 +4818,7 @@ export default function App() {
           )}
 
           {node.type === 'video' && (
-            <div className="w-full h-[480px] shrink-0 bg-black relative border-b border-[#333] overflow-hidden group">
+            <div className="w-full h-[480px] shrink-0 bg-[#2a2a2a] relative border-b border-[#333] overflow-hidden group">
               {videoUrls.length > 0 ? (
                 <>
                 <video
@@ -8629,7 +8630,7 @@ function PanoramaNodeContent({
       {/* 预览区域 */}
       <div
         ref={containerRef}
-        className="relative w-full flex-1 min-h-[200px] rounded-lg border border-[#333] overflow-hidden bg-black"
+        className="relative w-full flex-1 min-h-[200px] rounded-lg border border-[#333] overflow-hidden bg-[#2a2a2a]"
         onPointerDown={(e) => {
           e.stopPropagation();
         }}
