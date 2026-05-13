@@ -924,7 +924,7 @@ export default function App() {
   // --- State ---
   const [nodes, setNodes] = useState<CanvasNode[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
-  const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: 1 });
+  const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: 0.4 });
   const [activeTool, setActiveTool] = useState<Tool>('select');
   const [selectedIds, setSelectedIds] = useState<string[]>([]); // 多选支持
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
@@ -4441,7 +4441,7 @@ export default function App() {
         key={node.id}
         data-node-root="true"
         data-selected={isSelected ? 'true' : 'false'}
-        className={`absolute flex flex-col bg-[#1e1e1e] rounded-xl border-2 shadow-2xl transition-shadow ${borderColor} ${shadowColor} ${isSelected ? 'z-20' : 'z-10 hover:border-[#555]'} ${node.type === 'chat' ? 'canvas-node-root--chat' : 'canvas-node-font-195'}${node.type === 'annotation' ? ' canvas-node-annotation' : ''}${node.type === 'gridSplit' || node.type === 'gridMerge' ? ' canvas-node-grid-tool-150' : ''}`}
+        className={`absolute flex flex-col bg-[#1e1e1e] rounded-[20px] border-8 shadow-2xl transition-shadow ${borderColor} ${shadowColor} ${isSelected ? 'z-20' : 'z-10 hover:border-[#555]'} ${node.type === 'chat' ? 'canvas-node-root--chat' : 'canvas-node-font-195'}${node.type === 'annotation' ? ' canvas-node-annotation' : ''}${node.type === 'gridSplit' || node.type === 'gridMerge' ? ' canvas-node-grid-tool-150' : ''}`}
         style={{ left: node.x, top: node.y, width: node.width, height: node.height }}
         onPointerDown={(e) => handleNodePointerDown(e, node.id)}
       >
@@ -6953,14 +6953,14 @@ export default function App() {
                   {/* ① 君澜 */}
                   <div>
                     <h3 className="text-sm font-semibold text-gray-200 mb-2">君澜 AI</h3>
-                    <label className="text-xs text-gray-500 block mb-1">君澜 Base URL</label>
+                    <span hidden><label className="text-xs text-gray-500 block mb-1">君澜 Base URL</label>
                     <input
                       type="text"
                       readOnly
                       value={junlanBaseInput}
                       placeholder={DEFAULT_JUNLAN_BASE_URL}
                       className="w-full mb-3 bg-[#252525] border border-[#333] rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
-                    />
+                    /></span>
                     <label className="text-xs text-gray-500 block mb-1">君澜 API Key</label>
                     <input
                       type="password"
@@ -6974,14 +6974,14 @@ export default function App() {
                   {/* ② codesonline */}
                   <div className="mt-5 pt-4 border-t border-[#333]">
                     <h3 className="text-sm font-semibold text-gray-200 mb-2">codesonline（GPT Image 2）</h3>
-                    <label className="text-xs text-gray-500 block mb-1">codesonline Base URL</label>
+                    <span hidden><label className="text-xs text-gray-500 block mb-1">codesonline Base URL</label>
                     <input
                       type="text"
                       readOnly
                       value={codesonlineBaseInput}
                       placeholder={DEFAULT_CODESONLINE_IMAGE_BASE_URL}
                       className="w-full mb-3 bg-[#252525] border border-[#333] rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
-                    />
+                    /></span>
                     <label className="text-xs text-gray-500 block mb-1">codesonline API Key</label>
                     <input
                       type="password"
@@ -7003,19 +7003,20 @@ export default function App() {
                       placeholder="sk-..."
                       className="w-full mb-3 bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-cyan-600 transition-colors text-sm"
                     />
-                    <label className="text-xs text-gray-500 block mb-1">DeepSeek Base URL</label>
+                    <span hidden><label className="text-xs text-gray-500 block mb-1">DeepSeek Base URL</label>
                     <input
                       type="text"
                       readOnly
                       value={deepSeekBaseInput}
                       placeholder={DEFAULT_DEEPSEEK_BASE_URL}
                       className="w-full bg-[#252525] border border-[#333] rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
-                    />
+                    /></span>
                   </div>
 
                   {/* ⑤ ToAPIs */}
                   <div className="mt-5 pt-4 border-t border-[#333]">
                     <h3 className="text-sm font-semibold text-gray-200 mb-2">ToAPIs</h3>
+                    <span hidden>
                     <label className="text-xs text-gray-500 block mb-1">接口类型</label>
                     <select
                       value={aiProvider}
@@ -7030,14 +7031,15 @@ export default function App() {
                       <option value="openai-compatible">OpenAI 兼容（Bearer / sk-）</option>
                       <option value="gemini">Google Gemini</option>
                     </select>
-                    <label className="text-xs text-gray-500 block mb-1">ToAPIs Base URL</label>
+                    </span>
+                    <span hidden><label className="text-xs text-gray-500 block mb-1">ToAPIs Base URL</label>
                     <input
                       type="text"
                       readOnly
                       value={openAiBaseInput}
                       placeholder={DEFAULT_OPENAI_BASE_URL}
                       className="w-full mb-3 bg-[#252525] border border-[#333] rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
-                    />
+                    /></span>
                     {aiProvider === 'openai-compatible' ? (
                       <>
                         <label className="text-xs text-gray-500 block mb-1">ToAPIs API Key</label>
@@ -7104,14 +7106,14 @@ export default function App() {
                   {/* ⑤ New API */}
                   <div className="mt-5 pt-4 border-t border-[#333]">
                     <h3 className="text-sm font-semibold text-gray-200 mb-2">New API</h3>
-                    <label className="text-xs text-gray-500 block mb-1">New API Base URL</label>
+                    <span hidden><label className="text-xs text-gray-500 block mb-1">New API Base URL</label>
                     <input
                       type="text"
                       readOnly
                       value={newApiBaseInput}
                       placeholder={DEFAULT_NEWAPI_BASE_URL}
                       className="w-full mb-3 bg-[#252525] border border-[#333] rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
-                    />
+                    /></span>
                     <label className="text-xs text-gray-500 block mb-1">New API Key</label>
                     <input
                       type="password"
@@ -11453,7 +11455,7 @@ function ChatNodeContent({
             <div
                 className={`max-w-[92%] rounded-lg p-2.5 ${
                 msg.role === 'user'
-                  ? 'bg-blue-600 text-white'
+                  ? 'bg-[#7BB8E0]/15 text-[#BBD8F0] saturate-[0.2]'
                   : 'bg-[#2a2a2a] text-gray-200'
               }`}
                 style={{ fontSize: chatFontScaled }}
