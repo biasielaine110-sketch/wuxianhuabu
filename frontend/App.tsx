@@ -1279,7 +1279,7 @@ export default function App() {
     'annotation': { width: 960, height: 1000 },
     'director3d': { width: 900, height: 780 },
     /** AI 对话：竖向更高；内容区消息列表:底部输入带 = 2:1 */
-    'chat': { width: 920, height: CHAT_NODE_DEFAULT_PIXEL_HEIGHT },
+    'chat': { width: 1560, height: 2760 },
     'text': { width: 1050, height: 750 },
     'image': { width: 960, height: 1056 },
     'gridSplit': { width: 1680, height: 1200 },
@@ -3189,6 +3189,9 @@ export default function App() {
         setActiveTool('select');
       } else if (e.code === 'KeyB' && !isInput && !isContentEditable && !e.ctrlKey && !e.metaKey && !e.altKey) {
         setActiveTool('boxSelect');
+      } else if (e.code === 'KeyG' && !isInput && !isContentEditable && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        selectedIds.forEach(id => handleResetNodeSize(id));
       } else if (e.code === 'KeyQ' && shortcutCreatesNode) {
         e.preventDefault();
         placeNewNodeAtMouse('chat');
@@ -3628,6 +3631,14 @@ export default function App() {
 
   const handleCanvasDoubleClick = useCallback((e: React.MouseEvent) => {
     if (fullscreenImage) return;
+    const target = e.target as HTMLElement;
+    // 只响应画布空白区域双击，忽略节点/按钮/SVG等
+    if (target.closest('[data-node-root]') || target.closest('button') || target.closest('svg') || target.closest('select') || target.closest('textarea') || target.closest('input')) return;
+    if (target.id !== 'canvas-container' && target.id !== 'svg-layer' && !target.classList.contains('pointer-events-none')) {
+      // 检查是否在节点区域外
+      const hasNode = target.closest('[data-node-root]');
+      if (hasNode) return;
+    }
     const rect = containerRef.current!.getBoundingClientRect();
     const canvasX = (e.clientX - rect.left - transform.x) / transform.scale;
     const canvasY = (e.clientY - rect.top - transform.y) / transform.scale;
@@ -3635,7 +3646,7 @@ export default function App() {
   }, [transform, fullscreenImage]);
 
   const handleNodePointerDown = (e: React.PointerEvent, id: string) => {
-    if (e.button === 2 || fullscreenImage) return;
+    if (e.button === 2 || e.button === 1 || fullscreenImage) return;
 
     const targetEl = e.target as HTMLElement | null;
     /** 节点内表单控件：不应触发整块节点拖拽（否则调整下拉/输入时窗口会跟着「飞」） */
@@ -4785,7 +4796,6 @@ export default function App() {
                   ) : (
                     node.type === 'image' ? (
                       <div className="relative z-[2] flex flex-col items-center gap-2">
-                        <div className="text-xs text-gray-400">创建图片节点</div>
                         <button 
                           onPointerDown={(e) => {
                             e.stopPropagation();
@@ -4798,8 +4808,6 @@ export default function App() {
                           <PlusIcon size={32} />
                         </button>
                         <div className="flex items-center gap-2 text-[10px] text-gray-500">
-                          <span>点击 + 读取外部图片</span>
-                          <span>或用吸管/连线添加画布图片</span>
                         </div>
                         <button
                           onPointerDown={(e) => {
@@ -4817,7 +4825,7 @@ export default function App() {
                         </button>
                       </div>
                     ) : (
-                      <span className="relative z-[2]">等待生成...</span>
+                      <span className="relative z-[2]" />
                     )
                   )}
                 </div>
@@ -5514,15 +5522,7 @@ export default function App() {
                   className="w-full h-full bg-[#121212] text-gray-200 p-3 rounded-lg border border-[#444] focus:outline-none focus:border-blue-500 transition-colors resize-none leading-relaxed" style={{ fontSize: '100px' }}
                   value={node.prompt}
                   onChange={(e) => handleUpdateNode(node.id, { prompt: e.target.value })}
-                  placeholder={
-                    node.type === 'text'
-                      ? '输入文本内容...'
-                      : node.type === 't2i'
-                        ? '输入画面描述...'
-                        : node.type === 'video'
-                          ? '描述镜头与动作；可用 @R1 引用参考（图/视频截取帧）…'
-                          : '输入编辑指令；可用 @R1 引用参考图或视频帧…'
-                  }
+                  placeholder=""
                   onPointerDown={(e) => e.stopPropagation()}
                   style={{ minHeight: node.type === 'i2i' ? '80px' : '120px' }}
                 />
@@ -5816,7 +5816,7 @@ export default function App() {
     const chatNodeId = `chat-${Date.now()}`;
     const userMsg = { id: `msg-${Date.now()}-user`, role: 'user' as const, content: q };
     const chatNode: CanvasNode = {
-      id: chatNodeId, type: 'chat', x: 200, y: 200, width: 920, height: CHAT_NODE_DEFAULT_PIXEL_HEIGHT,
+      id: chatNodeId, type: 'chat', x: 200, y: 200, width: 1560, height: 2760,
       prompt: q, model: DEFAULT_DEEPSEEK_CHAT_MODEL_ID,
       messages: [userMsg],
     };
@@ -5946,7 +5946,7 @@ export default function App() {
             )}
             <div className="flex gap-2">
               <input value={homeChatInput} onChange={e => setHomeChatInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && homeChatSend()}
-                placeholder="询问 AI 任何问题..." disabled={homeChatLoading}
+                placeholder="" disabled={homeChatLoading}
                 className="flex-1 bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl px-4 py-2.5 text-sm text-white placeholder-[#404040] outline-none focus:border-[#9040F0]/30 transition-colors"
               />
               <button onClick={homeChatSend} disabled={homeChatLoading}
@@ -6290,7 +6290,7 @@ export default function App() {
     {contextMenu && (
       <div
         className="absolute z-50 bg-[#252525] border border-[#444] rounded-lg shadow-2xl py-1 min-w-[160px] overflow-hidden canvas-chrome-150"
-        style={{ left: contextMenu.x, top: contextMenu.y, transform: 'scale(0.5)', transformOrigin: 'top left' }}
+        style={{ left: contextMenu.x, top: contextMenu.y, transform: 'scale(0.75)', transformOrigin: 'top left' }}
         onPointerDown={e => e.stopPropagation()}
       >
         <button className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-rose-600 hover:text-white flex items-center gap-2" onPointerDown={() => handleAddNode('chat')}>
@@ -10406,7 +10406,6 @@ function GridSplitNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEy
               </>
             ) : (
               <div className="w-full h-full flex items-center justify-center text-gray-500 text-xs">
-                暂无图片
               </div>
             )}
           </div>
@@ -10715,8 +10714,7 @@ function GridMergeNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEy
                   ))}
                 </div>
                 <div className="absolute inset-0 flex items-center justify-center text-gray-500 text-xs">
-                  暂无图片
-                </div>
+                  </div>
               </>
             )}
           </div>
@@ -11080,7 +11078,7 @@ const CHAT_FEATURE_BUTTON_SPECS: ChatFeatureButtonSpec[] = [
     label: '反推提示词',
     icon: 'video',
     title:
-      '填入「分镜逆向 / 媒体反推」完整指令（含 JSON 字段）。请用参考区连接含视频或关键帧的节点；若模型无法直接读取视频，请改用文字按时间线描述镜头或换用支持多模态视频的模型。',
+      '',
   },
   {
     id: 'bbbb-all-asset',
@@ -11436,7 +11434,6 @@ function ChatNodeContent({
         `}</style>
         {messages.length === 0 && (
           <div className="text-center text-gray-500 py-8" style={{ fontSize: chatFontScaled }}>
-            输入问题，AI将为你解答
             {refSlots.length > 0 && (
               <div className="mt-2 text-cyan-400" style={{ fontSize: fs(Math.max(11, chatFontPx - 1)) }}>
                 已连接 {refSlots.length} 条参考（含图/视频），可用下方按钮插入 @R 引用
@@ -11453,11 +11450,7 @@ function ChatNodeContent({
             onPointerDown={(e) => e.stopPropagation()}
           >
             <div
-                className={`max-w-[92%] rounded-lg p-2.5 ${
-                msg.role === 'user'
-                  ? 'bg-[#7BB8E0]/15 text-[#BBD8F0] saturate-[0.2]'
-                  : 'bg-[#2a2a2a] text-gray-200'
-              }`}
+                className="max-w-[92%] rounded-lg p-2.5 text-gray-200"
                 style={{ fontSize: chatFontScaled }}
               onPointerDown={(e) => e.stopPropagation()}
             >
@@ -11557,11 +11550,24 @@ function ChatNodeContent({
                           }}
                           className="rounded border border-white/40 bg-white/15 px-2 py-0.5 font-medium hover:bg-white/25"
                           style={{ fontSize: fs(Math.max(10, chatFontPx - 2)) }}
-                          title="修改本条提问并重新生成之后的回复"
+                          title="修改本条消息并重新生成"
                         >
-                          编辑
+                          再次编辑
                         </button>
                       ) : null}
+                      <button
+                        type="button"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onUpdate({ prompt: (node.prompt || '') + '\n' + msg.content });
+                        }}
+                        className="rounded border border-white/25 px-2 py-0.5 opacity-70 hover:opacity-100 hover:bg-white/10"
+                        style={{ fontSize: fs(Math.max(10, chatFontPx - 2)) }}
+                        title="将此条消息内容作为参考添加到输入框"
+                      >
+                        作为参考
+                      </button>
                     </div>
                   </>
                 )}
@@ -11678,7 +11684,7 @@ function ChatNodeContent({
             value={node.prompt || ''}
             onChange={(e) => onUpdate({ prompt: e.target.value })}
             onKeyDown={handleKeyDown}
-            placeholder="输入问题… 可用 @R1 @R2 引用上方参考"
+            placeholder=""
             onPointerDown={(e) => e.stopPropagation()}
             onPointerUp={(e) => {
               e.stopPropagation();
