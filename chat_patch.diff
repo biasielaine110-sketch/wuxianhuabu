@@ -1,0 +1,355 @@
+diff --git a/frontend/App.tsx b/frontend/App.tsx
+index 540a529..3911d55 100644
+--- a/frontend/App.tsx
++++ b/frontend/App.tsx
+@@ -10957,152 +10957,6 @@ function ChatNodeContent({
+   const totalRefImages = refSlots.reduce((sum, slot) => sum + (slot.imageBase64s?.length || (slot.imageBase64 ? 1 : 0)), 0);
+   return (
+     <div className="flex flex-col h-full bg-[#1a1a1a] rounded-b-xl overflow-hidden">
+-      {/* 参考区：图片 + 视频 */}
+-      <div className="flex items-center gap-2 px-2 py-1.5 bg-[#252525] border-b border-[#333] shrink-0" style={{ fontSize: fs(10), order: 2 }}>
+-        <span className="text-gray-400 shrink-0">参考:</span>
+-        <span className="text-green-400 font-medium shrink-0">
+-          {totalRefImages}图
+-          {refSlots.some((s) => s.kind === 'video') ? (
+-            <span className="text-amber-400"> · {refSlots.filter((s) => s.kind === 'video').length}视频</span>
+-          ) : null}
+-        </span>
+-        <div className="flex gap-1 ml-1 flex-wrap max-w-[330px]">
+-          {(showAllRefs ? refSlots : refSlots.slice(0, 6)).map((slot) => (
+-            <div key={`${slot.edgeId}-slot-${slot.n}`} className="relative group">
+-              <div className="absolute -top-0.5 left-0 z-[1] rounded bg-black/70 px-0.5 font-bold leading-none text-cyan-300" style={{ fontSize: fs(7) }}>
+-                R{slot.n}{slot.imageBase64s && slot.imageBase64s.length > 1 ? `(${slot.imageBase64s.length})` : ''}
+-              </div>
+-              {slot.imageBase64s && slot.imageBase64s.length > 0 ? (
+-                <div className="flex gap-0.5">
+-                  {slot.imageBase64s.slice(0, 4).map((img, imgIdx) => (
+-                    <OptimizedImage
+-                      key={`${slot.edgeId}-img-${imgIdx}`}
+-                      base64={img}
+-                      maxSide={96}
+-                      quality={0.72}
+-                      alt={`${slot.label}图${imgIdx + 1}`}
+-                      className="w-11 h-11 object-cover rounded border border-[#444]"
+-                    />
+-                  ))}
+-                  {slot.imageBase64s.length > 4 && (
+-                    <div className="w-11 h-11 rounded border border-[#444] bg-[#333] flex items-center justify-center text-gray-400 text-[8px]">
+-                      +{slot.imageBase64s.length - 4}
+-                    </div>
+-                  )}
+-                </div>
+-              ) : slot.kind === 'image' && slot.imageBase64 ? (
+-                <OptimizedImage
+-                  base64={slot.imageBase64}
+-                  maxSide={200}
+-                  quality={0.72}
+-                  alt={slot.label}
+-                  className="w-11 h-11 object-cover rounded border border-[#444]"
+-                />
+-              ) : slot.kind === 'video' && slot.videoUrl ? (
+-                <video
+-                  src={slot.videoUrl}
+-                  className="h-9 w-9 rounded border border-[#444] object-cover"
+-                  muted
+-                  playsInline
+-                  preload="metadata"
+-                />
+-              ) : (
+-                <div className="h-9 w-9 rounded border border-[#444] bg-[#333]" title={slot.label} />
+-              )}
+-              <button
+-                onPointerDown={(e) => {
+-                  e.stopPropagation();
+-                }}
+-                onClick={(e) => {
+-                  e.stopPropagation();
+-                  onDeleteEdge(slot.edgeId);
+-                }}
+-                className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-white opacity-0 transition-opacity hover:bg-red-500 group-hover:opacity-100"
+-                title="取消引用"
+-              >
+-                <span className="leading-none text-[8px]">×</span>
+-              </button>
+-            </div>
+-          ))}
+-          {refSlots.length > 6 && (
+-            <button
+-              onPointerDown={(e) => {
+-                e.stopPropagation();
+-                setShowAllRefs((prev) => !prev);
+-              }}
+-              className="flex items-center rounded px-1 text-gray-400 hover:bg-white/10 hover:text-white"
+-              title={showAllRefs ? '收起参考' : '展开全部参考'}
+-            >
+-              {showAllRefs ? '收起' : `+${refSlots.length - 6}`}
+-            </button>
+-          )}
+-        </div>
+-        <button
+-          onPointerDown={(e) => {
+-            e.stopPropagation();
+-            onEyedropperSelect();
+-          }}
+-          className={`ml-auto shrink-0 rounded px-2 py-0.5 text-white ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
+-          title={eyedropperTargetNodeId === node.id ? '取消吸取' : '吸取参考（图片 / 视频节点）'}
+-        >
+-          <EyedropperIcon size={fs(12)} />
+-        </button>
+-      </div>
+-
+-      {/* 模型选择 */}
+-      <div
+-        className="flex items-center gap-2 px-3 py-2 bg-[#252525] border-b border-[#333]"
+-        style={{ fontSize: 27, order: 3 }}
+-      >
+-        <span className="text-gray-400">模型:</span>
+-        <select
+-          className="nodemodel-select bg-[#121212] border border-[#444] rounded px-2 py-1 text-gray-300 outline-none focus:border-rose-500 max-w-[330px]"
+-          value={normalizeDeepSeekChatModelId(node.model || DEFAULT_DEEPSEEK_CHAT_MODEL_ID).trim()}
+-          onChange={(e) => onUpdate({ model: e.target.value })}
+-          onPointerDown={(e) => e.stopPropagation()}
+-        >
+-          <optgroup label="DeepSeek（OpenAI 兼容 · api.deepseek.com/v1）">
+-            <option value="deepseek-v4-flash">DeepSeek-V4-Flash</option>
+-            <option value="deepseek-v4-pro">DeepSeek-V4-Pro</option>
+-          </optgroup>
+-          <optgroup label="君澜 AI（OpenAI 兼容）">
+-            <option value="gpt-5.5-junlan">GPT-5.5（君澜 · www.junlanai.com/v1）</option>
+-          </optgroup>
+-          <optgroup label="Google Gemini / ToAPIs">
+-            <option value="gemini-2.0-flash-official">Gemini 2.0 Flash（official · ToAPIs）</option>
+-            <option value="gemini-3.1-flash-lite-preview-official">Gemini 3.1 Flash Lite（official · ToAPIs）</option>
+-          <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+-          <option value="gemini-3.1-flash-preview">Gemini 3.1 Flash</option>
+-          <option value="gemini-3-pro-preview">Gemini 3 Pro</option>
+-          </optgroup>
+-        </select>
+-        <label className="flex items-center gap-1 shrink-0 text-gray-500" style={{ fontSize: fs(10) }}>
+-          <span className="whitespace-nowrap">字号</span>
+-          <select
+-            className="max-w-[76px] rounded border border-[#444] bg-[#121212] px-1 py-0.5 text-gray-200 outline-none focus:border-rose-500"
+-            style={{ fontSize: fs(10) }}
+-            value={chatFontPx}
+-            onChange={(e) => persistChatFontPx(Number(e.target.value))}
+-            onPointerDown={(e) => e.stopPropagation()}
+-            title="对话区与输入框字体大小（本机记忆）"
+-          >
+-            {[11, 12, 13, 14, 15, 16, 18, 20, 22].map((px) => (
+-              <option key={px} value={px}>
+-                {px}px
+-              </option>
+-            ))}
+-          </select>
+-        </label>
+-        <button
+-          onPointerDown={(e) => { e.stopPropagation(); onUpdate({ messages: [] }); }}
+-          disabled={messages.length === 0}
+-          className="ml-auto p-1.5 rounded text-white transition-colors bg-[#333] hover:bg-red-600 disabled:opacity-30 disabled:hover:bg-[#333] disabled:cursor-not-allowed"
+-          title="清除对话"
+-        >
+-          <TrashIcon size={fs(14)} />
+-        </button>
+-      </div>
+-
+       {/* 消息列表 : 底部输入区（功能+引用+文本框）垂直空间 = 2 : 1 */}
+       <div className="flex min-h-0 flex-1 flex-col" style={{ order: 1 }}>
+       <div
+@@ -11302,8 +11156,154 @@ function ChatNodeContent({
+             </div>
+           </div>
+         )}
++      </div>{/* 参考区：图片 + 视频 */}
++      <div className="flex items-center gap-2 px-2 py-1.5 bg-[#252525] border-b border-[#333] shrink-0" style={{ fontSize: fs(10), order: 2 }}>
++        <span className="text-gray-400 shrink-0">参考:</span>
++        <span className="text-green-400 font-medium shrink-0">
++          {totalRefImages}图
++          {refSlots.some((s) => s.kind === 'video') ? (
++            <span className="text-amber-400"> · {refSlots.filter((s) => s.kind === 'video').length}视频</span>
++          ) : null}
++        </span>
++        <div className="flex gap-1 ml-1 flex-wrap max-w-[330px]">
++          {(showAllRefs ? refSlots : refSlots.slice(0, 6)).map((slot) => (
++            <div key={`${slot.edgeId}-slot-${slot.n}`} className="relative group">
++              <div className="absolute -top-0.5 left-0 z-[1] rounded bg-black/70 px-0.5 font-bold leading-none text-cyan-300" style={{ fontSize: fs(7) }}>
++                R{slot.n}{slot.imageBase64s && slot.imageBase64s.length > 1 ? `(${slot.imageBase64s.length})` : ''}
++              </div>
++              {slot.imageBase64s && slot.imageBase64s.length > 0 ? (
++                <div className="flex gap-0.5">
++                  {slot.imageBase64s.slice(0, 4).map((img, imgIdx) => (
++                    <OptimizedImage
++                      key={`${slot.edgeId}-img-${imgIdx}`}
++                      base64={img}
++                      maxSide={96}
++                      quality={0.72}
++                      alt={`${slot.label}图${imgIdx + 1}`}
++                      className="w-11 h-11 object-cover rounded border border-[#444]"
++                    />
++                  ))}
++                  {slot.imageBase64s.length > 4 && (
++                    <div className="w-11 h-11 rounded border border-[#444] bg-[#333] flex items-center justify-center text-gray-400 text-[8px]">
++                      +{slot.imageBase64s.length - 4}
++                    </div>
++                  )}
++                </div>
++              ) : slot.kind === 'image' && slot.imageBase64 ? (
++                <OptimizedImage
++                  base64={slot.imageBase64}
++                  maxSide={200}
++                  quality={0.72}
++                  alt={slot.label}
++                  className="w-11 h-11 object-cover rounded border border-[#444]"
++                />
++              ) : slot.kind === 'video' && slot.videoUrl ? (
++                <video
++                  src={slot.videoUrl}
++                  className="h-9 w-9 rounded border border-[#444] object-cover"
++                  muted
++                  playsInline
++                  preload="metadata"
++                />
++              ) : (
++                <div className="h-9 w-9 rounded border border-[#444] bg-[#333]" title={slot.label} />
++              )}
++              <button
++                onPointerDown={(e) => {
++                  e.stopPropagation();
++                }}
++                onClick={(e) => {
++                  e.stopPropagation();
++                  onDeleteEdge(slot.edgeId);
++                }}
++                className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-white opacity-0 transition-opacity hover:bg-red-500 group-hover:opacity-100"
++                title="取消引用"
++              >
++                <span className="leading-none text-[8px]">×</span>
++              </button>
++            </div>
++          ))}
++          {refSlots.length > 6 && (
++            <button
++              onPointerDown={(e) => {
++                e.stopPropagation();
++                setShowAllRefs((prev) => !prev);
++              }}
++              className="flex items-center rounded px-1 text-gray-400 hover:bg-white/10 hover:text-white"
++              title={showAllRefs ? '收起参考' : '展开全部参考'}
++            >
++              {showAllRefs ? '收起' : `+${refSlots.length - 6}`}
++            </button>
++          )}
++        </div>
++        <button
++          onPointerDown={(e) => {
++            e.stopPropagation();
++            onEyedropperSelect();
++          }}
++          className={`ml-auto shrink-0 rounded px-2 py-0.5 text-white ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
++          title={eyedropperTargetNodeId === node.id ? '取消吸取' : '吸取参考（图片 / 视频节点）'}
++        >
++          <EyedropperIcon size={fs(12)} />
++        </button>
+       </div>
+ 
++      {/* 模型选择 */}
++      <div
++        className="flex items-center gap-2 px-3 py-2 bg-[#252525] border-b border-[#333]"
++        style={{ fontSize: 27, order: 3 }}
++      >
++        <span className="text-gray-400">模型:</span>
++        <select
++          className="nodemodel-select bg-[#121212] border border-[#444] rounded px-2 py-1 text-gray-300 outline-none focus:border-rose-500 max-w-[330px]"
++          value={normalizeDeepSeekChatModelId(node.model || DEFAULT_DEEPSEEK_CHAT_MODEL_ID).trim()}
++          onChange={(e) => onUpdate({ model: e.target.value })}
++          onPointerDown={(e) => e.stopPropagation()}
++        >
++          <optgroup label="DeepSeek（OpenAI 兼容 · api.deepseek.com/v1）">
++            <option value="deepseek-v4-flash">DeepSeek-V4-Flash</option>
++            <option value="deepseek-v4-pro">DeepSeek-V4-Pro</option>
++          </optgroup>
++          <optgroup label="君澜 AI（OpenAI 兼容）">
++            <option value="gpt-5.5-junlan">GPT-5.5（君澜 · www.junlanai.com/v1）</option>
++          </optgroup>
++          <optgroup label="Google Gemini / ToAPIs">
++            <option value="gemini-2.0-flash-official">Gemini 2.0 Flash（official · ToAPIs）</option>
++            <option value="gemini-3.1-flash-lite-preview-official">Gemini 3.1 Flash Lite（official · ToAPIs）</option>
++          <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
++          <option value="gemini-3.1-flash-preview">Gemini 3.1 Flash</option>
++          <option value="gemini-3-pro-preview">Gemini 3 Pro</option>
++          </optgroup>
++        </select>
++        <label className="flex items-center gap-1 shrink-0 text-gray-500" style={{ fontSize: fs(10) }}>
++          <span className="whitespace-nowrap">字号</span>
++          <select
++            className="max-w-[76px] rounded border border-[#444] bg-[#121212] px-1 py-0.5 text-gray-200 outline-none focus:border-rose-500"
++            style={{ fontSize: fs(10) }}
++            value={chatFontPx}
++            onChange={(e) => persistChatFontPx(Number(e.target.value))}
++            onPointerDown={(e) => e.stopPropagation()}
++            title="对话区与输入框字体大小（本机记忆）"
++          >
++            {[11, 12, 13, 14, 15, 16, 18, 20, 22].map((px) => (
++              <option key={px} value={px}>
++                {px}px
++              </option>
++            ))}
++          </select>
++        </label>
++        <button
++          onPointerDown={(e) => { e.stopPropagation(); onUpdate({ messages: [] }); }}
++          disabled={messages.length === 0}
++          className="ml-auto p-1.5 rounded text-white transition-colors bg-[#333] hover:bg-red-600 disabled:opacity-30 disabled:hover:bg-[#333] disabled:cursor-not-allowed"
++          title="清除对话"
++        >
++          <TrashIcon size={fs(14)} />
++        </button>
++      </div>
++
++      
++
+       {/* 输入区域（与上方消息区 flex 2:1） */}
+       <div className="flex min-h-0 flex-[1_1_0%] flex-col overflow-y-auto border-t border-[#333] bg-[#252525] p-2">
+         {/* 快捷功能：置于文字输入框上方 */}
+@@ -12954,7 +12954,7 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
+   return (
+     <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
+       {/* 链接的参考图信息 */}
+-      <div className="flex items-center gap-2 px-2 py-1.5 bg-[#252525] border-b border-[#333] shrink-0">
++      <div className="flex items-center gap-2 px-2 py-1.5 bg-[#252525] border-b border-[#333] shrink-0" style={{ order: 3 }}>
+         <span className="text-[10px] text-gray-400">参考图:</span>
+         <span className="text-green-400 font-medium">{sourceImages.length} 张</span>
+         <div className="flex gap-1 ml-2">
+@@ -12981,10 +12981,22 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
+         </button>
+       </div>
+ 
+-      {/* 标注画布：双击图片区域进入全屏标注（需已导入图片）；亦可点下方「全屏标注」 */}
++      {/* 图片预览区 */}
++      {sourceImage && (
++        <div className="relative shrink-0 bg-black rounded-lg border border-[#333] overflow-hidden" style={{ order: 1, minHeight: 120 }}>
++          <OptimizedImage
++            base64={sourceImage}
++            maxSide={400}
++            quality={0.6}
++            className="w-full object-contain"
++            alt="预览图"
++          />
++        </div>
++      )}
++      {/* 标注画布：双击进入全屏标注 */}
+       <div
+         ref={containerRef}
+-        className="relative flex-1 min-h-[160px] bg-[#1a1a1a] rounded-lg border border-[#333] overflow-hidden"
++        className="relative flex-1 min-h-[120px] bg-[#1a1a1a] rounded-lg border border-[#333] overflow-hidden" style={{ order: 2 }}
+       >
+         <canvas
+           ref={canvasRef}
+@@ -13101,7 +13113,7 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
+       )}
+ 
+       {/* 工具栏 */}
+-      <div className="flex items-center gap-1 flex-wrap shrink-0">
++      <div className="flex items-center gap-1 flex-wrap shrink-0" style={{ order: 4 }}>
+         <span className="text-[10px] text-gray-400">工具:</span>
+         {(['rect', 'circle', 'fillRect', 'fillCircle', 'arrow', 'pen', 'text', 'crop'] as const).map((tool) => (
+           <button

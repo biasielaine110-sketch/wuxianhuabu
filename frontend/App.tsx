@@ -11104,7 +11104,7 @@ function ChatNodeContent({
       </div>
 
       {/* 消息列表 : 底部输入区（功能+引用+文本框）垂直空间 = 2 : 1 */}
-      <div className="flex min-h-0 flex-1 flex-col" style={{ order: 1 }}>
+      <div className="flex min-h-0 flex-1 flex-col" style={{ order: 1 }} style={{ order: 1 }}>
       <div
         className="chat-messages min-h-0 flex-[2_1_0%] overflow-y-auto p-3 space-y-3 cursor-grab active:cursor-grabbing"
         style={{ userSelect: 'text' }}
@@ -12961,7 +12961,7 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
       {/* 链接的参考图信息 */}
-      <div className="flex items-center gap-2 px-2 py-1.5 bg-[#252525] border-b border-[#333] shrink-0">
+      <div className="flex items-center gap-2 px-2 py-1.5 bg-[#252525] border-b border-[#333] shrink-0" style={{ order: 3 }}>
         <span className="text-[10px] text-gray-400">参考图:</span>
         <span className="text-green-400 font-medium">{sourceImages.length} 张</span>
         <div className="flex gap-1 ml-2">
@@ -13124,7 +13124,7 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
       </div>
 
       {/* 颜色和字体大小 */}
-      <div className="flex items-center gap-2 shrink-0 flex-wrap">
+      <div className="flex items-center gap-2 shrink-0 flex-wrap" style={{ order: 2 }}>
         {/* 颜色选择 */}
         <div className="flex items-center gap-1">
           <span className="text-[10px] text-gray-400">色:</span>
@@ -13188,7 +13188,7 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
       </div>
 
       {/* 操作按钮 */}
-      <div className="flex gap-1 shrink-0">
+      <div className="flex gap-1 shrink-0" style={{ order: 4 }}>
         <button
           onPointerDown={(e) => e.stopPropagation()}
           onClick={() => {
