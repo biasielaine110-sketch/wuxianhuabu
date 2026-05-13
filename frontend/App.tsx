@@ -1046,6 +1046,7 @@ export default function App() {
   // Fullscreen Image Modal
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
   const [fsTransform, setFsTransform] = useState({ scale: 1, x: 0, y: 0 });
+  const [fsContextMenu, setFsContextMenu] = useState<{ x: number, y: number } | null>(null);
 
   // Image Import Target
   const [importTargetNodeId, setImportTargetNodeId] = useState<string | null>(null);
@@ -1280,7 +1281,7 @@ export default function App() {
     /** AI 对话：竖向更高；内容区消息列表:底部输入带 = 2:1 */
     'chat': { width: 920, height: CHAT_NODE_DEFAULT_PIXEL_HEIGHT },
     'text': { width: 420, height: 300 },
-    'image': { width: 480, height: 528 },
+    'image': { width: 1920, height: 2112 },
     'gridSplit': { width: 840, height: 600 },
     'gridMerge': { width: 840, height: 600 },
     'video': { width: 1200, height: 1400 },
@@ -1289,7 +1290,7 @@ export default function App() {
 
   // 节点最小尺寸限制（按类型；与默认倍率一致）
   const MIN_NODE_SIZES: Record<string, { width: number, height: number }> = {
-    image: { width: 420, height: 390 },
+    image: { width: 1680, height: 1560 },
     gridSplit: { width: 720, height: 560 },
     gridMerge: { width: 720, height: 560 },
     /** 文生图：与默认 3:4 比例一致 */
@@ -4431,10 +4432,15 @@ export default function App() {
       <div
         key={node.id}
         data-node-root="true"
-        className={`absolute flex flex-col bg-[#1e1e1e] rounded-xl border-2 shadow-2xl transition-shadow ${borderColor} ${shadowColor} ${isSelected ? 'z-20' : 'z-10 hover:border-[#555]'} ${node.type === 'chat' ? 'canvas-node-root--chat' : 'canvas-node-font-195'}${node.type === 'gridSplit' || node.type === 'gridMerge' ? ' canvas-node-grid-tool-150' : ''}`}
+        className={`absolute flex flex-col bg-[#1e1e1e] rounded-xl border-2 shadow-2xl transition-shadow ${borderColor} ${shadowColor} ${isSelected ? 'z-20' : 'z-10 hover:border-[#555]'} ${node.type === 'chat' ? 'canvas-node-root--chat' : 'canvas-node-font-195'}${node.type === 'annotation' ? ' canvas-node-annotation' : ''}${node.type === 'gridSplit' || node.type === 'gridMerge' ? ' canvas-node-grid-tool-150' : ''}`}
         style={{ left: node.x, top: node.y, width: node.width, height: node.height }}
         onPointerDown={(e) => handleNodePointerDown(e, node.id)}
       >
+        {/* Floating title - outside window, transparent */}
+        <div className="absolute -top-14 left-3 z-30 flex items-center gap-1.5 pointer-events-none">
+          {headerIcon}
+          <span className="canvas-node-window-title text-white/80 font-medium">{headerTitle}</span>
+        </div>
         {/* Input Port (Left) */}
         {hasInputPort && (
           <div 
@@ -4529,441 +4535,6 @@ export default function App() {
             </div>
           </>
         )}
-
-        {/* Header */}
-        <div className="min-h-8 py-1.5 bg-[#252525] rounded-t-xl border-b border-[#333] flex items-center justify-between px-3 cursor-grab active:cursor-grabbing shrink-0">
-          <div className="flex items-center gap-2">
-            {headerIcon}
-            <span
-              className={
-                node.type === 'chat'
-                  ? 'canvas-node-window-title text-gray-300 font-medium'
-                  : 'canvas-node-window-title text-xs text-gray-300 font-medium'
-              }
-            >
-              {headerTitle}
-            </span>
-          </div>
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                handleResetNodeSize(node.id);
-              }}
-              className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] text-gray-400 transition-colors hover:bg-[#333] hover:text-blue-400"
-              title="恢复为默认宽高"
-            >
-              <MaximizeIcon size={node.type === 'gridSplit' || node.type === 'gridMerge' ? 15 : 12} />
-              <span className="whitespace-nowrap">重置大小</span>
-            </button>
-            <button
-              type="button"
-              title="删除节点（Alt+Q）"
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                handleDeleteNode(node.id);
-              }}
-              className="text-gray-500 hover:text-red-400 transition-colors p-1"
-            >
-              <TrashIcon size={node.type === 'gridSplit' || node.type === 'gridMerge' ? 21 : 14} />
-            </button>
-          </div>
-        </div>
-
-        {/* Settings Bar */}
-        {(node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' || node.type === 'panorama') && (
-          <div className="flex flex-col gap-1.5 p-2 bg-[#252525] border-b border-[#333] text-xs shrink-0">
-            {/* 图生图节点和全景图生成节点的参考图信息 */}
-            {(node.type === 'i2i' || node.type === 'panoramaT2i') && (() => {
-              const i2iIncomingEdges = edges.filter(e => e.targetId === node.id);
-              const i2iSourceNodes = i2iIncomingEdges
-                .map(e => nodes.find(n => n.id === e.sourceId))
-                .filter(Boolean) as CanvasNode[];
-              const i2iSourceImages = i2iSourceNodes.flatMap(n => n.images || []).filter(img => img && img !== '');
-              return (
-                <div className="flex items-center gap-2 px-2 py-1 bg-[#1a1a1a] rounded text-[10px]">
-                  <span className="text-gray-400">参考图:</span>
-                  <span className="text-green-400 font-medium">{i2iSourceImages.length} 张</span>
-                  <div className="flex gap-1 ml-2 flex-wrap">
-                    {i2iSourceImages.slice(0, 6).map((img, idx) => (
-                      <div key={idx} className="relative group">
-                        <OptimizedImage
-                          base64={img}
-                          maxSide={128}
-                          quality={0.7}
-                          alt={`参考图${idx + 1}`}
-                          className="w-6 h-6 object-cover rounded border border-[#444]"
-                        />
-                        <button
-                          onPointerDown={(e) => { e.stopPropagation(); }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            // 找到对应的连线并删除
-                            const edgeToDelete = edges.find(edge => edge.targetId === node.id && edge.sourceId === i2iSourceNodes.find(n => n.images?.includes(img))?.id);
-                            if (edgeToDelete) {
-                              handleDeleteEdge(edgeToDelete.id);
-                            }
-                          }}
-                          className="absolute -top-1 -right-1 w-4 h-4 bg-red-600 hover:bg-red-500 rounded-full text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                          title="取消引用"
-                        >
-                          <span className="text-[8px] leading-none">×</span>
-                        </button>
-                      </div>
-                    ))}
-                    {i2iSourceImages.length > 6 && (
-                      <span className="text-gray-500 flex items-center">+{i2iSourceImages.length - 6}</span>
-                    )}
-                  </div>
-                  <button
-                    onPointerDown={(e) => { e.stopPropagation(); setEyedropperTargetNodeId(node.id); }}
-                    className={`ml-auto px-2 py-0.5 rounded text-white ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
-                    title={eyedropperTargetNodeId === node.id ? "取消吸取" : "吸取图片"}
-                  >
-                    <EyedropperIcon size={12} />
-                  </button>
-                </div>
-              );
-            })()}
-            <div className="flex flex-wrap items-center gap-1.5">
-              <select
-                className="nodemodel-select bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-blue-500 flex-1 min-w-[100px]"
-                value={node.model || (node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' || node.type === 'panorama' ? defaultCanvasImageModel() : 'gemini-3.1-flash-image-preview')}
-                onChange={(e) => {
-                  const m = e.target.value;
-                  const patch: Partial<CanvasNode> = { model: m };
-                  if (isFireflyNewApiImageModelId(m)) patch.resolution = '2k';
-                  else if (isGptImage2CanvasModelId(m)) patch.resolution = '4k';
-                  handleUpdateNode(node.id, patch);
-                }}
-                onPointerDown={e => e.stopPropagation()}
-              >
-                {(node.type === 't2i' || node.type === 'panoramaT2i') ? (
-                  <>
-                    <option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option>
-                    <option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option>
-                    <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
-                    <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option>
-                    <option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option>
-                    <option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option>
-                    <option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option>
-                    <option value="imagen-4">Imagen 4</option>
-                    <option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option>
-                  </>
-                ) : (
-                  <>
-                    <option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option>
-                    <option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option>
-                    <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
-                    <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option>
-                    <option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option>
-                    <option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option>
-                    <option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option>
-                    <option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option>
-                  </>
-                )}
-              </select>
-              <div className="nodemeta-skip-scale flex flex-wrap items-center gap-1.5">
-              <select
-                className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-blue-500"
-                value={node.aspectRatio || (node.type === 'panoramaT2i' ? '2:1' : (node.type === 't2i' || node.type === 'i2i' || node.type === 'panorama' ? '16:9' : '1:1'))}
-                onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })}
-                onPointerDown={e => e.stopPropagation()}
-              >
-                {node.type === 'panoramaT2i' ? (
-                  <>
-                    <option value="2:1">2:1 (720°)</option>
-                    <option value="21:9">21:9</option>
-                  </>
-                ) : (
-                  <>
-                    <option value="1:1">1:1</option>
-                    <option value="16:9">16:9</option>
-                    <option value="9:16">9:16</option>
-                    <option value="21:9">21:9</option>
-                    <option value="4:3">4:3</option>
-                    <option value="3:4">3:4</option>
-                  </>
-                )}
-              </select>
-              <select
-                className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-blue-500"
-                value={node.resolution || '4k'}
-                onChange={(e) => handleUpdateNode(node.id, { resolution: e.target.value })}
-                onPointerDown={e => e.stopPropagation()}
-              >
-                <option value="4k">4K</option>
-                <option value="2k">2K</option>
-                <option value="1k">1K</option>
-              </select>
-              <select
-                className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-blue-500"
-                value={node.imageCount || 1}
-                onChange={(e) => handleUpdateNode(node.id, { imageCount: parseInt(e.target.value) })}
-                onPointerDown={e => e.stopPropagation()}
-              >
-                <option value={1}>1张</option>
-                <option value={2}>2张</option>
-                <option value={4}>4张</option>
-              </select>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {node.type === 'video' && (() => {
-          const vm = node.model || '';
-          const modelSelectValue = videoNodeModelToToApis(vm);
-          const isSora = isVideoSoraStyleModel(vm);
-          const isVeo = isVideoVeoStyleModel(vm);
-          const isGroDur = isVideoGrokDurationStyleModel(vm);
-          const vSlots = buildIncomingRefSlots(node.id, edges, nodes);
-          const imageSlots = vSlots.filter((s) => s.kind === 'image');
-          const videoSlots = vSlots.filter((s) => s.kind === 'video');
-          const audioSlots = vSlots.filter((s) => s.kind === 'audio');
-          return (
-          <div className="flex flex-col gap-3 p-3 bg-[#252525] border-b border-[#333] text-xs shrink-0">
-            {(() => {
-              return (
-                <div className="flex items-center gap-3 px-3 py-2 bg-[#1a1a1a] rounded-lg text-xs">
-                  <span className="text-gray-400 shrink-0 font-medium">参考素材:</span>
-                  <span className="text-green-400 font-semibold shrink-0">
-                    {imageSlots.length} 图
-                    {videoSlots.length > 0 && (
-                      <span className="text-amber-400"> · {videoSlots.length} 视频</span>
-                    )}
-                    {audioSlots.length > 0 && (
-                      <span className="text-blue-400"> · {audioSlots.length} 语音</span>
-                    )}
-                  </span>
-                  <div className="flex gap-2 ml-2 flex-wrap">
-                    {vSlots.slice(0, 6).map((slot) => (
-                      <div key={`${node.id}-vslot-${slot.n}`} className="relative group">
-                        <div className="absolute -top-1 left-0 z-[1] rounded bg-black/70 px-1 text-[8px] font-bold leading-none text-cyan-300">
-                          R{slot.n}
-                        </div>
-                        {slot.kind === 'image' && slot.imageBase64 ? (
-                          <OptimizedImage
-                            base64={slot.imageBase64}
-                            maxSide={160}
-                            quality={0.7}
-                            alt={slot.label}
-                            className="h-10 w-10 rounded border border-[#444] object-cover"
-                          />
-                        ) : slot.kind === 'video' && slot.videoUrl ? (
-                          <video
-                            src={slot.videoUrl}
-                            className="h-10 w-10 rounded border border-[#444] object-cover"
-                            muted
-                            playsInline
-                            preload="metadata"
-                          />
-                        ) : slot.kind === 'audio' ? (
-                          <div className="h-10 w-10 rounded border border-[#444] bg-[#333] flex items-center justify-center" title={slot.label}>
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
-                              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                              <line x1="12" x2="12" y1="19" y2="22"/>
-                            </svg>
-                          </div>
-                        ) : (
-                          <div className="h-8 w-8 rounded border border-[#444] bg-[#333]" title={slot.label} />
-                        )}
-                        <button
-                          onPointerDown={(e) => {
-                            e.stopPropagation();
-                          }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteEdge(slot.edgeId);
-                          }}
-                          className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-white opacity-0 transition-opacity hover:bg-red-500 group-hover:opacity-100"
-                          title="取消引用"
-                        >
-                          <span className="text-[9px] leading-none">×</span>
-                        </button>
-                      </div>
-                    ))}
-                    {vSlots.length > 6 && (
-                      <span className="flex items-center text-gray-500">+{vSlots.length - 6}</span>
-                    )}
-                  </div>
-                  <button
-                    onPointerDown={(e) => {
-                      e.stopPropagation();
-                      setEyedropperTargetNodeId(node.id);
-                    }}
-                    className={`ml-auto shrink-0 rounded-lg px-3 py-1.5 text-white text-xs font-medium ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
-                    title={eyedropperTargetNodeId === node.id ? '取消吸取' : '吸取参考（图片 / 视频 / 语音节点）'}
-                  >
-                    <EyedropperIcon size={14} />
-                  </button>
-                </div>
-              );
-            })()}
-            <div className="text-xs text-gray-500 px-1 leading-relaxed">
-              需 OpenAI 兼容 + ToAPIs Base URL。最多 3 张参考图（视频将截取关键帧）{audioSlots.length > 0 && <span className="text-blue-400 font-medium">· 已连接语音参考</span>}。
-              {isVeo
-                ? ' · Veo：固定 8 秒；画幅 16:9 或 9:16；720p/1080p/4k'
-                : isSora
-                  ? ' · Sora 系：4/8/12 秒、16:9 或 9:16、720p'
-                  : isGroDur
-                    ? ' · Grok：多档秒数与画幅'
-                    : ''}
-            </div>
-            {!isSora && !isVeo && isGroDur && (
-              <div className="text-[9px] text-amber-600/95 px-1 leading-snug">
-                分辨率：Grok 系路径已随请求发送 resolution；若成品仍为 480p，多为上游默认。
-              </div>
-            )}
-            <div className="flex flex-wrap items-center gap-3">
-            <select
-                className="nodemodel-select bg-[#121212] border border-[#444] rounded-lg px-3 py-2 text-gray-300 outline-none focus:border-amber-500 min-w-[160px] text-sm"
-                value={modelSelectValue}
-                onChange={(e) => {
-                  const m = e.target.value;
-                  const updates: Partial<CanvasNode> = { model: m };
-                  if (m === 'sora-2-vvip') {
-                    updates.videoResolution = '720p';
-                    const d = node.videoDuration ?? 10;
-                    updates.videoDuration = d === 4 || d === 8 || d === 12 ? d : 8;
-                    const ar = node.aspectRatio || '16:9';
-                    if (ar !== '16:9' && ar !== '9:16') updates.aspectRatio = '16:9';
-                  } else if (m === 'veo3.1-fast') {
-                    updates.videoDuration = 8;
-                    updates.videoResolution =
-                      node.videoResolution === '1080p' || node.videoResolution === '4k'
-                        ? node.videoResolution
-                        : '720p';
-                    const ar = node.aspectRatio || '16:9';
-                    if (!['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].includes(ar)) updates.aspectRatio = '16:9';
-                  } else {
-                    const d = node.videoDuration ?? 8;
-                    if (d === 4 || d === 8 || d === 12) updates.videoDuration = 10;
-                    if (node.videoResolution === '1080p' || node.videoResolution === '4k') {
-                      updates.videoResolution = '720p';
-                    }
-                  }
-                  handleUpdateNode(node.id, updates);
-                }}
-              onPointerDown={e => e.stopPropagation()}
-            >
-                <optgroup label="ToAPIs">
-                  <option value="veo3.1-fast">Veo 3.1 Fast</option>
-                  <option value="grok-video-3">Grok Video 3</option>
-                  <option value="sora-2-vvip">Sora2 VVIP</option>
-                </optgroup>
-            </select>
-              <div className="nodemeta-skip-scale flex flex-wrap items-center gap-1.5">
-              {isVeo ? (
-                <span className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-400 text-xs whitespace-nowrap">
-                  8 秒（固定）
-                </span>
-              ) : isSora ? (
-            <select
-                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={[4, 8, 12].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 8}
-              onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
-              onPointerDown={e => e.stopPropagation()}
-            >
-                  <option value={4}>4 秒</option>
-                  <option value={8}>8 秒</option>
-                  <option value={12}>12 秒</option>
-            </select>
-              ) : (
-            <select
-                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={node.videoDuration ?? 10}
-                  onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
-                  onPointerDown={e => e.stopPropagation()}
-                >
-                  <option value={5}>5 秒（API 提交为 6 秒）</option>
-                  <option value={10}>10 秒</option>
-                  <option value={15}>15 秒</option>
-                  <option value={20}>20 秒</option>
-                  <option value={25}>25 秒</option>
-                  <option value={30}>30 秒</option>
-                </select>
-              )}
-              {isVeo ? (
-                <select
-                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-              value={node.aspectRatio || '16:9'}
-              onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })}
-              onPointerDown={e => e.stopPropagation()}
-            >
-              <option value="16:9">16:9</option>
-              <option value="9:16">9:16</option>
-                  <option value="1:1">1:1（按 16:9 提交）</option>
-                  <option value="4:3">4:3（按 16:9 提交）</option>
-                  <option value="3:4">3:4（按 16:9 提交）</option>
-                  <option value="3:2">3:2（按 16:9 提交）</option>
-                  <option value="2:3">2:3（按 16:9 提交）</option>
-                </select>
-              ) : isSora ? (
-                <select
-                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={node.aspectRatio === '9:16' ? '9:16' : '16:9'}
-                  onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })}
-                  onPointerDown={e => e.stopPropagation()}
-                >
-                  <option value="16:9">16:9</option>
-                  <option value="9:16">9:16</option>
-                </select>
-              ) : (
-                <select
-                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={node.aspectRatio || '16:9'}
-                  onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })}
-                  onPointerDown={e => e.stopPropagation()}
-                >
-                  <option value="16:9">16:9</option>
-                  <option value="9:16">9:16</option>
-                  <option value="3:2">3:2</option>
-                  <option value="2:3">2:3</option>
-              <option value="1:1">1:1</option>
-              <option value="4:3">4:3</option>
-              <option value="3:4">3:4</option>
-            </select>
-              )}
-              {isSora ? (
-                <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#121212]">720p</span>
-              ) : isVeo ? (
-                <select
-                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={
-                    node.videoResolution === '1080p' || node.videoResolution === '4k'
-                      ? node.videoResolution
-                      : '720p'
-                  }
-                  onChange={(e) =>
-                    handleUpdateNode(node.id, {
-                      videoResolution: e.target.value as '720p' | '1080p' | '4k',
-                    })
-                  }
-                  onPointerDown={e => e.stopPropagation()}
-                >
-                  <option value="720p">720p</option>
-                  <option value="1080p">1080p</option>
-                  <option value="4k">4K</option>
-                </select>
-              ) : (
-                <select
-                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={node.videoResolution === '480p' ? '480p' : '720p'}
-                  onChange={(e) => handleUpdateNode(node.id, { videoResolution: e.target.value as '480p' | '720p' })}
-                  onPointerDown={e => e.stopPropagation()}
-                >
-                  <option value="480p">480p</option>
-                  <option value="720p">720p</option>
-                </select>
-              )}
-              </div>
-            </div>
-          </div>
-          );
-        })()}
 
         {/* Content (Merged Window Layout) */}
         <div 
@@ -5575,6 +5146,332 @@ export default function App() {
             />
           )}
 
+          {/* Header */}
+        <div className="min-h-8 py-1.5 bg-[#252525] border-b border-[#333] flex items-center justify-between px-3 cursor-grab active:cursor-grabbing shrink-0">
+          <div className="flex items-center gap-2">
+            {headerIcon}
+          </div>
+          {(node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' || node.type === 'panorama') && (
+            <>
+              <select className="nodemodel-select bg-[#121212] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500 flex-1 min-w-[90px]" value={node.model || defaultCanvasImageModel()} onChange={(e) => { const m = e.target.value; const patch: Partial<CanvasNode> = { model: m }; if (isFireflyNewApiImageModelId(m)) patch.resolution = '2k'; else if (isGptImage2CanvasModelId(m)) patch.resolution = '4k'; handleUpdateNode(node.id, patch); }} onPointerDown={e => e.stopPropagation()}>
+                {(node.type === 't2i' || node.type === 'panoramaT2i') ? (<><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option><option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option><option value="imagen-4">Imagen 4</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option></>) : (<><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option><option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option></>)}
+              </select>
+              <div className="nodemeta-skip-scale flex items-center gap-0.5">
+                <select className="bg-[#121212] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.aspectRatio || (node.type === 'panoramaT2i' ? '2:1' : '16:9')} onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })} onPointerDown={e => e.stopPropagation()}>
+                  {node.type === 'panoramaT2i' ? (<><option value="2:1">2:1</option><option value="21:9">21:9</option></>) : (<><option value="1:1">1:1</option><option value="16:9">16:9</option><option value="9:16">9:16</option><option value="21:9">21:9</option><option value="4:3">4:3</option><option value="3:4">3:4</option></>)}
+                </select>
+                <select className="bg-[#121212] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.resolution || '4k'} onChange={(e) => handleUpdateNode(node.id, { resolution: e.target.value })} onPointerDown={e => e.stopPropagation()}><option value="4k">4K</option><option value="2k">2K</option><option value="1k">1K</option></select>
+                <select className="bg-[#121212] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.imageCount || 1} onChange={(e) => handleUpdateNode(node.id, { imageCount: parseInt(e.target.value) })} onPointerDown={e => e.stopPropagation()}><option value={1}>1</option><option value={2}>2</option><option value={4}>4</option></select>
+              </div>
+            </>
+          )}
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                handleResetNodeSize(node.id);
+              }}
+              className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] text-gray-400 transition-colors hover:bg-[#333] hover:text-blue-400"
+              title="恢复为默认宽高"
+            >
+              <MaximizeIcon size={node.type === 'gridSplit' || node.type === 'gridMerge' ? 15 : 12} />
+              <span className="whitespace-nowrap">重置大小</span>
+            </button>
+            <button
+              type="button"
+              title="删除节点（Alt+Q）"
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                handleDeleteNode(node.id);
+              }}
+              className="text-gray-500 hover:text-red-400 transition-colors p-1"
+            >
+              <TrashIcon size={node.type === 'gridSplit' || node.type === 'gridMerge' ? 21 : 14} />
+            </button>
+          </div>
+        </div>
+
+                {node.type === 'video' && (() => {
+          const vm = node.model || '';
+          const modelSelectValue = videoNodeModelToToApis(vm);
+          const isSora = isVideoSoraStyleModel(vm);
+          const isVeo = isVideoVeoStyleModel(vm);
+          const isGroDur = isVideoGrokDurationStyleModel(vm);
+          const vSlots = buildIncomingRefSlots(node.id, edges, nodes);
+          const imageSlots = vSlots.filter((s) => s.kind === 'image');
+          const videoSlots = vSlots.filter((s) => s.kind === 'video');
+          const audioSlots = vSlots.filter((s) => s.kind === 'audio');
+          return (
+          <div className="flex flex-col gap-3 p-3 bg-[#252525] border-b border-[#333] text-xs shrink-0">
+            {(() => {
+              return (
+                <div className="flex items-center gap-3 px-3 py-2 bg-[#1a1a1a] rounded-lg text-xs">
+                  <span className="text-gray-400 shrink-0 font-medium">参考素材:</span>
+                  <span className="text-green-400 font-semibold shrink-0">
+                    {imageSlots.length} 图
+                    {videoSlots.length > 0 && (
+                      <span className="text-amber-400"> · {videoSlots.length} 视频</span>
+                    )}
+                    {audioSlots.length > 0 && (
+                      <span className="text-blue-400"> · {audioSlots.length} 语音</span>
+                    )}
+                  </span>
+                  <div className="flex gap-2 ml-2 flex-wrap">
+                    {vSlots.slice(0, 6).map((slot) => (
+                      <div key={`${node.id}-vslot-${slot.n}`} className="relative group">
+                        <div className="absolute -top-1 left-0 z-[1] rounded bg-black/70 px-1 text-[8px] font-bold leading-none text-cyan-300">
+                          R{slot.n}
+                        </div>
+                        {slot.kind === 'image' && slot.imageBase64 ? (
+                          <OptimizedImage
+                            base64={slot.imageBase64}
+                            maxSide={160}
+                            quality={0.7}
+                            alt={slot.label}
+                            className="h-10 w-10 rounded border border-[#444] object-cover"
+                          />
+                        ) : slot.kind === 'video' && slot.videoUrl ? (
+                          <video
+                            src={slot.videoUrl}
+                            className="h-10 w-10 rounded border border-[#444] object-cover"
+                            muted
+                            playsInline
+                            preload="metadata"
+                          />
+                        ) : slot.kind === 'audio' ? (
+                          <div className="h-10 w-10 rounded border border-[#444] bg-[#333] flex items-center justify-center" title={slot.label}>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+                              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                              <line x1="12" x2="12" y1="19" y2="22"/>
+                            </svg>
+                          </div>
+                        ) : (
+                          <div className="h-8 w-8 rounded border border-[#444] bg-[#333]" title={slot.label} />
+                        )}
+                        <button
+                          onPointerDown={(e) => {
+                            e.stopPropagation();
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteEdge(slot.edgeId);
+                          }}
+                          className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-white opacity-0 transition-opacity hover:bg-red-500 group-hover:opacity-100"
+                          title="取消引用"
+                        >
+                          <span className="text-[9px] leading-none">×</span>
+                        </button>
+                      </div>
+                    ))}
+                    {vSlots.length > 6 && (
+                      <span className="flex items-center text-gray-500">+{vSlots.length - 6}</span>
+                    )}
+                  </div>
+                  <button
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      setEyedropperTargetNodeId(node.id);
+                    }}
+                    className={`ml-auto shrink-0 rounded-lg px-3 py-1.5 text-white text-xs font-medium ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
+                    title={eyedropperTargetNodeId === node.id ? '取消吸取' : '吸取参考（图片 / 视频 / 语音节点）'}
+                  >
+                    <EyedropperIcon size={14} />
+                  </button>
+                </div>
+              );
+            })()}
+            <div className="text-xs text-gray-500 px-1 leading-relaxed">
+              需 OpenAI 兼容 + ToAPIs Base URL。最多 3 张参考图（视频将截取关键帧）{audioSlots.length > 0 && <span className="text-blue-400 font-medium">· 已连接语音参考</span>}。
+              {isVeo
+                ? ' · Veo：固定 8 秒；画幅 16:9 或 9:16；720p/1080p/4k'
+                : isSora
+                  ? ' · Sora 系：4/8/12 秒、16:9 或 9:16、720p'
+                  : isGroDur
+                    ? ' · Grok：多档秒数与画幅'
+                    : ''}
+            </div>
+            {!isSora && !isVeo && isGroDur && (
+              <div className="text-[9px] text-amber-600/95 px-1 leading-snug">
+                分辨率：Grok 系路径已随请求发送 resolution；若成品仍为 480p，多为上游默认。
+              </div>
+            )}
+            <div className="flex flex-wrap items-center gap-3">
+            <select
+                className="nodemodel-select bg-[#121212] border border-[#444] rounded-lg px-3 py-2 text-gray-300 outline-none focus:border-amber-500 min-w-[160px] text-sm"
+                value={modelSelectValue}
+                onChange={(e) => {
+                  const m = e.target.value;
+                  const updates: Partial<CanvasNode> = { model: m };
+                  if (m === 'sora-2-vvip') {
+                    updates.videoResolution = '720p';
+                    const d = node.videoDuration ?? 10;
+                    updates.videoDuration = d === 4 || d === 8 || d === 12 ? d : 8;
+                    const ar = node.aspectRatio || '16:9';
+                    if (ar !== '16:9' && ar !== '9:16') updates.aspectRatio = '16:9';
+                  } else if (m === 'veo3.1-fast') {
+                    updates.videoDuration = 8;
+                    updates.videoResolution =
+                      node.videoResolution === '1080p' || node.videoResolution === '4k'
+                        ? node.videoResolution
+                        : '720p';
+                    const ar = node.aspectRatio || '16:9';
+                    if (!['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].includes(ar)) updates.aspectRatio = '16:9';
+                  } else {
+                    const d = node.videoDuration ?? 8;
+                    if (d === 4 || d === 8 || d === 12) updates.videoDuration = 10;
+                    if (node.videoResolution === '1080p' || node.videoResolution === '4k') {
+                      updates.videoResolution = '720p';
+                    }
+                  }
+                  handleUpdateNode(node.id, updates);
+                }}
+              onPointerDown={e => e.stopPropagation()}
+            >
+                <optgroup label="ToAPIs">
+                  <option value="veo3.1-fast">Veo 3.1 Fast</option>
+                  <option value="grok-video-3">Grok Video 3</option>
+                  <option value="sora-2-vvip">Sora2 VVIP</option>
+                </optgroup>
+            </select>
+              <div className="nodemeta-skip-scale flex flex-wrap items-center gap-1.5">
+              {isVeo ? (
+                <span className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-400 text-xs whitespace-nowrap">
+                  8 秒（固定）
+                </span>
+              ) : isSora ? (
+            <select
+                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  value={[4, 8, 12].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 8}
+              onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
+              onPointerDown={e => e.stopPropagation()}
+            >
+                  <option value={4}>4 秒</option>
+                  <option value={8}>8 秒</option>
+                  <option value={12}>12 秒</option>
+            </select>
+              ) : (
+            <select
+                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  value={node.videoDuration ?? 10}
+                  onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
+                  onPointerDown={e => e.stopPropagation()}
+                >
+                  <option value={5}>5 秒（API 提交为 6 秒）</option>
+                  <option value={10}>10 秒</option>
+                  <option value={15}>15 秒</option>
+                  <option value={20}>20 秒</option>
+                  <option value={25}>25 秒</option>
+                  <option value={30}>30 秒</option>
+                </select>
+              )}
+              {isVeo ? (
+                <select
+                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+              value={node.aspectRatio || '16:9'}
+              onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })}
+              onPointerDown={e => e.stopPropagation()}
+            >
+              <option value="16:9">16:9</option>
+              <option value="9:16">9:16</option>
+                  <option value="1:1">1:1（按 16:9 提交）</option>
+                  <option value="4:3">4:3（按 16:9 提交）</option>
+                  <option value="3:4">3:4（按 16:9 提交）</option>
+                  <option value="3:2">3:2（按 16:9 提交）</option>
+                  <option value="2:3">2:3（按 16:9 提交）</option>
+                </select>
+              ) : isSora ? (
+                <select
+                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  value={node.aspectRatio === '9:16' ? '9:16' : '16:9'}
+                  onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })}
+                  onPointerDown={e => e.stopPropagation()}
+                >
+                  <option value="16:9">16:9</option>
+                  <option value="9:16">9:16</option>
+                </select>
+              ) : (
+                <select
+                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  value={node.aspectRatio || '16:9'}
+                  onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })}
+                  onPointerDown={e => e.stopPropagation()}
+                >
+                  <option value="16:9">16:9</option>
+                  <option value="9:16">9:16</option>
+                  <option value="3:2">3:2</option>
+                  <option value="2:3">2:3</option>
+              <option value="1:1">1:1</option>
+              <option value="4:3">4:3</option>
+              <option value="3:4">3:4</option>
+            </select>
+              )}
+              {isSora ? (
+                <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#121212]">720p</span>
+              ) : isVeo ? (
+                <select
+                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  value={
+                    node.videoResolution === '1080p' || node.videoResolution === '4k'
+                      ? node.videoResolution
+                      : '720p'
+                  }
+                  onChange={(e) =>
+                    handleUpdateNode(node.id, {
+                      videoResolution: e.target.value as '720p' | '1080p' | '4k',
+                    })
+                  }
+                  onPointerDown={e => e.stopPropagation()}
+                >
+                  <option value="720p">720p</option>
+                  <option value="1080p">1080p</option>
+                  <option value="4k">4K</option>
+                </select>
+              ) : (
+                <select
+                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  value={node.videoResolution === '480p' ? '480p' : '720p'}
+                  onChange={(e) => handleUpdateNode(node.id, { videoResolution: e.target.value as '480p' | '720p' })}
+                  onPointerDown={e => e.stopPropagation()}
+                >
+                  <option value="480p">480p</option>
+                  <option value="720p">720p</option>
+                </select>
+              )}
+              </div>
+            </div>
+          </div>
+          );
+        })()}
+
+        {/* i2i reference bar */}
+          {(node.type === 'i2i' || node.type === 'panoramaT2i') && (() => {
+            const i2iIncomingEdges = edges.filter(e => e.targetId === node.id);
+            const i2iSourceNodes = i2iIncomingEdges
+              .map(e => nodes.find(n => n.id === e.sourceId))
+              .filter(Boolean) as CanvasNode[];
+            const i2iSourceImages = i2iSourceNodes.flatMap(n => n.images || []).filter(img => img && img !== '');
+            return i2iSourceImages.length > 0 ? (
+              <div className="flex items-center gap-1 px-2 py-0.5 bg-[#1e1e1e] border-b border-[#333] text-[10px] shrink-0">
+                <span className="text-gray-500">参考:</span>
+                <span className="text-green-400 font-medium">{i2iSourceImages.length}张</span>
+                <div className="flex gap-0.5 ml-1 flex-wrap">
+                  {i2iSourceImages.slice(0, 4).map((img, idx) => (
+                    <OptimizedImage key={idx} base64={img} maxSide={64} quality={0.6} alt={`R${idx+1}`} className="w-5 h-5 object-cover rounded border border-[#444]" />
+                  ))}
+                  {i2iSourceImages.length > 4 && <span className="text-gray-600">+{i2iSourceImages.length-4}</span>}
+                </div>
+                <button
+                  onPointerDown={(e) => { e.stopPropagation(); setEyedropperTargetNodeId(node.id); }}
+                  className={`ml-auto px-1.5 py-0.5 rounded text-[10px] text-white ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
+                  title={eyedropperTargetNodeId === node.id ? "取消吸取" : "吸取图片"}
+                >
+                  <EyedropperIcon size={10} />
+                </button>
+              </div>
+            ) : null;
+          })()}
           {/* Text Area - panoramaT2i 使用内置提示词，不显示输入框 */}
           {(node.type === 't2i' || node.type === 'i2i' || node.type === 'text' || node.type === 'video') && (
             <div
@@ -5627,7 +5524,7 @@ export default function App() {
                     type="button"
                   onPointerDown={(e) => { e.stopPropagation(); handleGenerate(node.id); }}
                   disabled={node.isGenerating}
-                    className={`flex-1 min-w-0 py-2 rounded text-sm font-bold flex justify-center items-center gap-2 transition-all
+                    className={`flex-1 min-w-0 py-2 rounded text-sm font-bold flex justify-center items-center gap-2 transition-all saturate-[0.7]
                       ${node.isGenerating ? 'bg-[#333] text-gray-500 cursor-not-allowed' : node.type === 't2i' ? 'bg-purple-600 hover:bg-purple-500 text-white' : 'bg-blue-600 hover:bg-blue-500 text-white'}`}
                   >
                     {node.isGenerating ? (
@@ -7621,39 +7518,75 @@ export default function App() {
       {fullscreenImage && (
         <div 
           className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center overflow-hidden backdrop-blur-sm" 
-          onPointerDown={() => setFullscreenImage(null)}
+          onPointerDown={() => { setFullscreenImage(null); setFsContextMenu(null); }}
+          onContextMenu={(e) => { e.preventDefault(); setFsContextMenu(null); }}
           onWheel={handleFsWheel}
         >
-          <div 
+          <div
             className="relative w-full h-full flex items-center justify-center"
             onPointerDown={(e) => { e.stopPropagation(); handleFsPointerDown(e); }}
           >
-            <img 
-              src={`data:image/jpeg;base64,${fullscreenImage}`} 
-              className="max-w-none max-h-none shadow-2xl" 
-              style={{ 
-                transform: `translate(${fsTransform.x}px, ${fsTransform.y}px) scale(${fsTransform.scale})`, 
+            <img
+              src={`data:image/jpeg;base64,${fullscreenImage}`}
+              className="max-w-none max-h-none shadow-2xl"
+              style={{
+                transform: `translate(${fsTransform.x}px, ${fsTransform.y}px) scale(${fsTransform.scale})`,
                 cursor: activePointerTypeRef.current === 'fullscreen' ? 'grabbing' : 'grab',
                 transition: activePointerTypeRef.current === 'fullscreen' ? 'none' : 'transform 0.1s ease-out'
               }}
               draggable={false}
-              alt="Fullscreen" 
+              alt="Fullscreen"
+              onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setFsContextMenu({ x: e.clientX, y: e.clientY }); }}
             />
           </div>
-          <button 
-            onPointerDown={(e) => { e.stopPropagation(); setFullscreenImage(null); }} 
+          <button
+            onPointerDown={(e) => { e.stopPropagation(); setFullscreenImage(null); }}
             className="absolute top-6 right-6 p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors"
             title="关闭"
           >
             <XIcon size={24} />
           </button>
-          <button 
-            onPointerDown={(e) => { e.stopPropagation(); downloadImage(fullscreenImage); }} 
+          <button
+            onPointerDown={(e) => { e.stopPropagation(); downloadImage(fullscreenImage); }}
             className="absolute bottom-8 right-8 px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl text-white font-bold shadow-lg shadow-blue-900/50 flex items-center gap-2 transition-all"
             title="下载图片"
           >
             <DownloadIcon size={20} /> 下载图片
           </button>
+          {fsContextMenu && (
+            <div
+              className="fixed z-[110] bg-[#252525] border border-[#444] rounded-lg shadow-2xl py-1 min-w-[140px] overflow-hidden"
+              style={{ left: fsContextMenu.x, top: fsContextMenu.y }}
+              onPointerDown={e => e.stopPropagation()}
+            >
+              <button
+                className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-orange-600 hover:text-white flex items-center gap-2"
+                onPointerDown={(e) => { e.stopPropagation(); setFsContextMenu(null);
+                  const rect = containerRef.current?.getBoundingClientRect();
+                  const cx = rect ? (window.innerWidth / 2 - rect.left - transformRef.current.x) / transformRef.current.scale : 0;
+                  const cy = rect ? (window.innerHeight / 2 - rect.top - transformRef.current.y) / transformRef.current.scale : 0;
+                  const newId = `annotation-${Date.now()}`;
+                  setNodes(prev => [...prev, { id: newId, type: 'annotation', x: cx - 480, y: cy - 500, width: 960, height: 1000, sourceImage: fullscreenImage, annotations: [], isEditing: false, selectedAnnotationId: undefined }]);
+                  setSelectedIds([newId]);
+                  setFullscreenImage(null);
+                }}
+              >
+                <AnnotationIcon size={16} /> 编辑图片
+              </button>
+              <button
+                className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-blue-600 hover:text-white flex items-center gap-2"
+                onPointerDown={(e) => { e.stopPropagation(); downloadImage(fullscreenImage); setFsContextMenu(null); }}
+              >
+                <DownloadIcon size={16} /> 下载图片
+              </button>
+              <button
+                className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-red-600 hover:text-white flex items-center gap-2"
+                onPointerDown={(e) => { e.stopPropagation(); setFullscreenImage(null); setFsContextMenu(null); }}
+              >
+                <XIcon size={16} /> 关闭
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -11025,7 +10958,7 @@ function ChatNodeContent({
   return (
     <div className="flex flex-col h-full bg-[#1a1a1a] rounded-b-xl overflow-hidden">
       {/* 参考区：图片 + 视频 */}
-      <div className="flex items-center gap-2 px-2 py-1.5 bg-[#252525] border-b border-[#333] shrink-0" style={{ fontSize: fs(10) }}>
+      <div className="flex items-center gap-2 px-2 py-1.5 bg-[#252525] border-b border-[#333] shrink-0" style={{ fontSize: fs(10), order: 2 }}>
         <span className="text-gray-400 shrink-0">参考:</span>
         <span className="text-green-400 font-medium shrink-0">
           {totalRefImages}图
@@ -11119,7 +11052,7 @@ function ChatNodeContent({
       {/* 模型选择 */}
       <div
         className="flex items-center gap-2 px-3 py-2 bg-[#252525] border-b border-[#333]"
-        style={{ fontSize: 27 }}
+        style={{ fontSize: 27, order: 3 }}
       >
         <span className="text-gray-400">模型:</span>
         <select
@@ -11171,7 +11104,7 @@ function ChatNodeContent({
       </div>
 
       {/* 消息列表 : 底部输入区（功能+引用+文本框）垂直空间 = 2 : 1 */}
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col" style={{ order: 1 }}>
       <div
         className="chat-messages min-h-0 flex-[2_1_0%] overflow-y-auto p-3 space-y-3"
         style={{ userSelect: 'text' }}
@@ -12578,11 +12511,47 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
     };
   }, [isFullscreenAnnotation, sourceImage, mapAnnotationEmbToFs]);
 
-  // 关闭全屏标注模式并应用标注
+  // 关闭全屏标注模式并应用标注，有标注时导出带标注的图片节点
   const closeFullscreenAnnotation = () => {
     const emb = imageCacheRef.current;
     const fs = fsImageRef.current;
-    if (emb && fs) {
+    if (emb && fs && fullscreenAnnotations.length > 0 && sourceImage) {
+      const mapped = fullscreenAnnotations.map((a) => mapAnnotationFsToEmb(a, fs, emb));
+      onUpdate({ annotations: mapped });
+      // 渲染标注到原图并创建图片节点
+      const img = new Image();
+      img.onload = () => {
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = img.width;
+        tempCanvas.height = img.height;
+        const outCtx = tempCanvas.getContext('2d');
+        if (!outCtx) return;
+        outCtx.drawImage(img, 0, 0);
+        const cssW = emb.w, cssH = emb.h;
+        const ds = Math.min(cssW / img.width, cssH / img.height);
+        const dW = img.width * ds, dH = img.height * ds;
+        const dX = (cssW - dW) / 2, dY = (cssH - dH) / 2;
+        const toImg = (ax, ay) => ({ x: (ax - dX) / ds, y: (ay - dY) / ds });
+        mapped.forEach(ann => {
+          const ip = toImg(ann.x, ann.y);
+          let ox = ip.x, oy = ip.y, sw = 0, sh = 0;
+          if (ann.endX !== undefined && ann.endY !== undefined) {
+            const ep = toImg(ann.endX, ann.endY);
+            ox = Math.min(ip.x, ep.x); oy = Math.min(ip.y, ep.y);
+            sw = Math.abs(ep.x - ip.x); sh = Math.abs(ep.y - ip.y);
+          } else { sw = (ann.width || 0) / ds; sh = (ann.height || 0) / ds; }
+          outCtx.strokeStyle = ann.color; outCtx.fillStyle = ann.color;
+          outCtx.lineWidth = Math.max(1, (ann.strokeWidth || 2) / ds);
+          outCtx.lineCap = 'round'; outCtx.lineJoin = 'round';
+          if (ann.type === 'rect') outCtx.strokeRect(ox, oy, sw, sh);
+          else if (ann.type === 'circle') { outCtx.beginPath(); outCtx.ellipse(ox+sw/2, oy+sh/2, sw/2, sh/2, 0, 0, Math.PI*2); outCtx.stroke(); }
+          else if (ann.type === 'fillRect') { outCtx.globalAlpha = ann.fillOpacity ?? 0.45; outCtx.fillRect(ox, oy, sw, sh); outCtx.globalAlpha = 1; outCtx.strokeStyle = ann.color; outCtx.lineWidth = Math.max(1, (ann.strokeWidth||2)*0.5/ds); outCtx.strokeRect(ox, oy, sw, sh); }
+        });
+        const base64 = tempCanvas.toDataURL('image/jpeg', 0.95).split(',')[1];
+        onCreateImageNode([base64], node.x + node.width + 50, node.y);
+      };
+      img.src = 'data:image/jpeg;base64,' + sourceImage;
+    } else if (emb && fs) {
       const mapped = fullscreenAnnotations.map((a) => mapAnnotationFsToEmb(a, fs, emb));
       onUpdate({ annotations: mapped });
     }
@@ -13417,6 +13386,12 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
                 className="ml-2 px-3 py-1.5 rounded text-xs bg-red-900 hover:bg-red-800 text-red-300"
               >
                 清除全部
+              </button>
+              <button
+                onClick={closeFullscreenAnnotation}
+                className="px-4 py-2 rounded text-sm font-bold bg-green-600 hover:bg-green-500 text-white"
+              >
+                确认标注
               </button>
               <button
                 onClick={closeFullscreenAnnotation}
