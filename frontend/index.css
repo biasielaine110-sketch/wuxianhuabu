@@ -124,10 +124,10 @@
   }
 
   /** 节点折叠：未选中时隐藏工具栏/参考栏/文字输入区 */
-  [data-selected="false"] [class*="rounded-t-xl"][class*="border-b"] {
+  [data-selected="false"] [class*="min-h-8"][class*="border-b"] {
     display: none !important;
   }
-  [data-selected="false"] [class*="shrink-0"][class*="border-b"]:not([class*="rounded-b"]) {
+  [data-selected="false"] [class*="shrink-0"][class*="border-b"] {
     display: none !important;
   }
 
