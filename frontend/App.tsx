@@ -6122,11 +6122,18 @@ export default function App() {
                         className="w-7 h-7 rounded-lg bg-black/80 backdrop-blur-sm hover:bg-[#2a1111] border border-[#4A4A4A] flex items-center justify-center transition-all" title="删除"
                       ><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#CC4444" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
                     </div>
-                    {/* 缩略图 */}
+                    {/* 缩略图 - 显示项目第一张图片 */}
                     <div className="relative w-full aspect-video rounded-xl bg-[#282828] border border-[#3A3A3A] group-hover:border-[#484848] overflow-hidden transition-all" onClick={() => handleOpenProject(p)}>
-                      <div className="absolute inset-0 bg-gradient-to-br from-[#2E2E2E] via-[#2C2C2C] to-[#222222] flex items-center justify-center">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#5a5a5a" strokeWidth="1.2" className="group-hover:stroke-[#2a2a2a] transition-colors"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
-                      </div>
+                      {(() => {
+                        const firstImg = (p.nodes || []).reduce<string | null>((found, n) => found || ((n.images?.length || 0) > 0 ? n.images![0] : null), null);
+                        return firstImg ? (
+                          <img src={`data:image/jpeg;base64,${firstImg}`} alt="" className="w-full h-full object-cover" draggable={false} />
+                        ) : (
+                          <div className="absolute inset-0 bg-gradient-to-br from-[#2E2E2E] via-[#2C2C2C] to-[#222222] flex items-center justify-center">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#5a5a5a" strokeWidth="1.2" className="group-hover:stroke-[#6a6a6a] transition-colors"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+                          </div>
+                        );
+                      })()}
                       {/* 底部渐变线 */}
                       <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[#9040F0]/0 group-hover:via-[#9040F0]/30 to-transparent transition-all duration-500" />
                     </div>
@@ -6542,14 +6549,6 @@ export default function App() {
         >
           <KeyIcon size={18} />
         </button>
-        <button
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => { loadProjectLibrary().then(lib => { if (lib) setHomeProjects(lib.projects); }); setShowHomePage(true); }}
-          className="canvas-chrome-150 bg-[#1e1e1e]/90 backdrop-blur-md p-2.5 rounded-xl shadow-2xl border border-[#333] hover:bg-[#9040F0]/30 transition-colors text-gray-400 hover:text-white flex items-center justify-center"
-          title="返回首页"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-        </button>
         <div className="canvas-chrome-150 bg-[#1e1e1e]/90 backdrop-blur-md p-1.5 rounded-xl shadow-2xl border border-[#333] flex flex-col gap-1">
           <button
             onPointerDown={(e) => {
@@ -6681,8 +6680,17 @@ export default function App() {
         if (!curProj) return null;
         const editing = centerTitleEditValue !== null;
         return (
-          <div
-            className="absolute top-5 left-1/2 z-[35] max-w-[min(640px,calc(100vw-14rem))] -translate-x-1/2 px-4 text-center"
+          <div className="absolute top-[70px] left-1/2 z-[35] -translate-x-1/2 flex items-center gap-[50px]">
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => { loadProjectLibrary().then(lib => { if (lib) setHomeProjects(lib.projects); }); setShowHomePage(true); }}
+              className="bg-[#1e1e1e]/90 backdrop-blur-md p-2 rounded-xl shadow-2xl border border-[#333] hover:bg-[#9040F0]/30 transition-colors text-gray-400 hover:text-white flex items-center justify-center shrink-0"
+              title="返回首页"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            </button>
+            <div
+            className="max-w-[min(640px,calc(100vw-14rem))] px-4 text-center"
             title={editing ? undefined : `${projectDraftDisplayName(curProj)} — 双击修改项目名（与草稿名同步）`}
             onPointerDown={(e) => e.stopPropagation()}
             onDoubleClick={(e) => {
@@ -6738,6 +6746,7 @@ export default function App() {
                 {projectDraftDisplayName(curProj)}
         </div>
       )}
+          </div>
           </div>
         );
       })() : null}
