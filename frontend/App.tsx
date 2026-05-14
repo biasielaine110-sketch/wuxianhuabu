@@ -4508,7 +4508,12 @@ export default function App() {
         className={`absolute flex flex-col bg-[#1e1e1e] rounded-[20px] border-8 shadow-2xl transition-shadow ${borderColor} ${shadowColor} ${isSelected ? 'z-20' : 'z-10 hover:border-[#555]'} ${node.type === 'chat' ? 'canvas-node-root--chat' : 'canvas-node-font-195'}${node.type === 'annotation' ? ' canvas-node-annotation' : ''}${node.type === 'gridSplit' || node.type === 'gridMerge' ? ' canvas-node-grid-tool-150' : ''}`}
         style={{ left: node.x, top: node.y, width: node.width, height: node.height }}
         onPointerDown={(e) => handleNodePointerDown(e, node.id)}
+        onDoubleClick={node.type === 'text' ? () => { setEditingTextNodeIds(prev => { const next = new Set(prev); next.add(node.id); return next; }); } : undefined}
       >
+        {/* 文本节点取消选中时退出编辑 */}
+        {node.type === 'text' && !isSelected && editingTextNodeIds.has(node.id) ? (
+          <></>
+        ) : null}
         {/* Floating title - outside window, transparent */}
         <div className="absolute -top-14 left-3 z-30 flex items-center gap-1.5 cursor-grab active:cursor-grabbing">
           {headerIcon}
@@ -4624,6 +4629,7 @@ export default function App() {
                   : 'flex-[5] min-h-[240px] basis-0 min-w-0'
               }`}
             >
+              {node.isGenerating && <div className="absolute inset-0 z-[3] noise-overlay pointer-events-none" />}
               {images.length > 0 ? (
                 <>
                   {/* Top right controls */}
@@ -4842,6 +4848,7 @@ export default function App() {
                   ) : null}
                   {node.isGenerating ? (
                     <div className="relative z-[2] flex flex-col items-center gap-1.5 text-gray-400">
+                      <div className="absolute inset-0 noise-overlay pointer-events-none" />
                       <LoaderIcon size={24} />
                       <span className="text-xs tabular-nums tracking-tight">已用时 {genTimeMmSs}</span>
                       <span className="text-[10px] text-gray-500">{genElapsedSec} 秒</span>
@@ -4887,7 +4894,7 @@ export default function App() {
           )}
 
           {node.type === 'video' && (
-            <div className="w-full h-[480px] shrink-0 bg-[#2a2a2a] relative border-b border-[#333] overflow-hidden group">
+            <div className="w-full h-[680px] shrink-0 bg-[#2a2a2a] relative border-b border-[#333] overflow-hidden group">
               {videoUrls.length > 0 ? (
                 <>
                 <video
@@ -4960,6 +4967,7 @@ export default function App() {
                   ) : null}
                   {node.isGenerating ? (
                     <div className="relative z-[2] flex flex-col items-center gap-1.5 text-gray-400">
+                      <div className="absolute inset-0 noise-overlay pointer-events-none" />
                       <LoaderIcon size={24} />
                       <span className="text-xs tabular-nums tracking-tight">已用时 {genTimeMmSs}</span>
                       <span className="text-[10px] text-gray-500">{genElapsedSec} 秒</span>
@@ -5548,6 +5556,7 @@ export default function App() {
               className={`flex flex-col min-h-0 overflow-hidden ${
                 node.type === 't2i' || node.type === 'i2i' ? 'flex-[3] basis-0' : 'flex-1'
               }`}
+              style={node.type === 'text' ? { display: isSelected && editingTextNodeIds.has(node.id) ? undefined : 'none' } : undefined}
             >
               {/* 预设按钮区域 - i2i节点 */}
               {node.type === 'i2i' && (
@@ -5863,6 +5872,7 @@ export default function App() {
   const [homeChatLoading, setHomeChatLoading] = useState(false);
   const [showAllProjectsModal, setShowAllProjectsModal] = useState(false);
   const [allProjectsList, setAllProjectsList] = useState<CanvasProjectSnapshot[]>([]);
+  const [editingTextNodeIds, setEditingTextNodeIds] = useState<Set<string>>(new Set());
   const [renameTarget, setRenameTarget] = useState<CanvasProjectSnapshot | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<CanvasProjectSnapshot | null>(null);
