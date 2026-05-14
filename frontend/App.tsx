@@ -4629,7 +4629,42 @@ export default function App() {
                   : 'flex-[5] min-h-[240px] basis-0 min-w-0'
               }`}
             >
-              {node.isGenerating && <div className="absolute inset-0 z-[3] noise-overlay pointer-events-none" />}
+              {node.isGenerating && (
+                <div className="absolute inset-0 z-[3] pointer-events-none" style={{ background: 'radial-gradient(ellipse at 50% 50%, rgba(144,64,240,0.30) 0%, transparent 70%)' }}>
+                  {/* 扫描线 */}
+                  <div style={{
+                    position: 'absolute', left: 0, right: 0, height: '3px',
+                    background: 'linear-gradient(90deg, transparent 5%, rgba(144,64,240,0.6) 20%, rgba(180,220,255,0.9) 50%, rgba(144,64,240,0.6) 80%, transparent 95%)',
+                    boxShadow: '0 0 30px rgba(144,64,240,0.5), 0 0 80px rgba(100,160,255,0.3)',
+                    animation: 'scanDown 3s ease-in-out infinite',
+                  }} />
+                  {/* 第二扫描线偏移 */}
+                  <div style={{
+                    position: 'absolute', left: 0, right: 0, height: '3px',
+                    background: 'linear-gradient(90deg, transparent 5%, rgba(100,160,255,0.5) 20%, rgba(160,200,240,0.8) 50%, rgba(100,160,255,0.5) 80%, transparent 95%)',
+                    boxShadow: '0 0 25px rgba(100,160,255,0.4), 0 0 60px rgba(144,64,240,0.25)',
+                    animation: 'scanDown 3s ease-in-out 1.5s infinite',
+                  }} />
+                  {/* 浮动粒子 - 更大更亮 */}
+                  {[...Array(10)].map((_, i) => (
+                    <div key={i} style={{
+                      position: 'absolute',
+                      width: '4px', height: '4px', borderRadius: '50%',
+                      background: i % 3 === 0 ? '#9040F0' : i % 3 === 1 ? '#60A0FF' : '#C080FF',
+                      boxShadow: `0 0 10px ${i % 3 === 0 ? 'rgba(144,64,240,0.8)' : i % 3 === 1 ? 'rgba(96,160,255,0.7)' : 'rgba(192,128,255,0.7)'}, 0 0 20px ${i % 3 === 0 ? 'rgba(144,64,240,0.4)' : i % 3 === 1 ? 'rgba(96,160,255,0.35)' : 'rgba(192,128,255,0.35)'}`,
+                      left: `${8 + i * 9}%`,
+                      animation: `particleFloat ${2 + i * 0.3}s ease-in-out ${i * 0.2}s infinite`,
+                    }} />
+                  ))}
+                  {/* 网格 - 提亮 */}
+                  <div style={{
+                    position: 'absolute', inset: 0,
+                    backgroundImage: 'linear-gradient(rgba(144,64,240,0.10) 1px, transparent 1px), linear-gradient(90deg, rgba(144,64,240,0.10) 1px, transparent 1px)',
+                    backgroundSize: '30px 30px',
+                    animation: 'gridPulse 3s ease-in-out infinite',
+                  }} />
+                </div>
+              )}
               {images.length > 0 ? (
                 <>
                   {/* Top right controls */}
