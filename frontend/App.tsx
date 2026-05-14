@@ -1047,8 +1047,25 @@ export default function App() {
 
   // Fullscreen Image Modal
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
+  const [fullscreenNodeId, setFullscreenNodeId] = useState<string | null>(null);
+  const [fullscreenImageIdx, setFullscreenImageIdx] = useState(0);
   const [fsTransform, setFsTransform] = useState({ scale: 1, x: 0, y: 0 });
   const [fsContextMenu, setFsContextMenu] = useState<{ x: number, y: number } | null>(null);
+  const openFullscreenImage = (nodeId: string, img: string, idx: number) => {
+    setFullscreenNodeId(nodeId);
+    setFullscreenImage(img);
+    setFullscreenImageIdx(idx);
+    setFsTransform({ scale: 1, x: 0, y: 0 });
+  };
+  const fsNavigate = (dir: 1 | -1) => {
+    const node = nodesRef.current.find(n => n.id === fullscreenNodeId);
+    if (!node?.images?.length) return;
+    const nextIdx = fullscreenImageIdx + dir;
+    if (nextIdx < 0 || nextIdx >= node.images.length) return;
+    setFullscreenImageIdx(nextIdx);
+    setFullscreenImage(node.images[nextIdx]);
+    setFsTransform({ scale: 1, x: 0, y: 0 });
+  };
 
   // Image Import Target
   const [importTargetNodeId, setImportTargetNodeId] = useState<string | null>(null);
@@ -4681,7 +4698,7 @@ export default function App() {
                     )}
                     {viewMode === 'single' && (
                       <button
-                        onPointerDown={(e) => { e.stopPropagation(); setFullscreenImage(images[currentIndex]); }}
+                        onPointerDown={(e) => { e.stopPropagation(); openFullscreenImage(node.id, images[currentIndex], currentIndex); }}
                         className="p-1.5 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
                         title="放大查看"
                       >
@@ -4742,7 +4759,7 @@ export default function App() {
                             alt={`Generated ${idx}`}
                           />
                           <button 
-                            onPointerDown={(e) => { e.stopPropagation(); setFullscreenImage(img); }} 
+                            onPointerDown={(e) => { e.stopPropagation(); openFullscreenImage(node.id, img, idx); }} 
                             className="absolute inset-0 m-auto w-8 h-8 flex items-center justify-center bg-black/60 hover:bg-black/80 rounded-full text-white backdrop-blur-sm opacity-0 group-hover/item:opacity-100 transition-opacity"
                             title="放大查看"
                           >
@@ -4767,7 +4784,7 @@ export default function App() {
                         onDoubleClick={(e) => {
                           e.stopPropagation();
                           if (!eyedropperTargetNodeId) {
-                            setFullscreenImage(images[currentIndex]);
+                            openFullscreenImage(node.id, images[currentIndex], currentIndex);
                           }
                         }}
                         draggable={false}
@@ -4775,7 +4792,7 @@ export default function App() {
                       />
                       
                       <button 
-                        onPointerDown={(e) => { e.stopPropagation(); setFullscreenImage(images[currentIndex]); }} 
+                        onPointerDown={(e) => { e.stopPropagation(); openFullscreenImage(node.id, images[currentIndex], currentIndex); }} 
                         className="absolute inset-0 m-auto w-10 h-10 flex items-center justify-center bg-black/60 hover:bg-black/80 rounded-full text-white backdrop-blur-sm opacity-0 group-hover/single:opacity-100 transition-opacity"
                         title="放大查看"
                       >
@@ -8031,7 +8048,7 @@ export default function App() {
           >
             <img
               src={`data:image/jpeg;base64,${fullscreenImage}`}
-              className="max-w-none max-h-none shadow-2xl"
+              className="max-w-[95vw] max-h-[90vh] object-contain shadow-2xl"
               style={{
                 transform: `translate(${fsTransform.x}px, ${fsTransform.y}px) scale(${fsTransform.scale})`,
                 cursor: activePointerTypeRef.current === 'fullscreen' ? 'grabbing' : 'grab',
@@ -8042,8 +8059,29 @@ export default function App() {
               onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setFsContextMenu({ x: e.clientX, y: e.clientY }); }}
             />
           </div>
+          {/* 翻页按钮 */}
+          {fullscreenNodeId && (() => {
+            const fsNode = nodesRef.current.find(n => n.id === fullscreenNodeId);
+            const total = fsNode?.images?.length || 0;
+            if (total <= 1) return null;
+            return (
+              <>
+                <button onPointerDown={e => { e.stopPropagation(); fsNavigate(-1); }}
+                  disabled={fullscreenImageIdx <= 0}
+                  className="absolute left-6 top-1/2 -translate-y-1/2 p-4 bg-white/10 hover:bg-white/20 disabled:opacity-20 rounded-full text-white transition-colors"
+                  title="上一张"
+                ><ChevronLeftIcon size={28} /></button>
+                <button onPointerDown={e => { e.stopPropagation(); fsNavigate(1); }}
+                  disabled={fullscreenImageIdx >= total - 1}
+                  className="absolute right-6 top-1/2 -translate-y-1/2 p-4 bg-white/10 hover:bg-white/20 disabled:opacity-20 rounded-full text-white transition-colors"
+                  title="下一张"
+                ><ChevronRightIcon size={28} /></button>
+                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 px-3 py-1.5 bg-black/50 rounded-full text-white text-sm backdrop-blur-sm">{fullscreenImageIdx + 1} / {total}</div>
+              </>
+            );
+          })()}
           <button
-            onPointerDown={(e) => { e.stopPropagation(); setFullscreenImage(null); }}
+            onPointerDown={(e) => { e.stopPropagation(); setFullscreenImage(null); setFullscreenNodeId(null); }}
             className="absolute top-6 right-6 p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors"
             title="关闭"
           >
