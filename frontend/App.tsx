@@ -556,6 +556,14 @@ const I2I_PRESET_CATEGORY_OPTIONS: { id: I2iPresetCategoryId; label: string }[] 
   { id: 'other', label: '其他' },
 ];
 
+/** 文生图预设分类 */
+type T2iPresetCategoryId = 'template' | 'storyboard';
+
+const T2I_PRESET_CATEGORY_OPTIONS: { id: T2iPresetCategoryId; label: string }[] = [
+  { id: 'template', label: '模板' },
+  { id: 'storyboard', label: '故事板' },
+];
+
 const I2I_PRESETS_BY_CATEGORY: Record<I2iPresetCategoryId, { key: string; label: string }[]> = {
   character: [
     { key: '角色4视图', label: '角色4视图' },
@@ -585,6 +593,29 @@ const I2I_PRESETS_BY_CATEGORY: Record<I2iPresetCategoryId, { key: string; label:
 const I2I_PRESET_FLAT = (Object.keys(I2I_PRESETS_BY_CATEGORY) as I2iPresetCategoryId[]).flatMap(
   (id) => I2I_PRESETS_BY_CATEGORY[id]
 );
+
+/** 文生图预设分类数据 */
+const T2I_PRESETS_BY_CATEGORY: Record<T2iPresetCategoryId, { key: string; label: string }[]> = {
+  template: [
+    { key: '通用模板', label: '通用模板' },
+  ],
+  storyboard: [
+    { key: '故事板_A', label: '故事板_A' },
+    { key: '故事板_B', label: '故事板_B' },
+  ],
+};
+
+const T2I_PRESET_FLAT = (Object.keys(T2I_PRESETS_BY_CATEGORY) as T2iPresetCategoryId[]).flatMap(
+  (id) => T2I_PRESETS_BY_CATEGORY[id]
+);
+
+function t2iCategoryForPreset(preset: string | undefined): T2iPresetCategoryId {
+  if (!preset) return 'template';
+  for (const id of Object.keys(T2I_PRESETS_BY_CATEGORY) as T2iPresetCategoryId[]) {
+    if (T2I_PRESETS_BY_CATEGORY[id].some((p) => p.key === preset)) return id;
+  }
+  return 'template';
+}
 
 function i2iCategoryForPreset(preset: string | undefined): I2iPresetCategoryId {
   if (!preset) return 'character';
@@ -620,8 +651,16 @@ const DEFAULT_CHAT_PRESET_KEYS = new Set([
   'CCC即梦视频',
 ]);
 
+/** 内置文生图预设键（默认归入文生图类） */
+const DEFAULT_T2I_PRESET_KEYS = new Set([
+  '故事板_A',
+  '故事板_B',
+  '通用模板',
+]);
+
 function defaultPresetDomain(name: string): PresetDomainId {
   if (DEFAULT_CHAT_PRESET_KEYS.has(name)) return 'chat';
+  if (DEFAULT_T2I_PRESET_KEYS.has(name)) return 't2i';
   return 'i2i';
 }
 
@@ -646,6 +685,25 @@ function i2iPresetListForCategory(
     .map((name) => ({
       key: name,
       label: I2I_PRESET_FLAT.find((p) => p.key === name)?.label ?? name,
+    }));
+}
+
+/** 文生图下拉：与设置共用 promptPresets，按分类列出 */
+function t2iPresetListForCategory(
+  cat: T2iPresetCategoryId,
+  promptPresets: Record<string, string>,
+  domainOverrides: Record<string, PresetDomainId>
+): { key: string; label: string }[] {
+  return Object.keys(promptPresets)
+    .filter(
+      (name) =>
+        settingsPresetDomain(name, domainOverrides) === 't2i' &&
+        t2iCategoryForPreset(name) === cat
+    )
+    .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
+    .map((name) => ({
+      key: name,
+      label: T2I_PRESET_FLAT.find((p) => p.key === name)?.label ?? name,
     }));
 }
 
@@ -679,6 +737,16 @@ const INITIAL_I2I_PROMPT_PRESETS: Record<string, string> = {
   道具转线稿色块: '将图片转换为线稿色块图：在灰色背景上使用扁平色块呈现线稿风格。保持与原图相同的构图与比例。',
   道具转超写实: '识别图片中的物体，quixel资产库效果，灰色背景。',
   道具转白模: '将图片转成传统3D游戏影视流程中的白模效果图，灰色背景。',
+};
+
+/** 文生图预设内容 */
+const INITIAL_T2I_PROMPT_PRESETS: Record<string, string> = {
+  '故事板_A':
+    '避免场景过于相似，创建一个电影制作板/视觉规划表，展示短片或商业广告的完整概念。布局应简洁、基于网格，并分为清晰标记的部分。包含：共享创意指导（顶部栏）：整体限制，如镜头数量、统一的调色板和一般的环境背景。角色与风格参考部分：一个从多个角度展示的模型（正面、背面、侧面、特写、放松姿态），配有服装和配饰参考。强调身份的一致性，同时允许在特定场景中进行细微变化。环境和场景设计部分：一个具有戏剧性自然特征的场景户外地点，以及一个俯视示意图，说明在空间中的移动路径。包括摄像机位置和沿路线标注的拍摄类型。故事板部分：一系列编号的帧（大约8个镜头）展示场景的进展。每个帧包括：摄像机类型/镜头感觉，镜头大小（广角、中景、特写、微距），运动方式（静态、跟踪、手持等），动作和情绪进展的简要描述。灯光/情绪/风格备注：与灯光条件、氛围和纹理相关的视觉示例和简短描述。包括一天中不同时间的过渡和光线质量的变化。情绪和关键词块：指导作品的简洁情绪基调主题描述列表。音频/音调部分：环境声音、音乐风格和整体声音氛围的指示。电影摄影笔记：包括镜头特性、运动风格和后期处理感觉的总体视觉哲学。整个版面应感觉连贯、电影化且专业设计——就像导演的预制作指南，能一眼传达出基调、节奏和视觉叙事。将宽高比设为16:9，并且标注每个镜头的时长（秒）。这是一个以清晰排版和文字可读性为优先的专业故事板设计。所有文字必须清晰锐利、准确可读，禁止乱码和伪文字。分区标题、镜头编号、角色角度标签必须明显放大。每个分镜中的文字说明必须非常简短，控制在1到2行内，避免长段落。采用干净背景、高对比度文字、整齐网格布局和充足留白，确保整张板上的中文说明一眼可读。',
+  '故事板_B':
+    '一张AI视频生成指导图，整体采用真实影视前期提案板风格，画面像电影导演组内部使用的专业视觉开发文件，而不是普通拼贴海报。整个版面为高端中文电影UI排版包含角色设定、环境设计、摄影机位图、分镜故事板、情绪关键词、灯光设计、音频设计、摄影笔记、色调建议、节奏建议等多个模块，整体统一为超写实电影摄影风格，8K，高细节，真实胶片质感，具有强烈的电影工业化氛围。整张故事板必须以我的场景参考图为主，严格参考场景中的建筑结构、空间布局、地面材质，光影方向、环境氛围、远景层次、游客尺度与真实空间关系，确保所有分镜中的场景保持一致性和连续性。场景整体具有真实空间纵深，拥有电影级体积光、空气透视、漂浮灰尘、湿润反光、真实天气氛围与环境色温变化，整体风格统一，不能出现空间穿帮与建筑错位。环境氛围需要根据剧情自动匹配，例如压抑、宿命感、神性、史诗感、悬疑感、肃杀感、废墟感或超现实感。人物部分严格参考我的人物三视图进行统一生成，角色外观、发型、服装、盔甲、配饰、体型、颜色、材质、面部特征必须保持完全一致，不能在不同分镜中出现人物变形、服装变化、盔甲错误、脸部漂移或比例错误。人物需要生成标准角色设定区域，包括正面、背面、侧面、面部特写、情绪表情、站姿或坐姿参考，以及武器和装备细节参考。角色整体采用真实电影角色设计风格，而不是动漫设定图，人物皮肤、布料、金属、战损、灰尘、汗水与光影细节必须真实可信。故事板主体区域根据我的文字分镜脚本自动生成完整的电影分镜结构。每一个镜头都需要自动分析脚本中的人物动作、镜头运动、情绪变化、空间关系与叙事节奏，并生成对应的分镜画面。每格分镜必须包含时间码、景别、镜头角度、摄影机运动、人物动作、对白、音效与情绪描述。例如角色缓慢抬头时自动使用Slow Dolly-in，情绪爆发时自动使用Crash Zoom，战斗冲击时自动使用Dynamic Follow Shot，人物离场时自动使用Whip Pan或Handheld Tracking。所有镜头之间必须遵守180度轴线原则与30度有效分镜原则，确保角色站位、视线方向与镜头方向保持统一，形成真实电影剪辑逻辑，而不是随机拼接。镜头风格必须是真实电影摄影语言，包含低角度仰拍、过肩镜头、俯拍、长焦压缩、手持跟拍、浅景深、动态模糊、运动残影、镜头拉背、航拍推近等专业电影镜头设计。系统自动根据剧情判断镜头节奏，例如压抑对话采用稳定慢推镜头，紧张情绪采用手持微晃，史诗场景采用航拍大远景，人物心理震动采用焦点转移与背景虚化。所有镜头之间具有明确情绪递进，形成完整的观察→压迫→冲突→爆发→余韵的电影节奏。故事板底部自动生成情绪与风格关键词区域，根据剧情与场景自动提取风格标签，例如：超写实、电影感、宿命感、压抑、史诗感、神性、金属反光、潮湿空气、能量冲击，逆光尘埃、冷暖对比、烟雾氛围、胶片颗粒、真实光影、木质旧化、战损细节等，用于统一整部短片的视觉方向。同时自动生成音频与声场设计区域，根据分镜动作生成环境音、动作音效与BGM氛围。例如风声、脚步声、游客惊呼、火焰燃烧、金属摩擦、水能量轰鸣、低频震动、压迫鼓点，空旷回声、烟灰掉落声等，并自动匹配整体声场风格，例如贴近、压迫、低频，空旷、留白感或震撼感。故事板最后生成电影摄影笔记区域，自动分析整组镜头所需的镜头焦段、灯光逻辑与后期调色方向。例如35mm、50mm、85mm电影镜头组合，暖金高光与冷蓝阴影对比，真实皮肤纹理，胶片颗粒，HDR高动态范围，电影级动态模糊，真实镜头呼吸感，低饱和电影调色，摄影机慢推、手持跟随、镜头甩动、镜头摇移等电影语言。画面信息量巨大，一定要我的文字信息进行分析，分析故事内容和剧情走向等等，具有专业中文UI排版、真实摄影逻辑、真实故事板结构、真实镜头分析与真实电影工业化气质。',
+  '通用模板':
+    '16:9横屏，专业摄影，高清8K，电影级质感，写实风格，自然光影',
 };
 
 const PRESET_SETTINGS_GUARD_PASSWORD = 'zhangbiwen666';
@@ -862,6 +930,94 @@ function I2iPresetCategorySelect({
         <span className="text-[10px] text-gray-500 shrink-0">预设</span>
         <select
           className="i2i-preset-select flex-1 min-w-[120px] bg-[#222222] border border-[#444] rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-amber-500"
+          value={presetSelectValue}
+          onPointerDown={(e) => e.stopPropagation()}
+          onChange={(e) => {
+            const key = e.target.value;
+            if (key) onApplyPreset(nodeId, key);
+          }}
+        >
+          <option value="">选择预设…</option>
+          {list.map((p) => (
+            <option key={p.key} value={p.key}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+}
+
+function T2iPresetCategorySelect({
+  nodeId,
+  activePreset,
+  promptPresets,
+  presetDomainOverrides,
+  onApplyPreset,
+  onClearPreset,
+}: {
+  nodeId: string;
+  activePreset?: string;
+  promptPresets: Record<string, string>;
+  presetDomainOverrides: Record<string, PresetDomainId>;
+  onApplyPreset: (nodeId: string, presetKey: string) => void;
+  onClearPreset: (nodeId: string) => void;
+}) {
+  const [category, setCategory] = React.useState<T2iPresetCategoryId>(() =>
+    t2iCategoryForPreset(activePreset ?? '')
+  );
+
+  React.useEffect(() => {
+    setCategory(t2iCategoryForPreset(activePreset ?? ''));
+  }, [activePreset]);
+
+  const list = React.useMemo(
+    () => t2iPresetListForCategory(category, promptPresets, presetDomainOverrides),
+    [category, promptPresets, presetDomainOverrides]
+  );
+  const presetSelectValue =
+    activePreset && list.some((p) => p.key === activePreset) ? activePreset : '';
+
+  return (
+    <div className="flex flex-col gap-1.5 p-2 shrink-0 border-b border-[#333]">
+      {activePreset && (
+        <div className="flex items-center gap-2 px-2 py-1 bg-gradient-to-r from-purple-900/40 to-pink-900/40 rounded border border-purple-600/50">
+          <span className="text-[10px] text-purple-400 font-medium">预设:</span>
+          <span className="text-xs text-white font-bold">
+            {T2I_PRESET_FLAT.find((p) => p.key === activePreset)?.label || activePreset}
+          </span>
+          <button
+            type="button"
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              onClearPreset(nodeId);
+            }}
+            className="ml-auto text-[10px] text-gray-400 hover:text-white px-1 py-0.5 rounded hover:bg-white/10"
+          >
+            清除
+          </button>
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[10px] text-gray-500 shrink-0">分类</span>
+        <select
+          className="t2i-preset-select bg-[#222222] border border-[#444] rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-purple-500 min-w-[72px]"
+          value={category}
+          onPointerDown={(e) => e.stopPropagation()}
+          onChange={(e) => {
+            setCategory(e.target.value as T2iPresetCategoryId);
+          }}
+        >
+          {T2I_PRESET_CATEGORY_OPTIONS.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <span className="text-[10px] text-gray-500 shrink-0">预设</span>
+        <select
+          className="t2i-preset-select flex-1 min-w-[120px] bg-[#222222] border border-[#444] rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-purple-500"
           value={presetSelectValue}
           onPointerDown={(e) => e.stopPropagation()}
           onChange={(e) => {
@@ -1415,6 +1571,8 @@ export default function App() {
   const [promptPresetDomainOverrides, setPromptPresetDomainOverrides] = useState<Record<string, PresetDomainId>>({});
   /** 设置 → 预设：仅「图生图」大类下使用 — 角色/场景/道具/其他 */
   const [settingsPresetCategoryTab, setSettingsPresetCategoryTab] = useState<I2iPresetCategoryId>('character');
+  /** 设置 → 预设：仅「文生图」大类下使用 — 模板/故事板 */
+  const [settingsT2iPresetCategoryTab, setSettingsT2iPresetCategoryTab] = useState<T2iPresetCategoryId>('template');
   /** 设置 → 预设：密码验证通过后的本会话内可自由编辑、复制/重命名/删除不再弹密码 */
   const [settingsPresetAuthSession, setSettingsPresetAuthSession] = useState(false);
   /** 设置 → 预设：密码校验弹层（复制 / 重命名 / 删除 / 解锁 / 添加 前弹出） */
@@ -2378,6 +2536,8 @@ export default function App() {
       setPromptPresetDomainOverrides((prev) => ({ ...prev, [name]: settingsPresetDomainTab }));
       if (settingsPresetDomainTab === 'i2i') {
         setSettingsPresetCategoryTab('other');
+      } else if (settingsPresetDomainTab === 't2i') {
+        setSettingsT2iPresetCategoryTab('template');
       }
     } else if (name && promptPresets[name]) {
       window.alert('已存在同名预设');
@@ -4646,39 +4806,209 @@ export default function App() {
               }`}
             >
               {node.isGenerating && (
-                <div className="absolute inset-0 z-[3] pointer-events-none" style={{ background: 'radial-gradient(ellipse at 50% 50%, rgba(144,64,240,0.30) 0%, transparent 70%)' }}>
-                  {/* 扫描线 */}
-                  <div style={{
-                    position: 'absolute', left: 0, right: 0, height: '3px',
-                    background: 'linear-gradient(90deg, transparent 5%, rgba(144,64,240,0.6) 20%, rgba(180,220,255,0.9) 50%, rgba(144,64,240,0.6) 80%, transparent 95%)',
-                    boxShadow: '0 0 30px rgba(144,64,240,0.5), 0 0 80px rgba(100,160,255,0.3)',
-                    animation: 'scanDown 3s ease-in-out infinite',
-                  }} />
-                  {/* 第二扫描线偏移 */}
-                  <div style={{
-                    position: 'absolute', left: 0, right: 0, height: '3px',
-                    background: 'linear-gradient(90deg, transparent 5%, rgba(100,160,255,0.5) 20%, rgba(160,200,240,0.8) 50%, rgba(100,160,255,0.5) 80%, transparent 95%)',
-                    boxShadow: '0 0 25px rgba(100,160,255,0.4), 0 0 60px rgba(144,64,240,0.25)',
-                    animation: 'scanDown 3s ease-in-out 1.5s infinite',
-                  }} />
-                  {/* 浮动粒子 - 更大更亮 */}
-                  {[...Array(10)].map((_, i) => (
-                    <div key={i} style={{
-                      position: 'absolute',
-                      width: '4px', height: '4px', borderRadius: '50%',
-                      background: i % 3 === 0 ? '#9040F0' : i % 3 === 1 ? '#60A0FF' : '#C080FF',
-                      boxShadow: `0 0 10px ${i % 3 === 0 ? 'rgba(144,64,240,0.8)' : i % 3 === 1 ? 'rgba(96,160,255,0.7)' : 'rgba(192,128,255,0.7)'}, 0 0 20px ${i % 3 === 0 ? 'rgba(144,64,240,0.4)' : i % 3 === 1 ? 'rgba(96,160,255,0.35)' : 'rgba(192,128,255,0.35)'}`,
-                      left: `${8 + i * 9}%`,
-                      animation: `particleFloat ${2 + i * 0.3}s ease-in-out ${i * 0.2}s infinite`,
-                    }} />
-                  ))}
-                  {/* 网格 - 提亮 */}
+                <div className="absolute inset-0 z-[3] pointer-events-none" style={{ 
+                  background: 'radial-gradient(ellipse at 50% 30%, rgba(0,245,255,0.15) 0%, rgba(102,126,234,0.10) 30%, rgba(168,85,247,0.08) 60%, transparent 80%)',
+                  overflow: 'hidden'
+                }}>
+                  {/* 全息扫描背景 */}
                   <div style={{
                     position: 'absolute', inset: 0,
-                    backgroundImage: 'linear-gradient(rgba(144,64,240,0.10) 1px, transparent 1px), linear-gradient(90deg, rgba(144,64,240,0.10) 1px, transparent 1px)',
-                    backgroundSize: '30px 30px',
-                    animation: 'gridPulse 3s ease-in-out infinite',
+                    background: `
+                      repeating-linear-gradient(
+                        0deg,
+                        transparent,
+                        transparent 2px,
+                        rgba(0,245,255,0.03) 2px,
+                        rgba(0,245,255,0.03) 4px
+                      )
+                    `,
+                    animation: 'hologramScan 0.5s linear infinite',
                   }} />
+                  
+                  {/* 主扫描线 - 青色 */}
+                  <div style={{
+                    position: 'absolute', left: 0, right: 0, height: '4px',
+                    background: 'linear-gradient(90deg, transparent 0%, rgba(0,245,255,0.3) 10%, rgba(0,245,255,0.9) 50%, rgba(0,245,255,0.3) 90%, transparent 100%)',
+                    boxShadow: '0 0 20px rgba(0,245,255,0.8), 0 0 40px rgba(0,245,255,0.4), 0 0 80px rgba(0,245,255,0.2)',
+                    animation: 'genScanDown 2s ease-in-out infinite',
+                  }} />
+                  
+                  {/* 次扫描线 - 紫色 */}
+                  <div style={{
+                    position: 'absolute', left: 0, right: 0, height: '3px',
+                    background: 'linear-gradient(90deg, transparent 0%, rgba(168,85,247,0.3) 10%, rgba(168,85,247,0.9) 50%, rgba(168,85,247,0.3) 90%, transparent 100%)',
+                    boxShadow: '0 0 15px rgba(168,85,247,0.8), 0 0 30px rgba(168,85,247,0.4)',
+                    animation: 'genScanDown 2s ease-in-out 1s infinite',
+                  }} />
+                  
+                  {/* 第三扫描线 - 白色高光 */}
+                  <div style={{
+                    position: 'absolute', left: 0, right: 0, height: '2px',
+                    background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.5) 50%, transparent 100%)',
+                    boxShadow: '0 0 10px rgba(255,255,255,0.6)',
+                    animation: 'genScanDown 2s ease-in-out 0.5s infinite',
+                  }} />
+                  
+                  {/* 神经网络连接线 */}
+                  <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0.6 }}>
+                    <defs>
+                      <linearGradient id="neuralGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" stopColor="rgba(0,245,255,0)" />
+                        <stop offset="50%" stopColor="rgba(0,245,255,1)" />
+                        <stop offset="100%" stopColor="rgba(168,85,247,0)" />
+                      </linearGradient>
+                    </defs>
+                    {[...Array(8)].map((_, i) => (
+                      <line
+                        key={i}
+                        x1={`${10 + i * 12}%`}
+                        y1="20%"
+                        x2={`${15 + i * 10}%`}
+                        y2="80%"
+                        stroke="url(#neuralGrad)"
+                        strokeWidth="1"
+                        style={{
+                          animation: `neuralPulse ${1.5 + i * 0.2}s ease-in-out ${i * 0.15}s infinite`,
+                        }}
+                      />
+                    ))}
+                  </svg>
+                  
+                  {/* 浮动粒子群 - 第一层 */}
+                  {[...Array(15)].map((_, i) => (
+                    <div key={`p1-${i}`} style={{
+                      position: 'absolute',
+                      width: i % 3 === 0 ? '5px' : i % 3 === 1 ? '3px' : '4px',
+                      height: i % 3 === 0 ? '5px' : i % 3 === 1 ? '3px' : '4px',
+                      borderRadius: '50%',
+                      background: i % 4 === 0 ? '#00f5ff' : i % 4 === 1 ? '#667eea' : i % 4 === 2 ? '#a855f7' : '#60a5fa',
+                      boxShadow: `0 0 8px ${i % 4 === 0 ? '#00f5ff' : i % 4 === 1 ? '#667eea' : i % 4 === 2 ? '#a855f7' : '#60a5fa'}, 0 0 16px ${i % 4 === 0 ? 'rgba(0,245,255,0.5)' : i % 4 === 1 ? 'rgba(102,126,234,0.5)' : i % 4 === 2 ? 'rgba(168,85,247,0.5)' : 'rgba(96,165,250,0.5)'}`,
+                      left: `${5 + i * 6.5}%`,
+                      top: `${15 + (i % 5) * 18}%`,
+                      animation: `genParticleFloat ${1.8 + i * 0.15}s ease-in-out ${i * 0.12}s infinite`,
+                    }} />
+                  ))}
+                  
+                  {/* 浮动粒子群 - 第二层（大粒子） */}
+                  {[...Array(6)].map((_, i) => (
+                    <div key={`p2-${i}`} style={{
+                      position: 'absolute',
+                      width: '6px',
+                      height: '6px',
+                      borderRadius: '50%',
+                      background: 'radial-gradient(circle, rgba(0,245,255,1) 0%, rgba(0,245,255,0) 70%)',
+                      boxShadow: '0 0 15px #00f5ff, 0 0 30px rgba(0,245,255,0.5)',
+                      left: `${8 + i * 15}%`,
+                      top: `${10 + (i % 3) * 30}%`,
+                      animation: `genParticleBreathe ${2.5 + i * 0.3}s ease-in-out ${i * 0.2}s infinite`,
+                    }} />
+                  ))}
+                  
+                  {/* 能量波纹 */}
+                  <div style={{
+                    position: 'absolute',
+                    left: '50%',
+                    top: '50%',
+                    width: '20px',
+                    height: '20px',
+                    transform: 'translate(-50%, -50%)',
+                    border: '2px solid rgba(0,245,255,0.5)',
+                    borderRadius: '50%',
+                    animation: 'genEnergyWave 2s ease-out infinite',
+                  }} />
+                  <div style={{
+                    position: 'absolute',
+                    left: '50%',
+                    top: '50%',
+                    width: '20px',
+                    height: '20px',
+                    transform: 'translate(-50%, -50%)',
+                    border: '1px solid rgba(168,85,247,0.4)',
+                    borderRadius: '50%',
+                    animation: 'genEnergyWave 2s ease-out 0.7s infinite',
+                  }} />
+                  <div style={{
+                    position: 'absolute',
+                    left: '50%',
+                    top: '50%',
+                    width: '20px',
+                    height: '20px',
+                    transform: 'translate(-50%, -50%)',
+                    border: '1px solid rgba(102,126,234,0.3)',
+                    borderRadius: '50%',
+                    animation: 'genEnergyWave 2s ease-out 1.4s infinite',
+                  }} />
+                  
+                  {/* 网格 - 赛博朋克风格 */}
+                  <div style={{
+                    position: 'absolute', inset: 0,
+                    backgroundImage: `
+                      linear-gradient(rgba(0,245,255,0.15) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(0,245,255,0.15) 1px, transparent 1px),
+                      linear-gradient(rgba(168,85,247,0.08) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(168,85,247,0.08) 1px, transparent 1px)
+                    `,
+                    backgroundSize: '60px 60px, 60px 60px, 30px 30px, 30px 30px',
+                    backgroundPosition: '0 0, 0 0, 30px 30px, 30px 30px',
+                    animation: 'genGridPulse 3s ease-in-out infinite',
+                  }} />
+                  
+                  {/* 扫描光栅 */}
+                  <div style={{
+                    position: 'absolute', inset: 0,
+                    background: `repeating-linear-gradient(
+                      90deg,
+                      transparent,
+                      transparent 20px,
+                      rgba(0,245,255,0.02) 20px,
+                      rgba(0,245,255,0.02) 21px
+                    )`,
+                    animation: 'genRasterScan 4s linear infinite',
+                  }} />
+                  
+                  {/* 角落装饰 */}
+                  <div style={{
+                    position: 'absolute', top: '8px', left: '8px',
+                    width: '30px', height: '30px',
+                    borderTop: '2px solid rgba(0,245,255,0.8)',
+                    borderLeft: '2px solid rgba(0,245,255,0.8)',
+                    boxShadow: '0 0 10px rgba(0,245,255,0.5)',
+                  }} />
+                  <div style={{
+                    position: 'absolute', top: '8px', right: '8px',
+                    width: '30px', height: '30px',
+                    borderTop: '2px solid rgba(0,245,255,0.8)',
+                    borderRight: '2px solid rgba(0,245,255,0.8)',
+                    boxShadow: '0 0 10px rgba(0,245,255,0.5)',
+                  }} />
+                  <div style={{
+                    position: 'absolute', bottom: '8px', left: '8px',
+                    width: '30px', height: '30px',
+                    borderBottom: '2px solid rgba(168,85,247,0.8)',
+                    borderLeft: '2px solid rgba(168,85,247,0.8)',
+                    boxShadow: '0 0 10px rgba(168,85,247,0.5)',
+                  }} />
+                  <div style={{
+                    position: 'absolute', bottom: '8px', right: '8px',
+                    width: '30px', height: '30px',
+                    borderBottom: '2px solid rgba(168,85,247,0.8)',
+                    borderRight: '2px solid rgba(168,85,247,0.8)',
+                    boxShadow: '0 0 10px rgba(168,85,247,0.5)',
+                  }} />
+                  
+                  {/* 加载文字 */}
+                  <div style={{
+                    position: 'absolute', bottom: '15px', left: '50%',
+                    transform: 'translateX(-50%)',
+                    fontSize: '11px',
+                    color: 'rgba(0,245,255,0.9)',
+                    textShadow: '0 0 10px rgba(0,245,255,0.8)',
+                    fontFamily: 'monospace',
+                    letterSpacing: '2px',
+                    animation: 'genTextBlink 1s ease-in-out infinite',
+                  }}>
+                    ◉ PROCESSING ◈
+                  </div>
                 </div>
               )}
               {images.length > 0 ? (
@@ -5017,11 +5347,62 @@ export default function App() {
                     />
                   ) : null}
                   {node.isGenerating ? (
-                    <div className="relative z-[2] flex flex-col items-center gap-1.5 text-gray-400">
-                      <div className="absolute inset-0 noise-overlay pointer-events-none" />
-                      <LoaderIcon size={24} />
-                      <span className="text-xs tabular-nums tracking-tight">已用时 {genTimeMmSs}</span>
-                      <span className="text-[10px] text-gray-500">{genElapsedSec} 秒</span>
+                    <div className="relative z-[2] flex flex-col items-center gap-1.5">
+                      {/* 琥珀色能量场背景 */}
+                      <div className="absolute inset-0 -m-8" style={{
+                        background: 'radial-gradient(ellipse at 50% 50%, rgba(255,170,0,0.2) 0%, rgba(255,100,0,0.1) 40%, transparent 70%)',
+                        animation: 'videoGenPulse 2s ease-in-out infinite',
+                      }} />
+                      
+                      {/* 能量环 */}
+                      <div className="relative w-16 h-16">
+                        <div style={{
+                          position: 'absolute', inset: 0,
+                          border: '3px solid transparent',
+                          borderTopColor: '#ffaa00',
+                          borderRightColor: '#ff6600',
+                          borderRadius: '50%',
+                          animation: 'videoEnergySpin 1s linear infinite',
+                          boxShadow: '0 0 15px rgba(255,170,0,0.5), inset 0 0 15px rgba(255,170,0,0.3)',
+                        }} />
+                        <div style={{
+                          position: 'absolute', inset: '4px',
+                          border: '2px solid transparent',
+                          borderBottomColor: '#ff8800',
+                          borderLeftColor: '#ff4400',
+                          borderRadius: '50%',
+                          animation: 'videoEnergySpin 0.8s linear reverse infinite',
+                          boxShadow: '0 0 10px rgba(255,136,0,0.4)',
+                        }} />
+                        <div style={{
+                          position: 'absolute', inset: '8px',
+                          background: 'radial-gradient(circle, rgba(255,170,0,0.8) 0%, rgba(255,100,0,0.4) 50%, transparent 70%)',
+                          borderRadius: '50%',
+                          animation: 'videoCorePulse 1s ease-in-out infinite',
+                        }} />
+                      </div>
+                      
+                      {/* 文字 */}
+                      <span className="relative text-amber-400 text-xs tabular-nums tracking-tight" style={{
+                        textShadow: '0 0 10px rgba(255,170,0,0.8)',
+                        animation: 'genTextBlink 1.5s ease-in-out infinite',
+                      }}>已用时 {genTimeMmSs}</span>
+                      <span className="relative text-amber-500/70 text-[10px]">{genElapsedSec} 秒</span>
+                      
+                      {/* 粒子 */}
+                      {[...Array(8)].map((_, i) => (
+                        <div key={i} style={{
+                          position: 'absolute',
+                          width: i % 2 === 0 ? '4px' : '3px',
+                          height: i % 2 === 0 ? '4px' : '3px',
+                          borderRadius: '50%',
+                          background: i % 3 === 0 ? '#ffaa00' : i % 3 === 1 ? '#ff6600' : '#ff8800',
+                          boxShadow: `0 0 6px ${i % 3 === 0 ? '#ffaa00' : i % 3 === 1 ? '#ff6600' : '#ff8800'}`,
+                          left: `${15 + i * 10}%`,
+                          top: `${20 + (i % 4) * 15}%`,
+                          animation: `videoParticleFloat ${1.5 + i * 0.1}s ease-in-out ${i * 0.1}s infinite`,
+                        }} />
+                      ))}
                     </div>
                   ) : (
                     <span className="relative z-[2]">生成后在此预览（链接约 24 小时内有效）</span>
@@ -5621,6 +6002,17 @@ export default function App() {
                   onClearPreset={handleClearPreset}
                 />
               )}
+              {/* 预设按钮区域 - t2i节点 */}
+              {node.type === 't2i' && (
+                <T2iPresetCategorySelect
+                  nodeId={node.id}
+                  activePreset={node.activePreset}
+                  promptPresets={promptPresets}
+                  presetDomainOverrides={promptPresetDomainOverrides}
+                  onApplyPreset={handleApplyPreset}
+                  onClearPreset={handleClearPreset}
+                />
+              )}
               <div className="relative flex flex-col flex-1 min-h-0">
                 {(node.type === 'i2i' || node.type === 'video') && (
                   <RefPickBar
@@ -5642,62 +6034,137 @@ export default function App() {
               </div>
               {(node.type === 't2i' || node.type === 'i2i') && (
                 <div className="flex gap-2 w-full shrink-0">
-                <button
-                    type="button"
-                  onPointerDown={(e) => { e.stopPropagation(); handleGenerate(node.id); }}
-                  disabled={node.isGenerating}
-                    className={`flex-1 min-w-0 py-2 rounded text-sm font-bold flex justify-center items-center gap-2 transition-all saturate-[0.7]
-                      ${node.isGenerating ? 'bg-[#333] text-gray-500 cursor-not-allowed' : node.type === 't2i' ? 'bg-purple-600 hover:bg-purple-500 text-white' : 'bg-blue-600 hover:bg-blue-500 text-white'}`}
-                  >
-                    {node.isGenerating ? (
-                      <span className="flex items-center gap-2">
-                        <LoaderIcon size={14} />
-                        <span className="tabular-nums text-[11px] opacity-90">{genTimeMmSs}</span>
-                        <span className="text-[10px] opacity-75">({genElapsedSec}s)</span>
-                      </span>
-                    ) : (
-                      '生成图片'
+                  <div className={`relative flex-1 min-w-0 ${node.isGenerating ? 'gen-btn-generating' : 'gen-btn-holo'}`}>
+                    {/* 角落装饰 - 仅非生成状态显示 */}
+                    {!node.isGenerating && (
+                      <>
+                        <span className="gen-btn-cyber-corner top-left" />
+                        <span className="gen-btn-cyber-corner top-right" />
+                        <span className="gen-btn-cyber-corner bottom-left" />
+                        <span className="gen-btn-cyber-corner bottom-right" />
+                      </>
                     )}
-                  </button>
+                    {/* 神经网络粒子 - 仅非生成状态显示 */}
+                    {!node.isGenerating && <span className="holo-particles" />}
+                    <button
+                      type="button"
+                      onPointerDown={(e) => { e.stopPropagation(); handleGenerate(node.id); }}
+                      disabled={node.isGenerating}
+                      className={`relative w-full py-2 rounded-lg text-sm font-bold flex justify-center items-center gap-2 transition-all
+                        ${node.isGenerating ? 'text-cyan-400 cursor-wait' : 'text-white hover:brightness-110'}`}
+                    >
+                      {node.isGenerating ? (
+                        <span className="flex items-center gap-2">
+                          {/* 环形进度能量球 */}
+                          <div className="gen-progress-orb">
+                            <div className="gen-progress-orb-ring" />
+                            <div className="gen-progress-orb-core">
+                              <svg className="w-3 h-3 text-cyan-400" viewBox="0 0 24 24" fill="none">
+                                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                              </svg>
+                            </div>
+                          </div>
+                          <span 
+                            className="gen-text-glitch tabular-nums text-[11px] opacity-90" 
+                            data-text={genTimeMmSs}
+                          >
+                            {genTimeMmSs}
+                          </span>
+                          <span className="text-[10px] opacity-75 text-cyan-300/70">({genElapsedSec}s)</span>
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-2">
+                          {/* 全息图标 */}
+                          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
+                            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                          <span className="gen-text-holo">生成图片</span>
+                        </span>
+                      )}
+                    </button>
+                  </div>
                   {node.isGenerating && (
                     <button
                       type="button"
                       title="仅在点击「生成图片」后出现，用于中断 ToAPIs 轮询"
                       onPointerDown={(e) => { e.stopPropagation(); handleCancelGeneration(node.id); }}
-                      className="shrink-0 px-3 py-2 rounded text-sm font-medium bg-[#444] hover:bg-[#555] text-gray-200 border border-[#555]"
+                      className="shrink-0 px-3 py-2 rounded-lg text-sm font-medium gen-btn-cancel text-cyan-400 hover:text-cyan-300"
                     >
-                      取消生成
-                </button>
+                      取消
+                    </button>
                   )}
                 </div>
               )}
               {node.type === 'video' && (
                 <div className="flex gap-2 w-full shrink-0">
-                  <button
-                    type="button"
-                    onPointerDown={(e) => { e.stopPropagation(); handleGenerateVideo(node.id); }}
-                    disabled={node.isGenerating}
-                    className={`flex-1 min-w-0 py-2 rounded text-sm font-bold flex justify-center items-center gap-2 transition-all
-                      ${node.isGenerating ? 'bg-[#333] text-gray-500 cursor-not-allowed' : 'bg-amber-600 hover:bg-amber-500 text-white'}`}
-                  >
-                    {node.isGenerating ? (
-                      <span className="flex items-center gap-2">
-                        <LoaderIcon size={14} />
-                        <span className="tabular-nums text-[11px] opacity-90">{genTimeMmSs}</span>
-                        <span className="text-[10px] opacity-75">({genElapsedSec}s)</span>
-                      </span>
-                    ) : (
-                      '生成视频'
+                  <div className={`relative flex-1 min-w-0 ${node.isGenerating ? 'gen-btn-generating' : 'gen-btn-video-core'}`}>
+                    {/* 角落装饰 - 仅非生成状态显示 */}
+                    {!node.isGenerating && (
+                      <>
+                        <span className="gen-btn-cyber-corner top-left video" />
+                        <span className="gen-btn-cyber-corner top-right video" />
+                        <span className="gen-btn-cyber-corner bottom-left video" />
+                        <span className="gen-btn-cyber-corner bottom-right video" />
+                      </>
                     )}
-                  </button>
+                    <button
+                      type="button"
+                      onPointerDown={(e) => { e.stopPropagation(); handleGenerateVideo(node.id); }}
+                      disabled={node.isGenerating}
+                      className={`relative w-full py-2 rounded-lg text-sm font-bold flex justify-center items-center gap-2 transition-all
+                        ${node.isGenerating ? 'text-amber-400 cursor-wait' : 'text-white hover:brightness-110'}`}
+                    >
+                      {node.isGenerating ? (
+                        <span className="flex items-center gap-2">
+                          {/* 环形进度能量球 - 琥珀色 */}
+                          <div className="gen-progress-orb">
+                            <div className="gen-progress-orb-ring" style={{
+                              background: 'conic-gradient(from 0deg, #ffaa00 0deg, #ff6600 180deg, #ffaa00 360deg)',
+                              filter: 'drop-shadow(0 0 6px rgba(255, 170, 0, 0.8))'
+                            }} />
+                            <div className="gen-progress-orb-core" style={{
+                              borderColor: 'rgba(255, 170, 0, 0.4)',
+                              animationName: 'corePulseAmber'
+                            }}>
+                              <svg className="w-3 h-3 text-amber-400" viewBox="0 0 24 24" fill="none">
+                                <path d="M23 7l-7 5 7 5V7zM1 5h15a2 2 0 012 2v10a2 2 0 01-2 2H1V5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                              </svg>
+                            </div>
+                          </div>
+                          <span 
+                            className="gen-text-glitch-amber tabular-nums text-[11px] opacity-90" 
+                            data-text={genTimeMmSs}
+                          >
+                            {genTimeMmSs}
+                          </span>
+                          <span className="text-[10px] opacity-75 text-amber-300/70">({genElapsedSec}s)</span>
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-2">
+                          {/* 能量核心图标 */}
+                          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
+                            <path d="M23 7l-7 5 7 5V7zM1 5h15a2 2 0 012 2v10a2 2 0 01-2 2H1V5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                          <span className="gen-text-holo" style={{
+                            background: 'linear-gradient(90deg, #ffaa00 0%, #ffffff 25%, #ff6600 50%, #ffffff 75%, #ffaa00 100%)',
+                            backgroundSize: '200% 100%',
+                            WebkitBackgroundClip: 'text',
+                            backgroundClip: 'text',
+                            WebkitTextFillColor: 'transparent',
+                            filter: 'drop-shadow(0 0 8px rgba(255, 170, 0, 0.6))'
+                          }}>生成视频</span>
+                        </span>
+                      )}
+                    </button>
+                  </div>
                   {node.isGenerating && (
                     <button
                       type="button"
                       title="仅在点击「生成视频」后出现，用于中断 ToAPIs 轮询"
                       onPointerDown={(e) => { e.stopPropagation(); handleCancelGeneration(node.id); }}
-                      className="shrink-0 px-3 py-2 rounded text-sm font-medium bg-[#444] hover:bg-[#555] text-gray-200 border border-[#555]"
+                      className="shrink-0 px-3 py-2 rounded-lg text-sm font-medium gen-btn-cancel gen-btn-cancel-video text-amber-400 hover:text-amber-300"
                     >
-                      取消生成
+                      取消
                     </button>
                   )}
                 </div>
@@ -7448,12 +7915,48 @@ export default function App() {
                       })}
                     </div>
                   )}
+                  {settingsPresetDomainTab === 't2i' && (
+                    <div className="flex flex-wrap gap-1.5 rounded-lg border border-[#333] bg-[#141414] p-1.5">
+                      {T2I_PRESET_CATEGORY_OPTIONS.map((cat) => {
+                        const count = Object.entries(promptPresets).filter(([name]) => {
+                          return (
+                            settingsPresetDomain(name, promptPresetDomainOverrides) === 't2i' &&
+                            t2iCategoryForPreset(name) === cat.id
+                          );
+                        }).length;
+                        const active = settingsT2iPresetCategoryTab === cat.id;
+                        return (
+                          <button
+                            key={cat.id}
+                            type="button"
+                            onClick={() => {
+                              setSettingsPresetPwdModal({ intent: null, input: '' });
+                              setSettingsT2iPresetCategoryTab(cat.id);
+                            }}
+                            className={`flex-1 min-w-[4.5rem] rounded-md px-2.5 py-2 text-xs font-medium transition-colors ${
+                              active
+                                ? 'bg-purple-600 text-white shadow-sm'
+                                : 'text-gray-400 hover:bg-[#2a2a2a] hover:text-gray-200'
+                            }`}
+                          >
+                            {cat.label}
+                            <span className={`ml-1 tabular-nums ${active ? 'text-purple-100' : 'text-gray-600'}`}>
+                              ({count})
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                   {(() => {
                     const entries = Object.entries(promptPresets).filter(([name]) => {
                       const dom = settingsPresetDomain(name, promptPresetDomainOverrides);
                       if (dom !== settingsPresetDomainTab) return false;
                       if (dom === 'i2i') {
                         return settingsPresetCategory(name, promptPresetCategoryOverrides) === settingsPresetCategoryTab;
+                      }
+                      if (dom === 't2i') {
+                        return t2iCategoryForPreset(name) === settingsT2iPresetCategoryTab;
                       }
                       return true;
                     });
@@ -11298,6 +11801,7 @@ const INITIAL_CHAT_PROMPT_PRESETS: Record<string, string> = {
 };
 
 const INITIAL_PROMPT_PRESETS_ALL: Record<string, string> = {
+  ...INITIAL_T2I_PROMPT_PRESETS,
   ...INITIAL_I2I_PROMPT_PRESETS,
   ...INITIAL_CHAT_PROMPT_PRESETS,
 };
