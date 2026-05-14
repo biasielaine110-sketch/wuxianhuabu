@@ -11774,7 +11774,7 @@ function ChatNodeContent({
               onSendMessage();
             }}
             disabled={node.isGenerating || !node.prompt?.trim()}
-            className="px-3 rounded bg-rose-600 hover:bg-rose-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white flex items-center justify-center"
+            className="px-[52px] rounded bg-rose-600 hover:bg-rose-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white flex items-center justify-center"
           >
             <SendIcon size={fs(14)} />
           </button>
