@@ -3151,11 +3151,9 @@ export default function App() {
   }, []);
 
   const createImageNodeFromBase64 = useCallback((base64: string) => {
-    const rect = containerRef.current?.getBoundingClientRect();
-    const centerClientX = rect ? rect.width / 2 : window.innerWidth / 2;
-    const centerClientY = rect ? rect.height / 2 : window.innerHeight / 2;
-    const x = (centerClientX - transform.x) / transform.scale - 240;
-    const y = (centerClientY - transform.y) / transform.scale - 264;
+    const mp = canvasMouseRef.current;
+    const x = mp.x - 240;
+    const y = mp.y - 264;
     const newNode: CanvasNode = {
       id: `image-${Date.now()}`,
       type: 'image',
@@ -3470,11 +3468,12 @@ export default function App() {
       // 非图片剪贴板时，回退为节点复制粘贴
       if (clipboard) {
         e.preventDefault();
+        const mp = canvasMouseRef.current;
         const newNode: CanvasNode = {
           ...clipboard,
           id: `${clipboard.type}-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-          x: clipboard.x + 40,
-          y: clipboard.y + 40,
+          x: mp.x,
+          y: mp.y,
         };
         setNodes(prev => [...prev, newNode]);
         setSelectedIds([newNode.id]);
