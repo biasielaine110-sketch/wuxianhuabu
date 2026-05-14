@@ -123,11 +123,23 @@
     line-height: 1 !important;
   }
 
-  /** 节点折叠：未选中时隐藏工具栏/参考栏/文字输入区 */
+  /** 节点折叠：未选中时隐藏工具栏/参考栏/文字输入区/功能栏 */
   [data-selected="false"] [class*="min-h-8"][class*="border-b"] {
     display: none !important;
   }
   [data-selected="false"] [class*="shrink-0"][class*="border-b"] {
+    display: none !important;
+  }
+  [data-selected="false"] [class*="flex-col"][class*="border-t"] {
+    display: none !important;
+  }
+  [data-selected="false"] [class*="overflow-y-auto"][class*="border-t"] {
+    display: none !important;
+  }
+  [data-selected="false"] [class*="flex-col"][class*="flex-[3]"] {
+    display: none !important;
+  }
+  [data-selected="false"] [class*="mb-2 flex flex-wrap"][class*="gap-1"] {
     display: none !important;
   }
 
