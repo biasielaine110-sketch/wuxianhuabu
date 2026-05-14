@@ -4635,7 +4635,7 @@ export default function App() {
                             base64={img}
                             quality={0.58}
                             fill="contain"
-                            className="bg-[#111] rounded transition-opacity"
+                            className="bg-[#222] rounded transition-opacity"
                             onClick={(e) => {
                               e.stopPropagation();
                               if (eyedropperTargetNodeId) {
@@ -5766,7 +5766,7 @@ export default function App() {
         const isLeft = i === 0;
         const isRight = i === 2;
         return (
-        <div key={i} className="group relative shrink-0 rounded-xl border border-[#151515] overflow-hidden transition-all duration-500"
+        <div key={i} className="group relative shrink-0 rounded-xl border border-[#2E2E2E] overflow-hidden transition-all duration-500"
           style={{
             width: isCenter ? '340px' : '220px',
             height: isCenter ? '210px' : '140px',
@@ -5787,14 +5787,14 @@ export default function App() {
       })}
       {editingImgIdx !== null && (
         <div className="fixed inset-0 z-[600] bg-black/70 flex items-center justify-center" onClick={() => setEditingImgIdx(null)}>
-          <div className="bg-[#0a0a0a] border border-[#202020] rounded-2xl p-6 w-[480px]" onClick={e => e.stopPropagation()}>
+          <div className="bg-[#181818] border border-[#202020] rounded-2xl p-6 w-[480px]" onClick={e => e.stopPropagation()}>
             <p className="text-sm text-white mb-3">修改图片 {editingImgIdx + 1} 的 URL</p>
-            <input autoFocus className="w-full bg-[#111] border border-[#1a1a1a] rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-[#9040F0]/30 mb-3"
+            <input autoFocus className="w-full bg-[#222] border border-[#303030] rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-[#9040F0]/30 mb-3"
               defaultValue={homeImages[editingImgIdx]}
               onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.trim(); if (v) { setHomeImages(prev => { const n = [...prev]; n[editingImgIdx] = v; return n; }); } setEditingImgIdx(null); } }}
             />
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setEditingImgIdx(null)} className="px-4 py-2 rounded-xl text-sm text-[#909090] hover:text-white">取消</button>
+              <button onClick={() => setEditingImgIdx(null)} className="px-4 py-2 rounded-xl text-sm text-[#C0C0C0] hover:text-white">取消</button>
               <button onClick={() => { const input = document.querySelector<HTMLInputElement>('[class*=\"修改图片\"] input'); if (input) { const v = input.value.trim(); if (v) { setHomeImages(prev => { const n = [...prev]; n[editingImgIdx] = v; return n; }); } } setEditingImgIdx(null); }}
                 className="px-4 py-2 rounded-xl bg-[#9040F0] text-white text-sm font-medium">确定</button>
             </div>
@@ -5873,13 +5873,13 @@ export default function App() {
       <div className="bg-[#1e1e1e] rounded-2xl p-0 w-[900px] h-[82vh] overflow-hidden flex shadow-2xl border border-[#333]" onClick={e => e.stopPropagation()}>
         <div className="w-[200px] shrink-0 bg-[#171717] border-r border-[#333] p-3 flex flex-col gap-2">
           {(['api','presets','downloads','credits','appearance'] as const).map(tab => (
-            <button key={tab} onClick={() => setSettingsTab(tab)} className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${settingsTab === tab ? 'bg-[#9040F0] text-white' : 'text-[#909090] hover:bg-[#222] hover:text-white'}`}>
+            <button key={tab} onClick={() => setSettingsTab(tab)} className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${settingsTab === tab ? 'bg-[#9040F0] text-white' : 'text-[#C0C0C0] hover:bg-[#222] hover:text-white'}`}>
               {tab === 'api' ? '⚡ API' : tab === 'presets' ? '📋 预设' : tab === 'downloads' ? '📥 下载路径' : tab === 'credits' ? '💰 积分消耗' : '🎨 外观'}
             </button>
           ))}
         </div>
         <div className="flex-1 overflow-y-auto p-6">
-          <p className="text-sm text-[#909090] leading-relaxed">
+          <p className="text-sm text-[#C0C0C0] leading-relaxed">
             {settingsTab === 'api' && 'API 设置 — 配置各 AI 服务的 API Key 和 Base URL。配置完成后在画布节点中即可调用对应模型。'}
             {settingsTab === 'presets' && '预设管理 — 管理文生图、图生图的提示词预设模板。'}
             {settingsTab === 'downloads' && '下载路径 — 设置图片导出和项目备份的默认存储位置。'}
@@ -5922,23 +5922,23 @@ export default function App() {
               </svg>
             </div>
             <span className="text-[15px] font-semibold tracking-tight text-white">NwwWoW</span>
-            <span className="text-[10px] text-[#505050] bg-[#111] px-2 py-0.5 rounded-full border border-[#1a1a1a]">STORYBOARD</span>
+            <span className="text-[10px] text-[#C0C0C0] bg-[#222] px-2 py-0.5 rounded-full border border-[#303030]">STORYBOARD</span>
           </div>
         </div>
 
         {/* 主体 - 整体上移60px */}
         <div className="relative flex-1 flex flex-col items-center justify-center px-8 gap-8 overflow-y-auto -mt-[460px]">
           {/* AI 对话框 */}
-          <div className="w-full max-w-[640px] rounded-3xl border border-[#151515] bg-[#050505]/80 backdrop-blur-sm p-4 -mt-[150px]">
+          <div className="w-full max-w-[640px] rounded-3xl border border-[#2E2E2E] bg-[#101010]/80 backdrop-blur-sm p-4 -mt-[150px]">
             <div className="flex items-center gap-2 mb-3 px-1">
               <div className="w-2 h-2 rounded-full bg-[#9040F0]" />
-              <span className="text-xs text-[#606060] font-medium">AI 助手 · DeepSeek</span>
+              <span className="text-xs text-[#A0A0A0] font-medium">AI 助手 · DeepSeek</span>
             </div>
             {homeChatMessages.length > 0 && (
               <div className="max-h-[320px] overflow-y-auto mb-3 space-y-2 px-1">
                 {homeChatMessages.map((m, i) => (
-                  <div key={i} className={`text-xs leading-relaxed ${m.role === 'user' ? 'text-[#909090]' : 'text-[#d0d0d0]'}`}>
-                    <span className="text-[10px] text-[#505050] mr-1">{m.role === 'user' ? 'You' : 'AI'}</span>
+                  <div key={i} className={`text-xs leading-relaxed ${m.role === 'user' ? 'text-[#C0C0C0]' : 'text-[#E8E8E8]'}`}>
+                    <span className="text-[10px] text-[#C0C0C0] mr-1">{m.role === 'user' ? 'You' : 'AI'}</span>
                     {m.content}
                   </div>
                 ))}
@@ -5947,7 +5947,7 @@ export default function App() {
             <div className="flex gap-2">
               <input value={homeChatInput} onChange={e => setHomeChatInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && homeChatSend()}
                 placeholder="" disabled={homeChatLoading}
-                className="flex-1 bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl px-4 py-2.5 text-sm text-white placeholder-[#404040] outline-none focus:border-[#9040F0]/30 transition-colors"
+                className="flex-1 bg-[#181818] border border-[#303030] rounded-xl px-4 py-2.5 text-sm text-white placeholder-[#404040] outline-none focus:border-[#9040F0]/30 transition-colors"
               />
               <button onClick={homeChatSend} disabled={homeChatLoading}
                 className="px-4 py-2.5 rounded-xl bg-[#9040F0] hover:bg-[#A050F0] text-white text-sm font-medium transition-all disabled:opacity-50"
@@ -5960,11 +5960,11 @@ export default function App() {
             <div className="flex flex-col items-center gap-4">
               <div className="relative">
                 <div className="absolute inset-0 w-14 h-14 rounded-2xl bg-[#9040F0]/20 blur-xl" />
-                <div className="relative w-14 h-14 rounded-2xl bg-[#0a0a0a] border border-[#1a1a1a] flex items-center justify-center">
+                <div className="relative w-14 h-14 rounded-2xl bg-[#181818] border border-[#303030] flex items-center justify-center">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9040F0" strokeWidth="1.2"><rect x="3" y="3" width="18" height="18" rx="4"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
                 </div>
               </div>
-              <p className="text-[#606060] text-sm">在无限画布上探索 AI 驱动的视觉叙事</p>
+              <p className="text-[#A0A0A0] text-sm">在无限画布上探索 AI 驱动的视觉叙事</p>
               <button onClick={handleCreateProject}
                 className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#9040F0] to-[#7020D0] hover:from-[#A050F0] hover:to-[#8030E0] text-white text-sm font-semibold transition-all duration-300 shadow-lg shadow-[#9040F0]/20"
               >创建第一个项目</button>
@@ -5974,17 +5974,17 @@ export default function App() {
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
                 {/* 新建卡片 */}
                 <div onClick={handleCreateProject}
-                  className="group cursor-pointer rounded-2xl border border-dashed border-[#1a1a1a] bg-transparent hover:border-[#9040F0]/30 hover:bg-[#060606] transition-all duration-300 p-6 flex flex-col items-center justify-center gap-4 min-h-[220px]"
+                  className="group cursor-pointer rounded-2xl border border-dashed border-[#303030] bg-transparent hover:border-[#9040F0]/30 hover:bg-[#121212] transition-all duration-300 p-6 flex flex-col items-center justify-center gap-4 min-h-[220px]"
                 >
-                  <div className="w-12 h-12 rounded-2xl bg-[#0a0a0a] border border-[#1a1a1a] group-hover:border-[#9040F0]/30 group-hover:bg-[#111] flex items-center justify-center transition-all duration-300 group-hover:scale-110">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#505050" strokeWidth="1.8" className="group-hover:stroke-[#9040F0] transition-colors"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  <div className="w-12 h-12 rounded-2xl bg-[#181818] border border-[#303030] group-hover:border-[#9040F0]/30 group-hover:bg-[#222] flex items-center justify-center transition-all duration-300 group-hover:scale-110">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#808080" strokeWidth="1.8" className="group-hover:stroke-[#9040F0] transition-colors"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                   </div>
-                  <span className="text-sm text-[#505050] group-hover:text-[#808080] transition-colors font-medium">新建项目</span>
+                  <span className="text-sm text-[#C0C0C0] group-hover:text-[#808080] transition-colors font-medium">新建项目</span>
                 </div>
                 {/* 项目卡片 */}
                 {homeProjects.map(p => (
                   <div key={p.id}
-                    className="group relative cursor-pointer rounded-2xl border border-[#111] bg-[#030303] hover:border-[#9040F0]/25 hover:bg-[#080808] transition-all duration-300 p-5 flex flex-col gap-4 min-h-[220px] hover:shadow-lg hover:shadow-[#9040F0]/5"
+                    className="group relative cursor-pointer rounded-2xl border border-[#353535] bg-[#0D0D0D] hover:border-[#9040F0]/25 hover:bg-[#151515] transition-all duration-300 p-5 flex flex-col gap-4 min-h-[220px] hover:shadow-lg hover:shadow-[#9040F0]/5"
                   >
                     {/* 光晕效果 */}
                     <div className="absolute inset-0 rounded-2xl bg-[#9040F0]/0 group-hover:bg-[#9040F0]/3 transition-colors duration-500 pointer-events-none" />
@@ -5992,17 +5992,17 @@ export default function App() {
                     <div className="absolute top-3 right-3 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-all duration-200 z-10" onClick={e => e.stopPropagation()}>
                       <button
                         onClick={async () => { const name = prompt('项目名称', p.name); if (name?.trim()) { const lib = await loadProjectLibrary(); const projects = (lib?.projects || []).map(x => x.id === p.id ? { ...x, name: name.trim() } : x); setHomeProjects(projects); await saveProjectLibrary(projects, lib?.activeProjectId || projects[0]?.id || ''); } }}
-                        className="w-7 h-7 rounded-lg bg-black/80 backdrop-blur-sm hover:bg-[#1a1a1a] border border-[#1a1a1a] flex items-center justify-center transition-all" title="重命名"
+                        className="w-7 h-7 rounded-lg bg-black/80 backdrop-blur-sm hover:bg-[#1a1a1a] border border-[#303030] flex items-center justify-center transition-all" title="重命名"
                       ><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#808080" strokeWidth="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></button>
                       <button
                         onClick={async () => { if (!confirm(`删除「${p.name}」？`)) return; const lib = await loadProjectLibrary(); const projects = (lib?.projects || []).filter(x => x.id !== p.id); setHomeProjects(projects); if (projects.length > 0) await saveProjectLibrary(projects, lib?.activeProjectId || projects[0]?.id || ''); }}
-                        className="w-7 h-7 rounded-lg bg-black/80 backdrop-blur-sm hover:bg-[#2a1111] border border-[#1a1a1a] flex items-center justify-center transition-all" title="删除"
+                        className="w-7 h-7 rounded-lg bg-black/80 backdrop-blur-sm hover:bg-[#2a1111] border border-[#303030] flex items-center justify-center transition-all" title="删除"
                       ><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#CC4444" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
                     </div>
                     {/* 缩略图 */}
-                    <div className="relative w-full aspect-video rounded-xl bg-[#080808] border border-[#0d0d0d] group-hover:border-[#151515] overflow-hidden transition-all" onClick={() => handleOpenProject(p)}>
-                      <div className="absolute inset-0 bg-gradient-to-br from-[#0d0d0d] via-[#0a0a0a] to-[#060606] flex items-center justify-center">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#1a1a1a" strokeWidth="1.2" className="group-hover:stroke-[#2a2a2a] transition-colors"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+                    <div className="relative w-full aspect-video rounded-xl bg-[#151515] border border-[#222] group-hover:border-[#2E2E2E] overflow-hidden transition-all" onClick={() => handleOpenProject(p)}>
+                      <div className="absolute inset-0 bg-gradient-to-br from-[#1A1A1A] via-[#181818] to-[#121212] flex items-center justify-center">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#3a3a3a" strokeWidth="1.2" className="group-hover:stroke-[#2a2a2a] transition-colors"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
                       </div>
                       {/* 底部渐变线 */}
                       <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[#9040F0]/0 group-hover:via-[#9040F0]/30 to-transparent transition-all duration-500" />
@@ -6010,7 +6010,7 @@ export default function App() {
                     {/* 信息 */}
                     <div className="flex flex-col gap-1" onClick={() => handleOpenProject(p)}>
                       <p className="text-sm text-[#b0b0b0] group-hover:text-white truncate font-medium">{p.name}</p>
-                      <p className="text-[11px] text-[#404040]">{new Date(p.updatedAt).toLocaleDateString('zh-CN', { month:'short', day:'numeric' })}</p>
+                      <p className="text-[11px] text-[#808080]">{new Date(p.updatedAt).toLocaleDateString('zh-CN', { month:'short', day:'numeric' })}</p>
                     </div>
                   </div>
                 ))}
@@ -6023,7 +6023,7 @@ export default function App() {
           <Carousel3D />
         </div>
         {/* 底栏 */}
-        <div className="relative text-center py-3 text-[10px] text-[#1a1a1a] shrink-0 tracking-[0.2em]">NwwWoW · STORYBOARD</div>
+        <div className="relative text-center py-3 text-[10px] text-[#404040] shrink-0 tracking-[0.2em]">NwwWoW · STORYBOARD</div>
         {SettingsModalShared}
       </div>
     );
@@ -6582,7 +6582,7 @@ export default function App() {
                     type="text"
                     value={draftNameInput}
                     onChange={(e) => setDraftNameInput(e.target.value)}
-                    className="w-full rounded-md border border-[#444] bg-[#0d0d0d] px-2 py-1.5 text-xs text-gray-100 outline-none focus:border-blue-600"
+                    className="w-full rounded-md border border-[#444] bg-[#1A1A1A] px-2 py-1.5 text-xs text-gray-100 outline-none focus:border-blue-600"
                     placeholder={projects.find((p) => p.id === activeProjectId)?.name || '未命名项目'}
                   />
                 </label>
@@ -6611,7 +6611,7 @@ export default function App() {
                     type="text"
                     value={draftStoragePathInput}
                     onChange={(e) => setDraftStoragePathInput(e.target.value)}
-                    className="w-full rounded-md border border-[#444] bg-[#0d0d0d] px-2 py-1.5 text-xs text-gray-100 outline-none focus:border-cyan-600"
+                    className="w-full rounded-md border border-[#444] bg-[#1A1A1A] px-2 py-1.5 text-xs text-gray-100 outline-none focus:border-cyan-600"
                     placeholder="例如 D:\备份\无限画布草稿"
                   />
                 </label>
@@ -6631,7 +6631,7 @@ export default function App() {
                   onChange={(e) =>
                     handleAutosaveIntervalChange(Number(e.target.value) as 0 | 5 | 10 | 20 | 30)
                   }
-                  className="rounded-md border border-[#444] bg-[#0d0d0d] px-2 py-1 text-[11px] text-gray-200 outline-none focus:border-blue-600"
+                  className="rounded-md border border-[#444] bg-[#1A1A1A] px-2 py-1 text-[11px] text-gray-200 outline-none focus:border-blue-600"
                 >
                   <option value={0}>关闭</option>
                   <option value={5}>每 5 分钟</option>
@@ -6830,7 +6830,7 @@ export default function App() {
                 onChange={(e) =>
                   setDraftDiskModal((m) => (m ? { ...m, basenameDraft: e.target.value } : m))
                 }
-                className="w-full rounded-md border border-[#444] bg-[#0d0d0d] px-2 py-2 text-xs text-gray-100 outline-none focus:border-cyan-600"
+                className="w-full rounded-md border border-[#444] bg-[#1A1A1A] px-2 py-2 text-xs text-gray-100 outline-none focus:border-cyan-600"
                 placeholder={
                   (draftDiskModal.mode === 'firstSave'
                     ? draftDiskModal.mergedProjects.find((p) => p.id === draftDiskModal.pid)?.name
@@ -7267,7 +7267,7 @@ export default function App() {
                                     />
                                   ) : (
                                     <div
-                                      className="w-full h-20 select-none rounded border border-[#2a2a2a] bg-[#0a0a0a] p-2 text-xs leading-snug text-gray-500 pointer-events-none overflow-hidden whitespace-pre-wrap break-words shadow-[inset_0_0_0_1px_rgba(0,0,0,0.35)]"
+                                      className="w-full h-20 select-none rounded border border-[#2a2a2a] bg-[#181818] p-2 text-xs leading-snug text-gray-500 pointer-events-none overflow-hidden whitespace-pre-wrap break-words shadow-[inset_0_0_0_1px_rgba(0,0,0,0.35)]"
                                     >
                                       {content || '（无内容）'}
                                     </div>
@@ -7735,7 +7735,7 @@ export default function App() {
               type="password"
               autoComplete="off"
               autoFocus
-              className="w-full rounded-lg border border-[#444] bg-[#0d0d0d] px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+              className="w-full rounded-lg border border-[#444] bg-[#1A1A1A] px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
               value={settingsPresetPwdModal.input}
               onChange={(e) =>
                 setSettingsPresetPwdModal((p) => (p.intent ? { ...p, input: e.target.value } : p))
@@ -7783,7 +7783,7 @@ export default function App() {
               type="password"
               autoComplete="off"
               autoFocus
-              className="w-full rounded-lg border border-[#444] bg-[#0d0d0d] px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+              className="w-full rounded-lg border border-[#444] bg-[#1A1A1A] px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
               value={settingsCreditsPwdModal.input}
               onChange={(e) =>
                 setSettingsCreditsPwdModal((p) => (p.open ? { ...p, input: e.target.value } : p))
@@ -9946,7 +9946,7 @@ function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onEyedropp
       {/* 3D场景预览 - 默认显示网格地面 */}
       <div
         ref={containerRef}
-        className="relative w-full aspect-video min-h-[220px] rounded-lg border border-[#333] overflow-hidden shrink-0 bg-[#111]"
+        className="relative w-full aspect-video min-h-[220px] rounded-lg border border-[#333] overflow-hidden shrink-0 bg-[#222]"
         onWheel={(e) => e.stopPropagation()}
         onPointerDown={(e) => e.stopPropagation()}
       >
@@ -10354,10 +10354,10 @@ function GridSplitNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEy
   return (
     <div className="flex flex-col h-full min-h-0 gap-1 p-2 overflow-y-auto">
       {/* 图片预览带宫格框：随节点窗口高度伸缩 */}
-      <div ref={previewRef} className="relative w-full flex-1 min-h-[240px] min-w-0 rounded-lg border border-[#333] bg-[#111] overflow-hidden">
+      <div ref={previewRef} className="relative w-full flex-1 min-h-[240px] min-w-0 rounded-lg border border-[#333] bg-[#222] overflow-hidden">
         <div className="absolute inset-0 flex items-center justify-center p-1 min-h-0">
           <div
-            className="relative rounded border border-[#333] bg-[#111] overflow-hidden mx-auto"
+            className="relative rounded border border-[#333] bg-[#222] overflow-hidden mx-auto"
             style={{
               aspectRatio: frameAspectRatio === '9:16' ? '9 / 16' : '16 / 9',
               height: '100%',
@@ -10646,10 +10646,10 @@ function GridMergeNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEy
   return (
     <div className="flex flex-col h-full min-h-0 gap-1 p-2 overflow-y-auto">
       {/* 图片预览带宫格框：随节点窗口高度伸缩 */}
-      <div ref={previewRef} className="relative w-full flex-1 min-h-[240px] min-w-0 rounded-lg border border-[#333] bg-[#111] overflow-hidden">
+      <div ref={previewRef} className="relative w-full flex-1 min-h-[240px] min-w-0 rounded-lg border border-[#333] bg-[#222] overflow-hidden">
         <div className="absolute inset-0 flex items-center justify-center p-1 min-h-0">
           <div
-            className="relative rounded border border-[#333] bg-[#111] overflow-hidden mx-auto"
+            className="relative rounded border border-[#333] bg-[#222] overflow-hidden mx-auto"
             style={{
               aspectRatio: frameAspectRatio === '9:16' ? '9 / 16' : '16 / 9',
               height: '100%',
