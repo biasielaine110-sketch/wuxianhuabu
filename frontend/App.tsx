@@ -6098,15 +6098,6 @@ export default function App() {
               {node.type === 'video' && (
                 <div className="flex gap-2 w-full shrink-0">
                   <div className={`relative flex-1 min-w-0 ${node.isGenerating ? 'gen-btn-generating' : 'gen-btn-video-core'}`}>
-                    {/* 角落装饰 - 仅非生成状态显示 */}
-                    {!node.isGenerating && (
-                      <>
-                        <span className="gen-btn-cyber-corner top-left video" />
-                        <span className="gen-btn-cyber-corner top-right video" />
-                        <span className="gen-btn-cyber-corner bottom-left video" />
-                        <span className="gen-btn-cyber-corner bottom-right video" />
-                      </>
-                    )}
                     <button
                       type="button"
                       onPointerDown={(e) => { e.stopPropagation(); handleGenerateVideo(node.id); }}
