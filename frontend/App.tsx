@@ -932,6 +932,8 @@ export default function App() {
   // Selection Box State
   const [selectionBox, setSelectionBox] = useState<{ x: number, y: number, width: number, height: number } | null>(null);
   const [isSelecting, setIsSelecting] = useState(false);
+  const selectionBoxRef = useRef<{ x: number, y: number, width: number, height: number } | null>(null);
+  const isSelectingRef = useRef(false);
   const longPressTimerRef = useRef<number | null>(null);
   const pressStartPosRef = useRef<{ x: number, y: number } | null>(null);
   const selectionModifiersRef = useRef<{ ctrl: boolean, alt: boolean }>({ ctrl: false, alt: false });
@@ -2904,7 +2906,12 @@ export default function App() {
           y: Math.min(startY, startY + dy),
           width: Math.abs(dx),
           height: Math.abs(dy)
-        });
+        }); selectionBoxRef.current = {
+          x: Math.min(startX, startX + dx),
+          y: Math.min(startY, startY + dy),
+          width: Math.abs(dx),
+          height: Math.abs(dy)
+        };
       }
     } else if (pointerType === 'edge') {
       const rect = containerRef.current!.getBoundingClientRect();
@@ -3008,9 +3015,11 @@ export default function App() {
         setIsResizing(false);
       }
 
-      // 处理框选结束
-      if ((pointerType === 'boxSelect' || pointerType === 'selection') && isSelecting && selectionBox) {
-        const box = selectionBox;
+      // 处理框选结束（使用 ref 避免闭包过期）
+      const selBox = selectionBoxRef.current;
+      const selActive = isSelectingRef.current;
+      if ((pointerType === 'boxSelect' || pointerType === 'selection') && selActive && selBox) {
+        const box = selBox;
         // 找出所有与选框相交的节点
         const selectedNodes = nodesRef.current.filter(node => {
           const nodeRight = node.x + node.width;
@@ -3025,8 +3034,8 @@ export default function App() {
           setSelectedIds(selectedNodes.map(n => n.id));
         }
 
-        setIsSelecting(false);
-        setSelectionBox(null);
+        setIsSelecting(false); isSelectingRef.current = false;
+        setSelectionBox(null); selectionBoxRef.current = null;
         pressStartPosRef.current = null;
       } else if (pointerType === 'edge' && draftEdgeRef.current) {
         const rect = containerRef.current!.getBoundingClientRect();
@@ -3502,8 +3511,10 @@ export default function App() {
       selectionModifiersRef.current = { ctrl: e.ctrlKey, alt: e.altKey };
       activePointerTypeRef.current = 'boxSelect';
       flushSync(() => {
+        isSelectingRef.current = true;
         setIsSelecting(true);
-        setSelectionBox({ x: e.clientX, y: e.clientY, width: 0, height: 0 });
+        selectionBoxRef.current = { x: e.clientX, y: e.clientY, width: 0, height: 0 };
+        setSelectionBox({ x: e.clientX, y: e.clientY, width: 0, height: 0 }); selectionBoxRef.current = { x: e.clientX, y: e.clientY, width: 0, height: 0 };
       });
     } else if (activeTool === 'select') {
       const target = e.target as HTMLElement | SVGElement;
@@ -3523,8 +3534,10 @@ export default function App() {
         // 长按触发框选
         activePointerTypeRef.current = 'selection';
         flushSync(() => {
+          isSelectingRef.current = true;
           setIsSelecting(true);
-          setSelectionBox({ x: e.clientX, y: e.clientY, width: 0, height: 0 });
+          selectionBoxRef.current = { x: e.clientX, y: e.clientY, width: 0, height: 0 };
+          setSelectionBox({ x: e.clientX, y: e.clientY, width: 0, height: 0 }); selectionBoxRef.current = { x: e.clientX, y: e.clientY, width: 0, height: 0 };
         });
       }, 300);
     }
