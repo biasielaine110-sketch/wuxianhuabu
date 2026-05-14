@@ -5348,7 +5348,61 @@ export default function App() {
                   ) : null}
                   {node.isGenerating ? (
                     <div className="relative z-[2] flex flex-col items-center gap-1.5">
-                      <span className="text-amber-400 text-xs">生成中... {genTimeMmSs}</span>
+                      {/* 琥珀色能量场背景 */}
+                      <div className="absolute inset-0 -m-8" style={{
+                        background: 'radial-gradient(ellipse at 50% 50%, rgba(255,170,0,0.2) 0%, rgba(255,100,0,0.1) 40%, transparent 70%)',
+                        animation: 'videoGenPulse 2s ease-in-out infinite',
+                      }} />
+                      
+                      {/* 能量环 */}
+                      <div className="relative w-16 h-16">
+                        <div style={{
+                          position: 'absolute', inset: 0,
+                          border: '3px solid transparent',
+                          borderTopColor: '#ffaa00',
+                          borderRightColor: '#ff6600',
+                          borderRadius: '50%',
+                          animation: 'videoEnergySpin 1s linear infinite',
+                          boxShadow: '0 0 15px rgba(255,170,0,0.5), inset 0 0 15px rgba(255,170,0,0.3)',
+                        }} />
+                        <div style={{
+                          position: 'absolute', inset: '4px',
+                          border: '2px solid transparent',
+                          borderBottomColor: '#ff8800',
+                          borderLeftColor: '#ff4400',
+                          borderRadius: '50%',
+                          animation: 'videoEnergySpin 0.8s linear reverse infinite',
+                          boxShadow: '0 0 10px rgba(255,136,0,0.4)',
+                        }} />
+                        <div style={{
+                          position: 'absolute', inset: '8px',
+                          background: 'radial-gradient(circle, rgba(255,170,0,0.8) 0%, rgba(255,100,0,0.4) 50%, transparent 70%)',
+                          borderRadius: '50%',
+                          animation: 'videoCorePulse 1s ease-in-out infinite',
+                        }} />
+                      </div>
+                      
+                      {/* 文字 */}
+                      <span className="relative text-amber-400 text-xs tabular-nums tracking-tight" style={{
+                        textShadow: '0 0 10px rgba(255,170,0,0.8)',
+                        animation: 'genTextBlink 1.5s ease-in-out infinite',
+                      }}>已用时 {genTimeMmSs}</span>
+                      <span className="relative text-amber-500/70 text-[10px]">{genElapsedSec} 秒</span>
+                      
+                      {/* 粒子 */}
+                      {[...Array(8)].map((_, i) => (
+                        <div key={i} style={{
+                          position: 'absolute',
+                          width: i % 2 === 0 ? '4px' : '3px',
+                          height: i % 2 === 0 ? '4px' : '3px',
+                          borderRadius: '50%',
+                          background: i % 3 === 0 ? '#ffaa00' : i % 3 === 1 ? '#ff6600' : '#ff8800',
+                          boxShadow: `0 0 6px ${i % 3 === 0 ? '#ffaa00' : i % 3 === 1 ? '#ff6600' : '#ff8800'}`,
+                          left: `${15 + i * 10}%`,
+                          top: `${20 + (i % 4) * 15}%`,
+                          animation: `videoParticleFloat ${1.5 + i * 0.1}s ease-in-out ${i * 0.1}s infinite`,
+                        }} />
+                      ))}
                     </div>
                   ) : (
                     <span className="relative z-[2]">生成后在此预览（链接约 24 小时内有效）</span>
@@ -6091,7 +6145,7 @@ export default function App() {
                           <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
                             <path d="M23 7l-7 5 7 5V7zM1 5h15a2 2 0 012 2v10a2 2 0 01-2 2H1V5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                           </svg>
-                          <span className="gen-text-holo" style={{
+                          <span style={{
                             background: 'linear-gradient(90deg, #ffaa00 0%, #ffffff 25%, #ff6600 50%, #ffffff 75%, #ffaa00 100%)',
                             backgroundSize: '200% 100%',
                             WebkitBackgroundClip: 'text',
