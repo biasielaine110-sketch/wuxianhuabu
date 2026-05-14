@@ -148,6 +148,33 @@
     66% { background-position: -30px 80px; }
     100% { background-position: 20px -40px; }
   }
+  @keyframes nanoWave {
+    0% { background-position: 0 0, 0 0; opacity: 0.4; }
+    25% { background-position: 6px 3px, 3px 6px; opacity: 0.7; }
+    50% { background-position: 0 6px, 6px 0; opacity: 0.5; }
+    75% { background-position: -6px 3px, -3px 6px; opacity: 0.8; }
+    100% { background-position: 0 0, 0 0; opacity: 0.4; }
+  }
+  @keyframes waveFlow {
+    0% { background-position-y: 0; }
+    100% { background-position-y: 60px; }
+  }
+  @keyframes scanDown {
+    0% { top: -2px; opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { top: 100%; opacity: 0; }
+  }
+  @keyframes particleFloat {
+    0%, 100% { transform: translateY(0) scale(1); opacity: 0.3; }
+    25% { transform: translateY(-30px) scale(1.5); opacity: 0.8; }
+    50% { transform: translateY(-60px) scale(1); opacity: 0.4; }
+    75% { transform: translateY(-30px) scale(0.8); opacity: 0.7; }
+  }
+  @keyframes gridPulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 0.8; }
+  }
 
   /** 节点折叠：未选中时隐藏工具栏/参考栏/文字输入区/功能栏 */
   [data-selected="false"] [class*="min-h-8"][class*="border-b"] {
