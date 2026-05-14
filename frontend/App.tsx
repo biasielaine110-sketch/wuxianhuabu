@@ -3659,7 +3659,7 @@ export default function App() {
   }, [transform, fullscreenImage]);
 
   const handleNodePointerDown = (e: React.PointerEvent, id: string) => {
-    if (e.button === 2 || e.button === 1 || fullscreenImage) return;
+    if (e.button === 2 || fullscreenImage) return;
 
     const targetEl = e.target as HTMLElement | null;
     /** 节点内表单控件：不应触发整块节点拖拽（否则调整下拉/输入时窗口会跟着「飞」） */
@@ -5823,6 +5823,9 @@ export default function App() {
   const [homeChatLoading, setHomeChatLoading] = useState(false);
   const [showAllProjectsModal, setShowAllProjectsModal] = useState(false);
   const [allProjectsList, setAllProjectsList] = useState<CanvasProjectSnapshot[]>([]);
+  const [renameTarget, setRenameTarget] = useState<CanvasProjectSnapshot | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<CanvasProjectSnapshot | null>(null);
   const homeChatSend = async () => {
     const q = homeChatInput.trim(); if (!q) return;
     setHomeChatInput(''); setHomeChatLoading(true);
@@ -5910,26 +5913,26 @@ export default function App() {
     return (
       <div className="w-screen h-screen bg-black text-white select-none font-sans flex flex-col relative overflow-hidden" onContextMenu={e => e.preventDefault()}>
         {/* 朦胧背景光效 - 20个大小差异色球，无方块硬切 */}
-        <div className="absolute top-[5%] left-[10%] w-[60px] h-[60px] rounded-full pointer-events-none animate-[breathe_8s_ease-in-out_infinite]" style={{background: 'radial-gradient(circle, rgba(180,80,255,0.08) 0%, transparent 97%)'}} />
-        <div className="absolute top-[8%] left-[45%] w-[300px] h-[300px] rounded-full pointer-events-none animate-[breathe_10s_ease-in-out_2s_infinite]" style={{background: 'radial-gradient(circle, rgba(100,60,220,0.12) 0%, transparent 97%)'}} />
-        <div className="absolute top-[15%] right-[8%] w-[40px] h-[40px] rounded-full pointer-events-none animate-[breathe_6s_ease-in-out_1s_infinite]" style={{background: 'radial-gradient(circle, rgba(0,200,220,0.06) 0%, transparent 97%)'}} />
-        <div className="absolute top-[25%] left-[30%] w-[175px] h-[175px] rounded-full pointer-events-none animate-[breathe_12s_ease-in-out_3s_infinite]" style={{background: 'radial-gradient(circle, rgba(140,80,240,0.10) 0%, transparent 97%)'}} />
-        <div className="absolute top-[30%] right-[20%] w-[90px] h-[90px] rounded-full pointer-events-none animate-[breathe_7s_ease-in-out_5s_infinite]" style={{background: 'radial-gradient(circle, rgba(220,120,160,0.07) 0%, transparent 97%)'}} />
-        <div className="absolute top-[40%] left-[5%] w-[125px] h-[125px] rounded-full pointer-events-none animate-[breathe_9s_ease-in-out_4s_infinite]" style={{background: 'radial-gradient(circle, rgba(80,180,240,0.09) 0%, transparent 97%)'}} />
-        <div className="absolute top-[45%] left-[55%] w-[210px] h-[210px] rounded-full pointer-events-none animate-[breathe_11s_ease-in-out_infinite]" style={{background: 'radial-gradient(circle, rgba(160,100,240,0.11) 0%, transparent 97%)'}} />
-        <div className="absolute top-[55%] right-[5%] w-[50px] h-[50px] rounded-full pointer-events-none animate-[breathe_5s_ease-in-out_2s_infinite]" style={{background: 'radial-gradient(circle, rgba(255,160,60,0.06) 0%, transparent 97%)'}} />
-        <div className="absolute top-[60%] left-[15%] w-[250px] h-[250px] rounded-full pointer-events-none animate-[breathe_13s_ease-in-out_6s_infinite]" style={{background: 'radial-gradient(circle, rgba(100,140,240,0.10) 0%, transparent 97%)'}} />
-        <div className="absolute top-[65%] left-[60%] w-[75px] h-[75px] rounded-full pointer-events-none animate-[breathe_8s_ease-in-out_3s_infinite]" style={{background: 'radial-gradient(circle, rgba(200,80,180,0.07) 0%, transparent 97%)'}} />
-        <div className="absolute top-[70%] right-[15%] w-[150px] h-[150px] rounded-full pointer-events-none animate-[breathe_10s_ease-in-out_5s_infinite]" style={{background: 'radial-gradient(circle, rgba(60,200,200,0.08) 0%, transparent 97%)'}} />
-        <div className="absolute top-[75%] left-[40%] w-[30px] h-[30px] rounded-full pointer-events-none animate-[breathe_6s_ease-in-out_1s_infinite]" style={{background: 'radial-gradient(circle, rgba(180,220,100,0.05) 0%, transparent 97%)'}} />
-        <div className="absolute top-[80%] left-[8%] w-[100px] h-[100px] rounded-full pointer-events-none animate-[breathe_9s_ease-in-out_4s_infinite]" style={{background: 'radial-gradient(circle, rgba(240,140,100,0.07) 0%, transparent 97%)'}} />
-        <div className="absolute top-[85%] left-[50%] w-[275px] h-[275px] rounded-full pointer-events-none animate-[breathe_14s_ease-in-out_7s_infinite]" style={{background: 'radial-gradient(circle, rgba(130,70,230,0.10) 0%, transparent 97%)'}} />
-        <div className="absolute top-[88%] right-[25%] w-[45px] h-[45px] rounded-full pointer-events-none animate-[breathe_7s_ease-in-out_2s_infinite]" style={{background: 'radial-gradient(circle, rgba(100,220,180,0.06) 0%, transparent 97%)'}} />
-        <div className="absolute top-[15%] left-[65%] w-[140px] h-[140px] rounded-full pointer-events-none animate-[breathe_11s_ease-in-out_5s_infinite]" style={{background: 'radial-gradient(circle, rgba(200,150,220,0.08) 0%, transparent 97%)'}} />
-        <div className="absolute top-[50%] left-[75%] w-[35px] h-[35px] rounded-full pointer-events-none animate-[breathe_5s_ease-in-out_3s_infinite]" style={{background: 'radial-gradient(circle, rgba(255,200,80,0.05) 0%, transparent 97%)'}} />
-        <div className="absolute top-[35%] left-[20%] w-[225px] h-[225px] rounded-full pointer-events-none animate-[breathe_12s_ease-in-out_8s_infinite]" style={{background: 'radial-gradient(circle, rgba(90,160,240,0.09) 0%, transparent 97%)'}} />
-        <div className="absolute top-[10%] left-[80%] w-[70px] h-[70px] rounded-full pointer-events-none animate-[breathe_8s_ease-in-out_6s_infinite]" style={{background: 'radial-gradient(circle, rgba(220,100,160,0.07) 0%, transparent 97%)'}} />
-        <div className="absolute top-[68%] left-[70%] w-[160px] h-[160px] rounded-full pointer-events-none animate-[breathe_10s_ease-in-out_4s_infinite]" style={{background: 'radial-gradient(circle, rgba(140,120,240,0.09) 0%, transparent 97%)'}} />
+        <div className="absolute top-[5%] left-[10%] w-[60px] h-[60px] rounded-full pointer-events-none animate-[breathe_8s_ease-in-out_infinite]" style={{background: 'radial-gradient(circle, rgba(180,80,255,0.10) 0%, transparent 97%)'}} />
+        <div className="absolute top-[8%] left-[45%] w-[300px] h-[300px] rounded-full pointer-events-none animate-[breathe_10s_ease-in-out_2s_infinite]" style={{background: 'radial-gradient(circle, rgba(100,60,220,0.16) 0%, transparent 97%)'}} />
+        <div className="absolute top-[15%] right-[8%] w-[40px] h-[40px] rounded-full pointer-events-none animate-[breathe_6s_ease-in-out_1s_infinite]" style={{background: 'radial-gradient(circle, rgba(0,200,220,0.08) 0%, transparent 97%)'}} />
+        <div className="absolute top-[25%] left-[30%] w-[175px] h-[175px] rounded-full pointer-events-none animate-[breathe_12s_ease-in-out_3s_infinite]" style={{background: 'radial-gradient(circle, rgba(140,80,240,0.13) 0%, transparent 97%)'}} />
+        <div className="absolute top-[30%] right-[20%] w-[90px] h-[90px] rounded-full pointer-events-none animate-[breathe_7s_ease-in-out_5s_infinite]" style={{background: 'radial-gradient(circle, rgba(220,120,160,0.09) 0%, transparent 97%)'}} />
+        <div className="absolute top-[40%] left-[5%] w-[125px] h-[125px] rounded-full pointer-events-none animate-[breathe_9s_ease-in-out_4s_infinite]" style={{background: 'radial-gradient(circle, rgba(80,180,240,0.12) 0%, transparent 97%)'}} />
+        <div className="absolute top-[45%] left-[55%] w-[210px] h-[210px] rounded-full pointer-events-none animate-[breathe_11s_ease-in-out_infinite]" style={{background: 'radial-gradient(circle, rgba(160,100,240,0.14) 0%, transparent 97%)'}} />
+        <div className="absolute top-[55%] right-[5%] w-[50px] h-[50px] rounded-full pointer-events-none animate-[breathe_5s_ease-in-out_2s_infinite]" style={{background: 'radial-gradient(circle, rgba(255,160,60,0.08) 0%, transparent 97%)'}} />
+        <div className="absolute top-[60%] left-[15%] w-[250px] h-[250px] rounded-full pointer-events-none animate-[breathe_13s_ease-in-out_6s_infinite]" style={{background: 'radial-gradient(circle, rgba(100,140,240,0.13) 0%, transparent 97%)'}} />
+        <div className="absolute top-[65%] left-[60%] w-[75px] h-[75px] rounded-full pointer-events-none animate-[breathe_8s_ease-in-out_3s_infinite]" style={{background: 'radial-gradient(circle, rgba(200,80,180,0.09) 0%, transparent 97%)'}} />
+        <div className="absolute top-[70%] right-[15%] w-[150px] h-[150px] rounded-full pointer-events-none animate-[breathe_10s_ease-in-out_5s_infinite]" style={{background: 'radial-gradient(circle, rgba(60,200,200,0.10) 0%, transparent 97%)'}} />
+        <div className="absolute top-[75%] left-[40%] w-[30px] h-[30px] rounded-full pointer-events-none animate-[breathe_6s_ease-in-out_1s_infinite]" style={{background: 'radial-gradient(circle, rgba(180,220,100,0.07) 0%, transparent 97%)'}} />
+        <div className="absolute top-[80%] left-[8%] w-[100px] h-[100px] rounded-full pointer-events-none animate-[breathe_9s_ease-in-out_4s_infinite]" style={{background: 'radial-gradient(circle, rgba(240,140,100,0.09) 0%, transparent 97%)'}} />
+        <div className="absolute top-[85%] left-[50%] w-[275px] h-[275px] rounded-full pointer-events-none animate-[breathe_14s_ease-in-out_7s_infinite]" style={{background: 'radial-gradient(circle, rgba(130,70,230,0.13) 0%, transparent 97%)'}} />
+        <div className="absolute top-[88%] right-[25%] w-[45px] h-[45px] rounded-full pointer-events-none animate-[breathe_7s_ease-in-out_2s_infinite]" style={{background: 'radial-gradient(circle, rgba(100,220,180,0.08) 0%, transparent 97%)'}} />
+        <div className="absolute top-[15%] left-[65%] w-[140px] h-[140px] rounded-full pointer-events-none animate-[breathe_11s_ease-in-out_5s_infinite]" style={{background: 'radial-gradient(circle, rgba(200,150,220,0.10) 0%, transparent 97%)'}} />
+        <div className="absolute top-[50%] left-[75%] w-[35px] h-[35px] rounded-full pointer-events-none animate-[breathe_5s_ease-in-out_3s_infinite]" style={{background: 'radial-gradient(circle, rgba(255,200,80,0.07) 0%, transparent 97%)'}} />
+        <div className="absolute top-[35%] left-[20%] w-[225px] h-[225px] rounded-full pointer-events-none animate-[breathe_12s_ease-in-out_8s_infinite]" style={{background: 'radial-gradient(circle, rgba(90,160,240,0.12) 0%, transparent 97%)'}} />
+        <div className="absolute top-[10%] left-[80%] w-[70px] h-[70px] rounded-full pointer-events-none animate-[breathe_8s_ease-in-out_6s_infinite]" style={{background: 'radial-gradient(circle, rgba(220,100,160,0.09) 0%, transparent 97%)'}} />
+        <div className="absolute top-[68%] left-[70%] w-[160px] h-[160px] rounded-full pointer-events-none animate-[breathe_10s_ease-in-out_4s_infinite]" style={{background: 'radial-gradient(circle, rgba(140,120,240,0.12) 0%, transparent 97%)'}} />
         {/* 呼吸动画 keyframes */}
         <style>{`@keyframes breathe { 0%,100% { opacity:0.6; transform:translate(-50%,0) scale(1); } 50% { opacity:1; transform:translate(-50%,0) scale(1.15); } }`}</style>
 
@@ -6026,11 +6029,11 @@ export default function App() {
                     {/* 编辑/删除 */}
                     <div className="absolute top-3 right-3 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-all duration-200 z-10" onClick={e => e.stopPropagation()}>
                       <button
-                        onClick={async () => { const name = prompt('项目名称', p.name); if (name?.trim()) { const lib = await loadProjectLibrary(); if (!lib) return; const projects = lib.projects.map(x => x.id === p.id ? { ...x, name: name.trim(), updatedAt: Date.now() } : x); const activeId = projects.find(x => x.id === lib.activeProjectId) ? lib.activeProjectId : projects[0]?.id || ''; setHomeProjects(projects); setProjects(projects); projectsRef.current = projects; await saveProjectLibrary(projects, activeId); } }}
+                        onClick={() => { setRenameTarget(p); setRenameDraft(p.name); }}
                         className="w-7 h-7 rounded-lg bg-black/80 backdrop-blur-sm hover:bg-[#1a1a1a] border border-[#4A4A4A] flex items-center justify-center transition-all" title="重命名"
                       ><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#A0A0A0" strokeWidth="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></button>
                       <button
-                        onClick={async () => { if (!confirm(`删除「${p.name}」？`)) return; const lib = await loadProjectLibrary(); const projects = (lib?.projects || []).filter(x => x.id !== p.id); setHomeProjects(projects); if (projects.length > 0) await saveProjectLibrary(projects, lib?.activeProjectId || projects[0]?.id || ''); }}
+                        onClick={() => setDeleteTarget(p)}
                         className="w-7 h-7 rounded-lg bg-black/80 backdrop-blur-sm hover:bg-[#2a1111] border border-[#4A4A4A] flex items-center justify-center transition-all" title="删除"
                       ><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#CC4444" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
                     </div>
@@ -6082,11 +6085,11 @@ export default function App() {
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
                           <button
-                            onClick={async () => { const name = prompt('项目名称', p.name); if (name?.trim()) { const lib = await loadProjectLibrary(); if (!lib) return; const projects = lib.projects.map(x => x.id === p.id ? { ...x, name: name.trim(), updatedAt: Date.now() } : x); const activeId = projects.find(x => x.id === lib.activeProjectId) ? lib.activeProjectId : projects[0]?.id || ''; setAllProjectsList(projects); setHomeProjects(projects); setProjects(projects); projectsRef.current = projects; await saveProjectLibrary(projects, activeId); } }}
+                            onClick={() => { setRenameTarget(p); setRenameDraft(p.name); }}
                             className="px-2 py-1 rounded-md text-xs text-[#808080] hover:text-white hover:bg-[#333] transition-colors"
                           >重命名</button>
                           <button
-                            onClick={async () => { if (!confirm(`删除「${p.name}」？`)) return; const lib = await loadProjectLibrary(); if (!lib) return; const projects = lib.projects.filter(x => x.id !== p.id); const activeId = projects.find(x => x.id === lib.activeProjectId) ? lib.activeProjectId : projects[0]?.id || ''; setAllProjectsList(projects); setHomeProjects(projects); setProjects(projects); projectsRef.current = projects; if (projects.length > 0) await saveProjectLibrary(projects, activeId); }}
+                            onClick={() => setDeleteTarget(p)}
                             className="px-2 py-1 rounded-md text-xs text-[#CC4444] hover:text-white hover:bg-[#441111] transition-colors"
                           >删除</button>
                         </div>
@@ -6094,6 +6097,37 @@ export default function App() {
                     ))}
                   </div>
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+        {/* 删除确认弹窗 */}
+        {deleteTarget && (
+          <div className="fixed inset-0 z-[600] bg-black/70 flex items-center justify-center" onClick={() => setDeleteTarget(null)}>
+            <div className="bg-[#1E1E1E] border border-[#444] rounded-2xl p-6 w-[380px]" onClick={e => e.stopPropagation()}>
+              <h3 className="text-sm font-bold text-white mb-2">删除项目</h3>
+              <p className="text-sm text-[#909090] mb-4">确定要删除「{deleteTarget.name}」？此操作不可撤销。</p>
+              <div className="flex gap-2 justify-end">
+                <button onClick={() => setDeleteTarget(null)} className="px-4 py-2 rounded-xl text-sm text-[#909090] hover:text-white">取消</button>
+                <button onClick={async () => { const p = deleteTarget; setDeleteTarget(null); const lib = await loadProjectLibrary(); if (!lib) return; const projects = lib.projects.filter(x => x.id !== p.id); const activeId = projects.find(x => x.id === lib.activeProjectId) ? lib.activeProjectId : projects[0]?.id || ''; setHomeProjects(projects); setAllProjectsList(projects); setProjects(projects); projectsRef.current = projects; if (projects.length > 0) await saveProjectLibrary(projects, activeId); }}
+                  className="px-4 py-2 rounded-xl bg-[#CC3333] hover:bg-[#DD4444] text-white text-sm font-medium">确认删除</button>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* 重命名弹窗 */}
+        {renameTarget && (
+          <div className="fixed inset-0 z-[600] bg-black/70 flex items-center justify-center" onClick={() => setRenameTarget(null)}>
+            <div className="bg-[#1E1E1E] border border-[#444] rounded-2xl p-6 w-[400px]" onClick={e => e.stopPropagation()}>
+              <h3 className="text-sm font-bold text-white mb-4">重命名项目</h3>
+              <input autoFocus className="w-full bg-[#222] border border-[#444] rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-[#9040F0] mb-4"
+                value={renameDraft} onChange={e => setRenameDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { const name = renameDraft.trim(); if (name) { const lib = loadProjectLibrary(); lib.then(l => { if (!l) return; const prj = l.projects.map(x => x.id === renameTarget.id ? { ...x, name, updatedAt: Date.now() } : x); const aid = prj.find(x => x.id === l.activeProjectId) ? l.activeProjectId : prj[0]?.id || ''; setAllProjectsList(prj); setHomeProjects(prj); setProjects(prj); projectsRef.current = prj; saveProjectLibrary(prj, aid); }); } setRenameTarget(null); } }}
+              />
+              <div className="flex gap-2 justify-end">
+                <button onClick={() => setRenameTarget(null)} className="px-4 py-2 rounded-xl text-sm text-[#909090] hover:text-white">取消</button>
+                <button onClick={() => { const name = renameDraft.trim(); if (name) { const p = renameTarget; loadProjectLibrary().then(l => { if (!l) return; const prj = l.projects.map(x => x.id === p.id ? { ...x, name, updatedAt: Date.now() } : x); const aid = prj.find(x => x.id === l.activeProjectId) ? l.activeProjectId : prj[0]?.id || ''; setAllProjectsList(prj); setHomeProjects(prj); setProjects(prj); projectsRef.current = prj; saveProjectLibrary(prj, aid); }); } setRenameTarget(null); }}
+                  className="px-4 py-2 rounded-xl bg-[#9040F0] text-white text-sm font-medium">确认</button>
               </div>
             </div>
           </div>
