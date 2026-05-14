@@ -4725,12 +4725,10 @@ export default function App() {
         {/* Output Port (Right) */}
         {hasOutputPort && (
           <div 
-            className="absolute right-0 top-1/2 translate-x-1/2 -translate-y-1/2 w-5 h-5 bg-[#555] border-2 border-[#888] hover:border-blue-400 hover:bg-blue-500 hover:scale-150 transition-all rounded-full cursor-crosshair z-30 group/port"
+            className="absolute right-0 top-1/2 translate-x-1/2 -translate-y-1/2 w-5 h-5 bg-[#555] border-2 border-[#888] hover:border-blue-400 hover:bg-blue-500 rounded-full cursor-crosshair z-30 group/port"
             onPointerDown={(e) => handlePortPointerDown(e, node.id)}
             title="拖拽连线到其他节点"
-          >
-            <div className="absolute inset-0 rounded-full bg-blue-400 opacity-0 group-hover/port:opacity-50 animate-ping" />
-          </div>
+          />
         )}
 
         {/* Resize Handles - 仅选中节点时显示 */}
@@ -6580,9 +6578,9 @@ export default function App() {
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
                 {/* 新建卡片 */}
                 <div onClick={handleCreateProject}
-                  className="group cursor-pointer rounded-2xl border border-dashed border-[#4A4A4A] bg-transparent hover:border-[#9040F0]/30 hover:bg-[#222222] transition-all duration-300 p-6 flex flex-col items-center justify-center gap-4 min-h-[220px]"
+                  className="group cursor-pointer rounded-2xl border border-dashed border-[#4A4A4A] bg-transparent hover:border-[#9040F0]/30 hover:bg-[#222222] p-6 flex flex-col items-center justify-center gap-4 min-h-[220px]"
                 >
-                  <div className="w-12 h-12 rounded-2xl bg-[#2C2C2C] border border-[#4A4A4A] group-hover:border-[#9040F0]/30 group-hover:bg-[#3A3A3A] flex items-center justify-center transition-all duration-300 group-hover:scale-110">
+                  <div className="w-12 h-12 rounded-2xl bg-[#2C2C2C] border border-[#4A4A4A] group-hover:border-[#9040F0]/30 group-hover:bg-[#3A3A3A] flex items-center justify-center">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#A0A0A0" strokeWidth="1.8" className="group-hover:stroke-[#9040F0] transition-colors"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                   </div>
                   <span className="text-sm text-[#F5F5F5] group-hover:text-[#B0B0B0] transition-colors font-medium">新建项目</span>
@@ -6590,23 +6588,23 @@ export default function App() {
                 {/* 项目卡片 */}
                 {homeProjects.map(p => (
                   <div key={p.id}
-                    className="group relative cursor-pointer rounded-2xl border border-[#505050] bg-[#303030] hover:border-[#9040F0]/25 hover:bg-[#282828] transition-all duration-300 p-5 flex flex-col gap-4 min-h-[220px] hover:shadow-lg hover:shadow-[#9040F0]/5"
+                    className="group relative cursor-pointer rounded-2xl border border-[#505050] bg-[#303030] hover:border-[#9040F0]/25 hover:bg-[#282828] p-5 flex flex-col gap-4 min-h-[220px]"
                   >
                     {/* 光晕效果 */}
-                    <div className="absolute inset-0 rounded-2xl bg-[#9040F0]/0 group-hover:bg-[#9040F0]/3 transition-colors duration-500 pointer-events-none" />
+                    <div className="absolute inset-0 rounded-2xl bg-[#9040F0]/0 group-hover:bg-[#9040F0]/3 pointer-events-none" />
                     {/* 编辑/删除 */}
-                    <div className="absolute top-3 right-3 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-all duration-200 z-10" onClick={e => e.stopPropagation()}>
+                    <div className="absolute top-3 right-3 flex gap-1.5 opacity-0 group-hover:opacity-100 z-10" onClick={e => e.stopPropagation()}>
                       <button
                         onClick={() => { setRenameTarget(p); setRenameDraft(p.name); }}
-                        className="w-7 h-7 rounded-lg bg-black/80 backdrop-blur-sm hover:bg-[#1a1a1a] border border-[#4A4A4A] flex items-center justify-center transition-all" title="重命名"
+                        className="w-7 h-7 rounded-lg bg-black/80 backdrop-blur-sm hover:bg-[#1a1a1a] border border-[#4A4A4A] flex items-center justify-center" title="重命名"
                       ><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#A0A0A0" strokeWidth="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></button>
                       <button
                         onClick={() => setDeleteTarget(p)}
-                        className="w-7 h-7 rounded-lg bg-black/80 backdrop-blur-sm hover:bg-[#2a1111] border border-[#4A4A4A] flex items-center justify-center transition-all" title="删除"
+                        className="w-7 h-7 rounded-lg bg-black/80 backdrop-blur-sm hover:bg-[#2a1111] border border-[#4A4A4A] flex items-center justify-center" title="删除"
                       ><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#CC4444" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
                     </div>
                     {/* 缩略图 - 显示项目第一张图片 */}
-                    <div className="relative w-full aspect-video rounded-xl bg-[#282828] border border-[#3A3A3A] group-hover:border-[#484848] overflow-hidden transition-all" onClick={() => handleOpenProject(p)}>
+                    <div className="relative w-full aspect-video rounded-xl bg-[#282828] border border-[#3A3A3A] group-hover:border-[#484848] overflow-hidden" onClick={() => handleOpenProject(p)}>
                       {(() => {
                         const firstImg = (p.nodes || []).reduce<string | null>((found, n) => found || ((n.images?.length || 0) > 0 ? n.images![0] : null), null);
                         return firstImg ? (
@@ -6618,11 +6616,11 @@ export default function App() {
                         );
                       })()}
                       {/* 底部渐变线 */}
-                      <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[#9040F0]/0 group-hover:via-[#9040F0]/30 to-transparent transition-all duration-500" />
+                      <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[#9040F0]/0 group-hover:via-[#9040F0]/30 to-transparent" />
                     </div>
                     {/* 信息 */}
                     <div className="flex flex-col gap-1" onClick={() => handleOpenProject(p)}>
-                      <p className="text-sm text-[#b0b0b0] group-hover:text-white truncate font-medium">{p.name}</p>
+                      <p className="text-sm text-[#b0b0b0] truncate font-medium">{p.name}</p>
                       <p className="text-[11px] text-[#B0B0B0]">{new Date(p.updatedAt).toLocaleDateString('zh-CN', { month:'short', day:'numeric' })}</p>
                     </div>
                   </div>
