@@ -3256,6 +3256,27 @@ export default function App() {
           setShowShortcutsPanel(false);
           return;
         }
+        // 清理所有拖拽/框选/缩放状态
+        if (draggingNodeIdRef.current) {
+          draggingNodeIdRef.current = null;
+          setDraggingNodeId(null);
+          if (rafIdRef.current) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
+          nodeDragAccumRef.current = null;
+        }
+        if (isSelectingRef.current) {
+          isSelectingRef.current = false;
+          setIsSelecting(false);
+          selectionBoxRef.current = null;
+          setSelectionBox(null);
+          pressStartPosRef.current = null;
+        }
+        if (resizingNodeIdRef.current) {
+          resizingNodeIdRef.current = null;
+          setResizingNodeId(null);
+          setIsResizing(false);
+          nodeResizeSessionRef.current = null;
+        }
+        activePointerTypeRef.current = null;
         setSelectedIds([]);
         setContextMenu(null);
         setDraftEdge(null);
