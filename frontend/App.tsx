@@ -846,7 +846,7 @@ function I2iPresetCategorySelect({
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[10px] text-gray-500 shrink-0">分类</span>
         <select
-          className="i2i-preset-select bg-[#121212] border border-[#444] rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-amber-500 min-w-[72px]"
+          className="i2i-preset-select bg-[#222222] border border-[#444] rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-amber-500 min-w-[72px]"
           value={category}
           onPointerDown={(e) => e.stopPropagation()}
           onChange={(e) => {
@@ -861,7 +861,7 @@ function I2iPresetCategorySelect({
         </select>
         <span className="text-[10px] text-gray-500 shrink-0">预设</span>
         <select
-          className="i2i-preset-select flex-1 min-w-[120px] bg-[#121212] border border-[#444] rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-amber-500"
+          className="i2i-preset-select flex-1 min-w-[120px] bg-[#222222] border border-[#444] rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-amber-500"
           value={presetSelectValue}
           onPointerDown={(e) => e.stopPropagation()}
           onChange={(e) => {
@@ -4635,7 +4635,7 @@ export default function App() {
                             base64={img}
                             quality={0.58}
                             fill="contain"
-                            className="bg-[#222] rounded transition-opacity"
+                            className="bg-[#3A3A3A] rounded transition-opacity"
                             onClick={(e) => {
                               e.stopPropagation();
                               if (eyedropperTargetNodeId) {
@@ -5170,15 +5170,15 @@ export default function App() {
           </div>
           {(node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' || node.type === 'panorama') && (
             <>
-              <select className="nodemodel-select bg-[#121212] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500 flex-1 min-w-[90px]" value={node.model || defaultCanvasImageModel()} onChange={(e) => { const m = e.target.value; const patch: Partial<CanvasNode> = { model: m }; if (isFireflyNewApiImageModelId(m)) patch.resolution = '2k'; else if (isGptImage2CanvasModelId(m)) patch.resolution = '4k'; handleUpdateNode(node.id, patch); }} onPointerDown={e => e.stopPropagation()}>
+              <select className="nodemodel-select bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500 flex-1 min-w-[90px]" value={node.model || defaultCanvasImageModel()} onChange={(e) => { const m = e.target.value; const patch: Partial<CanvasNode> = { model: m }; if (isFireflyNewApiImageModelId(m)) patch.resolution = '2k'; else if (isGptImage2CanvasModelId(m)) patch.resolution = '4k'; handleUpdateNode(node.id, patch); }} onPointerDown={e => e.stopPropagation()}>
                 {(node.type === 't2i' || node.type === 'panoramaT2i') ? (<><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option><option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option><option value="imagen-4">Imagen 4</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option></>) : (<><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option><option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option></>)}
               </select>
               <div className="nodemeta-skip-scale flex items-center gap-0.5">
-                <select className="bg-[#121212] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.aspectRatio || (node.type === 'panoramaT2i' ? '2:1' : '16:9')} onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })} onPointerDown={e => e.stopPropagation()}>
+                <select className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.aspectRatio || (node.type === 'panoramaT2i' ? '2:1' : '16:9')} onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })} onPointerDown={e => e.stopPropagation()}>
                   {node.type === 'panoramaT2i' ? (<><option value="2:1">2:1</option><option value="21:9">21:9</option></>) : (<><option value="1:1">1:1</option><option value="16:9">16:9</option><option value="9:16">9:16</option><option value="21:9">21:9</option><option value="4:3">4:3</option><option value="3:4">3:4</option></>)}
                 </select>
-                <select className="bg-[#121212] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.resolution || '4k'} onChange={(e) => handleUpdateNode(node.id, { resolution: e.target.value })} onPointerDown={e => e.stopPropagation()}><option value="4k">4K</option><option value="2k">2K</option><option value="1k">1K</option></select>
-                <select className="bg-[#121212] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.imageCount || 1} onChange={(e) => handleUpdateNode(node.id, { imageCount: parseInt(e.target.value) })} onPointerDown={e => e.stopPropagation()}><option value={1}>1</option><option value={2}>2</option><option value={4}>4</option></select>
+                <select className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.resolution || '4k'} onChange={(e) => handleUpdateNode(node.id, { resolution: e.target.value })} onPointerDown={e => e.stopPropagation()}><option value="4k">4K</option><option value="2k">2K</option><option value="1k">1K</option></select>
+                <select className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.imageCount || 1} onChange={(e) => handleUpdateNode(node.id, { imageCount: parseInt(e.target.value) })} onPointerDown={e => e.stopPropagation()}><option value={1}>1</option><option value={2}>2</option><option value={4}>4</option></select>
               </div>
             </>
           )}
@@ -5316,7 +5316,7 @@ export default function App() {
             )}
             <div className="flex flex-wrap items-center gap-3">
             <select
-                className="nodemodel-select bg-[#121212] border border-[#444] rounded-lg px-3 py-2 text-gray-300 outline-none focus:border-amber-500 min-w-[160px] text-sm"
+                className="nodemodel-select bg-[#222222] border border-[#444] rounded-lg px-3 py-2 text-gray-300 outline-none focus:border-amber-500 min-w-[160px] text-sm"
                 value={modelSelectValue}
                 onChange={(e) => {
                   const m = e.target.value;
@@ -5354,12 +5354,12 @@ export default function App() {
             </select>
               <div className="nodemeta-skip-scale flex flex-wrap items-center gap-1.5">
               {isVeo ? (
-                <span className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-400 text-xs whitespace-nowrap">
+                <span className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-400 text-xs whitespace-nowrap">
                   8 秒（固定）
                 </span>
               ) : isSora ? (
             <select
-                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
                   value={[4, 8, 12].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 8}
               onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
               onPointerDown={e => e.stopPropagation()}
@@ -5370,7 +5370,7 @@ export default function App() {
             </select>
               ) : (
             <select
-                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
                   value={node.videoDuration ?? 10}
                   onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
                   onPointerDown={e => e.stopPropagation()}
@@ -5385,7 +5385,7 @@ export default function App() {
               )}
               {isVeo ? (
                 <select
-                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
               value={node.aspectRatio || '16:9'}
               onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })}
               onPointerDown={e => e.stopPropagation()}
@@ -5400,7 +5400,7 @@ export default function App() {
                 </select>
               ) : isSora ? (
                 <select
-                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
                   value={node.aspectRatio === '9:16' ? '9:16' : '16:9'}
                   onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })}
                   onPointerDown={e => e.stopPropagation()}
@@ -5410,7 +5410,7 @@ export default function App() {
                 </select>
               ) : (
                 <select
-                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
                   value={node.aspectRatio || '16:9'}
                   onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })}
                   onPointerDown={e => e.stopPropagation()}
@@ -5425,10 +5425,10 @@ export default function App() {
             </select>
               )}
               {isSora ? (
-                <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#121212]">720p</span>
+                <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p</span>
               ) : isVeo ? (
                 <select
-                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
                   value={
                     node.videoResolution === '1080p' || node.videoResolution === '4k'
                       ? node.videoResolution
@@ -5447,7 +5447,7 @@ export default function App() {
                 </select>
               ) : (
                 <select
-                  className="bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
                   value={node.videoResolution === '480p' ? '480p' : '720p'}
                   onChange={(e) => handleUpdateNode(node.id, { videoResolution: e.target.value as '480p' | '720p' })}
                   onPointerDown={e => e.stopPropagation()}
@@ -5519,7 +5519,7 @@ export default function App() {
                   />
                 )}
                 <textarea
-                  className="w-full h-full bg-[#121212] text-gray-200 p-3 rounded-lg border border-[#444] focus:outline-none focus:border-blue-500 transition-colors resize-none leading-relaxed" style={{ fontSize: '100px' }}
+                  className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] focus:outline-none focus:border-blue-500 transition-colors resize-none leading-relaxed" style={{ fontSize: '100px' }}
                   value={node.prompt}
                   onChange={(e) => handleUpdateNode(node.id, { prompt: e.target.value })}
                   placeholder=""
@@ -5691,7 +5691,7 @@ export default function App() {
               </div>
               <div className="relative flex flex-col shrink-0 p-2 border-t border-[#333] bg-[#252525]">
                 <textarea
-                  className="w-full bg-[#121212] text-gray-200 text-xs p-2 rounded border border-[#333] focus:outline-none focus:border-indigo-500 transition-colors resize-y"
+                  className="w-full bg-[#222222] text-gray-200 text-xs p-2 rounded border border-[#333] focus:outline-none focus:border-indigo-500 transition-colors resize-y"
                   value={node.prompt}
                   onChange={(e) => handleUpdateNode(node.id, { prompt: e.target.value })}
                   placeholder="补充描述..."
@@ -5766,7 +5766,7 @@ export default function App() {
         const isLeft = i === 0;
         const isRight = i === 2;
         return (
-        <div key={i} className="group relative shrink-0 rounded-xl border border-[#2E2E2E] overflow-hidden transition-all duration-500"
+        <div key={i} className="group relative shrink-0 rounded-xl border border-[#484848] overflow-hidden transition-all duration-500"
           style={{
             width: isCenter ? '340px' : '220px',
             height: isCenter ? '210px' : '140px',
@@ -5787,14 +5787,14 @@ export default function App() {
       })}
       {editingImgIdx !== null && (
         <div className="fixed inset-0 z-[600] bg-black/70 flex items-center justify-center" onClick={() => setEditingImgIdx(null)}>
-          <div className="bg-[#181818] border border-[#202020] rounded-2xl p-6 w-[480px]" onClick={e => e.stopPropagation()}>
+          <div className="bg-[#2C2C2C] border border-[#202020] rounded-2xl p-6 w-[480px]" onClick={e => e.stopPropagation()}>
             <p className="text-sm text-white mb-3">修改图片 {editingImgIdx + 1} 的 URL</p>
-            <input autoFocus className="w-full bg-[#222] border border-[#303030] rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-[#9040F0]/30 mb-3"
+            <input autoFocus className="w-full bg-[#3A3A3A] border border-[#4A4A4A] rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-[#9040F0]/30 mb-3"
               defaultValue={homeImages[editingImgIdx]}
               onKeyDown={e => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.trim(); if (v) { setHomeImages(prev => { const n = [...prev]; n[editingImgIdx] = v; return n; }); } setEditingImgIdx(null); } }}
             />
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setEditingImgIdx(null)} className="px-4 py-2 rounded-xl text-sm text-[#C0C0C0] hover:text-white">取消</button>
+              <button onClick={() => setEditingImgIdx(null)} className="px-4 py-2 rounded-xl text-sm text-[#F5F5F5] hover:text-white">取消</button>
               <button onClick={() => { const input = document.querySelector<HTMLInputElement>('[class*=\"修改图片\"] input'); if (input) { const v = input.value.trim(); if (v) { setHomeImages(prev => { const n = [...prev]; n[editingImgIdx] = v; return n; }); } } setEditingImgIdx(null); }}
                 className="px-4 py-2 rounded-xl bg-[#9040F0] text-white text-sm font-medium">确定</button>
             </div>
@@ -5808,6 +5808,8 @@ export default function App() {
   const [homeChatInput, setHomeChatInput] = useState('');
   const [homeChatMessages, setHomeChatMessages] = useState<{role:string,content:string}[]>([]);
   const [homeChatLoading, setHomeChatLoading] = useState(false);
+  const [showAllProjectsModal, setShowAllProjectsModal] = useState(false);
+  const [allProjectsList, setAllProjectsList] = useState<CanvasProjectSnapshot[]>([]);
   const homeChatSend = async () => {
     const q = homeChatInput.trim(); if (!q) return;
     setHomeChatInput(''); setHomeChatLoading(true);
@@ -5873,13 +5875,13 @@ export default function App() {
       <div className="bg-[#1e1e1e] rounded-2xl p-0 w-[900px] h-[82vh] overflow-hidden flex shadow-2xl border border-[#333]" onClick={e => e.stopPropagation()}>
         <div className="w-[200px] shrink-0 bg-[#171717] border-r border-[#333] p-3 flex flex-col gap-2">
           {(['api','presets','downloads','credits','appearance'] as const).map(tab => (
-            <button key={tab} onClick={() => setSettingsTab(tab)} className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${settingsTab === tab ? 'bg-[#9040F0] text-white' : 'text-[#C0C0C0] hover:bg-[#222] hover:text-white'}`}>
+            <button key={tab} onClick={() => setSettingsTab(tab)} className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${settingsTab === tab ? 'bg-[#9040F0] text-white' : 'text-[#F5F5F5] hover:bg-[#3A3A3A] hover:text-white'}`}>
               {tab === 'api' ? '⚡ API' : tab === 'presets' ? '📋 预设' : tab === 'downloads' ? '📥 下载路径' : tab === 'credits' ? '💰 积分消耗' : '🎨 外观'}
             </button>
           ))}
         </div>
         <div className="flex-1 overflow-y-auto p-6">
-          <p className="text-sm text-[#C0C0C0] leading-relaxed">
+          <p className="text-sm text-[#F5F5F5] leading-relaxed">
             {settingsTab === 'api' && 'API 设置 — 配置各 AI 服务的 API Key 和 Base URL。配置完成后在画布节点中即可调用对应模型。'}
             {settingsTab === 'presets' && '预设管理 — 管理文生图、图生图的提示词预设模板。'}
             {settingsTab === 'downloads' && '下载路径 — 设置图片导出和项目备份的默认存储位置。'}
@@ -5894,10 +5896,27 @@ export default function App() {
   if (showHomePage) {
     return (
       <div className="w-screen h-screen bg-black text-white select-none font-sans flex flex-col relative overflow-hidden" onContextMenu={e => e.preventDefault()}>
-        {/* 呼吸感背景光效 */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] rounded-full pointer-events-none animate-[breathe_6s_ease-in-out_infinite]" style={{background: 'radial-gradient(circle, rgba(144,64,240,0.08) 0%, transparent 70%)'}} />
-        <div className="absolute bottom-1/3 right-1/4 w-[600px] h-[350px] rounded-full pointer-events-none animate-[breathe_8s_ease-in-out_2s_infinite]" style={{background: 'radial-gradient(circle, rgba(96,32,224,0.06) 0%, transparent 70%)'}} />
-        <div className="absolute top-1/2 left-1/3 w-[400px] h-[250px] rounded-full pointer-events-none animate-[breathe_7s_ease-in-out_4s_infinite]" style={{background: 'radial-gradient(circle, rgba(160,80,240,0.04) 0%, transparent 70%)'}} />
+        {/* 朦胧背景光效 - 20个大小差异色球，无方块硬切 */}
+        <div className="absolute top-[5%] left-[10%] w-[60px] h-[60px] rounded-full pointer-events-none animate-[breathe_8s_ease-in-out_infinite]" style={{background: 'radial-gradient(circle, rgba(180,80,255,0.08) 0%, transparent 97%)'}} />
+        <div className="absolute top-[8%] left-[45%] w-[300px] h-[300px] rounded-full pointer-events-none animate-[breathe_10s_ease-in-out_2s_infinite]" style={{background: 'radial-gradient(circle, rgba(100,60,220,0.12) 0%, transparent 97%)'}} />
+        <div className="absolute top-[15%] right-[8%] w-[40px] h-[40px] rounded-full pointer-events-none animate-[breathe_6s_ease-in-out_1s_infinite]" style={{background: 'radial-gradient(circle, rgba(0,200,220,0.06) 0%, transparent 97%)'}} />
+        <div className="absolute top-[25%] left-[30%] w-[175px] h-[175px] rounded-full pointer-events-none animate-[breathe_12s_ease-in-out_3s_infinite]" style={{background: 'radial-gradient(circle, rgba(140,80,240,0.10) 0%, transparent 97%)'}} />
+        <div className="absolute top-[30%] right-[20%] w-[90px] h-[90px] rounded-full pointer-events-none animate-[breathe_7s_ease-in-out_5s_infinite]" style={{background: 'radial-gradient(circle, rgba(220,120,160,0.07) 0%, transparent 97%)'}} />
+        <div className="absolute top-[40%] left-[5%] w-[125px] h-[125px] rounded-full pointer-events-none animate-[breathe_9s_ease-in-out_4s_infinite]" style={{background: 'radial-gradient(circle, rgba(80,180,240,0.09) 0%, transparent 97%)'}} />
+        <div className="absolute top-[45%] left-[55%] w-[210px] h-[210px] rounded-full pointer-events-none animate-[breathe_11s_ease-in-out_infinite]" style={{background: 'radial-gradient(circle, rgba(160,100,240,0.11) 0%, transparent 97%)'}} />
+        <div className="absolute top-[55%] right-[5%] w-[50px] h-[50px] rounded-full pointer-events-none animate-[breathe_5s_ease-in-out_2s_infinite]" style={{background: 'radial-gradient(circle, rgba(255,160,60,0.06) 0%, transparent 97%)'}} />
+        <div className="absolute top-[60%] left-[15%] w-[250px] h-[250px] rounded-full pointer-events-none animate-[breathe_13s_ease-in-out_6s_infinite]" style={{background: 'radial-gradient(circle, rgba(100,140,240,0.10) 0%, transparent 97%)'}} />
+        <div className="absolute top-[65%] left-[60%] w-[75px] h-[75px] rounded-full pointer-events-none animate-[breathe_8s_ease-in-out_3s_infinite]" style={{background: 'radial-gradient(circle, rgba(200,80,180,0.07) 0%, transparent 97%)'}} />
+        <div className="absolute top-[70%] right-[15%] w-[150px] h-[150px] rounded-full pointer-events-none animate-[breathe_10s_ease-in-out_5s_infinite]" style={{background: 'radial-gradient(circle, rgba(60,200,200,0.08) 0%, transparent 97%)'}} />
+        <div className="absolute top-[75%] left-[40%] w-[30px] h-[30px] rounded-full pointer-events-none animate-[breathe_6s_ease-in-out_1s_infinite]" style={{background: 'radial-gradient(circle, rgba(180,220,100,0.05) 0%, transparent 97%)'}} />
+        <div className="absolute top-[80%] left-[8%] w-[100px] h-[100px] rounded-full pointer-events-none animate-[breathe_9s_ease-in-out_4s_infinite]" style={{background: 'radial-gradient(circle, rgba(240,140,100,0.07) 0%, transparent 97%)'}} />
+        <div className="absolute top-[85%] left-[50%] w-[275px] h-[275px] rounded-full pointer-events-none animate-[breathe_14s_ease-in-out_7s_infinite]" style={{background: 'radial-gradient(circle, rgba(130,70,230,0.10) 0%, transparent 97%)'}} />
+        <div className="absolute top-[88%] right-[25%] w-[45px] h-[45px] rounded-full pointer-events-none animate-[breathe_7s_ease-in-out_2s_infinite]" style={{background: 'radial-gradient(circle, rgba(100,220,180,0.06) 0%, transparent 97%)'}} />
+        <div className="absolute top-[15%] left-[65%] w-[140px] h-[140px] rounded-full pointer-events-none animate-[breathe_11s_ease-in-out_5s_infinite]" style={{background: 'radial-gradient(circle, rgba(200,150,220,0.08) 0%, transparent 97%)'}} />
+        <div className="absolute top-[50%] left-[75%] w-[35px] h-[35px] rounded-full pointer-events-none animate-[breathe_5s_ease-in-out_3s_infinite]" style={{background: 'radial-gradient(circle, rgba(255,200,80,0.05) 0%, transparent 97%)'}} />
+        <div className="absolute top-[35%] left-[20%] w-[225px] h-[225px] rounded-full pointer-events-none animate-[breathe_12s_ease-in-out_8s_infinite]" style={{background: 'radial-gradient(circle, rgba(90,160,240,0.09) 0%, transparent 97%)'}} />
+        <div className="absolute top-[10%] left-[80%] w-[70px] h-[70px] rounded-full pointer-events-none animate-[breathe_8s_ease-in-out_6s_infinite]" style={{background: 'radial-gradient(circle, rgba(220,100,160,0.07) 0%, transparent 97%)'}} />
+        <div className="absolute top-[68%] left-[70%] w-[160px] h-[160px] rounded-full pointer-events-none animate-[breathe_10s_ease-in-out_4s_infinite]" style={{background: 'radial-gradient(circle, rgba(140,120,240,0.09) 0%, transparent 97%)'}} />
         {/* 呼吸动画 keyframes */}
         <style>{`@keyframes breathe { 0%,100% { opacity:0.6; transform:translate(-50%,0) scale(1); } 50% { opacity:1; transform:translate(-50%,0) scale(1.15); } }`}</style>
 
@@ -5922,23 +5941,22 @@ export default function App() {
               </svg>
             </div>
             <span className="text-[15px] font-semibold tracking-tight text-white">NwwWoW</span>
-            <span className="text-[10px] text-[#C0C0C0] bg-[#222] px-2 py-0.5 rounded-full border border-[#303030]">STORYBOARD</span>
           </div>
         </div>
 
         {/* 主体 - 整体上移60px */}
         <div className="relative flex-1 flex flex-col items-center justify-center px-8 gap-8 overflow-y-auto -mt-[460px]">
           {/* AI 对话框 */}
-          <div className="w-full max-w-[640px] rounded-3xl border border-[#2E2E2E] bg-[#101010]/80 backdrop-blur-sm p-4 -mt-[150px]">
+          <div className="w-full max-w-[640px] rounded-3xl border border-[#484848] bg-[#1E1E1E]/80 backdrop-blur-sm p-4 -mt-[150px]">
             <div className="flex items-center gap-2 mb-3 px-1">
               <div className="w-2 h-2 rounded-full bg-[#9040F0]" />
-              <span className="text-xs text-[#A0A0A0] font-medium">AI 助手 · DeepSeek</span>
+              <span className="text-xs text-[#D0D0D0] font-medium">AI 助手 · DeepSeek</span>
             </div>
             {homeChatMessages.length > 0 && (
               <div className="max-h-[320px] overflow-y-auto mb-3 space-y-2 px-1">
                 {homeChatMessages.map((m, i) => (
-                  <div key={i} className={`text-xs leading-relaxed ${m.role === 'user' ? 'text-[#C0C0C0]' : 'text-[#E8E8E8]'}`}>
-                    <span className="text-[10px] text-[#C0C0C0] mr-1">{m.role === 'user' ? 'You' : 'AI'}</span>
+                  <div key={i} className={`text-xs leading-relaxed ${m.role === 'user' ? 'text-[#F5F5F5]' : 'text-[#F5F5F5]'}`}>
+                    <span className="text-[10px] text-[#F5F5F5] mr-1">{m.role === 'user' ? 'You' : 'AI'}</span>
                     {m.content}
                   </div>
                 ))}
@@ -5947,7 +5965,7 @@ export default function App() {
             <div className="flex gap-2">
               <input value={homeChatInput} onChange={e => setHomeChatInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && homeChatSend()}
                 placeholder="" disabled={homeChatLoading}
-                className="flex-1 bg-[#181818] border border-[#303030] rounded-xl px-4 py-2.5 text-sm text-white placeholder-[#404040] outline-none focus:border-[#9040F0]/30 transition-colors"
+                className="flex-1 bg-[#2C2C2C] border border-[#4A4A4A] rounded-xl px-4 py-2.5 text-sm text-white placeholder-[#404040] outline-none focus:border-[#9040F0]/30 transition-colors"
               />
               <button onClick={homeChatSend} disabled={homeChatLoading}
                 className="px-4 py-2.5 rounded-xl bg-[#9040F0] hover:bg-[#A050F0] text-white text-sm font-medium transition-all disabled:opacity-50"
@@ -5960,49 +5978,53 @@ export default function App() {
             <div className="flex flex-col items-center gap-4">
               <div className="relative">
                 <div className="absolute inset-0 w-14 h-14 rounded-2xl bg-[#9040F0]/20 blur-xl" />
-                <div className="relative w-14 h-14 rounded-2xl bg-[#181818] border border-[#303030] flex items-center justify-center">
+                <div className="relative w-14 h-14 rounded-2xl bg-[#2C2C2C] border border-[#4A4A4A] flex items-center justify-center">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9040F0" strokeWidth="1.2"><rect x="3" y="3" width="18" height="18" rx="4"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
                 </div>
               </div>
-              <p className="text-[#A0A0A0] text-sm">在无限画布上探索 AI 驱动的视觉叙事</p>
+              <p className="text-[#D0D0D0] text-sm">在无限画布上探索 AI 驱动的视觉叙事</p>
               <button onClick={handleCreateProject}
                 className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#9040F0] to-[#7020D0] hover:from-[#A050F0] hover:to-[#8030E0] text-white text-sm font-semibold transition-all duration-300 shadow-lg shadow-[#9040F0]/20"
               >创建第一个项目</button>
             </div>
           ) : (
             <div className="w-full max-w-[960px]">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-bold text-white">最近的项目</h3>
+                <button onClick={async () => { const lib = await loadProjectLibrary(); if (lib) setAllProjectsList(lib.projects); setShowAllProjectsModal(true); }} className="text-xs text-[#B0B0B0] hover:text-white transition-colors">查看全部项目 →</button>
+              </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
                 {/* 新建卡片 */}
                 <div onClick={handleCreateProject}
-                  className="group cursor-pointer rounded-2xl border border-dashed border-[#303030] bg-transparent hover:border-[#9040F0]/30 hover:bg-[#121212] transition-all duration-300 p-6 flex flex-col items-center justify-center gap-4 min-h-[220px]"
+                  className="group cursor-pointer rounded-2xl border border-dashed border-[#4A4A4A] bg-transparent hover:border-[#9040F0]/30 hover:bg-[#222222] transition-all duration-300 p-6 flex flex-col items-center justify-center gap-4 min-h-[220px]"
                 >
-                  <div className="w-12 h-12 rounded-2xl bg-[#181818] border border-[#303030] group-hover:border-[#9040F0]/30 group-hover:bg-[#222] flex items-center justify-center transition-all duration-300 group-hover:scale-110">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#808080" strokeWidth="1.8" className="group-hover:stroke-[#9040F0] transition-colors"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  <div className="w-12 h-12 rounded-2xl bg-[#2C2C2C] border border-[#4A4A4A] group-hover:border-[#9040F0]/30 group-hover:bg-[#3A3A3A] flex items-center justify-center transition-all duration-300 group-hover:scale-110">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#A0A0A0" strokeWidth="1.8" className="group-hover:stroke-[#9040F0] transition-colors"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                   </div>
-                  <span className="text-sm text-[#C0C0C0] group-hover:text-[#808080] transition-colors font-medium">新建项目</span>
+                  <span className="text-sm text-[#F5F5F5] group-hover:text-[#B0B0B0] transition-colors font-medium">新建项目</span>
                 </div>
                 {/* 项目卡片 */}
                 {homeProjects.map(p => (
                   <div key={p.id}
-                    className="group relative cursor-pointer rounded-2xl border border-[#353535] bg-[#0D0D0D] hover:border-[#9040F0]/25 hover:bg-[#151515] transition-all duration-300 p-5 flex flex-col gap-4 min-h-[220px] hover:shadow-lg hover:shadow-[#9040F0]/5"
+                    className="group relative cursor-pointer rounded-2xl border border-[#505050] bg-[#303030] hover:border-[#9040F0]/25 hover:bg-[#282828] transition-all duration-300 p-5 flex flex-col gap-4 min-h-[220px] hover:shadow-lg hover:shadow-[#9040F0]/5"
                   >
                     {/* 光晕效果 */}
                     <div className="absolute inset-0 rounded-2xl bg-[#9040F0]/0 group-hover:bg-[#9040F0]/3 transition-colors duration-500 pointer-events-none" />
                     {/* 编辑/删除 */}
                     <div className="absolute top-3 right-3 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-all duration-200 z-10" onClick={e => e.stopPropagation()}>
                       <button
-                        onClick={async () => { const name = prompt('项目名称', p.name); if (name?.trim()) { const lib = await loadProjectLibrary(); const projects = (lib?.projects || []).map(x => x.id === p.id ? { ...x, name: name.trim() } : x); setHomeProjects(projects); await saveProjectLibrary(projects, lib?.activeProjectId || projects[0]?.id || ''); } }}
-                        className="w-7 h-7 rounded-lg bg-black/80 backdrop-blur-sm hover:bg-[#1a1a1a] border border-[#303030] flex items-center justify-center transition-all" title="重命名"
-                      ><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#808080" strokeWidth="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></button>
+                        onClick={async () => { const name = prompt('项目名称', p.name); if (name?.trim()) { const lib = await loadProjectLibrary(); if (!lib) return; const projects = lib.projects.map(x => x.id === p.id ? { ...x, name: name.trim(), updatedAt: Date.now() } : x); const activeId = projects.find(x => x.id === lib.activeProjectId) ? lib.activeProjectId : projects[0]?.id || ''; setHomeProjects(projects); setProjects(projects); projectsRef.current = projects; await saveProjectLibrary(projects, activeId); } }}
+                        className="w-7 h-7 rounded-lg bg-black/80 backdrop-blur-sm hover:bg-[#1a1a1a] border border-[#4A4A4A] flex items-center justify-center transition-all" title="重命名"
+                      ><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#A0A0A0" strokeWidth="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></button>
                       <button
                         onClick={async () => { if (!confirm(`删除「${p.name}」？`)) return; const lib = await loadProjectLibrary(); const projects = (lib?.projects || []).filter(x => x.id !== p.id); setHomeProjects(projects); if (projects.length > 0) await saveProjectLibrary(projects, lib?.activeProjectId || projects[0]?.id || ''); }}
-                        className="w-7 h-7 rounded-lg bg-black/80 backdrop-blur-sm hover:bg-[#2a1111] border border-[#303030] flex items-center justify-center transition-all" title="删除"
+                        className="w-7 h-7 rounded-lg bg-black/80 backdrop-blur-sm hover:bg-[#2a1111] border border-[#4A4A4A] flex items-center justify-center transition-all" title="删除"
                       ><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#CC4444" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
                     </div>
                     {/* 缩略图 */}
-                    <div className="relative w-full aspect-video rounded-xl bg-[#151515] border border-[#222] group-hover:border-[#2E2E2E] overflow-hidden transition-all" onClick={() => handleOpenProject(p)}>
-                      <div className="absolute inset-0 bg-gradient-to-br from-[#1A1A1A] via-[#181818] to-[#121212] flex items-center justify-center">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#3a3a3a" strokeWidth="1.2" className="group-hover:stroke-[#2a2a2a] transition-colors"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+                    <div className="relative w-full aspect-video rounded-xl bg-[#282828] border border-[#3A3A3A] group-hover:border-[#484848] overflow-hidden transition-all" onClick={() => handleOpenProject(p)}>
+                      <div className="absolute inset-0 bg-gradient-to-br from-[#2E2E2E] via-[#2C2C2C] to-[#222222] flex items-center justify-center">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#5a5a5a" strokeWidth="1.2" className="group-hover:stroke-[#2a2a2a] transition-colors"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
                       </div>
                       {/* 底部渐变线 */}
                       <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[#9040F0]/0 group-hover:via-[#9040F0]/30 to-transparent transition-all duration-500" />
@@ -6010,7 +6032,7 @@ export default function App() {
                     {/* 信息 */}
                     <div className="flex flex-col gap-1" onClick={() => handleOpenProject(p)}>
                       <p className="text-sm text-[#b0b0b0] group-hover:text-white truncate font-medium">{p.name}</p>
-                      <p className="text-[11px] text-[#808080]">{new Date(p.updatedAt).toLocaleDateString('zh-CN', { month:'short', day:'numeric' })}</p>
+                      <p className="text-[11px] text-[#B0B0B0]">{new Date(p.updatedAt).toLocaleDateString('zh-CN', { month:'short', day:'numeric' })}</p>
                     </div>
                   </div>
                 ))}
@@ -6023,7 +6045,46 @@ export default function App() {
           <Carousel3D />
         </div>
         {/* 底栏 */}
-        <div className="relative text-center py-3 text-[10px] text-[#404040] shrink-0 tracking-[0.2em]">NwwWoW · STORYBOARD</div>
+        <div className="relative text-center py-3 text-[10px] text-[#808080] shrink-0 tracking-[0.2em]">NwwWoW · STORYBOARD</div>
+        {/* 查看全部项目弹窗 */}
+        {showAllProjectsModal && (
+          <div className="fixed inset-0 z-[500] bg-black/85 flex items-center justify-center" onClick={() => setShowAllProjectsModal(false)}>
+            <div className="bg-[#1E1E1E] border border-[#444] rounded-2xl w-[700px] max-h-[75vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-6 py-4 border-b border-[#333] shrink-0">
+                <h3 className="text-base font-bold text-white">全部项目</h3>
+                <button onClick={() => setShowAllProjectsModal(false)} className="text-[#808080] hover:text-white text-lg leading-none">✕</button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-6">
+                {allProjectsList.length === 0 ? (
+                  <p className="text-sm text-[#808080] text-center py-8">暂无项目</p>
+                ) : (
+                  <div className="space-y-2">
+                    {allProjectsList.map(p => (
+                      <div key={p.id}
+                        className="flex items-center justify-between px-4 py-3 rounded-xl border border-[#333] bg-[#181818] hover:bg-[#222] hover:border-[#9040F0]/30 transition-all group"
+                      >
+                        <div className="flex flex-col gap-0.5 cursor-pointer flex-1 min-w-0 mr-4" onClick={() => { handleOpenProject(p); setShowAllProjectsModal(false); }}>
+                          <span className="text-sm text-white font-medium group-hover:text-[#C0A0F0] transition-colors truncate">{p.name}</span>
+                          <span className="text-[11px] text-[#707070]">{new Date(p.updatedAt).toLocaleDateString('zh-CN', { year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })} · {p.nodes?.length || 0} 节点</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
+                          <button
+                            onClick={async () => { const name = prompt('项目名称', p.name); if (name?.trim()) { const lib = await loadProjectLibrary(); if (!lib) return; const projects = lib.projects.map(x => x.id === p.id ? { ...x, name: name.trim(), updatedAt: Date.now() } : x); const activeId = projects.find(x => x.id === lib.activeProjectId) ? lib.activeProjectId : projects[0]?.id || ''; setAllProjectsList(projects); setHomeProjects(projects); setProjects(projects); projectsRef.current = projects; await saveProjectLibrary(projects, activeId); } }}
+                            className="px-2 py-1 rounded-md text-xs text-[#808080] hover:text-white hover:bg-[#333] transition-colors"
+                          >重命名</button>
+                          <button
+                            onClick={async () => { if (!confirm(`删除「${p.name}」？`)) return; const lib = await loadProjectLibrary(); if (!lib) return; const projects = lib.projects.filter(x => x.id !== p.id); const activeId = projects.find(x => x.id === lib.activeProjectId) ? lib.activeProjectId : projects[0]?.id || ''; setAllProjectsList(projects); setHomeProjects(projects); setProjects(projects); projectsRef.current = projects; if (projects.length > 0) await saveProjectLibrary(projects, activeId); }}
+                            className="px-2 py-1 rounded-md text-xs text-[#CC4444] hover:text-white hover:bg-[#441111] transition-colors"
+                          >删除</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
         {SettingsModalShared}
       </div>
     );
@@ -6582,7 +6643,7 @@ export default function App() {
                     type="text"
                     value={draftNameInput}
                     onChange={(e) => setDraftNameInput(e.target.value)}
-                    className="w-full rounded-md border border-[#444] bg-[#1A1A1A] px-2 py-1.5 text-xs text-gray-100 outline-none focus:border-blue-600"
+                    className="w-full rounded-md border border-[#444] bg-[#303030] px-2 py-1.5 text-xs text-gray-100 outline-none focus:border-blue-600"
                     placeholder={projects.find((p) => p.id === activeProjectId)?.name || '未命名项目'}
                   />
                 </label>
@@ -6599,7 +6660,7 @@ export default function App() {
                     const n = projects.find((p) => p.id === activeProjectId)?.name || '';
                     setDraftNameInput(n);
                 }}
-                  className="shrink-0 rounded-md border border-[#444] px-2.5 py-1.5 text-[11px] text-gray-400 hover:bg-[#222]"
+                  className="shrink-0 rounded-md border border-[#444] px-2.5 py-1.5 text-[11px] text-gray-400 hover:bg-[#3A3A3A]"
               >
                   填入项目名
               </button>
@@ -6611,7 +6672,7 @@ export default function App() {
                     type="text"
                     value={draftStoragePathInput}
                     onChange={(e) => setDraftStoragePathInput(e.target.value)}
-                    className="w-full rounded-md border border-[#444] bg-[#1A1A1A] px-2 py-1.5 text-xs text-gray-100 outline-none focus:border-cyan-600"
+                    className="w-full rounded-md border border-[#444] bg-[#303030] px-2 py-1.5 text-xs text-gray-100 outline-none focus:border-cyan-600"
                     placeholder="例如 D:\备份\无限画布草稿"
                   />
                 </label>
@@ -6631,7 +6692,7 @@ export default function App() {
                   onChange={(e) =>
                     handleAutosaveIntervalChange(Number(e.target.value) as 0 | 5 | 10 | 20 | 30)
                   }
-                  className="rounded-md border border-[#444] bg-[#1A1A1A] px-2 py-1 text-[11px] text-gray-200 outline-none focus:border-blue-600"
+                  className="rounded-md border border-[#444] bg-[#303030] px-2 py-1 text-[11px] text-gray-200 outline-none focus:border-blue-600"
                 >
                   <option value={0}>关闭</option>
                   <option value={5}>每 5 分钟</option>
@@ -6731,7 +6792,7 @@ export default function App() {
                   return (
                   <div
                     key={project.id}
-                    className={`p-3 rounded-lg border ${project.id === activeProjectId ? 'border-blue-500 bg-blue-900/20' : 'border-[#333] bg-[#121212]'}`}
+                    className={`p-3 rounded-lg border ${project.id === activeProjectId ? 'border-blue-500 bg-blue-900/20' : 'border-[#333] bg-[#222222]'}`}
                   >
                     <div className="flex items-center gap-2">
                       <button
@@ -6830,7 +6891,7 @@ export default function App() {
                 onChange={(e) =>
                   setDraftDiskModal((m) => (m ? { ...m, basenameDraft: e.target.value } : m))
                 }
-                className="w-full rounded-md border border-[#444] bg-[#1A1A1A] px-2 py-2 text-xs text-gray-100 outline-none focus:border-cyan-600"
+                className="w-full rounded-md border border-[#444] bg-[#303030] px-2 py-2 text-xs text-gray-100 outline-none focus:border-cyan-600"
                 placeholder={
                   (draftDiskModal.mode === 'firstSave'
                     ? draftDiskModal.mergedProjects.find((p) => p.id === draftDiskModal.pid)?.name
@@ -6841,7 +6902,7 @@ export default function App() {
             <div className="flex justify-end gap-2">
               <button
                 type="button"
-                className="rounded-md border border-[#444] px-3 py-1.5 text-xs text-gray-300 hover:bg-[#222]"
+                className="rounded-md border border-[#444] px-3 py-1.5 text-xs text-gray-300 hover:bg-[#3A3A3A]"
                 onClick={() => cancelDraftDiskModal()}
               >
                 取消
@@ -6967,7 +7028,7 @@ export default function App() {
                       value={junlanKeyInput}
                       onChange={(e) => setJunlanKeyInput(e.target.value)}
                       placeholder="sk-..."
-                      className="w-full bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-600 transition-colors text-sm"
+                      className="w-full bg-[#222222] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-600 transition-colors text-sm"
                     />
                   </div>
 
@@ -6988,7 +7049,7 @@ export default function App() {
                       value={codesonlineKeyInput}
                       onChange={(e) => setCodesonlineKeyInput(e.target.value)}
                       placeholder="sk-..."
-                      className="w-full bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-sky-600 transition-colors text-sm"
+                      className="w-full bg-[#222222] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-sky-600 transition-colors text-sm"
                     />
                   </div>
 
@@ -7001,7 +7062,7 @@ export default function App() {
                       value={deepSeekKeyInput}
                       onChange={(e) => setDeepSeekKeyInput(e.target.value)}
                       placeholder="sk-..."
-                      className="w-full mb-3 bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-cyan-600 transition-colors text-sm"
+                      className="w-full mb-3 bg-[#222222] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-cyan-600 transition-colors text-sm"
                     />
                     <span hidden><label className="text-xs text-gray-500 block mb-1">DeepSeek Base URL</label>
                     <input
@@ -7026,7 +7087,7 @@ export default function App() {
                         const s = getAiSettingsSnapshot();
                         setApiKeyInput(p === 'gemini' ? s.geminiKey : s.openAiKey);
                       }}
-                      className="w-full mb-3 bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                      className="w-full mb-3 bg-[#222222] border border-[#444] rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
                     >
                       <option value="openai-compatible">OpenAI 兼容（Bearer / sk-）</option>
                       <option value="gemini">Google Gemini</option>
@@ -7067,7 +7128,7 @@ export default function App() {
                             }
                           }}
                           placeholder="sk-..."
-                          className="w-full bg-[#121212] border border-[#444] rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
+                          className="w-full bg-[#222222] border border-[#444] rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
                         />
                       </>
                     ) : (
@@ -7097,7 +7158,7 @@ export default function App() {
                             }
                           }}
                           placeholder="AIza..."
-                          className="w-full bg-[#121212] border border-[#444] rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
+                          className="w-full bg-[#222222] border border-[#444] rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
                         />
                       </>
                     )}
@@ -7120,7 +7181,7 @@ export default function App() {
                       value={newApiKeyInput}
                       onChange={(e) => setNewApiKeyInput(e.target.value)}
                       placeholder="sk-..."
-                      className="w-full bg-[#121212] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-violet-500 transition-colors text-sm"
+                      className="w-full bg-[#222222] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-violet-500 transition-colors text-sm"
                     />
                   </div>
 
@@ -7259,7 +7320,7 @@ export default function App() {
                                   <label className="text-xs text-gray-400 mb-1 block">{name}</label>
                                   {settingsPresetAuthSession ? (
                                     <textarea
-                                      className="w-full h-20 bg-[#121212] text-gray-200 text-sm p-2 rounded border border-[#333] focus:outline-none focus:border-blue-500 resize-none overflow-y-auto"
+                                      className="w-full h-20 bg-[#222222] text-gray-200 text-sm p-2 rounded border border-[#333] focus:outline-none focus:border-blue-500 resize-none overflow-y-auto"
                                       value={content}
                                       onChange={(e) =>
                                         setPromptPresets((prev) => ({ ...prev, [name]: e.target.value }))
@@ -7267,7 +7328,7 @@ export default function App() {
                                     />
                                   ) : (
                                     <div
-                                      className="w-full h-20 select-none rounded border border-[#2a2a2a] bg-[#181818] p-2 text-xs leading-snug text-gray-500 pointer-events-none overflow-hidden whitespace-pre-wrap break-words shadow-[inset_0_0_0_1px_rgba(0,0,0,0.35)]"
+                                      className="w-full h-20 select-none rounded border border-[#2a2a2a] bg-[#2C2C2C] p-2 text-xs leading-snug text-gray-500 pointer-events-none overflow-hidden whitespace-pre-wrap break-words shadow-[inset_0_0_0_1px_rgba(0,0,0,0.35)]"
                                     >
                                       {content || '（无内容）'}
                                     </div>
@@ -7277,7 +7338,7 @@ export default function App() {
                                   <span className="text-[10px] text-gray-500">大类</span>
                                   <select
                                     disabled={!settingsPresetAuthSession}
-                                    className="w-full bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-[11px] text-gray-300 outline-none focus:border-amber-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    className="w-full bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-[11px] text-gray-300 outline-none focus:border-amber-500 disabled:opacity-50 disabled:cursor-not-allowed"
                                     value={resolvedDom}
                                     onChange={(e) => {
                                       if (!settingsPresetAuthSession) return;
@@ -7303,7 +7364,7 @@ export default function App() {
                                     disabled={
                                       !settingsPresetAuthSession || resolvedDom !== 'i2i'
                                     }
-                                    className="w-full bg-[#121212] border border-[#444] rounded px-1.5 py-1 text-[11px] text-gray-300 outline-none focus:border-amber-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    className="w-full bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-[11px] text-gray-300 outline-none focus:border-amber-500 disabled:opacity-50 disabled:cursor-not-allowed"
                                     value={resolvedCat}
                                     onChange={(e) => {
                                       if (!settingsPresetAuthSession) return;
@@ -7591,7 +7652,7 @@ export default function App() {
                                     )
                                   )
                                 }
-                                className="w-full rounded border border-[#444] bg-[#121212] px-2 py-1.5 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="w-full rounded border border-[#444] bg-[#222222] px-2 py-1.5 text-white disabled:opacity-50 disabled:cursor-not-allowed"
                               />
                             </td>
                             <td className="p-1 align-middle">
@@ -7606,7 +7667,7 @@ export default function App() {
                                     )
                                   )
                                 }
-                                className="w-full rounded border border-[#444] bg-[#121212] px-2 py-1.5 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="w-full rounded border border-[#444] bg-[#222222] px-2 py-1.5 text-white disabled:opacity-50 disabled:cursor-not-allowed"
                               />
                             </td>
                             <td className="p-1 align-middle">
@@ -7621,7 +7682,7 @@ export default function App() {
                                     )
                                   )
                                 }
-                                className="w-full rounded border border-[#444] bg-[#121212] px-2 py-1.5 text-white placeholder-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="w-full rounded border border-[#444] bg-[#222222] px-2 py-1.5 text-white placeholder-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
                               />
                             </td>
                             <td className="p-1 align-middle">
@@ -7638,7 +7699,7 @@ export default function App() {
                                     prev.map((r) => (r.id === row.id ? { ...r, credits: v } : r))
                                   );
                                 }}
-                                className="w-full rounded border border-[#444] bg-[#121212] px-2 py-1.5 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="w-full rounded border border-[#444] bg-[#222222] px-2 py-1.5 text-white disabled:opacity-50 disabled:cursor-not-allowed"
                               />
                             </td>
                             <td className="p-1 align-middle text-center">
@@ -7735,7 +7796,7 @@ export default function App() {
               type="password"
               autoComplete="off"
               autoFocus
-              className="w-full rounded-lg border border-[#444] bg-[#1A1A1A] px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+              className="w-full rounded-lg border border-[#444] bg-[#303030] px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
               value={settingsPresetPwdModal.input}
               onChange={(e) =>
                 setSettingsPresetPwdModal((p) => (p.intent ? { ...p, input: e.target.value } : p))
@@ -7783,7 +7844,7 @@ export default function App() {
               type="password"
               autoComplete="off"
               autoFocus
-              className="w-full rounded-lg border border-[#444] bg-[#1A1A1A] px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
+              className="w-full rounded-lg border border-[#444] bg-[#303030] px-3 py-2.5 text-sm text-white outline-none focus:border-amber-500"
               value={settingsCreditsPwdModal.input}
               onChange={(e) =>
                 setSettingsCreditsPwdModal((p) => (p.open ? { ...p, input: e.target.value } : p))
@@ -9946,7 +10007,7 @@ function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onEyedropp
       {/* 3D场景预览 - 默认显示网格地面 */}
       <div
         ref={containerRef}
-        className="relative w-full aspect-video min-h-[220px] rounded-lg border border-[#333] overflow-hidden shrink-0 bg-[#222]"
+        className="relative w-full aspect-video min-h-[220px] rounded-lg border border-[#333] overflow-hidden shrink-0 bg-[#3A3A3A]"
         onWheel={(e) => e.stopPropagation()}
         onPointerDown={(e) => e.stopPropagation()}
       >
@@ -10354,10 +10415,10 @@ function GridSplitNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEy
   return (
     <div className="flex flex-col h-full min-h-0 gap-1 p-2 overflow-y-auto">
       {/* 图片预览带宫格框：随节点窗口高度伸缩 */}
-      <div ref={previewRef} className="relative w-full flex-1 min-h-[240px] min-w-0 rounded-lg border border-[#333] bg-[#222] overflow-hidden">
+      <div ref={previewRef} className="relative w-full flex-1 min-h-[240px] min-w-0 rounded-lg border border-[#333] bg-[#3A3A3A] overflow-hidden">
         <div className="absolute inset-0 flex items-center justify-center p-1 min-h-0">
           <div
-            className="relative rounded border border-[#333] bg-[#222] overflow-hidden mx-auto"
+            className="relative rounded border border-[#333] bg-[#3A3A3A] overflow-hidden mx-auto"
             style={{
               aspectRatio: frameAspectRatio === '9:16' ? '9 / 16' : '16 / 9',
               height: '100%',
@@ -10646,10 +10707,10 @@ function GridMergeNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEy
   return (
     <div className="flex flex-col h-full min-h-0 gap-1 p-2 overflow-y-auto">
       {/* 图片预览带宫格框：随节点窗口高度伸缩 */}
-      <div ref={previewRef} className="relative w-full flex-1 min-h-[240px] min-w-0 rounded-lg border border-[#333] bg-[#222] overflow-hidden">
+      <div ref={previewRef} className="relative w-full flex-1 min-h-[240px] min-w-0 rounded-lg border border-[#333] bg-[#3A3A3A] overflow-hidden">
         <div className="absolute inset-0 flex items-center justify-center p-1 min-h-0">
           <div
-            className="relative rounded border border-[#333] bg-[#222] overflow-hidden mx-auto"
+            className="relative rounded border border-[#333] bg-[#3A3A3A] overflow-hidden mx-auto"
             style={{
               aspectRatio: frameAspectRatio === '9:16' ? '9 / 16' : '16 / 9',
               height: '100%',
@@ -11355,7 +11416,7 @@ function ChatNodeContent({
       >
         <span className="text-gray-400">模型:</span>
         <select
-          className="nodemodel-select bg-[#121212] border border-[#444] rounded px-2 py-1 text-gray-300 outline-none focus:border-rose-500 max-w-[330px]"
+          className="nodemodel-select bg-[#222222] border border-[#444] rounded px-2 py-1 text-gray-300 outline-none focus:border-rose-500 max-w-[330px]"
           value={normalizeDeepSeekChatModelId(node.model || DEFAULT_DEEPSEEK_CHAT_MODEL_ID).trim()}
           onChange={(e) => onUpdate({ model: e.target.value })}
           onPointerDown={(e) => e.stopPropagation()}
@@ -11378,7 +11439,7 @@ function ChatNodeContent({
         <label className="flex items-center gap-1 shrink-0 text-gray-500" style={{ fontSize: fs(10) }}>
           <span className="whitespace-nowrap">字号</span>
           <select
-            className="max-w-[76px] rounded border border-[#444] bg-[#121212] px-1 py-0.5 text-gray-200 outline-none focus:border-rose-500"
+            className="max-w-[76px] rounded border border-[#444] bg-[#222222] px-1 py-0.5 text-gray-200 outline-none focus:border-rose-500"
             style={{ fontSize: fs(10) }}
             value={chatFontPx}
             onChange={(e) => persistChatFontPx(Number(e.target.value))}
@@ -11621,7 +11682,7 @@ function ChatNodeContent({
       {/* 输入区域（与上方消息区 flex 2:1） */}
       <div className="flex min-h-0 flex-[1_1_0%] flex-col overflow-y-auto border-t border-[#333] bg-[#252525] p-2">
         {/* 快捷功能：置于文字输入框上方 */}
-        <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-md border border-[#333] bg-[#222] px-2 py-1.5" style={{ fontSize: fs(10) }}>
+        <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-md border border-[#333] bg-[#3A3A3A] px-2 py-1.5" style={{ fontSize: fs(10) }}>
           <span className="shrink-0 text-gray-500">功能</span>
           {CHAT_FEATURE_BUTTON_SPECS.map((btn) => {
             const presetBody = promptPresets[btn.presetKey] ?? '';
@@ -11675,7 +11736,7 @@ function ChatNodeContent({
         <div className="flex gap-2">
           <textarea
             ref={chatPromptRef}
-            className="flex-1 bg-[#121212] text-gray-200 p-2.5 rounded border border-[#444] focus:outline-none focus:border-rose-500 resize-y"
+            className="flex-1 bg-[#222222] text-gray-200 p-2.5 rounded border border-[#444] focus:outline-none focus:border-rose-500 resize-y"
             style={{
               fontSize: chatFontScaled,
               minHeight: fs(108),
@@ -13478,7 +13539,7 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-gray-400">大小:</span>
             <select
-              className="bg-[#121212] border border-[#444] rounded px-2 py-1 text-[10px] text-gray-300 outline-none focus:border-blue-500"
+              className="bg-[#222222] border border-[#444] rounded px-2 py-1 text-[10px] text-gray-300 outline-none focus:border-blue-500"
               value={currentFontSize}
               onPointerDown={(e) => e.stopPropagation()}
               onChange={(e) => setCurrentFontSize(Number(e.target.value))}
