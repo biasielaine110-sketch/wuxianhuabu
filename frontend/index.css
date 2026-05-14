@@ -821,6 +821,8 @@
   /* 移除火焰光效动画 */
   .gen-btn-video-core::after {
     display: none;
+  }
+
   /* --- 玻璃态取消按钮 --- */
   .gen-btn-cancel {
     background: linear-gradient(135deg,
