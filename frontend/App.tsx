@@ -2823,6 +2823,25 @@ export default function App() {
   // --- Global Pointer Events for Robust Dragging ---
   useEffect(() => {
     const handleGlobalPointerMove = (e: PointerEvent) => {
+    // 安全兜底：鼠标按键已释放但未收到 pointerup 时，强制清理拖拽状态
+    if (e.buttons === 0 && activePointerTypeRef.current) {
+      if (draggingNodeIdRef.current) {
+        draggingNodeIdRef.current = null;
+        setDraggingNodeId(null);
+        if (rafIdRef.current) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
+        nodeDragAccumRef.current = null;
+      }
+      if (isSelectingRef.current) {
+        isSelectingRef.current = false;
+        setIsSelecting(false);
+        selectionBoxRef.current = null;
+        setSelectionBox(null);
+        pressStartPosRef.current = null;
+      }
+      activePointerTypeRef.current = null;
+      return;
+    }
+
     const pointerType = activePointerTypeRef.current;
 
     // 始终追踪鼠标在画布坐标中的位置（供快捷键/右键菜单创建节点定位）
@@ -3463,7 +3482,7 @@ export default function App() {
     if (e.cancelable) e.preventDefault();
     const zoomSensitivity = 0.002;
     const delta = -e.deltaY * zoomSensitivity;
-    const newScale = Math.min(Math.max(0.1, fsTransform.scale * (1 + delta)), 10);
+    const newScale = Math.min(Math.max(0.05, fsTransform.scale * (1 + delta)), 10);
     setFsTransform(prev => ({ ...prev, scale: newScale }));
   }, [fsTransform.scale]);
 
