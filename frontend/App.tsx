@@ -6033,7 +6033,7 @@ export default function App() {
               className={`flex flex-col min-h-0 overflow-hidden ${
                 node.type === 't2i' || node.type === 'i2i' ? 'flex-[3] basis-0' : 'flex-1'
               }`}
-              style={node.type === 'text' ? { display: isSelected && editingTextNodeIds.has(node.id) ? undefined : 'none' } : undefined}
+              style={node.type === 'text' ? {} : undefined}
             >
               {/* 预设按钮区域 - i2i节点 */}
               {node.type === 'i2i' && (
@@ -6068,11 +6068,30 @@ export default function App() {
                     }
                   />
                 )}
+                {node.type === 'text' && !(isSelected && editingTextNodeIds.has(node.id)) ? (
+                  <div
+                    className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] overflow-y-auto leading-relaxed whitespace-pre-wrap break-words"
+                    style={{ fontSize: '40px', minHeight: '120px' }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      if (isSelected) {
+                        // 已选中时双击进入编辑模式
+                        setEditingTextNodeIds(prev => { const next = new Set(prev); next.add(node.id); return next; });
+                      } else {
+                        openBigEditor(node.prompt || '', (v) => handleUpdateNode(node.id, { prompt: v }));
+                      }
+                    }}
+                  >
+                    {node.prompt || <span className="text-gray-500">双击编辑文本</span>}
+                  </div>
+                ) : (
                 <textarea
-                  className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] focus:outline-none focus:border-blue-500 transition-colors resize-none leading-relaxed" style={{ fontSize: '100px' }}
+                  className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] focus:outline-none focus:border-blue-500 transition-colors resize-none leading-relaxed" style={{ fontSize: '100px', minHeight: node.type === 'i2i' ? '80px' : '120px' }}
                   value={node.prompt}
                   onChange={(e) => handleUpdateNode(node.id, { prompt: e.target.value })}
                   placeholder=""
+                  readOnly={node.type === 'text' && !(isSelected && editingTextNodeIds.has(node.id))}
                   onPointerDown={(e) => {
                     e.stopPropagation();
                     // 双击检测：基于时间戳
@@ -6088,8 +6107,8 @@ export default function App() {
                     e.stopPropagation();
                     openBigEditor(node.prompt || '', (v) => handleUpdateNode(node.id, { prompt: v }));
                   }}
-                  style={{ minHeight: node.type === 'i2i' ? '80px' : '120px' }}
                 />
+                )}
               </div>
               {(node.type === 't2i' || node.type === 'i2i') && (
                 <div className="flex gap-2 w-full shrink-0">
