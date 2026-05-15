@@ -6074,32 +6074,30 @@ export default function App() {
                     style={{ fontSize: '40px', minHeight: '120px' }}
                     onPointerDown={(e) => {
                       e.stopPropagation();
-                      // 长按 >250ms 触发画布抓手平移（阻止了节点拖拽，专门用于画布平移）
-                      const ptrDown = e.nativeEvent as PointerEvent;
-                      const canvas = document.getElementById('canvas-container') as HTMLElement | null;
-                      if (!canvas) return;
+                      // 长按 >200ms 触发画布抓手平移
+                      const startX = e.clientX, startY = e.clientY;
                       const cancelRef = { current: false };
                       const timer = setTimeout(() => {
                         if (cancelRef.current) return;
-                        // 在 canvas 上重新触发 pointerdown 事件，模拟中键拖动
-                        const clone = new PointerEvent('pointerdown', {
-                          clientX: ptrDown.clientX,
-                          clientY: ptrDown.clientY,
-                          pointerId: ptrDown.pointerId,
-                          pointerType: ptrDown.pointerType,
-                          button: 1,  // 模拟中键
-                          bubbles: true,
-                          cancelable: true,
-                        });
-                        canvas.dispatchEvent(clone);
-                      }, 250);
+                        // 激活画布平移模式：设置 activePointerType 并开始追踪位置
+                        activePointerTypeRef.current = 'canvas';
+                        lastMousePosRef.current = { x: startX, y: startY };
+                      }, 200);
                       const cleanup = () => {
                         cancelRef.current = true;
                         clearTimeout(timer);
                         document.removeEventListener('pointerup', cleanup, true);
                         document.removeEventListener('pointermove', onMove, true);
                       };
-                      const onMove = () => { cancelRef.current = true; clearTimeout(timer); };
+                      const onMove = (m: PointerEvent) => {
+                        if (!cancelRef.current) {
+                          // 鼠标移动超过 5px 取消长按（可能是滚动或点击）
+                          if (Math.hypot(m.clientX - startX, m.clientY - startY) > 5) {
+                            cancelRef.current = true;
+                            clearTimeout(timer);
+                          }
+                        }
+                      };
                       document.addEventListener('pointerup', cleanup, true);
                       document.addEventListener('pointermove', onMove, true);
                     }}
