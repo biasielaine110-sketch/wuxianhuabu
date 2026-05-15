@@ -6,6 +6,7 @@ import {
   DEFAULT_CODESONLINE_IMAGE_BASE_URL,
   DEFAULT_DEEPSEEK_BASE_URL,
   DEFAULT_DEEPSEEK_CHAT_MODEL_ID,
+  DEFAULT_GAORUI_BASE_URL,
   DEFAULT_JUNLAN_BASE_URL,
   DEFAULT_NEWAPI_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
@@ -1663,6 +1664,8 @@ export default function App() {
   const [newApiKeyInput, setNewApiKeyInput] = useState(() => getAiSettingsSnapshot().newApiKey);
   const [codesonlineBaseInput, setCodesonlineBaseInput] = useState(() => getAiSettingsSnapshot().codesonlineBaseUrl);
   const [codesonlineKeyInput, setCodesonlineKeyInput] = useState(() => getAiSettingsSnapshot().codesonlineKey);
+  const [gaoruiKeyInput, setGaoruiKeyInput] = useState(() => getAiSettingsSnapshot().gaoruiKey);
+  const [gaoruiBaseInput, setGaoruiBaseInput] = useState(() => getAiSettingsSnapshot().gaoruiBaseUrl);
 
   useEffect(() => {
     const s = getAiSettingsSnapshot();
@@ -1677,6 +1680,8 @@ export default function App() {
     setNewApiKeyInput(s.newApiKey);
     setCodesonlineBaseInput(s.codesonlineBaseUrl);
     setCodesonlineKeyInput(s.codesonlineKey);
+    setGaoruiKeyInput(s.gaoruiKey);
+    setGaoruiBaseInput(s.gaoruiBaseUrl);
   }, []);
 
   useEffect(() => {
@@ -7955,6 +7960,27 @@ export default function App() {
                     />
                   </div>
 
+                  {/* ⑥ 高瑞 AI */}
+                  <div className="mt-5 pt-4 border-t border-[#333]">
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">高瑞 AI（gaorui.cc）</h3>
+                    <span hidden><label className="text-xs text-gray-500 block mb-1">高瑞 AI Base URL</label>
+                    <input
+                      type="text"
+                      readOnly
+                      value={gaoruiBaseInput}
+                      placeholder={DEFAULT_GAORUI_BASE_URL || 'https://gaorui.cc'}
+                      className="w-full mb-3 bg-[#252525] border border-[#333] rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
+                    /></span>
+                    <label className="text-xs text-gray-500 block mb-1">高瑞 AI API Key</label>
+                    <input
+                      type="password"
+                      value={gaoruiKeyInput}
+                      onChange={(e) => setGaoruiKeyInput(e.target.value)}
+                      placeholder="sk-..."
+                      className="w-full bg-[#222222] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-orange-600 transition-colors text-sm"
+                    />
+                  </div>
+
                   <div className="flex gap-3 mt-4">
                     <button
                       onClick={() => setShowSettingsModal(false)}
@@ -7977,6 +8003,8 @@ export default function App() {
                           newApiBaseUrl: newApiBaseInput.trim(),
                           deepSeekApiKey: deepSeekKeyInput.trim(),
                           deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
+                          gaoruiApiKey: gaoruiKeyInput.trim(),
+                          gaoruiBaseUrl: gaoruiBaseInput.trim() || DEFAULT_GAORUI_BASE_URL,
                         });
                         initGeminiClientFromStorage();
                           setShowSettingsModal(false);
