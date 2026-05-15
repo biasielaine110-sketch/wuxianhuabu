@@ -6072,7 +6072,37 @@ export default function App() {
                   <div
                     className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] overflow-y-auto leading-relaxed whitespace-pre-wrap break-words"
                     style={{ fontSize: '40px', minHeight: '120px' }}
-                    onPointerDown={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      // 长按 >250ms 触发画布抓手平移（阻止了节点拖拽，专门用于画布平移）
+                      const ptrDown = e.nativeEvent as PointerEvent;
+                      const canvas = document.getElementById('canvas-container') as HTMLElement | null;
+                      if (!canvas) return;
+                      const cancelRef = { current: false };
+                      const timer = setTimeout(() => {
+                        if (cancelRef.current) return;
+                        // 在 canvas 上重新触发 pointerdown 事件，模拟中键拖动
+                        const clone = new PointerEvent('pointerdown', {
+                          clientX: ptrDown.clientX,
+                          clientY: ptrDown.clientY,
+                          pointerId: ptrDown.pointerId,
+                          pointerType: ptrDown.pointerType,
+                          button: 1,  // 模拟中键
+                          bubbles: true,
+                          cancelable: true,
+                        });
+                        canvas.dispatchEvent(clone);
+                      }, 250);
+                      const cleanup = () => {
+                        cancelRef.current = true;
+                        clearTimeout(timer);
+                        document.removeEventListener('pointerup', cleanup, true);
+                        document.removeEventListener('pointermove', onMove, true);
+                      };
+                      const onMove = () => { cancelRef.current = true; clearTimeout(timer); };
+                      document.addEventListener('pointerup', cleanup, true);
+                      document.addEventListener('pointermove', onMove, true);
+                    }}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
                       if (isSelected) {
