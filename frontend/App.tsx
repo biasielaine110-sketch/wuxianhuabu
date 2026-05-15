@@ -546,13 +546,14 @@ type CanvasHistoryEntry = {
   selectedIds: string[];
 };
 
-/** 图生图预设：按「角色 / 场景 / 道具 / 其他」分类，供下拉选择 */
-type I2iPresetCategoryId = 'character' | 'scene' | 'props' | 'other';
+/** 图生图预设：按「角色 / 场景 / 道具 / 故事板 / 其他」分类，供下拉选择 */
+type I2iPresetCategoryId = 'character' | 'scene' | 'props' | 'storyboard' | 'other';
 
 const I2I_PRESET_CATEGORY_OPTIONS: { id: I2iPresetCategoryId; label: string }[] = [
   { id: 'character', label: '角色' },
   { id: 'scene', label: '场景' },
   { id: 'props', label: '道具' },
+  { id: 'storyboard', label: '故事板' },
   { id: 'other', label: '其他' },
 ];
 
@@ -583,6 +584,10 @@ const I2I_PRESETS_BY_CATEGORY: Record<I2iPresetCategoryId, { key: string; label:
     { key: '道具转线稿色块', label: '道具转线稿色块' },
     { key: '道具转超写实', label: '道具转超写实' },
     { key: '道具转白模', label: '道具转白模' },
+  ],
+  storyboard: [
+    { key: '故事板_A', label: '故事板_A' },
+    { key: '故事板_B', label: '故事板_B' },
   ],
   other: [
     { key: '故事九宫格', label: '故事九宫格' },
@@ -658,9 +663,16 @@ const DEFAULT_T2I_PRESET_KEYS = new Set([
   '通用模板',
 ]);
 
+/** 内置图生图预设键（默认归入图生图类，包含故事板） */
+const DEFAULT_I2I_PRESET_KEYS = new Set([
+  '故事板_A',
+  '故事板_B',
+]);
+
 function defaultPresetDomain(name: string): PresetDomainId {
   if (DEFAULT_CHAT_PRESET_KEYS.has(name)) return 'chat';
   if (DEFAULT_T2I_PRESET_KEYS.has(name)) return 't2i';
+  if (DEFAULT_I2I_PRESET_KEYS.has(name)) return 'i2i';
   return 'i2i';
 }
 
