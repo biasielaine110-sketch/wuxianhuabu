@@ -29,7 +29,7 @@ function isDeepSeekChatModelId(modelName: string): boolean {
 /** 对话走君澜 OpenAI 兼容网关（与 ToAPIs 主通道分离，使用设置中的君澜 Base URL + Key） */
 function isJunlanChatModelId(modelName: string): boolean {
   const m = (modelName || '').trim();
-  return m === 'gpt-5.5-junlan';
+  return m === 'gpt-5.5-junlan' || m === 'claude-sonnet-4-6';
 }
 
 /** Google GenAI 官方模型 id；ToAPIs 等网关可使用带 -official 的别名，直连时需映射 */
@@ -342,7 +342,7 @@ export const callGeminiChatWithHistory = async (
       const jlKey = getJunlanSavedKey().trim();
       if (!jlKey) {
         throw new Error(
-          '使用 GPT-5.5（君澜）：请在「设置 → API」中填写「君澜 API Key」，并确认君澜 Base URL 为 https://www.junlanai.com/v1（与 ToAPIs 主通道密钥分开）。'
+          '使用 GPT-5.5 / Claude Sonnet 4-6（君澜）：请在「设置 → API」中填写「君澜 API Key」，并确认君澜 Base URL 为 https://www.junlanai.com/v1（与 ToAPIs 主通道密钥分开）。'
         );
       }
       return chatCompletionHistoryAtBase(

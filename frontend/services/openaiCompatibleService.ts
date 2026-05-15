@@ -101,6 +101,16 @@ function isDeepSeekHost(baseNormalized: string): boolean {
   }
 }
 
+/** 判断是否为君澜 AI 域名（www.junlanai.com） */
+function isJunlanHost(baseNormalized: string): boolean {
+  try {
+    const host = new URL(baseNormalized).hostname.toLowerCase();
+    return host === 'www.junlanai.com' || host.endsWith('.junlanai.com');
+  } catch {
+    return false;
+  }
+}
+
 /** 画布节点 id；上游 New API 请求 model 为去掉 `-newapi` 后的 id（与 ToAPIs 的 gemini-3-pro-image-preview 等区分） */
 function isNewApiFireflyCanvasModel(modelName: string): boolean {
   const m = (modelName || '').trim();
@@ -1365,6 +1375,7 @@ function resolveChatModelForBase(baseNormalized: string, modelName: string): str
   const m = (modelName || '').trim();
   /** 画布对话节点 id，上游 OpenAI 兼容 model 字段 */
   if (m === 'gpt-5.5-junlan') return 'gpt-5.5';
+  if (m === 'claude-sonnet-4-6') return 'claude-sonnet-4-6';
   if (isToApisHost(baseNormalized)) {
     if (m) return m;
     return 'gemini-3-pro-preview';
