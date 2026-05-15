@@ -885,46 +885,54 @@ type SettingsPresetPwdIntent =
 
 function I2iPresetCategorySelect({
   nodeId,
-  activePreset,
+  activePresets,
   promptPresets,
   presetDomainOverrides,
   presetCategoryOverrides,
-  onApplyPreset,
+  onTogglePreset,
   onClearPreset,
 }: {
   nodeId: string;
-  activePreset?: string;
+  activePresets?: string[];
   promptPresets: Record<string, string>;
   presetDomainOverrides: Record<string, PresetDomainId>;
   presetCategoryOverrides: Record<string, I2iPresetCategoryId>;
-  onApplyPreset: (nodeId: string, presetKey: string) => void;
+  onTogglePreset: (nodeId: string, presetKey: string) => void;
   onClearPreset: (nodeId: string) => void;
 }) {
-  const [category, setCategory] = React.useState<I2iPresetCategoryId>(() =>
-    settingsPresetCategory(activePreset ?? '', presetCategoryOverrides)
-  );
+  const [category, setCategory] = React.useState<I2iPresetCategoryId>(() => {
+    const first = activePresets?.[0];
+    return first ? settingsPresetCategory(first, presetCategoryOverrides) : 'character';
+  });
 
   React.useEffect(() => {
-    setCategory(settingsPresetCategory(activePreset ?? '', presetCategoryOverrides));
-  }, [activePreset, presetCategoryOverrides]);
+    const first = activePresets?.[0];
+    if (first) {
+      setCategory(settingsPresetCategory(first, presetCategoryOverrides));
+    }
+  }, [activePresets, presetCategoryOverrides]);
 
   const list = React.useMemo(
     () => i2iPresetListForCategory(category, promptPresets, presetDomainOverrides, presetCategoryOverrides),
     [category, promptPresets, presetDomainOverrides, presetCategoryOverrides]
   );
-  const presetSelectValue =
-    activePreset && list.some((p) => p.key === activePreset) ? activePreset : '';
 
-  const commonTemplateActive = activePreset === COMMON_TEMPLATE_KEY;
+  const activeSet = new Set(activePresets ?? []);
+  const commonTemplateActive = activeSet.has(COMMON_TEMPLATE_KEY);
+  const hasActivePresets = activePresets && activePresets.length > 0;
 
   return (
     <div className="flex flex-col gap-1.5 p-2 shrink-0 border-b border-[#333]">
-      {activePreset && (
+      {hasActivePresets && (
         <div className="flex items-center gap-2 px-2 py-1 bg-gradient-to-r from-cyan-900/40 to-blue-900/40 rounded border border-cyan-600/50">
           <span className="text-[10px] text-cyan-400 font-medium">预设:</span>
-          <span className="text-xs text-white font-bold">
-            {I2I_PRESET_FLAT.find((p) => p.key === activePreset)?.label || activePreset}
-          </span>
+          <div className="flex flex-wrap gap-1">
+            {activePresets!.map(k => (
+              <span key={k} className="text-xs text-white font-bold">
+                {(I2I_PRESET_FLAT.find(p => p.key === k)?.label ?? k) + (k === COMMON_TEMPLATE_KEY ? '' : '')}
+              </span>
+            ))}
+          </div>
           <button
             type="button"
             onPointerDown={(e) => {
@@ -956,15 +964,20 @@ function I2iPresetCategorySelect({
         </select>
         <span className="text-[10px] text-gray-500 shrink-0">预设</span>
         <select
-          className="i2i-preset-select flex-1 min-w-[120px] bg-[#222222] border border-[#444] rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-amber-500"
-          value={presetSelectValue}
+          multiple
+          className="i2i-preset-select flex-1 min-w-[140px] bg-[#222222] border border-[#444] rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-amber-500"
+          value={activePresets?.filter(k => k !== COMMON_TEMPLATE_KEY) ?? []}
           onPointerDown={(e) => e.stopPropagation()}
           onChange={(e) => {
-            const key = e.target.value;
-            if (key) onApplyPreset(nodeId, key);
+            const options = e.target.options;
+            for (let i = 0; i < options.length; i++) {
+              const opt = options[i];
+              if (opt.selected !== activeSet.has(opt.value)) {
+                onTogglePreset(nodeId, opt.value);
+              }
+            }
           }}
         >
-          <option value="">选择预设…</option>
           {list.map((p) => (
             <option key={p.key} value={p.key}>
               {p.label}
@@ -980,9 +993,9 @@ function I2iPresetCategorySelect({
           onChange={(e) => {
             const key = e.target.value;
             if (key) {
-              onApplyPreset(nodeId, key);
-            } else {
-              onClearPreset(nodeId);
+              onTogglePreset(nodeId, key);
+            } else if (commonTemplateActive) {
+              onTogglePreset(nodeId, COMMON_TEMPLATE_KEY);
             }
           }}
         >
@@ -996,44 +1009,52 @@ function I2iPresetCategorySelect({
 
 function T2iPresetCategorySelect({
   nodeId,
-  activePreset,
+  activePresets,
   promptPresets,
   presetDomainOverrides,
-  onApplyPreset,
+  onTogglePreset,
   onClearPreset,
 }: {
   nodeId: string;
-  activePreset?: string;
+  activePresets?: string[];
   promptPresets: Record<string, string>;
   presetDomainOverrides: Record<string, PresetDomainId>;
-  onApplyPreset: (nodeId: string, presetKey: string) => void;
+  onTogglePreset: (nodeId: string, presetKey: string) => void;
   onClearPreset: (nodeId: string) => void;
 }) {
-  const [category, setCategory] = React.useState<T2iPresetCategoryId>(() =>
-    t2iCategoryForPreset(activePreset ?? '')
-  );
+  const [category, setCategory] = React.useState<T2iPresetCategoryId>(() => {
+    const first = activePresets?.[0];
+    return first ? t2iCategoryForPreset(first) : 'storyboard';
+  });
 
   React.useEffect(() => {
-    setCategory(t2iCategoryForPreset(activePreset ?? ''));
-  }, [activePreset]);
+    const first = activePresets?.[0];
+    if (first) {
+      setCategory(t2iCategoryForPreset(first));
+    }
+  }, [activePresets]);
 
   const list = React.useMemo(
     () => t2iPresetListForCategory(category, promptPresets, presetDomainOverrides),
     [category, promptPresets, presetDomainOverrides]
   );
-  const presetSelectValue =
-    activePreset && list.some((p) => p.key === activePreset) ? activePreset : '';
 
-  const commonTemplateActive = activePreset === COMMON_TEMPLATE_KEY;
+  const activeSet = new Set(activePresets ?? []);
+  const commonTemplateActive = activeSet.has(COMMON_TEMPLATE_KEY);
+  const hasActivePresets = activePresets && activePresets.length > 0;
 
   return (
     <div className="flex flex-col gap-1.5 p-2 shrink-0 border-b border-[#333]">
-      {activePreset && (
+      {hasActivePresets && (
         <div className="flex items-center gap-2 px-2 py-1 bg-gradient-to-r from-purple-900/40 to-pink-900/40 rounded border border-purple-600/50">
           <span className="text-[10px] text-purple-400 font-medium">预设:</span>
-          <span className="text-xs text-white font-bold">
-            {T2I_PRESET_FLAT.find((p) => p.key === activePreset)?.label || activePreset}
-          </span>
+          <div className="flex flex-wrap gap-1">
+            {activePresets!.map(k => (
+              <span key={k} className="text-xs text-white font-bold">
+                {(T2I_PRESET_FLAT.find(p => p.key === k)?.label ?? k)}
+              </span>
+            ))}
+          </div>
           <button
             type="button"
             onPointerDown={(e) => {
@@ -1065,15 +1086,20 @@ function T2iPresetCategorySelect({
         </select>
         <span className="text-[10px] text-gray-500 shrink-0">预设</span>
         <select
-          className="t2i-preset-select flex-1 min-w-[120px] bg-[#222222] border border-[#444] rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-purple-500"
-          value={presetSelectValue}
+          multiple
+          className="t2i-preset-select flex-1 min-w-[140px] bg-[#222222] border border-[#444] rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-purple-500"
+          value={activePresets?.filter(k => k !== COMMON_TEMPLATE_KEY) ?? []}
           onPointerDown={(e) => e.stopPropagation()}
           onChange={(e) => {
-            const key = e.target.value;
-            if (key) onApplyPreset(nodeId, key);
+            const options = e.target.options;
+            for (let i = 0; i < options.length; i++) {
+              const opt = options[i];
+              if (opt.selected !== activeSet.has(opt.value)) {
+                onTogglePreset(nodeId, opt.value);
+              }
+            }
           }}
         >
-          <option value="">选择预设…</option>
           {list.map((p) => (
             <option key={p.key} value={p.key}>
               {p.label}
@@ -1089,9 +1115,9 @@ function T2iPresetCategorySelect({
           onChange={(e) => {
             const key = e.target.value;
             if (key) {
-              onApplyPreset(nodeId, key);
-            } else {
-              onClearPreset(nodeId);
+              onTogglePreset(nodeId, key);
+            } else if (commonTemplateActive) {
+              onTogglePreset(nodeId, COMMON_TEMPLATE_KEY);
             }
           }}
         >
@@ -2741,14 +2767,19 @@ export default function App() {
   }, [settingsCreditsPwdModal.open]);
 
   // --- Apply Preset Prompt ---
-  const handleApplyPreset = useCallback((nodeId: string, presetKey: string) => {
-    // 只设置激活的预设标识，不改变 prompt 内容
-    handleUpdateNode(nodeId, { activePreset: presetKey });
-  }, [handleUpdateNode]);
+  const handleTogglePreset = useCallback((nodeId: string, presetKey: string) => {
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node) return;
+    const current = node.activePresets ?? [];
+    const next = current.includes(presetKey)
+      ? current.filter(k => k !== presetKey)
+      : [...current, presetKey];
+    handleUpdateNode(nodeId, { activePresets: next });
+  }, [handleUpdateNode, nodes]);
 
   // 清除预设选择
   const handleClearPreset = useCallback((nodeId: string) => {
-    handleUpdateNode(nodeId, { activePreset: undefined });
+    handleUpdateNode(nodeId, { activePresets: undefined });
   }, [handleUpdateNode]);
 
   // 复制节点生成的图片到新的图片节点
@@ -4182,7 +4213,7 @@ export default function App() {
           : 'gemini-3.1-flash-image-preview',
       viewMode: 'single',
       currentImageIndex: 0,
-      ...(type === 'panoramaT2i' ? { activePreset: '全景图生成' } : {}),
+      ...(type === 'panoramaT2i' ? { activePresets: ['全景图生成'] } : {}),
       ...(type === 'panorama' ? { panoramaImage: '', yaw: 0, pitch: 0, fov: 75, envMode: 'day' as const } : {}),
       ...(type === 'panoramaT2i' ? { panoramaImage: '', isGenerating: false } : {}),
       ...(type === 'annotation'
@@ -4312,10 +4343,10 @@ export default function App() {
       const textInputs = inputNodes.map(n => n.prompt).filter(Boolean);
 
       // 获取预设提示词（如果有激活的预设）
-      const presetPrompt = node.activePreset ? promptPresets[node.activePreset] || '' : '';
+      const presetPrompts = (node.activePresets ?? []).map(key => promptPresets[key] || '').filter(Boolean);
       
       // 预设提示词在前，用户输入在后
-      const combinedPrompt = [presetPrompt, node.prompt, ...textInputs].filter(Boolean).join('\n');
+      const combinedPrompt = [...presetPrompts, node.prompt, ...textInputs].filter(Boolean).join('\n');
       
       // Do NOT append resolution/aspect ratio to the prompt text to avoid confusing the model's style adherence.
       const finalPrompt = combinedPrompt;
@@ -6085,11 +6116,11 @@ export default function App() {
               {node.type === 'i2i' && (
                 <I2iPresetCategorySelect
                   nodeId={node.id}
-                  activePreset={node.activePreset}
+                  activePresets={node.activePresets}
                   promptPresets={promptPresets}
                   presetDomainOverrides={promptPresetDomainOverrides}
                   presetCategoryOverrides={promptPresetCategoryOverrides}
-                  onApplyPreset={handleApplyPreset}
+                  onTogglePreset={handleTogglePreset}
                   onClearPreset={handleClearPreset}
                 />
               )}
@@ -6097,10 +6128,10 @@ export default function App() {
               {node.type === 't2i' && (
                 <T2iPresetCategorySelect
                   nodeId={node.id}
-                  activePreset={node.activePreset}
+                  activePresets={node.activePresets}
                   promptPresets={promptPresets}
                   presetDomainOverrides={promptPresetDomainOverrides}
-                  onApplyPreset={handleApplyPreset}
+                  onTogglePreset={handleTogglePreset}
                   onClearPreset={handleClearPreset}
                 />
               )}
@@ -6353,10 +6384,10 @@ export default function App() {
                   </div>
                 )}
                 {/* 当前激活的预设显示 */}
-                {node.activePreset && (
+                {node.activePresets && node.activePresets.length > 0 && (
                   <div className="flex items-center gap-1 px-2 py-1 bg-gradient-to-r from-indigo-900/40 to-purple-900/40 rounded border border-indigo-600/50 mb-2">
                     <span className="text-[10px] text-indigo-400">预设:</span>
-                    <span className="text-xs text-white font-bold">{node.activePreset}</span>
+                    <span className="text-xs text-white font-bold">{node.activePresets.join(', ')}</span>
                     <button
                       onPointerDown={(e) => { e.stopPropagation(); handleClearPreset(node.id); }}
                       className="ml-auto text-[10px] text-gray-400 hover:text-white px-1 py-0.5 rounded hover:bg-white/10"
@@ -6367,9 +6398,9 @@ export default function App() {
                 )}
                 {/* 预设按钮 */}
                 <button
-                  onPointerDown={(e) => { e.stopPropagation(); handleApplyPreset(node.id, '全景图生成'); }}
+                  onPointerDown={(e) => { e.stopPropagation(); handleTogglePreset(node.id, '全景图生成'); }}
                   className={`w-full px-2 py-1 text-[10px] rounded transition-all mb-2 ${
-                    node.activePreset === '全景图生成' 
+                    (node.activePresets ?? []).includes('全景图生成') 
                       ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white ring-1 ring-indigo-400' 
                       : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white'
                   }`}

@@ -88,7 +88,7 @@ export interface CanvasNode {
   viewMode?: 'single' | 'grid'; // Display mode for multiple images
   currentImageIndex?: number; // For pagination in single view
   textOverlays?: TextOverlay[]; // 图片上的文字覆盖
-  activePreset?: string; // 当前激活的预设名称（用于显示按钮样式）
+  activePresets?: string[]; // 当前激活的预设名称列表（用于多选预设）
   chatInputHeight?: number; // 对话节点输入框高度
   panoramaPromptHeight?: number; // 全景图生成节点提示词高度
   /** 视频生成节点：成品 mp4 等 URL（ToAPIs 返回，24h 内有效） */
