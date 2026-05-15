@@ -10,6 +10,8 @@ import {
   getNewApiSavedKey,
   getOpenAiBaseUrl,
   getOpenAiSavedKey,
+  getGaoruiBaseUrl,
+  getGaoruiSavedKey,
 } from './aiSettings';
 
 function normalizeBaseUrl(url: string): string {
@@ -125,8 +127,257 @@ function newApiFireflyRequestModelCandidates(canvasModelId: string): string[] {
 /** ToAPIs 异步任务轮询最长等待（文生图 / 图生图等） */
 const TOAPIS_TASK_MAX_WAIT_MS = 1_800_000;
 
+/** 高瑞 AI 异步任务轮询最长等待 */
+const GAORUI_TASK_MAX_WAIT_MS = 1_800_000;
+
 /** ToAPIs 视频任务轮询最长等待 */
 const TOAPIS_VIDEO_TASK_MAX_WAIT_MS = 1_800_000;
+
+/** 高瑞 AI：提交生图任务 */
+async function gaoruiSubmitImageGeneration(
+  baseNorm: string,
+  apiKey: string,
+  model: string,
+  prompt: string,
+  aspectRatio: string,
+  signal?: AbortSignal
+): Promise<{ id: string }> {
+  // 高瑞 API 提交接口是 /v1/nano-banana（不是 /v1/images/generations）
+  const fetchBase = rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm);
+  
+  const body = {
+    model,
+    prompt,
+    imageSize: '4K',  // 高瑞支持 1K, 2K, 4K
+    aspectRatio,       // 高瑞支持的宽高比：1:1, 16:9, 9:16, 4:3, 3:4, 21:9
+    images: [],        // 空数组表示文生图
+    webHook: '-1',
+    shutProgress: false,
+  };
+  console.log('[高瑞] 提交请求:', `${fetchBase}/nano-banana`, body);
+  
+  const res = await fetch(`${fetchBase}/nano-banana`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+  
+  const text = await res.text();
+  console.log('[高瑞] 提交响应:', res.status, text.slice(0, 1000));
+  
+  if (!res.ok) {
+    throw new Error(`高瑞 AI 提交任务失败 (${res.status}): ${text.slice(0, 800)}`);
+  }
+  
+  let json: Record<string, unknown>;
+  try {
+    json = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    throw new Error(`高瑞 AI 响应无效: ${text.slice(0, 400)}`);
+  }
+  
+  if (json.code !== 0 && json.code !== undefined) {
+    throw new Error(`高瑞 AI: ${json.msg || JSON.stringify(json)}`);
+  }
+  
+  // 高瑞返回格式: { code: 0, data: { id: "14-xxx", type: "text2image" } }
+  const data = json.data as Record<string, unknown> | undefined;
+  if (!data?.id) {
+    throw new Error(`高瑞 AI 未返回任务 id：${text.slice(0, 400)}`);
+  }
+  
+  return { id: data.id as string };
+}
+
+/** 高瑞 AI：轮询生图任务状态 */
+async function gaoruiPollImageTask(
+  baseNorm: string,
+  apiKey: string,
+  taskId: string,
+  signal?: AbortSignal
+): Promise<string> {
+  // 高瑞 API 的 /fetch 接口不在 /v1 下面，需要去掉 /v1
+  const baseWithoutV1 = baseNorm.replace(/\/v1$/, '');
+  const deadline = Date.now() + GAORUI_TASK_MAX_WAIT_MS;
+  await sleepInterruptible(3000, signal);
+
+  while (Date.now() < deadline) {
+    assertNotAborted(signal);
+    
+    // 高瑞 API 查询接口是 /fetch/{task_id}，不在 /v1 下
+    const pollUrl = `${baseWithoutV1}/fetch/${taskId}`;
+    const res = await fetch(pollUrl, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal,
+    });
+    const text = await res.text();
+    
+    if (!res.ok) {
+      await sleepInterruptible(3000, signal);
+      continue;
+    }
+    
+    const data = JSON.parse(text) as {
+      status?: string;
+      url?: string;
+      data?: {
+        status?: string;
+        url?: string;
+        progress?: number;
+        error?: string;
+        originData?: {
+          status?: string;
+          progress?: number;
+          error?: string;
+          failure_reason?: string;
+          results?: { url?: string; content?: string }[];
+        };
+      };
+    };
+
+    // 高瑞返回格式: { code: 0, data: { status, url, originData: { results: [{ url }] } } }
+    const innerData = data.data || data;
+    const status = innerData.status || data.status;
+    const errorMsg = innerData.error || innerData.originData?.failure_reason || innerData.originData?.error;
+    
+    // 标准化状态：pending/queued -> pending, processing/running -> processing, succeeded -> succeeded, failed -> failed
+    const normalizedStatus = status === 'running' ? 'processing' : status;
+    const completed = normalizedStatus === 'succeeded';
+    const failed = normalizedStatus === 'failed';
+
+    if (failed) {
+      throw new Error(`高瑞 AI 生成失败: ${errorMsg || '未知错误'}`);
+    }
+
+    if (completed) {
+      const rawUrl =
+        innerData.url ||
+        innerData.originData?.results?.[0]?.url;
+
+      if (!rawUrl) {
+        throw new Error(`高瑞 AI 任务完成但未返回图片 URL。响应: ${text.slice(0, 500)}`);
+      }
+
+      let imageUrl = rawUrl;
+      if (rawUrl.startsWith('/')) {
+        imageUrl = `${baseWithoutV1}${rawUrl}`;
+      }
+
+      try {
+        const imgRes = await fetch(imageUrl, { signal });
+        if (imgRes.ok) {
+          const blob = await imgRes.blob();
+          return new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result));
+            reader.onerror = () => reject(new Error('读取图片失败'));
+            reader.readAsDataURL(blob);
+          });
+        }
+      } catch {
+        // 下载失败，尝试标准方式
+      }
+
+      return fetchUrlAsBase64(imageUrl, signal, apiKey);
+    }
+    await sleepInterruptible(3000, signal);
+  }
+  throw new Error(`高瑞 AI 任务超时（已等待超过 ${GAORUI_TASK_MAX_WAIT_MS / 60_000} 分钟），请稍后重试。`);
+}
+
+/** 高瑞 AI：文生图 */
+async function gaoruiGenerateNewImage(
+  baseNorm: string,
+  apiKey: string,
+  prompt: string,
+  aspectRatio: string,
+  numberOfImages: number,
+  model: string,
+  nodeResolution?: string,
+  signal?: AbortSignal
+): Promise<string[]> {
+  const out: string[] = [];
+  const count = Math.min(Math.max(numberOfImages, 1), 4);
+
+  for (let i = 0; i < count; i++) {
+    assertNotAborted(signal);
+    const { id } = await gaoruiSubmitImageGeneration(baseNorm, apiKey, model, prompt, aspectRatio, signal);
+    out.push(await gaoruiPollImageTask(baseNorm, apiKey, id, signal));
+  }
+  return out;
+}
+
+/** 高瑞 AI：提交图生图任务 */
+async function gaoruiSubmitImageEdit(
+  baseNorm: string,
+  apiKey: string,
+  model: string,
+  base64Images: string[],
+  prompt: string,
+  signal?: AbortSignal
+): Promise<{ id: string }> {
+  const fetchBase = rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm);
+  // 先上传参考图
+  const imageUrls: string[] = [];
+  for (const base64 of base64Images) {
+    assertNotAborted(signal);
+    const { raw, mime } = parseBase64ImageInput(base64);
+    const blob = base64ToBlob(raw, mime);
+    const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
+    const url = await openAiCompatUploadImageBlob(baseNorm, apiKey, blob, `ref.${ext}`, signal);
+    imageUrls.push(url);
+  }
+
+  const res = await fetch(`${fetchBase}/images/edits`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      prompt,
+      image_urls: imageUrls,
+      response_format: 'url',
+    }),
+    signal,
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`高瑞 AI 图生图提交任务失败 (${res.status}): ${text.slice(0, 800)}`);
+  }
+  const json = JSON.parse(text) as { id?: string; error?: { message?: string } };
+  if (json.error?.message) throw new Error(`高瑞 AI: ${json.error.message}`);
+  if (!json.id) throw new Error(`高瑞 AI 图生图未返回任务 id：${text.slice(0, 400)}`);
+  return { id: json.id };
+}
+
+/** 高瑞 AI：图生图 */
+async function gaoruiEditImage(
+  baseNorm: string,
+  apiKey: string,
+  base64Images: string[],
+  prompt: string,
+  numberOfImages: number,
+  model: string,
+  aspectRatio: string,
+  signal?: AbortSignal
+): Promise<string[]> {
+  if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
+  const out: string[] = [];
+  const count = Math.min(Math.max(numberOfImages, 1), 4);
+
+  for (let i = 0; i < count; i++) {
+    assertNotAborted(signal);
+    const { id } = await gaoruiSubmitImageEdit(baseNorm, apiKey, model, base64Images, prompt, signal);
+    out.push(await gaoruiPollImageTask(baseNorm, apiKey, id, signal));
+  }
+  return out;
+}
 
 function assertNotAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException('已取消生成', 'AbortError');
@@ -2055,6 +2306,24 @@ export async function openAiGenerateNewImage(
     );
   }
 
+  if (rawModel === 'gpt-image-2-gaorui') {
+    const grKey = getGaoruiSavedKey().trim();
+    if (!grKey) {
+      throw new Error('未配置高瑞 AI 图像通道。请在「设置 → API」填写「高瑞 API Key」。');
+    }
+    const grBase = normalizeBaseUrl(getGaoruiBaseUrl());
+    return gaoruiGenerateNewImage(grBase, grKey, prompt, aspectRatio, numberOfImages, 'gpt-image-2', nodeResolution, signal);
+  }
+
+  if (rawModel === 'nano-banana-pro-gaorui') {
+    const grKey = getGaoruiSavedKey().trim();
+    if (!grKey) {
+      throw new Error('未配置高瑞 AI 图像通道。请在「设置 → API」填写「高瑞 API Key」。');
+    }
+    const grBase = normalizeBaseUrl(getGaoruiBaseUrl());
+    return gaoruiGenerateNewImage(grBase, grKey, prompt, aspectRatio, numberOfImages, 'nano-banana-pro', nodeResolution, signal);
+  }
+
   const base = normalizeBaseUrl(getOpenAiBaseUrl());
   if (isToApisHost(base)) {
     return toApisGenerateNewImage(prompt, aspectRatio, numberOfImages, modelName, nodeResolution, signal);
@@ -2146,6 +2415,24 @@ export async function openAiEditImage(
       aspectRatio,
       signal
     );
+  }
+
+  if (rawModel === 'gpt-image-2-gaorui') {
+    const grKey = getGaoruiSavedKey().trim();
+    if (!grKey) {
+      throw new Error('未配置高瑞 AI 图像通道。请在「设置 → API」填写「高瑞 API Key」。');
+    }
+    const grBase = normalizeBaseUrl(getGaoruiBaseUrl());
+    return gaoruiEditImage(grBase, grKey, base64Images, prompt, numberOfImages, 'gpt-image-2', aspectRatio, signal);
+  }
+
+  if (rawModel === 'nano-banana-pro-gaorui') {
+    const grKey = getGaoruiSavedKey().trim();
+    if (!grKey) {
+      throw new Error('未配置高瑞 AI 图像通道。请在「设置 → API」填写「高瑞 API Key」。');
+    }
+    const grBase = normalizeBaseUrl(getGaoruiBaseUrl());
+    return gaoruiEditImage(grBase, grKey, base64Images, prompt, numberOfImages, 'nano-banana-pro', aspectRatio, signal);
   }
 
   if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');

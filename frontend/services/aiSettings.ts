@@ -15,6 +15,9 @@ const NEWAPI_BASE_URL_STORAGE_KEY = 'newapi-openai-compatible-base-url-v1';
 /** [codesonline 控制台](https://image.codesonline.dev/personal/docs) OpenAI 兼容图像网关；画布模型 id 为 `gpt-image-2-codesonline`，与 ToAPIs/君澜的 gpt-image-2 分流 */
 const CODESONLINE_IMAGE_API_KEY_STORAGE_KEY = 'codesonline-image-openai-api-key-v1';
 const CODESONLINE_IMAGE_BASE_URL_STORAGE_KEY = 'codesonline-image-openai-base-url-v1';
+/** 高瑞 AI（gaorui.cc）OpenAI 兼容图像网关；画布模型 id 为 `gpt-image-2-gaorui` / `nano-banana-pro-gaorui`，独立通道 */
+const GAORUI_API_KEY_STORAGE_KEY = 'gaorui-openai-api-key-v1';
+const GAORUI_BASE_URL_STORAGE_KEY = 'gaorui-openai-base-url-v1';
 
 export const DEFAULT_OPENAI_BASE_URL = 'https://toapis.com/v1';
 /** 文档：https://stsg17lkjz.apifox.cn/8682367m0 — Base URL 须含 /v1 */
@@ -23,6 +26,8 @@ export const DEFAULT_JUNLAN_BASE_URL = 'https://www.junlanai.com/v1';
 export const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1';
 /** 画布「AI 对话」默认 DeepSeek 模型（与 {@link DEFAULT_DEEPSEEK_BASE_URL} 配合；官方 ID：deepseek-v4-flash / deepseek-v4-pro） */
 export const DEFAULT_DEEPSEEK_CHAT_MODEL_ID = 'deepseek-v4-flash';
+/** 高瑞 AI OpenAI 兼容图像网关根路径（含 /v1） */
+export const DEFAULT_GAORUI_BASE_URL = 'https://gaorui.cc';
 
 /** 旧版存盘中的 model id → 当前官方命名（不在界面展示旧名） */
 export function normalizeDeepSeekChatModelId(modelId: string): string {
@@ -295,6 +300,44 @@ export function setDeepSeekBaseUrl(url: string): void {
   }
 }
 
+/** 高瑞 AI API Key */
+export function getGaoruiSavedKey(): string {
+  try {
+    return localStorage.getItem(GAORUI_API_KEY_STORAGE_KEY)?.trim() || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setGaoruiKey(apiKey: string): void {
+  const normalized = apiKey.trim();
+  try {
+    if (normalized) localStorage.setItem(GAORUI_API_KEY_STORAGE_KEY, normalized);
+    else localStorage.removeItem(GAORUI_API_KEY_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getGaoruiBaseUrl(): string {
+  try {
+    const raw = localStorage.getItem(GAORUI_BASE_URL_STORAGE_KEY)?.trim();
+    return raw || DEFAULT_GAORUI_BASE_URL;
+  } catch {
+    return DEFAULT_GAORUI_BASE_URL;
+  }
+}
+
+export function setGaoruiBaseUrl(url: string): void {
+  const normalized = url.trim();
+  try {
+    if (normalized) localStorage.setItem(GAORUI_BASE_URL_STORAGE_KEY, normalized);
+    else localStorage.removeItem(GAORUI_BASE_URL_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export type AiSettingsSnapshot = {
   provider: AiProvider;
   geminiKey: string;
@@ -308,6 +351,8 @@ export type AiSettingsSnapshot = {
   codesonlineBaseUrl: string;
   deepSeekKey: string;
   deepSeekBaseUrl: string;
+  gaoruiKey: string;
+  gaoruiBaseUrl: string;
 };
 
 export function getAiSettingsSnapshot(): AiSettingsSnapshot {
@@ -324,6 +369,8 @@ export function getAiSettingsSnapshot(): AiSettingsSnapshot {
     codesonlineBaseUrl: getCodesonlineBaseUrl(),
     deepSeekKey: getDeepSeekSavedKey(),
     deepSeekBaseUrl: getDeepSeekBaseUrl(),
+    gaoruiKey: getGaoruiSavedKey(),
+    gaoruiBaseUrl: getGaoruiBaseUrl(),
   };
 }
 
@@ -346,6 +393,9 @@ export type PersistAiSettingsInput = {
   /** DeepSeek 对话专用；不传则保留原值 */
   deepSeekApiKey?: string;
   deepSeekBaseUrl?: string;
+  /** 高瑞 AI 图像专用（画布 id：gpt-image-2-gaorui / nano-banana-pro-gaorui）；不传则保留原值 */
+  gaoruiApiKey?: string;
+  gaoruiBaseUrl?: string;
 };
 
 export function persistAiSettings(opts: PersistAiSettingsInput): void {
@@ -361,4 +411,6 @@ export function persistAiSettings(opts: PersistAiSettingsInput): void {
   if (opts.codesonlineBaseUrl !== undefined) setCodesonlineBaseUrl(opts.codesonlineBaseUrl);
   if (opts.deepSeekApiKey !== undefined) setDeepSeekKey(opts.deepSeekApiKey);
   if (opts.deepSeekBaseUrl !== undefined) setDeepSeekBaseUrl(opts.deepSeekBaseUrl);
+  if (opts.gaoruiApiKey !== undefined) setGaoruiKey(opts.gaoruiApiKey);
+  if (opts.gaoruiBaseUrl !== undefined) setGaoruiBaseUrl(opts.gaoruiBaseUrl);
 }

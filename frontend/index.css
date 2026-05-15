@@ -596,52 +596,14 @@
     overflow: visible;
   }
 
-  /* 能量波扩散 */
+  /* 能量波扩散 - 已禁用旋转效果 */
   .gen-btn-generating::before {
-    content: '';
-    position: absolute;
-    inset: -3px;
-    background: conic-gradient(
-      from 0deg,
-      transparent,
-      rgba(0, 245, 255, 0.6),
-      transparent,
-      rgba(168, 85, 247, 0.6),
-      transparent
-    );
-    border-radius: inherit;
-    animation: energySpin 2s linear infinite;
-    filter: blur(4px);
-    opacity: 0.8;
+    /* 旋转特效已移除 */
   }
 
-  @keyframes energySpin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-  }
-
-  /* 扫描线效果 */
+  /* 扫描线效果 - 已禁用 */
   .gen-btn-generating::after {
-    content: '';
-    position: absolute;
-    top: -100%;
-    left: 0;
-    width: 100%;
-    height: 50%;
-    background: linear-gradient(
-      180deg,
-      transparent 0%,
-      rgba(0, 245, 255, 0.15) 50%,
-      transparent 100%
-    );
-    animation: scanBeam 1.5s ease-in-out infinite;
-  }
-
-  @keyframes scanBeam {
-    0% { top: -50%; opacity: 0; }
-    10% { opacity: 1; }
-    90% { opacity: 1; }
-    100% { top: 100%; opacity: 0; }
+    /* 扫描线特效已移除 */
   }
 
   /* --- 环形进度能量球 --- */

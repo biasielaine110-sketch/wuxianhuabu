@@ -10,6 +10,8 @@ import {
   getOpenAiSavedKey,
   normalizeDeepSeekChatModelId,
   setGeminiKey,
+  getGaoruiBaseUrl,
+  getGaoruiSavedKey,
 } from './aiSettings';
 import {
   chatCompletionHistoryAtBase,
@@ -125,6 +127,12 @@ export const generateNewImage = async (
       return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, signal);
     }
     if (model === 'gpt-image-2-codesonline') {
+      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, signal);
+    }
+    if (model === 'gpt-image-2-gaorui') {
+      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, signal);
+    }
+    if (model === 'nano-banana-pro-gaorui') {
       return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, signal);
     }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {

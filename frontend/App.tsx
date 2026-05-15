@@ -698,7 +698,13 @@ function i2iPresetListForCategory(
     }));
 }
 
-/** 文生图下拉：与设置共用 promptPresets，按分类列出 */
+/** 预设是否属于「故事板」分类（故事板预设可同时出现在文生图和图生图窗口） */
+const STORYBOARD_PRESET_KEYS = new Set(['故事板_A', '故事板_B']);
+function isStoryboardPreset(name: string): boolean {
+  return STORYBOARD_PRESET_KEYS.has(name);
+}
+
+/** 文生图下拉：与设置共用 promptPresets，按分类列出（故事板预设也会出现） */
 function t2iPresetListForCategory(
   cat: T2iPresetCategoryId,
   promptPresets: Record<string, string>,
@@ -707,7 +713,7 @@ function t2iPresetListForCategory(
   return Object.keys(promptPresets)
     .filter(
       (name) =>
-        settingsPresetDomain(name, domainOverrides) === 't2i' &&
+        (settingsPresetDomain(name, domainOverrides) === 't2i' || isStoryboardPreset(name)) &&
         t2iCategoryForPreset(name) === cat
     )
     .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
