@@ -6074,32 +6074,9 @@ export default function App() {
                     style={{ fontSize: '40px', minHeight: '120px' }}
                     onPointerDown={(e) => {
                       e.stopPropagation();
-                      // 长按 >200ms 触发画布抓手平移
-                      const startX = e.clientX, startY = e.clientY;
-                      const cancelRef = { current: false };
-                      const timer = setTimeout(() => {
-                        if (cancelRef.current) return;
-                        // 激活画布平移模式：设置 activePointerType 并开始追踪位置
-                        activePointerTypeRef.current = 'canvas';
-                        lastMousePosRef.current = { x: startX, y: startY };
-                      }, 200);
-                      const cleanup = () => {
-                        cancelRef.current = true;
-                        clearTimeout(timer);
-                        document.removeEventListener('pointerup', cleanup, true);
-                        document.removeEventListener('pointermove', onMove, true);
-                      };
-                      const onMove = (m: PointerEvent) => {
-                        if (!cancelRef.current) {
-                          // 鼠标移动超过 5px 取消长按（可能是滚动或点击）
-                          if (Math.hypot(m.clientX - startX, m.clientY - startY) > 5) {
-                            cancelRef.current = true;
-                            clearTimeout(timer);
-                          }
-                        }
-                      };
-                      document.addEventListener('pointerup', cleanup, true);
-                      document.addEventListener('pointermove', onMove, true);
+                      // 左键按下立即激活画布平移（长按区域内容会穿透拖动画布）
+                      activePointerTypeRef.current = 'canvas';
+                      lastMousePosRef.current = { x: e.clientX, y: e.clientY };
                     }}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
