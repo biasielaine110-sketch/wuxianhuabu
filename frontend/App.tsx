@@ -6073,19 +6073,7 @@ export default function App() {
                     className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] overflow-y-auto leading-relaxed whitespace-pre-wrap break-words"
                     style={{ fontSize: '40px', minHeight: '120px' }}
                     onPointerDown={(e) => {
-                      e.stopPropagation();
-                      // 左键按下立即激活画布平移（长按区域内容会穿透拖动画布）
-                      activePointerTypeRef.current = 'canvas';
-                      lastMousePosRef.current = { x: e.clientX, y: e.clientY };
-                    }}
-                    onDoubleClick={(e) => {
-                      e.stopPropagation();
-                      if (isSelected) {
-                        // 已选中时双击进入编辑模式
-                        setEditingTextNodeIds(prev => { const next = new Set(prev); next.add(node.id); return next; });
-                      } else {
-                        openBigEditor(node.prompt || '', (v) => handleUpdateNode(node.id, { prompt: v }));
-                      }
+                      // 不阻止传播，让节点容器 handleNodePointerDown 处理节点拖拽
                     }}
                   >
                     {node.prompt || <span className="text-gray-500">双击编辑文本</span>}
