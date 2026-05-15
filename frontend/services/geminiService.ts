@@ -136,6 +136,9 @@ export const generateNewImage = async (
     if (model === 'nano-banana-pro-gaorui') {
       return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
     }
+    if (model === 'nano-banana-pro-gaorui-v2') {
+      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
+    }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {
       throw new Error(
         'GPT Image 2（ToAPIs）等需在「设置 → API」中使用 OpenAI 兼容主通道，Base URL 指向 ToAPIs（https://toapis.com/v1）。君澜 / codesonline 通路请分别选择「GPT Image 2（君澜 AI）」「GPT Image 2（codesonline）」并填写对应密钥。'
@@ -228,6 +231,15 @@ export const editExistingImage = async (
       return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, signal);
     }
     if (model === 'gpt-image-2-codesonline') {
+      return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, signal);
+    }
+    if (model === 'gpt-image-2-gaorui') {
+      return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, signal);
+    }
+    if (model === 'nano-banana-pro-gaorui') {
+      return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, signal);
+    }
+    if (model === 'nano-banana-pro-gaorui-v2') {
       return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, signal);
     }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {

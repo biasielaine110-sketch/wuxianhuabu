@@ -2352,6 +2352,26 @@ export async function openAiGenerateNewImage(
     return gaoruiGenerateNewImage(grBase, grKey, prompt, aspectRatio, numberOfImages, 'nano-banana-pro', nodeResolution, quality, signal);
   }
 
+  if (rawModel === 'nano-banana-pro-gaorui-v2') {
+    const grKey = getGaoruiSavedKey().trim();
+    if (!grKey) {
+      throw new Error('未配置高瑞 AI 图像通道。请在「设置 → API」填写「高瑞 API Key」。');
+    }
+    const grBase = normalizeBaseUrl(getGaoruiBaseUrl());
+    // 高瑞 NanoBanana Pro 新版使用标准 OpenAI /v1/images/generations 接口
+    return generateImagesAtOpenAiCompatibleBase(
+      rewriteRemoteOpenAiCompatBaseForBrowserCors(grBase),
+      grKey,
+      prompt,
+      aspectRatio,
+      numberOfImages,
+      'nano-banana-pro',
+      nodeResolution,
+      quality,
+      signal
+    );
+  }
+
   const base = normalizeBaseUrl(getOpenAiBaseUrl());
   if (isToApisHost(base)) {
     return toApisGenerateNewImage(prompt, aspectRatio, numberOfImages, modelName, nodeResolution, signal);
@@ -2465,6 +2485,25 @@ export async function openAiEditImage(
     }
     const grBase = normalizeBaseUrl(getGaoruiBaseUrl());
     return gaoruiEditImage(grBase, grKey, base64Images, prompt, numberOfImages, 'nano-banana-pro', aspectRatio, quality, signal);
+  }
+
+  if (rawModel === 'nano-banana-pro-gaorui-v2') {
+    const grKey = getGaoruiSavedKey().trim();
+    if (!grKey) {
+      throw new Error('未配置高瑞 AI 图像通道。请在「设置 → API」填写「高瑞 API Key」。');
+    }
+    const grBase = normalizeBaseUrl(getGaoruiBaseUrl());
+    return editImagesAtOpenAiCompatibleBase(
+      rewriteRemoteOpenAiCompatBaseForBrowserCors(grBase),
+      grKey,
+      base64Images,
+      prompt,
+      numberOfImages,
+      'nano-banana-pro',
+      aspectRatio,
+      quality,
+      signal
+    );
   }
 
   if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');

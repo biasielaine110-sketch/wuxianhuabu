@@ -58,6 +58,13 @@ export const DEFAULT_CREDIT_PRICING_ROWS: CreditPricingRow[] = [
     credits: 10,
   },
   {
+    id: 'default-row-nano-banana-pro-gaorui-v2',
+    category: '图生图',
+    modelName: 'nano-banana-pro-gaorui-v2',
+    specLabel: '高瑞 AI',
+    credits: 10,
+  },
+  {
     id: 'default-row-gemini-31-flash-2k',
     category: '图生图',
     modelName: 'gemini-3.1-flash-image-preview',
