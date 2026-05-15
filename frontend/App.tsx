@@ -5675,6 +5675,7 @@ export default function App() {
               node={node as ChatNode}
               nodes={nodes}
               edges={edges}
+              isSelected={isSelected}
               eyedropperTargetNodeId={eyedropperTargetNodeId}
               onEyedropperSelect={() => setEyedropperTargetNodeId(node.id)}
               onDeleteEdge={handleDeleteEdge}
@@ -11988,6 +11989,7 @@ interface ChatNodeContentProps {
   node: ChatNode;
   nodes: CanvasNode[];
   edges: Edge[];
+  isSelected: boolean;
   eyedropperTargetNodeId: string | null;
   onEyedropperSelect: () => void;
   onDeleteEdge: (edgeId: string) => void;
@@ -12007,6 +12009,7 @@ function ChatNodeContent({
   node,
   nodes,
   edges,
+  isSelected,
   eyedropperTargetNodeId,
   onEyedropperSelect,
   onDeleteEdge,
@@ -12161,7 +12164,7 @@ function ChatNodeContent({
         </div>
         <textarea
           className="flex-1 w-full resize-none rounded-lg border border-[#444] bg-[#252525] p-4 text-gray-200 outline-none focus:border-rose-500"
-          style={{ fontSize: fs(14) }}
+          style={{ fontSize: fs(14), overflowY: 'auto' }}
           value={bigInputDraft}
           onChange={(e) => setBigInputDraft(e.target.value)}
           autoFocus
@@ -12291,8 +12294,8 @@ function ChatNodeContent({
 
       {/* 模型选择 */}
       <div
-        className="flex items-center gap-2 px-3 py-2 bg-[#252525] border-b border-[#333]"
-        style={{ fontSize: 27, order: 3 }}
+        className={`flex items-center gap-2 px-3 py-2 bg-[#252525] border-b border-[#333] ${isSelected ? '' : 'hidden'}`}
+        style={{ fontSize: 45, order: 3 }}
       >
         <span className="text-gray-400">模型:</span>
         <select
@@ -12317,11 +12320,11 @@ function ChatNodeContent({
           <option value="gemini-3-pro-preview">Gemini 3 Pro</option>
           </optgroup>
         </select>
-        <label className="flex items-center gap-1 shrink-0 text-gray-500" style={{ fontSize: fs(10) }}>
+        <label className="flex items-center gap-1 shrink-0 text-gray-500" style={{ fontSize: 45 }}>
           <span className="whitespace-nowrap">字号</span>
           <select
-            className="max-w-[76px] rounded border border-[#444] bg-[#222222] px-1 py-0.5 text-gray-200 outline-none focus:border-rose-500"
-            style={{ fontSize: fs(10) }}
+            className="chat-fontsize-select max-w-[120px] rounded border border-[#444] bg-[#222222] px-1.5 py-0.5 text-gray-200 outline-none focus:border-rose-500"
+            style={{ fontSize: 45 }}
             value={chatFontPx}
             onChange={(e) => persistChatFontPx(Number(e.target.value))}
             onPointerDown={(e) => e.stopPropagation()}
@@ -12355,11 +12358,10 @@ function ChatNodeContent({
           if (!target.closest('.chat-bubble-wrap')) return;
           e.stopPropagation();
         }}
-        onWheel={(e) => e.stopPropagation()}
       >
         <style>{`
           .chat-messages::-webkit-scrollbar {
-            width: ${fs(6)}px;
+            width: 40px;
           }
           .chat-messages::-webkit-scrollbar-track {
             background: #1a1a1a;
@@ -12371,6 +12373,13 @@ function ChatNodeContent({
           }
           .chat-messages::-webkit-scrollbar-thumb:hover {
             background: #555;
+          }
+          /* 滚动条始终可见 */
+          .chat-messages {
+            overflow-y: scroll !important;
+          }
+          .chat-messages::-webkit-scrollbar-thumb {
+            visibility: visible !important;
           }
         `}</style>
         {messages.length === 0 && (
@@ -12629,6 +12638,7 @@ function ChatNodeContent({
               fontSize: chatFontScaled,
               minHeight: fs(108),
               height: node.chatInputHeight ?? fs(152),
+              overflowY: 'auto',
             }}
             value={node.prompt || ''}
             onChange={(e) => onUpdate({ prompt: e.target.value })}
