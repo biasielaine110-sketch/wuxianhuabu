@@ -940,7 +940,7 @@ function I2iPresetCategorySelect({
         <span className="text-[10px] text-gray-500 shrink-0">分类</span>
         <select
           className="i2i-preset-select bg-[#222222] border border-[#444] rounded px-2 py-1 text-gray-300 outline-none focus:border-amber-500 min-w-[72px]"
-          style={{ fontSize: 30 }}          
+          style={{ fontSize: 20 }}          
           value={category}
           onPointerDown={(e) => e.stopPropagation()}
           onChange={(e) => {
@@ -1029,7 +1029,7 @@ function T2iPresetCategorySelect({
         <span className="text-[10px] text-gray-500 shrink-0">分类</span>
         <select
           className="t2i-preset-select bg-[#222222] border border-[#444] rounded px-2 py-1 text-gray-300 outline-none focus:border-purple-500 min-w-[72px]"
-          style={{ fontSize: 30 }}          
+          style={{ fontSize: 20 }}          
           value={category}
           onPointerDown={(e) => e.stopPropagation()}
           onChange={(e) => {

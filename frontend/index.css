@@ -416,16 +416,30 @@
   }
 
   /**
-   * 图生图：分类 / 预设下拉 — 统一 25px
+   * 图生图：分类 / 预设下拉 — 统一 20px
    */
+  .canvas-node-font-195 select.i2i-preset-select,
+  .canvas-node-font-195 select.i2i-preset-select option,
+  .canvas-node-font-195 select.i2i-preset-select optgroup {
+    font-size: 20px !important;
+  }
   .canvas-node-font-195 select.i2i-preset-select {
-    font-size: 25px !important;
     line-height: 1.1 !important;
   }
   .canvas-node-font-195 select.i2i-preset-select option,
   .canvas-node-font-195 select.i2i-preset-select optgroup {
-    font-size: 25px !important;
     line-height: 1.35 !important;
+    font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+  }
+
+  /**
+   * 文生图：分类 / 预设下拉 — 统一 20px
+   */
+  .canvas-node-font-195 select.t2i-preset-select,
+  .canvas-node-font-195 select.t2i-preset-select option,
+  .canvas-node-font-195 select.t2i-preset-select optgroup {
+    font-size: 20px !important;
+    line-height: 1.1 !important;
     font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
   }
 
