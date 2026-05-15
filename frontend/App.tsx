@@ -12345,10 +12345,10 @@ function ChatNodeContent({
       </div>
 
       {/* 消息列表 : 底部输入区（功能+引用+文本框）垂直空间 = 2 : 1 */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden" style={{ order: 1 }}>
+      <div className="flex-1 grid grid-rows-[2fr_1fr] overflow-hidden" style={{ order: 1 }}>
       <div
-        className="chat-messages min-h-0 flex-[2_1_0%] overflow-y-scroll p-3 space-y-3 overscroll-contain"
-        style={{ userSelect: 'text', maxHeight: '100%' }}
+        className="chat-messages overflow-y-scroll p-3 space-y-3 overscroll-contain min-h-0"
+        style={{ userSelect: 'text' }}
         onPointerDown={(e) => {
           const target = e.target as HTMLElement;
           // 点击消息气泡区域或可交互元素阻止冒泡，避免触发节点拖拽
@@ -12567,8 +12567,8 @@ function ChatNodeContent({
         )}
       </div>
 
-      {/* 输入区域（与上方消息区 flex 2:1） */}
-      <div className="flex min-h-0 flex-[1_1_0%] flex-col overflow-y-auto border-t border-[#333] bg-[#252525] p-2">
+      {/* 输入区域（与上方消息区 grid 2:1） */}
+      <div className="flex min-h-0 flex-col overflow-y-auto border-t border-[#333] bg-[#252525] p-2">
         {/* 快捷功能：置于文字输入框上方 */}
         <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-md border border-[#333] bg-[#3A3A3A] px-2 py-1.5" style={{ fontSize: fs(10) }}>
           <span className="shrink-0 text-gray-500">功能</span>
