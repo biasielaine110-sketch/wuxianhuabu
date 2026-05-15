@@ -2358,18 +2358,8 @@ export async function openAiGenerateNewImage(
       throw new Error('未配置高瑞 AI 图像通道。请在「设置 → API」填写「高瑞 API Key」。');
     }
     const grBase = normalizeBaseUrl(getGaoruiBaseUrl());
-    // 高瑞 NanoBanana Pro 新版使用标准 OpenAI /v1/images/generations 接口
-    return generateImagesAtOpenAiCompatibleBase(
-      rewriteRemoteOpenAiCompatBaseForBrowserCors(grBase),
-      grKey,
-      prompt,
-      aspectRatio,
-      numberOfImages,
-      'nano-banana-pro',
-      nodeResolution,
-      quality,
-      signal
-    );
+    // 高瑞 NanoBanana Pro 使用异步 /nano-banana 接口 + /fetch 轮询
+    return gaoruiGenerateNewImage(grBase, grKey, prompt, aspectRatio, numberOfImages, 'nano-banana-pro', nodeResolution, quality, signal);
   }
 
   const base = normalizeBaseUrl(getOpenAiBaseUrl());
@@ -2493,17 +2483,7 @@ export async function openAiEditImage(
       throw new Error('未配置高瑞 AI 图像通道。请在「设置 → API」填写「高瑞 API Key」。');
     }
     const grBase = normalizeBaseUrl(getGaoruiBaseUrl());
-    return editImagesAtOpenAiCompatibleBase(
-      rewriteRemoteOpenAiCompatBaseForBrowserCors(grBase),
-      grKey,
-      base64Images,
-      prompt,
-      numberOfImages,
-      'nano-banana-pro',
-      aspectRatio,
-      quality,
-      signal
-    );
+    return gaoruiEditImage(grBase, grKey, base64Images, prompt, numberOfImages, 'nano-banana-pro', aspectRatio, quality, signal);
   }
 
   if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
