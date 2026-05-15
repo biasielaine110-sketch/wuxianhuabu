@@ -6,7 +6,6 @@ import {
   DEFAULT_CODESONLINE_IMAGE_BASE_URL,
   DEFAULT_DEEPSEEK_BASE_URL,
   DEFAULT_DEEPSEEK_CHAT_MODEL_ID,
-  DEFAULT_GAORUI_BASE_URL,
   DEFAULT_JUNLAN_BASE_URL,
   DEFAULT_NEWAPI_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
@@ -558,11 +557,13 @@ const I2I_PRESET_CATEGORY_OPTIONS: { id: I2iPresetCategoryId; label: string }[] 
   { id: 'other', label: '其他' },
 ];
 
+/** 通用模板预设键 */
+const COMMON_TEMPLATE_KEY = '通用模板';
+
 /** 文生图预设分类 */
-type T2iPresetCategoryId = 'template' | 'storyboard';
+type T2iPresetCategoryId = 'storyboard';
 
 const T2I_PRESET_CATEGORY_OPTIONS: { id: T2iPresetCategoryId; label: string }[] = [
-  { id: 'template', label: '模板' },
   { id: 'storyboard', label: '故事板' },
 ];
 
@@ -603,9 +604,6 @@ const I2I_PRESET_FLAT = (Object.keys(I2I_PRESETS_BY_CATEGORY) as I2iPresetCatego
 
 /** 文生图预设分类数据 */
 const T2I_PRESETS_BY_CATEGORY: Record<T2iPresetCategoryId, { key: string; label: string }[]> = {
-  template: [
-    { key: '通用模板', label: '通用模板' },
-  ],
   storyboard: [
     { key: '故事板_A', label: '故事板_A' },
     { key: '故事板_B', label: '故事板_B' },
@@ -618,11 +616,11 @@ const T2I_PRESET_FLAT = (Object.keys(T2I_PRESETS_BY_CATEGORY) as T2iPresetCatego
 );
 
 function t2iCategoryForPreset(preset: string | undefined): T2iPresetCategoryId {
-  if (!preset) return 'template';
+  if (!preset) return 'storyboard';
   for (const id of Object.keys(T2I_PRESETS_BY_CATEGORY) as T2iPresetCategoryId[]) {
     if (T2I_PRESETS_BY_CATEGORY[id].some((p) => p.key === preset)) return id;
   }
-  return 'template';
+  return 'storyboard';
 }
 
 function i2iCategoryForPreset(preset: string | undefined): I2iPresetCategoryId {
@@ -917,6 +915,8 @@ function I2iPresetCategorySelect({
   const presetSelectValue =
     activePreset && list.some((p) => p.key === activePreset) ? activePreset : '';
 
+  const commonTemplateActive = activePreset === COMMON_TEMPLATE_KEY;
+
   return (
     <div className="flex flex-col gap-1.5 p-2 shrink-0 border-b border-[#333]">
       {activePreset && (
@@ -971,6 +971,24 @@ function I2iPresetCategorySelect({
             </option>
           ))}
         </select>
+        <span className="text-[10px] text-gray-500 shrink-0">通用模板</span>
+        <select
+          className="i2i-preset-select bg-[#222222] border border-[#444] rounded px-2 py-1 text-gray-300 outline-none focus:border-amber-500 min-w-[72px]"
+          style={{ fontSize: 20, color: commonTemplateActive ? '#06b6d4' : undefined }}
+          value={commonTemplateActive ? COMMON_TEMPLATE_KEY : ''}
+          onPointerDown={(e) => e.stopPropagation()}
+          onChange={(e) => {
+            const key = e.target.value;
+            if (key) {
+              onApplyPreset(nodeId, key);
+            } else {
+              onClearPreset(nodeId);
+            }
+          }}
+        >
+          <option value="">未使用</option>
+          <option value={COMMON_TEMPLATE_KEY}>通用模板</option>
+        </select>
       </div>
     </div>
   );
@@ -1005,6 +1023,8 @@ function T2iPresetCategorySelect({
   );
   const presetSelectValue =
     activePreset && list.some((p) => p.key === activePreset) ? activePreset : '';
+
+  const commonTemplateActive = activePreset === COMMON_TEMPLATE_KEY;
 
   return (
     <div className="flex flex-col gap-1.5 p-2 shrink-0 border-b border-[#333]">
@@ -1059,6 +1079,24 @@ function T2iPresetCategorySelect({
               {p.label}
             </option>
           ))}
+        </select>
+        <span className="text-[10px] text-gray-500 shrink-0">通用模板</span>
+        <select
+          className="t2i-preset-select bg-[#222222] border border-[#444] rounded px-2 py-1 text-gray-300 outline-none focus:border-purple-500 min-w-[72px]"
+          style={{ fontSize: 20, color: commonTemplateActive ? '#a855f7' : undefined }}
+          value={commonTemplateActive ? COMMON_TEMPLATE_KEY : ''}
+          onPointerDown={(e) => e.stopPropagation()}
+          onChange={(e) => {
+            const key = e.target.value;
+            if (key) {
+              onApplyPreset(nodeId, key);
+            } else {
+              onClearPreset(nodeId);
+            }
+          }}
+        >
+          <option value="">未使用</option>
+          <option value={COMMON_TEMPLATE_KEY}>通用模板</option>
         </select>
       </div>
     </div>
@@ -1612,8 +1650,8 @@ export default function App() {
   const [promptPresetDomainOverrides, setPromptPresetDomainOverrides] = useState<Record<string, PresetDomainId>>({});
   /** 设置 → 预设：仅「图生图」大类下使用 — 角色/场景/道具/其他 */
   const [settingsPresetCategoryTab, setSettingsPresetCategoryTab] = useState<I2iPresetCategoryId>('character');
-  /** 设置 → 预设：仅「文生图」大类下使用 — 模板/故事板 */
-  const [settingsT2iPresetCategoryTab, setSettingsT2iPresetCategoryTab] = useState<T2iPresetCategoryId>('template');
+  /** 设置 → 预设：仅「文生图」大类下使用 — 故事板 */
+  const [settingsT2iPresetCategoryTab, setSettingsT2iPresetCategoryTab] = useState<T2iPresetCategoryId>('storyboard');
   /** 设置 → 预设：密码验证通过后的本会话内可自由编辑、复制/重命名/删除不再弹密码 */
   const [settingsPresetAuthSession, setSettingsPresetAuthSession] = useState(false);
   /** 设置 → 预设：密码校验弹层（复制 / 重命名 / 删除 / 解锁 / 添加 前弹出） */
@@ -1664,8 +1702,6 @@ export default function App() {
   const [newApiKeyInput, setNewApiKeyInput] = useState(() => getAiSettingsSnapshot().newApiKey);
   const [codesonlineBaseInput, setCodesonlineBaseInput] = useState(() => getAiSettingsSnapshot().codesonlineBaseUrl);
   const [codesonlineKeyInput, setCodesonlineKeyInput] = useState(() => getAiSettingsSnapshot().codesonlineKey);
-  const [gaoruiKeyInput, setGaoruiKeyInput] = useState(() => getAiSettingsSnapshot().gaoruiKey);
-  const [gaoruiBaseInput, setGaoruiBaseInput] = useState(() => getAiSettingsSnapshot().gaoruiBaseUrl);
 
   useEffect(() => {
     const s = getAiSettingsSnapshot();
@@ -1680,8 +1716,6 @@ export default function App() {
     setNewApiKeyInput(s.newApiKey);
     setCodesonlineBaseInput(s.codesonlineBaseUrl);
     setCodesonlineKeyInput(s.codesonlineKey);
-    setGaoruiKeyInput(s.gaoruiKey);
-    setGaoruiBaseInput(s.gaoruiBaseUrl);
   }, []);
 
   useEffect(() => {
@@ -2582,7 +2616,7 @@ export default function App() {
       if (settingsPresetDomainTab === 'i2i') {
         setSettingsPresetCategoryTab('other');
       } else if (settingsPresetDomainTab === 't2i') {
-        setSettingsT2iPresetCategoryTab('template');
+        setSettingsT2iPresetCategoryTab('storyboard');
       }
     } else if (name && promptPresets[name]) {
       window.alert('已存在同名预设');
@@ -5713,7 +5747,7 @@ export default function App() {
           {(node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' || node.type === 'panorama') && (
             <>
               <select className="nodemodel-select bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500 flex-1 min-w-[90px]" value={node.model || defaultCanvasImageModel()} onChange={(e) => { const m = e.target.value; const patch: Partial<CanvasNode> = { model: m }; if (isFireflyNewApiImageModelId(m)) patch.resolution = '2k'; else if (isGptImage2CanvasModelId(m)) patch.resolution = '4k'; handleUpdateNode(node.id, patch); }} onPointerDown={e => e.stopPropagation()}>
-                {(node.type === 't2i' || node.type === 'panoramaT2i') ? (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option><option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option><option value="imagen-4">Imagen 4</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option><option value="nano-banana-pro-gaorui-v2">Nano-Banana Pro（高瑞 AI）</option></>) : (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option><option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option><option value="nano-banana-pro-gaorui-v2">Nano-Banana Pro（高瑞 AI）</option></>)}
+                {(node.type === 't2i' || node.type === 'panoramaT2i') ? (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option><option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option><option value="imagen-4">Imagen 4</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option></>) : (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option><option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option></>)}
               </select>
               <div className="nodemeta-skip-scale flex items-center gap-0.5">
                 <select className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.aspectRatio || (node.type === 'panoramaT2i' ? '2:1' : '16:9')} onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })} onPointerDown={e => e.stopPropagation()}>
@@ -7960,27 +7994,6 @@ export default function App() {
                     />
                   </div>
 
-                  {/* ⑥ 高瑞 AI */}
-                  <div className="mt-5 pt-4 border-t border-[#333]">
-                    <h3 className="text-sm font-semibold text-gray-200 mb-2">高瑞 AI（gaorui.cc）</h3>
-                    <span hidden><label className="text-xs text-gray-500 block mb-1">高瑞 AI Base URL</label>
-                    <input
-                      type="text"
-                      readOnly
-                      value={gaoruiBaseInput}
-                      placeholder={DEFAULT_GAORUI_BASE_URL || 'https://gaorui.cc'}
-                      className="w-full mb-3 bg-[#252525] border border-[#333] rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
-                    /></span>
-                    <label className="text-xs text-gray-500 block mb-1">高瑞 AI API Key</label>
-                    <input
-                      type="password"
-                      value={gaoruiKeyInput}
-                      onChange={(e) => setGaoruiKeyInput(e.target.value)}
-                      placeholder="sk-..."
-                      className="w-full bg-[#222222] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-orange-600 transition-colors text-sm"
-                    />
-                  </div>
-
                   <div className="flex gap-3 mt-4">
                     <button
                       onClick={() => setShowSettingsModal(false)}
@@ -8003,8 +8016,6 @@ export default function App() {
                           newApiBaseUrl: newApiBaseInput.trim(),
                           deepSeekApiKey: deepSeekKeyInput.trim(),
                           deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
-                          gaoruiApiKey: gaoruiKeyInput.trim(),
-                          gaoruiBaseUrl: gaoruiBaseInput.trim() || DEFAULT_GAORUI_BASE_URL,
                         });
                         initGeminiClientFromStorage();
                           setShowSettingsModal(false);
