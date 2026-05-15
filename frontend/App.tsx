@@ -658,8 +658,6 @@ const DEFAULT_CHAT_PRESET_KEYS = new Set([
 
 /** 内置文生图预设键（默认归入文生图类） */
 const DEFAULT_T2I_PRESET_KEYS = new Set([
-  '故事板_A',
-  '故事板_B',
   '通用模板',
 ]);
 
