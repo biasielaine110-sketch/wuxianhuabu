@@ -12201,7 +12201,7 @@ function ChatNodeContent({
   return (
     <div className="flex flex-col h-full bg-[#1a1a1a] rounded-b-xl overflow-hidden">
       {/* 参考区：图片 + 视频 */}
-      <div className="flex items-center gap-2 px-2 py-1.5 bg-[#252525] border-b border-[#333] shrink-0" style={{ fontSize: fs(10), order: 2 }}>
+      <div className={`flex items-center gap-2 px-2 py-1.5 bg-[#252525] border-b border-[#333] shrink-0 ${isSelected ? '' : 'hidden'}`} style={{ fontSize: fs(10), order: 2 }}>
         <span className="text-gray-400 shrink-0">参考:</span>
         <span className="text-green-400 font-medium shrink-0">
           {totalRefImages}图
@@ -12348,9 +12348,12 @@ function ChatNodeContent({
       </div>
 
       {/* 消息列表 : 底部输入区（功能+引用+文本框）垂直空间 = 2 : 1 */}
-      <div className="flex-1 grid grid-rows-[2fr_1fr] overflow-hidden" style={{ order: 1 }}>
       <div
-        className="chat-messages overflow-y-scroll p-3 space-y-3 overscroll-contain min-h-0"
+        className={`flex-1 ${isSelected ? 'grid grid-rows-[2fr_1fr]' : 'flex flex-col'} overflow-hidden`}
+        style={{ order: 1 }}
+      >
+      <div
+        className={`chat-messages overflow-y-scroll p-3 space-y-3 overscroll-contain ${isSelected ? 'min-h-0' : 'flex-1 min-h-0'}`}
         style={{ userSelect: 'text' }}
         onPointerDown={(e) => {
           const target = e.target as HTMLElement;
@@ -12577,9 +12580,9 @@ function ChatNodeContent({
       </div>
 
       {/* 输入区域（与上方消息区 grid 2:1） */}
-      <div className="flex min-h-0 flex-col overflow-y-auto border-t border-[#333] bg-[#252525] p-2">
+      <div className={`flex min-h-0 flex-col overflow-y-auto border-t border-[#333] bg-[#252525] p-2 ${isSelected ? '' : 'hidden'}`}>
         {/* 快捷功能：置于文字输入框上方 */}
-        <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-md border border-[#333] bg-[#3A3A3A] px-2 py-1.5" style={{ fontSize: fs(10) }}>
+        <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-md border border-[#333] bg-[#3A3A3A] px-2 py-1.5" style={{ fontSize: 50 }}>
           <span className="shrink-0 text-gray-500">功能</span>
           {CHAT_FEATURE_BUTTON_SPECS.map((btn) => {
             const presetBody = promptPresets[btn.presetKey] ?? '';
