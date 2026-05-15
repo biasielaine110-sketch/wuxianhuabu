@@ -308,6 +308,7 @@ async function gaoruiGenerateNewImage(
   numberOfImages: number,
   model: string,
   nodeResolution?: string,
+  _quality?: string,
   signal?: AbortSignal
 ): Promise<string[]> {
   const out: string[] = [];
@@ -375,6 +376,7 @@ async function gaoruiEditImage(
   numberOfImages: number,
   model: string,
   aspectRatio: string,
+  _quality?: string,
   signal?: AbortSignal
 ): Promise<string[]> {
   if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
@@ -1858,6 +1860,7 @@ async function generateImagesAtOpenAiCompatibleBase(
   numberOfImages: number,
   resolvedModel: string,
   nodeResolution?: string,
+  quality?: string,
   signal?: AbortSignal
 ): Promise<string[]> {
   if (isYunzhiOpenAiCompatBase(baseNorm) && resolvedModel.startsWith('firefly-')) {
@@ -1883,16 +1886,21 @@ async function generateImagesAtOpenAiCompatibleBase(
   if (onePerRequest) {
     for (let i = 0; i < numberOfImages; i++) {
       assertNotAborted(signal);
+      const body: Record<string, unknown> = {
+        model: resolvedModel,
+        prompt: enhancedPrompt,
+        n: 1,
+        size,
+        response_format: 'b64_json',
+      };
+      // GPT Image 2 系列支持 quality 参数
+      if (quality && resolvedModel === 'gpt-image-2') {
+        body.quality = quality;
+      }
       const json = await postJsonAtBase<Record<string, unknown>>(
         baseNorm,
         '/images/generations',
-        {
-          model: resolvedModel,
-          prompt: enhancedPrompt,
-          n: 1,
-          size,
-          response_format: 'b64_json',
-        },
+        body,
         apiKey
       );
       out.push(await openAiStyleGenerationJsonToBase64(json, signal, apiKey));
@@ -2173,6 +2181,7 @@ async function editImagesAtOpenAiCompatibleBase(
   numberOfImages: number,
   resolvedEditModel: string,
   aspectRatio: string,
+  quality?: string,
   signal?: AbortSignal
 ): Promise<string[]> {
   if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
@@ -2219,6 +2228,10 @@ async function editImagesAtOpenAiCompatibleBase(
     if (resolvedEditModel !== 'dall-e-2') {
       form.append('response_format', 'b64_json');
     }
+    // GPT Image 2 系列支持 quality 参数
+    if (quality && resolvedEditModel === 'gpt-image-2') {
+      form.append('quality', quality);
+    }
 
     const res = await fetch(`${rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm)}/images/edits`, {
       method: 'POST',
@@ -2251,6 +2264,7 @@ export async function openAiGenerateNewImage(
   numberOfImages: number,
   modelName: string,
   nodeResolution?: string,
+  quality?: string,
   signal?: AbortSignal
 ): Promise<string[]> {
   const rawModel = (modelName || '').trim();
@@ -2275,6 +2289,7 @@ export async function openAiGenerateNewImage(
       numberOfImages,
       upstream,
       nodeResolution,
+      quality,
       signal
     );
   }
@@ -2282,7 +2297,7 @@ export async function openAiGenerateNewImage(
   if (rawModel === 'gpt-image-2-junlan') {
     const jlKey = getJunlanSavedKey().trim();
     if (!jlKey) {
-      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, 'gpt-image-2', nodeResolution, signal);
+      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, 'gpt-image-2', nodeResolution, quality, signal);
     }
     const jlBase = normalizeBaseUrl(getJunlanBaseUrl());
     return generateImagesAtOpenAiCompatibleBase(
@@ -2293,6 +2308,7 @@ export async function openAiGenerateNewImage(
       numberOfImages,
       'gpt-image-2',
       nodeResolution,
+      quality,
       signal
     );
   }
@@ -2313,6 +2329,7 @@ export async function openAiGenerateNewImage(
       numberOfImages,
       'gpt-image-2',
       nodeResolution,
+      quality,
       signal
     );
   }
@@ -2323,7 +2340,7 @@ export async function openAiGenerateNewImage(
       throw new Error('未配置高瑞 AI 图像通道。请在「设置 → API」填写「高瑞 API Key」。');
     }
     const grBase = normalizeBaseUrl(getGaoruiBaseUrl());
-    return gaoruiGenerateNewImage(grBase, grKey, prompt, aspectRatio, numberOfImages, 'gpt-image-2', nodeResolution, signal);
+    return gaoruiGenerateNewImage(grBase, grKey, prompt, aspectRatio, numberOfImages, 'gpt-image-2', nodeResolution, quality, signal);
   }
 
   if (rawModel === 'nano-banana-pro-gaorui') {
@@ -2332,7 +2349,7 @@ export async function openAiGenerateNewImage(
       throw new Error('未配置高瑞 AI 图像通道。请在「设置 → API」填写「高瑞 API Key」。');
     }
     const grBase = normalizeBaseUrl(getGaoruiBaseUrl());
-    return gaoruiGenerateNewImage(grBase, grKey, prompt, aspectRatio, numberOfImages, 'nano-banana-pro', nodeResolution, signal);
+    return gaoruiGenerateNewImage(grBase, grKey, prompt, aspectRatio, numberOfImages, 'nano-banana-pro', nodeResolution, quality, signal);
   }
 
   const base = normalizeBaseUrl(getOpenAiBaseUrl());
@@ -2351,6 +2368,7 @@ export async function openAiGenerateNewImage(
     numberOfImages,
     model,
     nodeResolution,
+    quality,
     signal
   );
 }
@@ -2362,6 +2380,7 @@ export async function openAiEditImage(
   modelName: string,
   aspectRatio: string,
   nodeResolution?: string,
+  quality?: string,
   signal?: AbortSignal
 ): Promise<string[]> {
   const rawModel = (modelName || '').trim();
@@ -2393,7 +2412,7 @@ export async function openAiEditImage(
   if (rawModel === 'gpt-image-2-junlan') {
     const jlKey = getJunlanSavedKey().trim();
     if (!jlKey) {
-      return openAiEditImage(base64Images, prompt, numberOfImages, 'gpt-image-2', aspectRatio, nodeResolution, signal);
+      return openAiEditImage(base64Images, prompt, numberOfImages, 'gpt-image-2', aspectRatio, nodeResolution, quality, signal);
     }
     const jlBase = normalizeBaseUrl(getJunlanBaseUrl());
     return editImagesAtOpenAiCompatibleBase(
@@ -2404,6 +2423,7 @@ export async function openAiEditImage(
       numberOfImages,
       'gpt-image-2',
       aspectRatio,
+      quality,
       signal
     );
   }
@@ -2424,6 +2444,7 @@ export async function openAiEditImage(
       numberOfImages,
       'gpt-image-2',
       aspectRatio,
+      quality,
       signal
     );
   }
@@ -2434,7 +2455,7 @@ export async function openAiEditImage(
       throw new Error('未配置高瑞 AI 图像通道。请在「设置 → API」填写「高瑞 API Key」。');
     }
     const grBase = normalizeBaseUrl(getGaoruiBaseUrl());
-    return gaoruiEditImage(grBase, grKey, base64Images, prompt, numberOfImages, 'gpt-image-2', aspectRatio, signal);
+    return gaoruiEditImage(grBase, grKey, base64Images, prompt, numberOfImages, 'gpt-image-2', aspectRatio, quality, signal);
   }
 
   if (rawModel === 'nano-banana-pro-gaorui') {
@@ -2443,7 +2464,7 @@ export async function openAiEditImage(
       throw new Error('未配置高瑞 AI 图像通道。请在「设置 → API」填写「高瑞 API Key」。');
     }
     const grBase = normalizeBaseUrl(getGaoruiBaseUrl());
-    return gaoruiEditImage(grBase, grKey, base64Images, prompt, numberOfImages, 'nano-banana-pro', aspectRatio, signal);
+    return gaoruiEditImage(grBase, grKey, base64Images, prompt, numberOfImages, 'nano-banana-pro', aspectRatio, quality, signal);
   }
 
   if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
@@ -2462,6 +2483,7 @@ export async function openAiEditImage(
     numberOfImages,
     model,
     aspectRatio,
+    quality,
     signal
   );
 }

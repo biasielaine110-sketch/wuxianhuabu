@@ -82,6 +82,7 @@ export interface CanvasNode {
   error?: string;
   aspectRatio?: string; // e.g., '1:1', '16:9'
   resolution?: string; // '1k', '2k', '4k'
+  quality?: string; // 'low', 'medium', 'high', 'auto' — GPT Image 2 等模型画质
   imageCount?: number; // 1, 2, or 4
   model?: string; // t2i/i2i：含 gemini-3.1-flash-image-preview（ToAPIs 异步）等
   viewMode?: 'single' | 'grid'; // Display mode for multiple images

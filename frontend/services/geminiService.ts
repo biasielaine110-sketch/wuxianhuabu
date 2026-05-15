@@ -112,28 +112,29 @@ export const generateNewImage = async (
   modelName: string = 'imagen-4',
   /** 画布节点 1k/2k/4k；OpenAI 兼容 + ToAPIs 且 gemini-3.1-flash-image-preview 时映射为 metadata.resolution */
   outputResolution?: string,
+  quality?: string,
   signal?: AbortSignal
 ): Promise<string[]> => {
   try {
     if (getAiProvider() === 'openai-compatible') {
-      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, modelName, outputResolution, signal);
+      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, modelName, outputResolution, quality, signal);
     }
 
     const model = modelName || 'imagen-4';
     if (model === 'firefly-nano-banana-pro-newapi' || model === 'firefly-nano-banana2-newapi') {
-      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, signal);
+      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
     }
     if (model === 'gpt-image-2-junlan') {
-      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, signal);
+      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
     }
     if (model === 'gpt-image-2-codesonline') {
-      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, signal);
+      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
     }
     if (model === 'gpt-image-2-gaorui') {
-      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, signal);
+      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
     }
     if (model === 'nano-banana-pro-gaorui') {
-      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, signal);
+      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
     }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {
       throw new Error(
@@ -210,23 +211,24 @@ export const editExistingImage = async (
   modelName: string = 'gemini-3.1-flash-image-preview',
   aspectRatio: string = '1:1',
   outputResolution?: string,
+  quality?: string,
   signal?: AbortSignal
 ): Promise<string[]> => {
   try {
     if (getAiProvider() === 'openai-compatible') {
-      return openAiEditImage(base64Images, prompt, numberOfImages, modelName, aspectRatio, outputResolution, signal);
+      return openAiEditImage(base64Images, prompt, numberOfImages, modelName, aspectRatio, outputResolution, quality, signal);
     }
 
     const results: string[] = [];
     const model = modelName || 'gemini-3.1-flash-image-preview';
     if (model === 'firefly-nano-banana-pro-newapi' || model === 'firefly-nano-banana2-newapi') {
-      return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, signal);
+      return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, signal);
     }
     if (model === 'gpt-image-2-junlan') {
-      return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, signal);
+      return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, signal);
     }
     if (model === 'gpt-image-2-codesonline') {
-      return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, signal);
+      return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, signal);
     }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {
       throw new Error(

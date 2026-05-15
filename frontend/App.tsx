@@ -1175,6 +1175,19 @@ export default function App() {
   const draftDiskModalRef = useRef<DraftDiskModalState>(null);
   const [draftDiskModal, setDraftDiskModal] = useState<DraftDiskModalState>(null);
 
+  // 全局大编辑框（所有节点的 textarea 双击弹出）
+  const [bigEditorOpen, setBigEditorOpen] = useState(false);
+  const [bigEditorValue, setBigEditorValue] = useState('');
+  const bigEditorOnSaveRef = useRef<((v: string) => void) | null>(null);
+  const bigEditorLastClickRef = useRef(0);
+
+  /** 双击 textarea 时调用：打开全局大编辑框 */
+  const openBigEditor = useCallback((current: string, onSave: (v: string) => void) => {
+    setBigEditorValue(current);
+    bigEditorOnSaveRef.current = onSave;
+    setBigEditorOpen(true);
+  }, []);
+
   /** 与画布/项目 state 同步，供保存与列表操作读取「最新」快照，避免闭包滞后 */
   const activeProjectIdRef = useRef(activeProjectId);
   const projectsRef = useRef(projects);
@@ -4271,6 +4284,7 @@ export default function App() {
           node.imageCount || 1,
           node.model || defaultCanvasImageModel(),
           node.resolution,
+          node.quality,
           ac.signal
         );
       } else if (node.type === 'i2i' || node.type === 'panoramaT2i') {
@@ -4289,6 +4303,7 @@ export default function App() {
           node.model || defaultCanvasImageModel(),
           aspectRatio,
           node.resolution,
+          node.quality,
           ac.signal
         );
       }
@@ -5673,6 +5688,7 @@ export default function App() {
               promptPresets={promptPresets}
               generationMmSs={node.isGenerating ? genTimeMmSs : undefined}
               generationSeconds={node.isGenerating ? genElapsedSec : undefined}
+              onOpenBigEditor={openBigEditor}
             />
           )}
 
@@ -5692,6 +5708,14 @@ export default function App() {
                 </select>
                 <select className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.resolution || '4k'} onChange={(e) => handleUpdateNode(node.id, { resolution: e.target.value })} onPointerDown={e => e.stopPropagation()}><option value="4k">4K</option><option value="2k">2K</option><option value="1k">1K</option></select>
                 <select className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.imageCount || 1} onChange={(e) => handleUpdateNode(node.id, { imageCount: parseInt(e.target.value) })} onPointerDown={e => e.stopPropagation()}><option value={1}>1</option><option value={2}>2</option><option value={4}>4</option></select>
+                {isGptImage2CanvasModelId(node.model || defaultCanvasImageModel()) && (
+                  <select className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.quality || 'high'} onChange={(e) => handleUpdateNode(node.id, { quality: e.target.value })} onPointerDown={e => e.stopPropagation()}>
+                    <option value="low">low</option>
+                    <option value="medium">medium</option>
+                    <option value="high">high</option>
+                    <option value="auto">auto</option>
+                  </select>
+                )}
               </div>
             </>
           )}
@@ -6048,7 +6072,21 @@ export default function App() {
                   value={node.prompt}
                   onChange={(e) => handleUpdateNode(node.id, { prompt: e.target.value })}
                   placeholder=""
-                  onPointerDown={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    // 双击检测：基于时间戳
+                    const now = Date.now();
+                    if (now - bigEditorLastClickRef.current < 320) {
+                      bigEditorLastClickRef.current = 0;
+                      openBigEditor(node.prompt || '', (v) => handleUpdateNode(node.id, { prompt: v }));
+                    } else {
+                      bigEditorLastClickRef.current = now;
+                    }
+                  }}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    openBigEditor(node.prompt || '', (v) => handleUpdateNode(node.id, { prompt: v }));
+                  }}
                   style={{ minHeight: node.type === 'i2i' ? '80px' : '120px' }}
                 />
               </div>
@@ -6286,7 +6324,21 @@ export default function App() {
                   value={node.prompt}
                   onChange={(e) => handleUpdateNode(node.id, { prompt: e.target.value })}
                   placeholder="补充描述..."
-                  onPointerDown={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    // 双击检测：基于时间戳
+                    const now = Date.now();
+                    if (now - bigEditorLastClickRef.current < 320) {
+                      bigEditorLastClickRef.current = 0;
+                      openBigEditor(node.prompt || '', (v) => handleUpdateNode(node.id, { prompt: v }));
+                    } else {
+                      bigEditorLastClickRef.current = now;
+                    }
+                  }}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    openBigEditor(node.prompt || '', (v) => handleUpdateNode(node.id, { prompt: v }));
+                  }}
                   onPointerUp={(e) => {
                     e.stopPropagation();
                     const nextHeight = Math.max(64, Math.round((e.currentTarget as HTMLTextAreaElement).offsetHeight));
@@ -6722,6 +6774,69 @@ export default function App() {
       </div>
     );
   }
+
+  // 全局大编辑框 Portal
+  const bigEditorPortal = bigEditorOpen && createPortal(
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60"
+      onPointerDown={(e) => {
+        if (e.target === e.currentTarget) {
+          setBigEditorOpen(false);
+        }
+      }}
+    >
+      <div
+        className="flex flex-col bg-[#1e1e1e] border border-[#444] rounded-xl shadow-2xl w-[80vw] max-w-[800px] h-[75vh] max-h-[700px] p-5"
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-3 shrink-0">
+          <span className="text-gray-300 font-medium" style={{ fontSize: 16 }}>编辑文本</span>
+          <button
+            type="button"
+            onClick={() => setBigEditorOpen(false)}
+            className="rounded p-1 text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <textarea
+          className="flex-1 w-full resize-none rounded-lg border border-[#444] bg-[#252525] p-4 text-gray-200 outline-none focus:border-rose-500"
+          style={{ fontSize: 16 }}
+          value={bigEditorValue}
+          onChange={(e) => setBigEditorValue(e.target.value)}
+          autoFocus
+          onPointerDown={(e) => e.stopPropagation()}
+        />
+        <div className="flex justify-end gap-3 mt-3 shrink-0">
+          <button
+            type="button"
+            onClick={() => setBigEditorOpen(false)}
+            className="rounded-lg border border-[#555] px-5 py-2 text-gray-300 hover:bg-white/10 transition-colors"
+            style={{ fontSize: 14 }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              bigEditorOnSaveRef.current?.(bigEditorValue);
+              setBigEditorOpen(false);
+            }}
+            className="rounded-lg bg-rose-600 px-5 py-2 text-white hover:bg-rose-500 transition-colors"
+            style={{ fontSize: 14 }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            确认
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-[#0f0f0f] text-neutral-100 select-none font-sans" onContextMenu={handleContextMenu} onDoubleClick={handleCanvasDoubleClick}>
@@ -8746,6 +8861,7 @@ export default function App() {
           title="重置为 100%"
         >1:1</button>
       </div>
+      {bigEditorPortal}
 
     </div>
   );
@@ -11884,6 +12000,7 @@ interface ChatNodeContentProps {
   promptPresets: Record<string, string>;
   generationMmSs?: string;
   generationSeconds?: number;
+  onOpenBigEditor?: (current: string, onSave: (v: string) => void) => void;
 }
 
 function ChatNodeContent({
@@ -11900,13 +12017,17 @@ function ChatNodeContent({
   promptPresets,
   generationMmSs,
   generationSeconds,
+  onOpenBigEditor,
 }: ChatNodeContentProps) {
   const [showAllRefs, setShowAllRefs] = useState(false);
   const chatPromptRef = useRef<HTMLTextAreaElement>(null);
+  const bigInputLastClickTimeRef = useRef(0);
   const refSlots = useMemo(() => buildIncomingRefSlots(node.id, edges, nodes), [node.id, edges, nodes]);
 
   const [editingUserMessageId, setEditingUserMessageId] = useState<string | null>(null);
   const [editUserDraft, setEditUserDraft] = useState('');
+  const [showBigInput, setShowBigInput] = useState(false);
+  const [bigInputDraft, setBigInputDraft] = useState('');
   const [chatFontPx, setChatFontPx] = useState(readStoredChatFontPx);
   const persistChatFontPx = useCallback((px: number) => {
     const v = clampChatFontPx(px);
@@ -12010,6 +12131,70 @@ function ChatNodeContent({
   })();
 
   const totalRefImages = refSlots.reduce((sum, slot) => sum + (slot.imageBase64s?.length || (slot.imageBase64 ? 1 : 0)), 0);
+
+  // 大输入框浮动弹框
+  const bigInputOverlay = showBigInput && createPortal(
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60"
+      onPointerDown={(e) => {
+        if (e.target === e.currentTarget) {
+          setShowBigInput(false);
+        }
+      }}
+    >
+      <div
+        className="flex flex-col bg-[#1e1e1e] border border-[#444] rounded-xl shadow-2xl w-[80vw] max-w-[800px] h-[75vh] max-h-[700px] p-5"
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-3 shrink-0">
+          <span className="text-gray-300 font-medium" style={{ fontSize: fs(13) }}>编辑提问</span>
+          <button
+            type="button"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => setShowBigInput(false)}
+            className="rounded p-1 text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <textarea
+          className="flex-1 w-full resize-none rounded-lg border border-[#444] bg-[#252525] p-4 text-gray-200 outline-none focus:border-rose-500"
+          style={{ fontSize: fs(14) }}
+          value={bigInputDraft}
+          onChange={(e) => setBigInputDraft(e.target.value)}
+          autoFocus
+          onPointerDown={(e) => e.stopPropagation()}
+        />
+        <div className="flex justify-end gap-3 mt-3 shrink-0">
+          <button
+            type="button"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => setShowBigInput(false)}
+            className="rounded-lg border border-[#555] px-5 py-2 text-gray-300 hover:bg-white/10 transition-colors"
+            style={{ fontSize: fs(12) }}
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => {
+              onUpdate({ prompt: bigInputDraft });
+              setShowBigInput(false);
+            }}
+            className="rounded-lg bg-rose-600 px-5 py-2 text-white hover:bg-rose-500 transition-colors"
+            style={{ fontSize: fs(12) }}
+          >
+            确认
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+
   return (
     <div className="flex flex-col h-full bg-[#1a1a1a] rounded-b-xl overflow-hidden">
       {/* 参考区：图片 + 视频 */}
@@ -12160,18 +12345,17 @@ function ChatNodeContent({
       </div>
 
       {/* 消息列表 : 底部输入区（功能+引用+文本框）垂直空间 = 2 : 1 */}
-      <div className="flex min-h-0 flex-1 flex-col" style={{ order: 1 }} style={{ order: 1 }}>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden" style={{ order: 1 }}>
       <div
-        className="chat-messages min-h-0 flex-[2_1_0%] overflow-y-auto p-3 space-y-3 cursor-grab active:cursor-grabbing"
-        style={{ userSelect: 'text' }}
+        className="chat-messages min-h-0 flex-[2_1_0%] overflow-y-scroll p-3 space-y-3 overscroll-contain"
+        style={{ userSelect: 'text', maxHeight: '100%' }}
         onPointerDown={(e) => {
           const target = e.target as HTMLElement;
-          // 点击空白区域（消息容器本身或 padding 区域）允许拖动节点
-          if (target.classList.contains('chat-messages') || target.tagName === 'DIV' && (target.parentElement?.classList.contains('chat-messages') || target === e.currentTarget)) {
-            return; // 不阻止冒泡，让节点拖拽处理
-          }
+          // 点击消息气泡区域或可交互元素阻止冒泡，避免触发节点拖拽
+          if (!target.closest('.chat-bubble-wrap')) return;
           e.stopPropagation();
         }}
+        onWheel={(e) => e.stopPropagation()}
       >
         <style>{`
           .chat-messages::-webkit-scrollbar {
@@ -12200,15 +12384,16 @@ function ChatNodeContent({
         )}
         {messages.map((msg) => {
           const editingThis = msg.role === 'user' && editingUserMessageId === msg.id;
+          const isUser = msg.role === 'user';
           return (
           <div
             key={msg.id}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            className={`chat-bubble-wrap flex ${isUser ? 'justify-end' : 'justify-start'}`}
             onPointerDown={(e) => e.stopPropagation()}
           >
             <div
-                className="max-w-[92%] rounded-lg p-2.5 text-gray-200"
-                style={{ fontSize: chatFontScaled }}
+                className={`max-w-[92%] rounded-lg p-2.5 ${isUser ? 'bg-[#1e3a5f] text-gray-100' : 'bg-[#2a2a2a] text-gray-300'}`}
+                style={{ fontSize: isUser ? fs(Math.max(13, chatFontPx + 1)) : chatFontScaled }}
               onPointerDown={(e) => e.stopPropagation()}
             >
               {(msg.images?.length ? msg.images : msg.image ? [msg.image] : []).map((im, ii) => (
@@ -12224,11 +12409,12 @@ function ChatNodeContent({
                 {editingThis ? (
                   <>
                     <textarea
+                      key={editingUserMessageId ?? 'no-edit'}
                       value={editUserDraft}
                       onChange={(e) => setEditUserDraft(e.target.value)}
                       rows={5}
                       className="w-full min-h-[180px] rounded-md bg-black/25 border border-white/35 px-2 py-1.5 text-white outline-none focus:border-white/60"
-                      style={{ fontSize: chatFontScaled }}
+                      style={{ fontSize: fs(Math.max(13, chatFontPx + 1)) }}
                       onPointerDown={(e) => e.stopPropagation()}
                     />
                     <div className="mt-2 flex flex-wrap justify-end gap-2">
@@ -12299,11 +12485,17 @@ function ChatNodeContent({
                       {msg.role === 'user' && !node.isGenerating ? (
                         <button
                           type="button"
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => {
+                          onPointerDown={(e) => {
                             e.stopPropagation();
-                            setEditingUserMessageId(msg.id);
-                            setEditUserDraft(msg.content);
+                            if (onOpenBigEditor) {
+                              onOpenBigEditor(msg.content, (newVal) => {
+                                setEditUserDraft(newVal);
+                                setEditingUserMessageId(msg.id);
+                              });
+                            } else {
+                              setEditingUserMessageId(msg.id);
+                              setEditUserDraft(msg.content);
+                            }
                           }}
                           className="rounded border border-white/40 bg-white/15 px-2 py-0.5 font-medium hover:bg-white/25"
                           style={{ fontSize: fs(Math.max(10, chatFontPx - 2)) }}
@@ -12442,7 +12634,31 @@ function ChatNodeContent({
             onChange={(e) => onUpdate({ prompt: e.target.value })}
             onKeyDown={handleKeyDown}
             placeholder=""
-            onPointerDown={(e) => e.stopPropagation()}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              // 双击检测：基于时间戳（320ms 间隔内第二次点击即为双击）
+              const now = Date.now();
+              if (now - bigInputLastClickTimeRef.current < 320) {
+                bigInputLastClickTimeRef.current = 0;
+                if (onOpenBigEditor) {
+                  onOpenBigEditor(node.prompt || '', (v) => onUpdate({ prompt: v }));
+                } else {
+                  setBigInputDraft(node.prompt || '');
+                  setShowBigInput(true);
+                }
+              } else {
+                bigInputLastClickTimeRef.current = now;
+              }
+            }}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              if (onOpenBigEditor) {
+                onOpenBigEditor(node.prompt || '', (v) => onUpdate({ prompt: v }));
+              } else {
+                setBigInputDraft(node.prompt || '');
+                setShowBigInput(true);
+              }
+            }}
             onPointerUp={(e) => {
               e.stopPropagation();
               const nextHeight = Math.max(fs(108), Math.round((e.currentTarget as HTMLTextAreaElement).offsetHeight));
