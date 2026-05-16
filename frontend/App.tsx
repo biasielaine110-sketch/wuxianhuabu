@@ -574,11 +574,13 @@ const I2I_PRESETS_BY_CATEGORY: Record<I2iPresetCategoryId, { key: string; label:
     { key: '角色8视图', label: '角色8视图' },
     { key: '角色无头视图', label: '角色无头视图' },
     { key: '角色细节图', label: '角色细节图' },
+    { key: '角色身高比例图', label: '角色身高比例图' },
   ],
   scene: [
     { key: '场景四视图', label: '场景四视图' },
     { key: '场景9视图', label: '场景9视图' },
     { key: '场景九视图', label: '场景九视图' },
+    { key: '场景反打及细节', label: '场景反打及细节' },
   ],
   props: [
     { key: '道具拆分', label: '道具拆分' },
@@ -739,10 +741,14 @@ const INITIAL_I2I_PROMPT_PRESETS: Record<string, string> = {
     '上下分屏排版。上半部分：面部特写。下半部分：角色三视图（正视图、侧视图、背视图）。注意：下半部分的三个身体必须完全无头（仅保留脖子以下）。白色背景，图片风格为真人照片质感，禁止转绘为漫画或其它风格。',
   '角色细节图':
     '专业游戏角色设定参考图，标准三视图+细节特写排版，左侧3张全身站姿（正面、左侧面、背面），右侧4行3列细节分镜，保持角色设计完全统一，极简纯白背景，细黑线分割网格，超写实人像摄影，8K分辨率，锐度拉满，电影级柔光，角色100%一致，无变形无穿模，包含头部多角度、面部五官、服装面料、拉链细节、背包细节、鞋履细节、手部细节，专业3D建模参考图，棚拍质感，并在每格左上角标注格数数字。',
+  '角色身高比例图':
+    '帮我生成全身身高比例图，角色均正视面向镜头。',
   '场景9视图':
     '根据所有画面中保持外观、比例、材质、颜色和风格的完美一致性的原则。生成一个(16:9比例)设计的电影级专业3X3(共9张)的电影分镜网格。共9个面板。每个面板标记1-9的数字，该网格需采用3D电影截图风格。每一帧都是根据场景下不同角度，不同面的场景图。AI自动选择所有摄像机角度和构图。确保电影级布光、一致的调色、真实的景深以及连贯的环境演变。无重复镜头。',
   '场景九视图':
     '请根据提供的图片做出这个场景的不同角度图片，创作一个由九个画面组成的九宫格3*3排列画幅16:9。每个画面需精心设计以体现不同的景别和技术手法，包括但不限于特写、远景、俯拍、仰拍和运动镜头。场景中没有人物，用不同镜头角度展现。每个宫格标注1-9的数字。',
+  '场景反打及细节':
+    '为我创建一张综合图。这张图将包含场景的正面图、反面图，以及几个关键道具的特写小图，同时严格保持参考图中的陈设、装饰、光线和布局风格。\n场景分析与生成策略：\n    正面场景图：将忠实地再现您提供的原始图片，确保所有细节、光线和氛围都一致。\n    反面场景图：这是最具挑战性的部分。我将根据原始图的风格（深色调、工业风、暖光、现代简约）和布局推断房间的另一侧。\n   假设原始图展示的是客厅的一面，那么反面图将展示房间的另一面墙，可能包含入口、另一组家具或艺术品，但会保持整体的协调性。我会想象相机转过180度后看到的景象，所以沙发的背面可能会在前景中出现，而墙面会延续现有的材质和照明风格。\n    关键道具小图：我会从原始图片中提取并放大以下关键道具的特写：\n    桌上的黑色VR头显（或类似设备）\n    威士忌酒杯\n    金属马克杯\n    书架上的酒瓶和书籍细节\n    落地灯\n综合图布局：\n我将采用一个清晰的布局，将正面和反面场景图作为主要部分，并在下方或侧面区域展示关键道具的特写小图。',
   '故事九宫格':
     '请根据提供的图片内容及前面叙述的故事背景，创作一个由九个画面构成的写实风格九宫格故事3*3排列画幅16:9。每个画面精心设计以体现不同的景别和技术手法，包括但不限于特写、远景、俯拍、仰拍和运动镜头等，以此强化故事的紧张氛围和视觉表现力。具体要求如下：整体一致性：所有画面应保持与上传图片相同的写实风格；故事连贯性：九宫格中的每幅画都应当紧密围绕一个完整的故事线展开，确保故事逻辑清晰且连贯；景别多样性：至少包含一个特写镜头，用于捕捉角色的表情或关键物品的细节；加入至少一个远景镜头，展示环境全貌或大规模的动作场景；运用俯拍或仰拍来增强特定场景的情感表达或戏剧效果；考虑使用运动镜头（如跟随角色移动）以增加动态感和紧张气氛；视觉与情感深度：利用光影对比、色彩调配以及构图技巧来加强故事的情感层次和视觉吸引力。请务必让每一张图像都能够独立讲述一部分故事，同时作为整个九宫格的一部分共同编织出一个引人入胜的整体叙事。按照要求生成图片。',
   '全景图生成':
@@ -1129,9 +1135,9 @@ function T2iPresetCategorySelect({
   );
 }
 
-/** 君澜 → codesonline → ToAPIs → New API（Firefly），与下拉选项顺序一致 */
+/** codesonline → 君澜 → ToAPIs → New API（Firefly），与下拉选项顺序一致 */
 function defaultCanvasImageModel(): string {
-  return 'gpt-image-2-junlan';
+  return 'gpt-image-2-codesonline';
 }
 
 /** 画布节点 Firefly（New API）模型 id */
@@ -1139,7 +1145,7 @@ function isFireflyNewApiImageModelId(id: string): boolean {
   return id === 'firefly-nano-banana-pro-newapi' || id === 'firefly-nano-banana2-newapi';
 }
 
-/** GPT Image 2：君澜 / codesonline / ToAPIs 节点选择时默认 4K */
+/** GPT Image 2：君澜 / codesonline / ToAPIs 节点选择时默认 2K */
 function isGptImage2CanvasModelId(id: string): boolean {
   return id === 'gpt-image-2-junlan' || id === 'gpt-image-2-codesonline' || id === 'gpt-image-2';
 }
@@ -1152,8 +1158,9 @@ const CANVAS_SHORTCUT_HELP_ROWS: readonly { combo: string; detail: string }[] = 
   { combo: 'Q', detail: '在视图中心新建「AI 对话」节点（无 Ctrl / ⌘ / Alt；不在输入框内）' },
   { combo: 'W', detail: '新建「文生图」节点' },
   { combo: 'E', detail: '新建「图生图」节点' },
-  { combo: 'R', detail: '新建「图片标注」节点' },
+  { combo: 'R', detail: '新建「文本」节点' },
   { combo: 'X', detail: '将当前选中节点设为吸管目标；无选中则取消吸管' },
+  { combo: 'C', detail: '将选中节点的当前图片复制为新图片节点（节点须包含图片）' },
   { combo: 'Esc', detail: '关闭本快捷键窗口（若已打开）；否则取消选中、关闭菜单与草稿连线、退出全屏图、取消吸管' },
   { combo: 'Delete / Backspace', detail: '删除当前选中的节点（非全屏预览图时）' },
   { combo: 'Alt + Q', detail: '删除当前选中的节点（同上）' },
@@ -1452,7 +1459,7 @@ export default function App() {
               handleUpdateNode(node.id, {
                 aspectRatio: node.type === 'panoramaT2i' ? '2:1' : '16:9',
                 imageCount: 1,
-                resolution: '4k',
+                resolution: '2k',
                 ...(node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' || node.type === 'panorama' ? { model: defaultCanvasImageModel() } : {}),
                 error: undefined,
               }),
@@ -1475,7 +1482,10 @@ export default function App() {
     if (!node.error) return null;
     const diagnosis = classifyError(node.error, node);
     return (
-      <div className="absolute inset-x-3 bottom-3 z-20 text-xs text-red-200 bg-red-950/95 p-2 rounded border border-red-900/50 shadow-lg break-words max-h-40 overflow-y-auto backdrop-blur-md">
+      <div
+        className="absolute inset-x-3 bottom-3 z-20 text-xs text-red-200 bg-red-950/95 p-2 rounded border border-red-900/50 shadow-lg break-words max-h-40 overflow-y-auto backdrop-blur-md cursor-pointer"
+        onClick={() => handleUpdateNode(node.id, { error: undefined })}
+      >
         <div className="flex justify-between items-start mb-1 gap-2">
           <span className="font-bold">{diagnosis.title}</span>
           <button onPointerDown={(e) => { e.stopPropagation(); handleUpdateNode(node.id, { error: undefined }); }} className="text-red-300 hover:text-red-100"><XIcon size={12} /></button>
@@ -3516,7 +3526,7 @@ export default function App() {
         placeNewNodeAtMouse('i2i');
       } else if (e.code === 'KeyR' && shortcutCreatesNode) {
         e.preventDefault();
-        placeNewNodeAtMouse('annotation');
+        placeNewNodeAtMouse('text');
       } else if (e.code === 'KeyT' && shortcutCreatesNode) {
         e.preventDefault();
         placeNewNodeAtMouse('video');
@@ -3536,6 +3546,38 @@ export default function App() {
         }
         const id = sel[0];
         setEyedropperTargetNodeId((prev) => (prev === id ? null : id));
+      } else if (
+        e.code === 'KeyC' &&
+        !isInput &&
+        !isContentEditable &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !e.shiftKey &&
+        !fullscreenImage
+      ) {
+        e.preventDefault();
+        const sid = selectedIdsRef.current[0];
+        if (!sid) return;
+        const node = nodes.find(n => n.id === sid);
+        if (!node) return;
+        const imgs = (node as any).images as string[] | undefined;
+        const idx = (node as any).currentImageIndex as number | undefined;
+        const img = imgs?.[idx ?? 0];
+        if (!img) return;
+        const mp = canvasMouseRef.current;
+        const newNode: CanvasNode = {
+          id: `image-${Date.now()}`,
+          type: 'image',
+          x: mp.x,
+          y: mp.y,
+          width: 720,
+          height: 792,
+          images: [img],
+          currentImageIndex: 0,
+        };
+        setNodes(prev => [...prev, newNode]);
+        setSelectedIds([newNode.id]);
       } else if (e.code === 'Escape') {
         if (showShortcutsPanel) {
           setShowShortcutsPanel(false);
@@ -4205,7 +4247,7 @@ export default function App() {
           : type === 't2i' || type === 'i2i' || type === 'video' || type === 'gridSplit' || type === 'gridMerge'
             ? '16:9'
             : '1:1',
-      resolution: type === 't2i' || type === 'i2i' || type === 'panoramaT2i' ? '4k' : '2k',
+      resolution: '2k',
       imageCount: 1,
       model:
         type === 't2i' || type === 'i2i' || type === 'panoramaT2i' || type === 'panorama'
@@ -4796,7 +4838,14 @@ export default function App() {
         className={`absolute flex flex-col bg-[#1e1e1e] rounded-[20px] border-8 shadow-2xl transition-shadow ${borderColor} ${shadowColor} ${isSelected ? 'z-20' : 'z-10 hover:border-[#555]'} ${node.type === 'chat' ? 'canvas-node-root--chat' : 'canvas-node-font-195'}${node.type === 'annotation' ? ' canvas-node-annotation' : ''}${node.type === 'gridSplit' || node.type === 'gridMerge' ? ' canvas-node-grid-tool-150' : ''}`}
         style={{ left: node.x, top: node.y, width: node.width, height: node.height }}
         onPointerDown={(e) => handleNodePointerDown(e, node.id)}
-        onDoubleClick={node.type === 'text' ? () => { setEditingTextNodeIds(prev => { const next = new Set(prev); next.add(node.id); return next; }); } : undefined}
+        onDoubleClick={() => {
+          if (!isSelected && (node.type === 'chat' || node.type === 'text')) {
+            setSelectedIds([node.id]);
+          }
+          if (node.type === 'text') {
+            setEditingTextNodeIds(prev => { const next = new Set(prev); next.add(node.id); return next; });
+          }
+        }}
       >
         {/* 文本节点取消选中时退出编辑 */}
         {node.type === 'text' && !isSelected && editingTextNodeIds.has(node.id) ? (
@@ -5166,7 +5215,7 @@ export default function App() {
                         }
                       }}
                       className="p-1.5 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
-                      title="复制图片"
+                      title="复制图片 (C)"
                     >
                       <CopyIcon size={25}/>
                     </button>
@@ -5767,6 +5816,7 @@ export default function App() {
               generationMmSs={node.isGenerating ? genTimeMmSs : undefined}
               generationSeconds={node.isGenerating ? genElapsedSec : undefined}
               onOpenBigEditor={openBigEditor}
+              onActivate={() => setSelectedIds([node.id])}
             />
           )}
 
@@ -5777,14 +5827,14 @@ export default function App() {
           </div>
           {(node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' || node.type === 'panorama') && (
             <>
-              <select className="nodemodel-select bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500 flex-1 min-w-[90px]" value={node.model || defaultCanvasImageModel()} onChange={(e) => { const m = e.target.value; const patch: Partial<CanvasNode> = { model: m }; if (isFireflyNewApiImageModelId(m)) patch.resolution = '2k'; else if (isGptImage2CanvasModelId(m)) patch.resolution = '4k'; handleUpdateNode(node.id, patch); }} onPointerDown={e => e.stopPropagation()}>
+              <select className="nodemodel-select bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500 flex-1 min-w-[90px]" value={node.model || defaultCanvasImageModel()} onChange={(e) => { const m = e.target.value; const patch: Partial<CanvasNode> = { model: m }; if (isFireflyNewApiImageModelId(m) || isGptImage2CanvasModelId(m)) patch.resolution = '2k'; handleUpdateNode(node.id, patch); }} onPointerDown={e => e.stopPropagation()}>
                 {(node.type === 't2i' || node.type === 'panoramaT2i') ? (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option><option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option><option value="imagen-4">Imagen 4</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option></>) : (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option><option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option></>)}
               </select>
               <div className="nodemeta-skip-scale flex items-center gap-0.5">
                 <select className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.aspectRatio || (node.type === 'panoramaT2i' ? '2:1' : '16:9')} onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })} onPointerDown={e => e.stopPropagation()}>
                   {node.type === 'panoramaT2i' ? (<><option value="2:1">2:1</option><option value="21:9">21:9</option></>) : (<><option value="1:1">1:1</option><option value="16:9">16:9</option><option value="9:16">9:16</option><option value="21:9">21:9</option><option value="4:3">4:3</option><option value="3:4">3:4</option></>)}
                 </select>
-                <select className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.resolution || '4k'} onChange={(e) => handleUpdateNode(node.id, { resolution: e.target.value })} onPointerDown={e => e.stopPropagation()}><option value="4k">4K</option><option value="2k">2K</option><option value="1k">1K</option></select>
+                <select className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.resolution || '2k'} onChange={(e) => handleUpdateNode(node.id, { resolution: e.target.value })} onPointerDown={e => e.stopPropagation()}><option value="4k">4K</option><option value="2k">2K</option><option value="1k">1K</option></select>
                 <select className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.imageCount || 1} onChange={(e) => handleUpdateNode(node.id, { imageCount: parseInt(e.target.value) })} onPointerDown={e => e.stopPropagation()}><option value={1}>1</option><option value={2}>2</option><option value={4}>4</option></select>
                 {isGptImage2CanvasModelId(node.model || defaultCanvasImageModel()) && (
                   <select className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.quality || 'high'} onChange={(e) => handleUpdateNode(node.id, { quality: e.target.value })} onPointerDown={e => e.stopPropagation()}>
@@ -6147,13 +6197,30 @@ export default function App() {
                 )}
                 {node.type === 'text' && !(isSelected && editingTextNodeIds.has(node.id)) ? (
                   <div
-                    className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] overflow-y-auto leading-relaxed whitespace-pre-wrap break-words"
+                    className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] overflow-y-auto leading-relaxed whitespace-pre-wrap break-words text-node-content"
                     style={{ fontSize: '40px', minHeight: '120px' }}
                     onPointerDown={(e) => {
-                      // 不阻止传播，让节点容器 handleNodePointerDown 处理节点拖拽
+                      const target = e.target as HTMLElement;
+                      // 拖动滚动条时不激活选中节点
+                      if (target.classList.contains('text-node-content') || target === e.currentTarget) {
+                        e.stopPropagation();
+                      }
+                    }}
+                    onDoubleClick={(e) => {
+                      if (!isSelected) {
+                        e.stopPropagation();
+                        setSelectedIds([node.id]);
+                        setEditingTextNodeIds(prev => { const next = new Set(prev); next.add(node.id); return next; });
+                      }
                     }}
                   >
                     {node.prompt || <span className="text-gray-500">双击编辑文本</span>}
+                    <style>{`
+                      .text-node-content::-webkit-scrollbar { width: 36px; }
+                      .text-node-content::-webkit-scrollbar-track { background: #2a2a2a; border-radius: 4px; }
+                      .text-node-content::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; border: 4px solid transparent; background-clip: content-box; }
+                      .text-node-content::-webkit-scrollbar-thumb:hover { background: #666; border: 4px solid transparent; background-clip: content-box; }
+                    `}</style>
                   </div>
                 ) : (
                 <textarea
@@ -12092,6 +12159,8 @@ interface ChatNodeContentProps {
   generationMmSs?: string;
   generationSeconds?: number;
   onOpenBigEditor?: (current: string, onSave: (v: string) => void) => void;
+  /** 双击窗口内部任意区域时激活选中 */
+  onActivate: () => void;
 }
 
 function ChatNodeContent({
@@ -12110,6 +12179,7 @@ function ChatNodeContent({
   generationMmSs,
   generationSeconds,
   onOpenBigEditor,
+  onActivate,
 }: ChatNodeContentProps) {
   const [showAllRefs, setShowAllRefs] = useState(false);
   const chatPromptRef = useRef<HTMLTextAreaElement>(null);
@@ -12288,7 +12358,14 @@ function ChatNodeContent({
   );
 
   return (
-    <div className="flex flex-col h-full bg-[#1a1a1a] rounded-b-xl overflow-hidden">
+    <div className="flex flex-col h-full bg-[#1a1a1a] rounded-b-xl overflow-hidden"
+      onDoubleClick={(e) => {
+        if (!isSelected) {
+          e.stopPropagation();
+          onActivate();
+        }
+      }}
+    >
       {/* 参考区：图片 + 视频 */}
       <div className={`flex items-center gap-2 px-2 py-1.5 bg-[#252525] border-b border-[#333] shrink-0 ${isSelected ? '' : 'hidden'}`} style={{ fontSize: fs(10), order: 2 }}>
         <span className="text-gray-400 shrink-0">参考:</span>
@@ -12446,9 +12523,15 @@ function ChatNodeContent({
         style={{ userSelect: 'text' }}
         onPointerDown={(e) => {
           const target = e.target as HTMLElement;
-          // 点击消息气泡区域或可交互元素阻止冒泡，避免触发节点拖拽
-          if (!target.closest('.chat-bubble-wrap')) return;
-          e.stopPropagation();
+          // 拖动滚动条时不激活选中节点（target 为容器自身表示点击了滚动条区域）
+          if (target.classList.contains('chat-messages') || target === e.currentTarget) {
+            e.stopPropagation();
+            return;
+          }
+          // 点击消息气泡区域阻止冒泡，避免触发节点拖拽
+          if (target.closest('.chat-bubble-wrap')) {
+            e.stopPropagation();
+          }
         }}
       >
         <style>{`
@@ -12559,6 +12642,10 @@ function ChatNodeContent({
                       title={msg.role === 'user' && !node.isGenerating ? '双击可修改本条提问' : undefined}
                       onDoubleClick={(e) => {
                         e.stopPropagation();
+                        if (!isSelected) {
+                          onActivate();
+                          return;
+                        }
                         if (msg.role !== 'user' || node.isGenerating) return;
                         setEditingUserMessageId(msg.id);
                         setEditUserDraft(msg.content);
@@ -12646,8 +12733,9 @@ function ChatNodeContent({
         {node.error && chatErrorDiagnosis && (
           <div className="flex justify-start">
             <div
-              className="bg-red-950/90 rounded-lg p-2.5 text-red-200 border border-red-900/60 max-w-[92%]"
+              className="bg-red-950/90 rounded-lg p-2.5 text-red-200 border border-red-900/60 max-w-[92%] cursor-pointer"
               style={{ fontSize: chatFontScaled }}
+              onClick={() => onUpdate({ error: undefined })}
             >
               <div className="font-bold mb-1">{chatErrorDiagnosis.title}</div>
               <div className="text-red-100/90 mb-1">{chatErrorDiagnosis.reason}</div>
@@ -12754,6 +12842,10 @@ function ChatNodeContent({
             }}
             onDoubleClick={(e) => {
               e.stopPropagation();
+              if (!isSelected) {
+                onActivate();
+                return;
+              }
               if (onOpenBigEditor) {
                 onOpenBigEditor(node.prompt || '', (v) => onUpdate({ prompt: v }));
               } else {
