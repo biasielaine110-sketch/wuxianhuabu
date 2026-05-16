@@ -1637,14 +1637,9 @@ export async function openAiGenerateNewImage(
         signal
       );
     } catch (err) {
-      // 君澜服务不可用（503 等）时依次回退 codesonline → ToAPIs
+      // 君澜服务不可用（503 等）时回退 codesonline
       console.warn('[openAiGenerateNewImage] 君澜不可用，尝试回退:', err);
-      try {
-        return await openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, 'gpt-image-2-codesonline', nodeResolution, quality, signal);
-      } catch {
-        // codesonline 也无 Key 时兜底走 ToAPIs
-        return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, 'gpt-image-2', nodeResolution, quality, signal);
-      }
+      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, 'gpt-image-2-codesonline', nodeResolution, quality, signal);
     }
   }
 
@@ -1720,13 +1715,9 @@ export async function openAiEditImage(
         signal
       );
     } catch (err) {
-      // 君澜服务不可用（503 等）时依次回退 codesonline → ToAPIs
+      // 君澜服务不可用（503 等）时回退 codesonline
       console.warn('[openAiEditImage] 君澜不可用，尝试回退:', err);
-      try {
-        return await openAiEditImage(base64Images, prompt, numberOfImages, 'gpt-image-2-codesonline', aspectRatio, nodeResolution, quality, signal);
-      } catch {
-        return openAiEditImage(base64Images, prompt, numberOfImages, 'gpt-image-2', aspectRatio, nodeResolution, quality, signal);
-      }
+      return openAiEditImage(base64Images, prompt, numberOfImages, 'gpt-image-2-codesonline', aspectRatio, nodeResolution, quality, signal);
     }
   }
 

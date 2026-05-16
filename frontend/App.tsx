@@ -960,20 +960,19 @@ function I2iPresetCategorySelect({
         </select>
         <span className="text-[10px] text-gray-500 shrink-0">预设</span>
         <select
-          multiple
           className="i2i-preset-select flex-1 min-w-[140px] bg-[#222222] border border-[#444] rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-amber-500"
-          value={activePresets?.filter(k => k !== COMMON_TEMPLATE_KEY) ?? []}
+          value={activePresets?.filter(k => k !== COMMON_TEMPLATE_KEY)?.[0] ?? ''}
           onPointerDown={(e) => e.stopPropagation()}
           onChange={(e) => {
-            const options = e.target.options;
-            for (let i = 0; i < options.length; i++) {
-              const opt = options[i];
-              if (opt.selected !== activeSet.has(opt.value)) {
-                onTogglePreset(nodeId, opt.value);
-              }
+            const key = e.target.value;
+            if (key) {
+              onTogglePreset(nodeId, key);
+            } else if (activePresets?.length) {
+              activePresets.forEach(k => onTogglePreset(nodeId, k));
             }
           }}
         >
+          <option value="">未使用</option>
           {list.map((p) => (
             <option key={p.key} value={p.key}>
               {p.label}
@@ -1082,20 +1081,20 @@ function T2iPresetCategorySelect({
         </select>
         <span className="text-[10px] text-gray-500 shrink-0">预设</span>
         <select
-          multiple
           className="t2i-preset-select flex-1 min-w-[140px] bg-[#222222] border border-[#444] rounded px-2 py-1 text-xs text-gray-300 outline-none focus:border-purple-500"
-          value={activePresets?.filter(k => k !== COMMON_TEMPLATE_KEY) ?? []}
+          value={activePresets?.filter(k => k !== COMMON_TEMPLATE_KEY)?.[0] ?? ''}
           onPointerDown={(e) => e.stopPropagation()}
           onChange={(e) => {
-            const options = e.target.options;
-            for (let i = 0; i < options.length; i++) {
-              const opt = options[i];
-              if (opt.selected !== activeSet.has(opt.value)) {
-                onTogglePreset(nodeId, opt.value);
-              }
+            const key = e.target.value;
+            if (key) {
+              onTogglePreset(nodeId, key);
+            } else if (activePresets?.length) {
+              // 选择空选项时清除所有预设
+              activePresets.forEach(k => onTogglePreset(nodeId, k));
             }
           }}
         >
+          <option value="">未使用</option>
           {list.map((p) => (
             <option key={p.key} value={p.key}>
               {p.label}
@@ -2762,13 +2761,34 @@ export default function App() {
     const next = current.includes(presetKey)
       ? current.filter(k => k !== presetKey)
       : [...current, presetKey];
-    handleUpdateNode(nodeId, { activePresets: next });
+
+    // 选择特定预设时自动设置默认比例，取消时改回 16:9
+    const patch: Partial<CanvasNode> = { activePresets: next };
+    if (!current.includes(presetKey)) {
+      if (presetKey === '故事板_CCC') {
+        patch.aspectRatio = '3:4';
+      } else if (presetKey === '角色4视图' || presetKey === '角色无头视图') {
+        patch.aspectRatio = '9:16';
+      }
+    } else {
+      if (presetKey === '故事板_CCC' || presetKey === '角色4视图' || presetKey === '角色无头视图') {
+        patch.aspectRatio = '16:9';
+      }
+    }
+    handleUpdateNode(nodeId, patch);
   }, [handleUpdateNode, nodes]);
 
   // 清除预设选择
   const handleClearPreset = useCallback((nodeId: string) => {
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node) return;
+    const clearedPresets = node.activePresets ?? [];
     handleUpdateNode(nodeId, { activePresets: undefined });
-  }, [handleUpdateNode]);
+    // 如果有特殊预设被清除，比例也改回 16:9
+    if (clearedPresets.some(k => k === '故事板_CCC' || k === '角色4视图' || k === '角色无头视图')) {
+      handleUpdateNode(nodeId, { aspectRatio: '16:9' });
+    }
+  }, [handleUpdateNode, nodes]);
 
   // 复制节点生成的图片到新的图片节点
   const handleCopyToImage = useCallback((nodeId: string) => {
