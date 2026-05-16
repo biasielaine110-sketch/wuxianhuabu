@@ -7,13 +7,11 @@ import {
   DEFAULT_DEEPSEEK_BASE_URL,
   DEFAULT_DEEPSEEK_CHAT_MODEL_ID,
   DEFAULT_JUNLAN_BASE_URL,
-  DEFAULT_NEWAPI_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
   getAiSettingsSnapshot,
   normalizeDeepSeekChatModelId,
   getCodesonlineSavedKey,
   getJunlanSavedKey,
-  getNewApiSavedKey,
   migrateAiSettingsIfLegacy,
   persistAiSettings,
 } from './services/aiSettings';
@@ -125,15 +123,11 @@ function sniffImageMimeFromBase64(raw: string): string {
   return 'image/jpeg';
 }
 
-/** 视频节点：下拉仅 ToAPIs；旧工程里曾存的 New API 画布 id 映射为等价 ToAPIs 模型 */
+/** 视频节点模型 → ToAPIs 模型 */
 function videoNodeModelToToApis(m?: string): 'grok-video-3' | 'sora-2-vvip' | 'veo3.1-fast' {
   const vm = (m || '').trim();
-  if (vm === 'sora-2-vvip' || vm === 'firefly-sora2-newapi' || vm === 'firefly-sora2-pro-newapi') {
-    return 'sora-2-vvip';
-  }
-  if (isVeo31FastVideoModel(vm) || vm === 'firefly-veo31-ref-newapi') {
-    return 'veo3.1-fast';
-  }
+  if (vm === 'sora-2-vvip') return 'sora-2-vvip';
+  if (isVeo31FastVideoModel(vm)) return 'veo3.1-fast';
   return 'grok-video-3';
 }
 
@@ -142,26 +136,20 @@ function isVeo31FastVideoModel(m?: string): boolean {
   return m === 'veo3.1-fast' || m === 'veo3.1-fast-official';
 }
 
-/** 视频节点 Veo：ToAPIs 或旧工程中的 firefly-veo31-ref-newapi */
+/** 视频节点 Veo */
 function isVideoVeoStyleModel(m?: string): boolean {
-  return isVeo31FastVideoModel(m) || m === 'firefly-veo31-ref-newapi';
+  return isVeo31FastVideoModel(m);
 }
 
-/** 视频节点 Sora：ToAPIs 或旧工程中的 firefly-sora2* */
+/** 视频节点 Sora */
 function isVideoSoraStyleModel(m?: string): boolean {
-  return m === 'sora-2-vvip' || m === 'firefly-sora2-newapi' || m === 'firefly-sora2-pro-newapi';
+  return m === 'sora-2-vvip';
 }
 
-/** 视频节点 Grok 秒数档：ToAPIs Grok3；旧工程可能仍为 grok-imagine-newapi / Kling id */
+/** 视频节点 Grok 秒数档 */
 function isVideoGrokDurationStyleModel(m?: string): boolean {
   const x = (m || '').trim();
-  return (
-    !x ||
-    x === 'grok-video-3' ||
-    x === 'grok-imagine-video-newapi' ||
-    x === 'firefly-kling30-newapi' ||
-    x === 'firefly-kling30omni-newapi'
-  );
+  return !x || x === 'grok-video-3';
 }
 
 function base64ToImageDataUrl(raw: string): string {
@@ -1135,14 +1123,8 @@ function T2iPresetCategorySelect({
   );
 }
 
-/** codesonline → 君澜 → ToAPIs → New API（Firefly），与下拉选项顺序一致 */
 function defaultCanvasImageModel(): string {
   return 'gpt-image-2-codesonline';
-}
-
-/** 画布节点 Firefly（New API）模型 id */
-function isFireflyNewApiImageModelId(id: string): boolean {
-  return id === 'firefly-nano-banana-pro-newapi' || id === 'firefly-nano-banana2-newapi';
 }
 
 /** GPT Image 2：君澜 / codesonline / ToAPIs 节点选择时默认 2K */
@@ -1734,8 +1716,6 @@ export default function App() {
   const [deepSeekBaseInput, setDeepSeekBaseInput] = useState(() => getAiSettingsSnapshot().deepSeekBaseUrl);
   const [junlanBaseInput, setJunlanBaseInput] = useState(() => getAiSettingsSnapshot().junlanBaseUrl);
   const [junlanKeyInput, setJunlanKeyInput] = useState(() => getAiSettingsSnapshot().junlanKey);
-  const [newApiBaseInput, setNewApiBaseInput] = useState(() => getAiSettingsSnapshot().newApiBaseUrl);
-  const [newApiKeyInput, setNewApiKeyInput] = useState(() => getAiSettingsSnapshot().newApiKey);
   const [codesonlineBaseInput, setCodesonlineBaseInput] = useState(() => getAiSettingsSnapshot().codesonlineBaseUrl);
   const [codesonlineKeyInput, setCodesonlineKeyInput] = useState(() => getAiSettingsSnapshot().codesonlineKey);
 
@@ -1748,8 +1728,6 @@ export default function App() {
     setDeepSeekBaseInput(s.deepSeekBaseUrl);
     setJunlanBaseInput(s.junlanBaseUrl);
     setJunlanKeyInput(s.junlanKey);
-    setNewApiBaseInput(s.newApiBaseUrl);
-    setNewApiKeyInput(s.newApiKey);
     setCodesonlineBaseInput(s.codesonlineBaseUrl);
     setCodesonlineKeyInput(s.codesonlineKey);
   }, []);
@@ -1778,8 +1756,6 @@ export default function App() {
     setDeepSeekBaseInput(s.deepSeekBaseUrl);
     setJunlanBaseInput(s.junlanBaseUrl);
     setJunlanKeyInput(s.junlanKey);
-    setNewApiBaseInput(s.newApiBaseUrl);
-    setNewApiKeyInput(s.newApiKey);
     setCodesonlineBaseInput(s.codesonlineBaseUrl);
     setCodesonlineKeyInput(s.codesonlineKey);
     setDownloadPathSettings(loadDownloadPathSettings());
@@ -4038,7 +4014,10 @@ export default function App() {
 
     /** 吸管模式：点击节点窗口任意非表单区域即可与「吸取目标」节点连线（与预览区点击行为一致） */
     const eyeT = eyedropperTargetNodeIdRef.current;
-    if (eyeT && eyeT !== id && !isInteractiveSurface) {
+    // text 节点内容区域（textarea）在吸管模式下应可被点击拾取作为源节点
+    const pickedNode = nodes.find(n => n.id === id);
+    const isEyedropperPickable = eyeT && eyeT !== id && (pickedNode?.type === 'text' ? true : !isInteractiveSurface);
+    if (isEyedropperPickable) {
       if (handleCanvasEyedropper(id, eyeT)) {
         e.preventDefault();
         e.stopPropagation();
@@ -5824,11 +5803,20 @@ export default function App() {
         <div className="min-h-8 py-1.5 bg-[#252525] border-b border-[#333] flex items-center justify-between px-3 cursor-grab active:cursor-grabbing shrink-0">
           <div className="flex items-center gap-2">
             {headerIcon}
+            {node.type === 'text' && (
+              <button
+                onPointerDown={(e) => { e.stopPropagation(); setEyedropperTargetNodeId(node.id); }}
+                className={`ml-1 px-1.5 py-0.5 rounded text-[10px] text-white ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
+                title={eyedropperTargetNodeId === node.id ? "取消吸取" : "吸取文本"}
+              >
+                <EyedropperIcon size={10} />
+              </button>
+            )}
           </div>
           {(node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' || node.type === 'panorama') && (
             <>
-              <select className="nodemodel-select bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500 flex-1 min-w-[90px]" value={node.model || defaultCanvasImageModel()} onChange={(e) => { const m = e.target.value; const patch: Partial<CanvasNode> = { model: m }; if (isFireflyNewApiImageModelId(m) || isGptImage2CanvasModelId(m)) patch.resolution = '2k'; handleUpdateNode(node.id, patch); }} onPointerDown={e => e.stopPropagation()}>
-                {(node.type === 't2i' || node.type === 'panoramaT2i') ? (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option><option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option><option value="imagen-4">Imagen 4</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option></>) : (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="firefly-nano-banana-pro-newapi">Firefly Nano Banana Pro（New API）</option><option value="firefly-nano-banana2-newapi">Firefly Nano Banana 2（New API）</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option></>)}
+              <select className="nodemodel-select bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500 flex-1 min-w-[90px]" value={node.model || defaultCanvasImageModel()} onChange={(e) => { const m = e.target.value; const patch: Partial<CanvasNode> = { model: m }; if (isGptImage2CanvasModelId(m)) patch.resolution = '2k'; handleUpdateNode(node.id, patch); }} onPointerDown={e => e.stopPropagation()}>
+                {(node.type === 't2i' || node.type === 'panoramaT2i') ? (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="nano-banana-2">Nano-Banana 2（ToAPIs）</option><option value="imagen-4">Imagen 4</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option></>) : (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="nano-banana-2">Nano-Banana 2（ToAPIs）</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option></>)}
               </select>
               <div className="nodemeta-skip-scale flex items-center gap-0.5">
                 <select className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.aspectRatio || (node.type === 'panoramaT2i' ? '2:1' : '16:9')} onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })} onPointerDown={e => e.stopPropagation()}>
@@ -6200,11 +6188,12 @@ export default function App() {
                     className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] overflow-y-auto leading-relaxed whitespace-pre-wrap break-words text-node-content"
                     style={{ fontSize: '40px', minHeight: '120px' }}
                     onPointerDown={(e) => {
-                      const target = e.target as HTMLElement;
-                      // 拖动滚动条时不激活选中节点
-                      if (target.classList.contains('text-node-content') || target === e.currentTarget) {
-                        e.stopPropagation();
+                      // 吸管模式激活时，允许事件冒泡触发吸管连线
+                      if (eyedropperTargetNodeId) {
+                        return;
                       }
+                      // 允许事件冒泡，使节点可被拖拽移动
+                      // 滚动条区域也不阻止，由外层的 handleNodePointerDown 处理
                     }}
                     onDoubleClick={(e) => {
                       if (!isSelected) {
@@ -6230,6 +6219,8 @@ export default function App() {
                   placeholder=""
                   readOnly={node.type === 'text' && !(isSelected && editingTextNodeIds.has(node.id))}
                   onPointerDown={(e) => {
+                    // 吸管模式激活时，允许事件冒泡触发吸管连线
+                    if (eyedropperTargetNodeId) return;
                     e.stopPropagation();
                     // 双击检测：基于时间戳
                     const now = Date.now();
@@ -6311,7 +6302,7 @@ export default function App() {
                 </div>
               )}
               {node.type === 'video' && (
-                <div className="flex gap-2 w-full shrink-0">
+                <div className={`flex gap-2 w-full shrink-0${isSelected ? '' : ' hidden'}`}>
                   <div className={`relative flex-1 min-w-0 ${node.isGenerating ? 'gen-btn-generating' : 'gen-btn-video-core'}`}>
                     <button
                       type="button"
@@ -8025,8 +8016,6 @@ export default function App() {
                                 junlanBaseUrl: junlanBaseInput.trim() || DEFAULT_JUNLAN_BASE_URL,
                                 codesonlineApiKey: codesonlineKeyInput.trim(),
                                 codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
-                                newApiApiKey: newApiKeyInput.trim(),
-                                newApiBaseUrl: newApiBaseInput.trim(),
                                 deepSeekApiKey: deepSeekKeyInput.trim(),
                                 deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
                               });
@@ -8055,8 +8044,6 @@ export default function App() {
                                 junlanBaseUrl: junlanBaseInput.trim() || DEFAULT_JUNLAN_BASE_URL,
                                 codesonlineApiKey: codesonlineKeyInput.trim(),
                                 codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
-                                newApiApiKey: newApiKeyInput.trim(),
-                                newApiBaseUrl: newApiBaseInput.trim(),
                                 deepSeekApiKey: deepSeekKeyInput.trim(),
                                 deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
                               });
@@ -8069,27 +8056,6 @@ export default function App() {
                         />
                       </>
                     )}
-                  </div>
-
-                  {/* ⑤ New API */}
-                  <div className="mt-5 pt-4 border-t border-[#333]">
-                    <h3 className="text-sm font-semibold text-gray-200 mb-2">New API</h3>
-                    <span hidden><label className="text-xs text-gray-500 block mb-1">New API Base URL</label>
-                    <input
-                      type="text"
-                      readOnly
-                      value={newApiBaseInput}
-                      placeholder={DEFAULT_NEWAPI_BASE_URL}
-                      className="w-full mb-3 bg-[#252525] border border-[#333] rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
-                    /></span>
-                    <label className="text-xs text-gray-500 block mb-1">New API Key</label>
-                    <input
-                      type="password"
-                      value={newApiKeyInput}
-                      onChange={(e) => setNewApiKeyInput(e.target.value)}
-                      placeholder="sk-..."
-                      className="w-full bg-[#222222] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-violet-500 transition-colors text-sm"
-                    />
                   </div>
 
                   <div className="flex gap-3 mt-4">
@@ -8110,8 +8076,6 @@ export default function App() {
                           junlanBaseUrl: junlanBaseInput.trim() || DEFAULT_JUNLAN_BASE_URL,
                           codesonlineApiKey: codesonlineKeyInput.trim(),
                           codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
-                          newApiApiKey: newApiKeyInput.trim(),
-                          newApiBaseUrl: newApiBaseInput.trim(),
                           deepSeekApiKey: deepSeekKeyInput.trim(),
                           deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
                         });
@@ -12366,13 +12330,16 @@ function ChatNodeContent({
         }
       }}
     >
-      {/* 参考区：图片 + 视频 */}
+      {/* 参考区：图片 + 视频 + 文本 */}
       <div className={`flex items-center gap-2 px-2 py-1.5 bg-[#252525] border-b border-[#333] shrink-0 ${isSelected ? '' : 'hidden'}`} style={{ fontSize: fs(10), order: 2 }}>
         <span className="text-gray-400 shrink-0">参考:</span>
         <span className="text-green-400 font-medium shrink-0">
           {totalRefImages}图
           {refSlots.some((s) => s.kind === 'video') ? (
             <span className="text-amber-400"> · {refSlots.filter((s) => s.kind === 'video').length}视频</span>
+          ) : null}
+          {refSlots.some((s) => s.kind === 'text') ? (
+            <span className="text-cyan-400"> · {refSlots.filter((s) => s.kind === 'text').length}文本</span>
           ) : null}
         </span>
         <div className="flex gap-1 ml-1 flex-wrap max-w-[330px]">
@@ -12415,6 +12382,11 @@ function ChatNodeContent({
                   playsInline
                   preload="metadata"
                 />
+              ) : slot.kind === 'text' && slot.textContent ? (
+                <div className="w-9 h-9 rounded border border-cyan-700/50 bg-[#1a1a2e] flex items-center justify-center text-cyan-300 text-[7px] leading-tight px-0.5 overflow-hidden text-center"
+                  title={slot.textContent}>
+                  文本
+                </div>
               ) : (
                 <div className="h-9 w-9 rounded border border-[#444] bg-[#333]" title={slot.label} />
               )}
@@ -12470,17 +12442,17 @@ function ChatNodeContent({
           onChange={(e) => onUpdate({ model: e.target.value })}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <optgroup label="DeepSeek（OpenAI 兼容 · api.deepseek.com/v1）">
+          <optgroup label="DeepSeek">
             <option value="deepseek-v4-flash">DeepSeek-V4-Flash</option>
             <option value="deepseek-v4-pro">DeepSeek-V4-Pro</option>
           </optgroup>
-          <optgroup label="君澜 AI（OpenAI 兼容）">
-            <option value="gpt-5.5-junlan">GPT-5.5（君澜 · www.junlanai.com/v1）</option>
-            <option value="claude-sonnet-4-6">Claude Sonnet 4-6（君澜 · www.junlanai.com/v1）</option>
+          <optgroup label="君澜 AI">
+            <option value="gpt-5.5-junlan">GPT-5.5（君澜）</option>
+            <option value="claude-sonnet-4-6">Claude Sonnet 4-6（君澜）</option>
           </optgroup>
           <optgroup label="Google Gemini / ToAPIs">
-            <option value="gemini-2.0-flash-official">Gemini 2.0 Flash（official · ToAPIs）</option>
-            <option value="gemini-3.1-flash-lite-preview-official">Gemini 3.1 Flash Lite（official · ToAPIs）</option>
+            <option value="gemini-2.0-flash-official">Gemini 2.0 Flash（ToAPIs）</option>
+            <option value="gemini-3.1-flash-lite-preview-official">Gemini 3.1 Flash Lite（ToAPIs）</option>
           <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
           <option value="gemini-3.1-flash-preview">Gemini 3.1 Flash</option>
           <option value="gemini-3-pro-preview">Gemini 3 Pro</option>
@@ -12523,11 +12495,8 @@ function ChatNodeContent({
         style={{ userSelect: 'text' }}
         onPointerDown={(e) => {
           const target = e.target as HTMLElement;
-          // 拖动滚动条时不激活选中节点（target 为容器自身表示点击了滚动条区域）
-          if (target.classList.contains('chat-messages') || target === e.currentTarget) {
-            e.stopPropagation();
-            return;
-          }
+          // 吸管模式：允许点击消息区域空白触发吸管连线
+          if (eyedropperTargetNodeId) return;
           // 点击消息气泡区域阻止冒泡，避免触发节点拖拽
           if (target.closest('.chat-bubble-wrap')) {
             e.stopPropagation();

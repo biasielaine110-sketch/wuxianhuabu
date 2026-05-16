@@ -1,9 +1,9 @@
 import type { CanvasNode, Edge } from './types';
 
-/** 汇入某一节点的参考槽（图 / 视频 / 语音），编号 @R1、@R2… 与连线顺序一致 */
+/** 汇入某一节点的参考槽（图 / 视频 / 语音 / 文本），编号 @R1、@R2… 与连线顺序一致 */
 export type IncomingRefSlot = {
   n: number;
-  kind: 'image' | 'video' | 'audio';
+  kind: 'image' | 'video' | 'audio' | 'text';
   label: string;
   imageBase64?: string;
   imageBase64s?: string[]; // 多图模式：返回所有图片
@@ -12,6 +12,8 @@ export type IncomingRefSlot = {
   audioBase64?: string;
   /** 语音参考：音频时长（秒） */
   audioDuration?: number;
+  /** 文本参考：文本节点内容 */
+  textContent?: string;
   edgeId: string;
   sourceNodeId: string;
 };
@@ -78,6 +80,18 @@ export function buildIncomingRefSlots(
         label: `${prefix}${src.audioDuration ? `·${formatDuration(src.audioDuration)}` : ''}`,
         audioBase64: src.audio,
         audioDuration: src.audioDuration,
+        edgeId: edge.id,
+        sourceNodeId: src.id,
+      });
+    }
+    /** 文本参考节点 */
+    if (src.type === 'text' && src.prompt) {
+      n += 1;
+      slots.push({
+        n,
+        kind: 'text',
+        label: `${prefix}·${src.prompt.slice(0, 20)}${src.prompt.length > 20 ? '…' : ''}`,
+        textContent: src.prompt,
         edgeId: edge.id,
         sourceNodeId: src.id,
       });

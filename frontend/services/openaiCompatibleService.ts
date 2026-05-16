@@ -6,12 +6,8 @@ import {
   getCodesonlineSavedKey,
   getJunlanBaseUrl,
   getJunlanSavedKey,
-  getNewApiBaseUrl,
-  getNewApiSavedKey,
   getOpenAiBaseUrl,
   getOpenAiSavedKey,
-  getGaoruiBaseUrl,
-  getGaoruiSavedKey,
 } from './aiSettings';
 
 function normalizeBaseUrl(url: string): string {
@@ -111,285 +107,11 @@ function isJunlanHost(baseNormalized: string): boolean {
   }
 }
 
-/** 画布节点 id；上游 New API 请求 model 为去掉 `-newapi` 后的 id（与 ToAPIs 的 gemini-3-pro-image-preview 等区分） */
-function isNewApiFireflyCanvasModel(modelName: string): boolean {
-  const m = (modelName || '').trim();
-  return m === 'firefly-nano-banana-pro-newapi' || m === 'firefly-nano-banana2-newapi';
-}
-
-function newApiFireflyUpstreamModelId(modelName: string): string {
-  return (modelName || '').trim().replace(/-newapi$/i, '');
-}
-
-/** 部分 New API 通道登记为去后缀 id（常见），少数与后台「模型名」带 -newapi 一致；优先去后缀以匹配 model_not_found 报错 */
-function newApiFireflyRequestModelCandidates(canvasModelId: string): string[] {
-  const id = (canvasModelId || '').trim();
-  if (!id) return [];
-  const stripped = id.replace(/-newapi$/i, '');
-  const out: string[] = [];
-  for (const m of [stripped, id]) {
-    const t = m.trim();
-    if (t && !out.includes(t)) out.push(t);
-  }
-  return out;
-}
-
 /** ToAPIs 异步任务轮询最长等待（文生图 / 图生图等） */
 const TOAPIS_TASK_MAX_WAIT_MS = 1_800_000;
 
-/** 高瑞 AI 异步任务轮询最长等待 */
-const GAORUI_TASK_MAX_WAIT_MS = 1_800_000;
-
 /** ToAPIs 视频任务轮询最长等待 */
 const TOAPIS_VIDEO_TASK_MAX_WAIT_MS = 1_800_000;
-
-/** 高瑞 AI：提交生图任务 */
-async function gaoruiSubmitImageGeneration(
-  baseNorm: string,
-  apiKey: string,
-  model: string,
-  prompt: string,
-  aspectRatio: string,
-  signal?: AbortSignal
-): Promise<{ id: string }> {
-  // 高瑞 API 提交接口是 /v1/nano-banana（不是 /v1/images/generations）
-  const fetchBase = rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm);
-  
-  const body = {
-    model,
-    prompt,
-    imageSize: '4K',  // 高瑞支持 1K, 2K, 4K
-    aspectRatio,       // 高瑞支持的宽高比：1:1, 16:9, 9:16, 4:3, 3:4, 21:9
-    images: [],        // 空数组表示文生图
-    webHook: '-1',
-    shutProgress: false,
-  };
-  console.log('[高瑞] 提交请求:', `${fetchBase}/nano-banana`, body);
-  
-  const res = await fetch(`${fetchBase}/nano-banana`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
-  
-  const text = await res.text();
-  console.log('[高瑞] 提交响应:', res.status, text.slice(0, 1000));
-  
-  if (!res.ok) {
-    throw new Error(`高瑞 AI 提交任务失败 (${res.status}): ${text.slice(0, 800)}`);
-  }
-  
-  let json: Record<string, unknown>;
-  try {
-    json = JSON.parse(text) as Record<string, unknown>;
-  } catch {
-    throw new Error(`高瑞 AI 响应无效: ${text.slice(0, 400)}`);
-  }
-  
-  if (json.code !== 0 && json.code !== undefined) {
-    throw new Error(`高瑞 AI: ${json.msg || JSON.stringify(json)}`);
-  }
-  
-  // 高瑞返回格式: { code: 0, data: { id: "14-xxx", type: "text2image" } }
-  const data = json.data as Record<string, unknown> | undefined;
-  if (!data?.id) {
-    throw new Error(`高瑞 AI 未返回任务 id：${text.slice(0, 400)}`);
-  }
-  
-  return { id: data.id as string };
-}
-
-/** 高瑞 AI：轮询生图任务状态 */
-async function gaoruiPollImageTask(
-  baseNorm: string,
-  apiKey: string,
-  taskId: string,
-  signal?: AbortSignal
-): Promise<string> {
-  // 高瑞 API 的 /fetch 接口不在 /v1 下面，需要去掉 /v1
-  const baseWithoutV1 = baseNorm.replace(/\/v1$/, '');
-  const deadline = Date.now() + GAORUI_TASK_MAX_WAIT_MS;
-  await sleepInterruptible(3000, signal);
-
-  while (Date.now() < deadline) {
-    assertNotAborted(signal);
-    
-    // 高瑞 API 查询接口是 /fetch/{task_id}，不在 /v1 下
-    const pollUrl = `${baseWithoutV1}/fetch/${taskId}`;
-    const res = await fetch(pollUrl, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal,
-    });
-    const text = await res.text();
-    
-    if (!res.ok) {
-      await sleepInterruptible(3000, signal);
-      continue;
-    }
-    
-    const data = JSON.parse(text) as {
-      status?: string;
-      url?: string;
-      data?: {
-        status?: string;
-        url?: string;
-        progress?: number;
-        error?: string;
-        originData?: {
-          status?: string;
-          progress?: number;
-          error?: string;
-          failure_reason?: string;
-          results?: { url?: string; content?: string }[];
-        };
-      };
-    };
-
-    // 高瑞返回格式: { code: 0, data: { status, url, originData: { results: [{ url }] } } }
-    const innerData = data.data || data;
-    const status = innerData.status || data.status;
-    const errorMsg = innerData.error || innerData.originData?.failure_reason || innerData.originData?.error;
-    
-    // 标准化状态：pending/queued -> pending, processing/running -> processing, succeeded -> succeeded, failed -> failed
-    const normalizedStatus = status === 'running' ? 'processing' : status;
-    const completed = normalizedStatus === 'succeeded';
-    const failed = normalizedStatus === 'failed';
-
-    if (failed) {
-      throw new Error(`高瑞 AI 生成失败: ${errorMsg || '未知错误'}`);
-    }
-
-    if (completed) {
-      const rawUrl =
-        innerData.url ||
-        innerData.originData?.results?.[0]?.url;
-
-      if (!rawUrl) {
-        throw new Error(`高瑞 AI 任务完成但未返回图片 URL。响应: ${text.slice(0, 500)}`);
-      }
-
-      let imageUrl = rawUrl;
-      if (rawUrl.startsWith('/')) {
-        imageUrl = `${baseWithoutV1}${rawUrl}`;
-      }
-
-      try {
-        const imgRes = await fetch(imageUrl, { signal });
-        if (imgRes.ok) {
-          const blob = await imgRes.blob();
-          return new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(String(reader.result));
-            reader.onerror = () => reject(new Error('读取图片失败'));
-            reader.readAsDataURL(blob);
-          });
-        }
-      } catch {
-        // 下载失败，尝试标准方式
-      }
-
-      return fetchUrlAsBase64(imageUrl, signal, apiKey);
-    }
-    await sleepInterruptible(3000, signal);
-  }
-  throw new Error(`高瑞 AI 任务超时（已等待超过 ${GAORUI_TASK_MAX_WAIT_MS / 60_000} 分钟），请稍后重试。`);
-}
-
-/** 高瑞 AI：文生图 */
-async function gaoruiGenerateNewImage(
-  baseNorm: string,
-  apiKey: string,
-  prompt: string,
-  aspectRatio: string,
-  numberOfImages: number,
-  model: string,
-  nodeResolution?: string,
-  _quality?: string,
-  signal?: AbortSignal
-): Promise<string[]> {
-  const out: string[] = [];
-  const count = Math.min(Math.max(numberOfImages, 1), 4);
-
-  for (let i = 0; i < count; i++) {
-    assertNotAborted(signal);
-    const { id } = await gaoruiSubmitImageGeneration(baseNorm, apiKey, model, prompt, aspectRatio, signal);
-    out.push(await gaoruiPollImageTask(baseNorm, apiKey, id, signal));
-  }
-  return out;
-}
-
-/** 高瑞 AI：提交图生图任务 */
-async function gaoruiSubmitImageEdit(
-  baseNorm: string,
-  apiKey: string,
-  model: string,
-  base64Images: string[],
-  prompt: string,
-  signal?: AbortSignal
-): Promise<{ id: string }> {
-  const fetchBase = rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm);
-  // 先上传参考图
-  const imageUrls: string[] = [];
-  for (const base64 of base64Images) {
-    assertNotAborted(signal);
-    const { raw, mime } = parseBase64ImageInput(base64);
-    const blob = base64ToBlob(raw, mime);
-    const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
-    const url = await openAiCompatUploadImageBlob(baseNorm, apiKey, blob, `ref.${ext}`, signal);
-    imageUrls.push(url);
-  }
-
-  const res = await fetch(`${fetchBase}/images/edits`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      prompt,
-      image_urls: imageUrls,
-      response_format: 'url',
-    }),
-    signal,
-  });
-  const text = await res.text();
-  if (!res.ok) {
-    throw new Error(`高瑞 AI 图生图提交任务失败 (${res.status}): ${text.slice(0, 800)}`);
-  }
-  const json = JSON.parse(text) as { id?: string; error?: { message?: string } };
-  if (json.error?.message) throw new Error(`高瑞 AI: ${json.error.message}`);
-  if (!json.id) throw new Error(`高瑞 AI 图生图未返回任务 id：${text.slice(0, 400)}`);
-  return { id: json.id };
-}
-
-/** 高瑞 AI：图生图 */
-async function gaoruiEditImage(
-  baseNorm: string,
-  apiKey: string,
-  base64Images: string[],
-  prompt: string,
-  numberOfImages: number,
-  model: string,
-  aspectRatio: string,
-  _quality?: string,
-  signal?: AbortSignal
-): Promise<string[]> {
-  if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
-  const out: string[] = [];
-  const count = Math.min(Math.max(numberOfImages, 1), 4);
-
-  for (let i = 0; i < count; i++) {
-    assertNotAborted(signal);
-    const { id } = await gaoruiSubmitImageEdit(baseNorm, apiKey, model, base64Images, prompt, signal);
-    out.push(await gaoruiPollImageTask(baseNorm, apiKey, id, signal));
-  }
-  return out;
-}
 
 function assertNotAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException('已取消生成', 'AbortError');
@@ -413,13 +135,13 @@ async function sleepInterruptible(ms: number, signal?: AbortSignal): Promise<voi
 /** ToAPIs：透传 imagen / gemini / gpt-image-* 等模型 id（含 gemini-3.1-flash-image-preview 文生图/图生图） */
 function toApisT2iModel(modelName: string): string {
   const m = (modelName || '').trim();
-  if (/^firefly-nano-banana.*-newapi$/i.test(m)) return newApiFireflyUpstreamModelId(m);
   if (m === 'gpt-image-2-codesonline') return 'gpt-image-2';
   if (m === 'gpt-image-2-junlan') return 'gpt-image-2';
   if (m.startsWith('imagen') || m.startsWith('gemini')) return m;
   if (m === 'gpt-image-2' || m === 'gpt-image-1' || m.startsWith('gpt-image')) return m;
   if (m === 'gpt-4o-image') return m;
   if (m === 'dall-e-3' || m === 'dall-e-2') return 'gemini-3-pro-image-preview';
+  if (m === 'nano-banana-2') return m;
   return m || 'gemini-3-pro-image-preview';
 }
 
@@ -1656,134 +1378,7 @@ function buildYunzhiI2iUserText(params: {
   const head = `图片比例${params.aspect}, ${yunzhiQualityDisplayUpper(params.quality)}分辨率(${yunzhiQualityPixelsLabel(params.quality)}像素)`;
   const enforce =
     '【必须以上传参考图中的人物、场景、构图与色调为基准进行编辑或重绘；禁止替换成无关主体或全新场景；仅可按文字指令微调姿态、细节与风格。】\n\n';
-  if (params.upstreamModel === 'firefly-gpt-image2' || params.upstreamModel === 'firefly-gpt-image15') {
-    return `${head}, ${params.prompt}`;
-  }
   return `${enforce}${head}, ${params.prompt}`;
-}
-
-async function editImagesYunzhiNewApiFireflyViaChatCompletions(params: {
-  baseNorm: string;
-  apiKey: string;
-  base64Images: string[];
-  prompt: string;
-  numberOfImages: number;
-  canvasFireflyModelId: string;
-  aspectRatio: string;
-  nodeResolution?: string;
-  signal?: AbortSignal;
-}): Promise<string[]> {
-  const {
-    baseNorm,
-    apiKey,
-    base64Images,
-    prompt,
-    numberOfImages,
-    canvasFireflyModelId,
-    aspectRatio,
-    nodeResolution,
-    signal,
-  } = params;
-  if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
-  const modelCandidates = newApiFireflyRequestModelCandidates(canvasFireflyModelId);
-  if (!modelCandidates.length) throw new Error('无效的 Firefly（New API）模型。');
-  const yAr = yunzhiChatDocAspectRatio(aspectRatio);
-  const yQ = yunzhiChatDocQuality(nodeResolution);
-  const count = Math.min(Math.max(numberOfImages, 1), 4);
-  const imageParts = await buildYunzhiChatContentImageParts(
-    baseNorm,
-    apiKey,
-    base64Images.slice(0, 6),
-    'yunzhi-i2i',
-    signal
-  );
-  const results: string[] = [];
-  for (let i = 0; i < count; i++) {
-    assertNotAborted(signal);
-    let lastErr: Error | null = null;
-    let ok = false;
-    for (const tryModel of modelCandidates) {
-      const textBlock = buildYunzhiI2iUserText({
-        prompt,
-        aspect: yAr,
-        quality: yQ,
-        upstreamModel: tryModel,
-      });
-      const content: Array<
-        { type: 'image_url'; image_url: { url: string } } | { type: 'text'; text: string }
-      > = [...imageParts, { type: 'text', text: textBlock }];
-      try {
-        const imageUrl = await yunzhiOpenAiCompatStreamChatToFirstImageUrl(
-          baseNorm,
-          apiKey,
-          {
-            model: tryModel,
-            messages: [{ role: 'user', content }],
-            stream: true,
-            aspect_ratio: yAr,
-            quality: yQ,
-          },
-          signal
-        );
-        results.push(await fetchUrlAsBase64(imageUrl, signal, apiKey.trim()));
-        ok = true;
-        break;
-      } catch (e) {
-        lastErr = e instanceof Error ? e : new Error(String(e));
-      }
-    }
-    if (!ok) throw lastErr ?? new Error('云智图生图失败');
-  }
-  return results;
-}
-
-/** 云智文生图：POST /v1/chat/completions + SSE，与官方文档一致（单条 user text）。 */
-async function generateImagesYunzhiFireflyViaChatCompletions(params: {
-  baseNorm: string;
-  apiKey: string;
-  prompt: string;
-  aspectRatio: string;
-  numberOfImages: number;
-  resolvedModel: string;
-  nodeResolution?: string;
-  signal?: AbortSignal;
-}): Promise<string[]> {
-  const {
-    baseNorm,
-    apiKey,
-    prompt,
-    aspectRatio,
-    numberOfImages,
-    resolvedModel,
-    nodeResolution,
-    signal,
-  } = params;
-  const yAr = yunzhiChatDocAspectRatio(aspectRatio);
-  const yQ = yunzhiChatDocQuality(nodeResolution);
-  const head = `图片比例${yAr}, ${yunzhiQualityDisplayUpper(yQ)}分辨率(${yunzhiQualityPixelsLabel(yQ)}像素)`;
-  const textLine =
-    resolvedModel === 'firefly-gpt-image2' || resolvedModel === 'firefly-gpt-image15'
-      ? `${head}, ${prompt.trim()}`
-      : prompt.trim();
-  const count = Math.max(numberOfImages, 1);
-  const out: string[] = [];
-  for (let i = 0; i < count; i++) {
-    assertNotAborted(signal);
-    const imageUrl = await yunzhiOpenAiCompatStreamChatToFirstImageUrl(
-      baseNorm,
-      apiKey,
-      {
-        model: resolvedModel,
-        messages: [{ role: 'user', content: [{ type: 'text', text: textLine }] }],
-        stream: true,
-        aspect_ratio: yAr,
-        quality: yQ,
-      },
-      signal
-    );
-    out.push(await fetchUrlAsBase64(imageUrl, signal, apiKey.trim()));
-  }
-  return out;
 }
 
 async function postJsonAtBase<T>(base: string, path: string, body: unknown, apiKey: string): Promise<T> {
@@ -1863,26 +1458,13 @@ async function generateImagesAtOpenAiCompatibleBase(
   quality?: string,
   signal?: AbortSignal
 ): Promise<string[]> {
-  if (isYunzhiOpenAiCompatBase(baseNorm) && resolvedModel.startsWith('firefly-')) {
-    return generateImagesYunzhiFireflyViaChatCompletions({
-      baseNorm,
-      apiKey,
-      prompt,
-      aspectRatio,
-      numberOfImages,
-      resolvedModel,
-      nodeResolution,
-      signal,
-    });
-  }
   const size = aspectRatioToOpenAiSize(aspectRatio, resolvedModel);
   const enhancedPrompt = buildPromptWithDimensions(prompt, aspectRatio);
   const out: string[] = [];
   const onePerRequest =
     resolvedModel === 'dall-e-3' ||
     resolvedModel === 'gpt-image-2' ||
-    resolvedModel === 'gpt-image-1' ||
-    resolvedModel.startsWith('firefly-');
+    resolvedModel === 'gpt-image-1';
   if (onePerRequest) {
     for (let i = 0; i < numberOfImages; i++) {
       assertNotAborted(signal);
@@ -1941,238 +1523,6 @@ async function generateImagesAtOpenAiCompatibleBase(
  * 非 401 时不中断；尝试 `uploads/images` 与 `upload/image` 得公网 URL 后以 `image_urls` 调 generations。
  * 若上传为 404 且 edits 失败：拒绝仅含 data URI/裸 base64 的 JSON 成功（避免误接受纯文生图），multipart 二进制仍尝试。
  */
-async function editImagesNewApiFireflyWithRouteFallback(
-  baseNorm: string,
-  apiKey: string,
-  base64Images: string[],
-  prompt: string,
-  numberOfImages: number,
-  canvasFireflyModelId: string,
-  aspectRatio: string,
-  nodeResolution?: string,
-  signal?: AbortSignal
-): Promise<string[]> {
-  if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
-  if (isYunzhiOpenAiCompatBase(baseNorm)) {
-    return editImagesYunzhiNewApiFireflyViaChatCompletions({
-      baseNorm,
-      apiKey,
-      base64Images,
-      prompt,
-      numberOfImages,
-      canvasFireflyModelId,
-      aspectRatio,
-      nodeResolution,
-      signal,
-    });
-  }
-  const modelCandidates = newApiFireflyRequestModelCandidates(canvasFireflyModelId);
-  if (!modelCandidates.length) throw new Error('无效的 Firefly（New API）模型。');
-  const sizeModel = modelCandidates[0];
-  const size = aspectRatioToOpenAiSize(aspectRatio, sizeModel);
-  const enhancedPrompt = buildPromptWithDimensions(prompt, aspectRatio);
-  // 支持多图：转换所有 base64 为 PNG blob
-  const pngBlobs: Blob[] = [];
-  for (const base64 of base64Images) {
-    pngBlobs.push(await jpegBase64ToPngBlob(base64));
-  }
-  const parsedRef = parseBase64ImageInput(base64Images[0]);
-  const refDataUrl = `data:${parsedRef.mime || 'image/jpeg'};base64,${parsedRef.raw}`;
-  const results: string[] = [];
-  const count = Math.min(Math.max(numberOfImages, 1), 4);
-  const url = `${rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm)}/images/edits`;
-
-  for (let i = 0; i < count; i++) {
-    const startLen = results.length;
-    assertNotAborted(signal);
-    let done = false;
-    for (const tryModel of modelCandidates) {
-      for (const useBracket of [true, false] as const) {
-        const form = new FormData();
-        // 多图参考：发送所有图片
-        if (useBracket) {
-          for (let imgIdx = 0; imgIdx < pngBlobs.length; imgIdx++) {
-            form.append('image[]', pngBlobs[imgIdx], `ref${imgIdx}.png`);
-          }
-        } else {
-          form.append('image', pngBlobs[0], 'ref.png');
-        }
-        form.append('prompt', enhancedPrompt);
-        form.append('model', tryModel);
-        form.append('n', '1');
-        form.append('size', size);
-        form.append('response_format', 'b64_json');
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${apiKey}` },
-          body: form,
-          signal,
-        });
-        const text = await res.text();
-        if (res.ok) {
-          const json = JSON.parse(text) as unknown;
-          results.push(await openAiStyleGenerationJsonToBase64(json, signal, apiKey));
-          done = true;
-          break;
-        }
-        if (res.status === 401) {
-          throw new Error(
-            `图生图接口错误 (${res.status})${openAiCompatFailureHint(res.status, 'image-edit')}: ${text.slice(0, 800)}`
-          );
-        }
-        // 404/503/502 等：云智等对 edits 常不可用或 model_not_found，须回退 generations（勿把栈顶 vertex shim 当根因）
-      }
-      if (done) break;
-    }
-    if (!done) {
-      const refAnchoredPrompt = `【必须以上传参考图中的人物/场景/构图/色调为基准进行编辑或重绘，禁止换成无关角色或全新场景；仅可按文字指令微调姿态、细节与风格。】\n\n${enhancedPrompt}`;
-      const refPngDataUrl = await blobToDataUrl(pngBlobs[0]);
-      let refUploadUrl: string | null = null;
-      let refUpload404 = false;
-      try {
-        refUploadUrl = await openAiCompatUploadImageBlob(baseNorm, apiKey, pngBlobs[0], 'ref.png', signal);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        refUpload404 = msg.includes('(404)') || msg.includes(' 404');
-      }
-      /** 上传 404 且 edits 未成功时：云智等常忽略 JSON 里的 data URI/裸 base64，接受则多为纯文生图 */
-      const strictRejectInlineRefJson = refUpload404;
-      const genUrl = `${rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm)}/images/generations`;
-      const makeUrlRefBodies = (tryModel: string): Record<string, unknown>[] =>
-        refUploadUrl
-          ? [
-              {
-                model: tryModel,
-                prompt: refAnchoredPrompt,
-                n: 1,
-                size,
-                response_format: 'b64_json',
-                image_urls: [refUploadUrl],
-                resolution: '2K',
-              },
-              {
-                model: tryModel,
-                prompt: refAnchoredPrompt,
-                n: 1,
-                size,
-                response_format: 'b64_json',
-                image_urls: [refUploadUrl],
-              },
-              { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: [refUploadUrl] },
-              { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', images: [refUploadUrl] },
-            ]
-          : [];
-
-      if (refUploadUrl) {
-        let urlJsonOk = false;
-        for (const tryModel of modelCandidates) {
-          for (const body of makeUrlRefBodies(tryModel)) {
-            try {
-              const json = await postJsonAtBase<Record<string, unknown>>(
-                baseNorm,
-                '/images/generations',
-                body,
-                apiKey
-              );
-              results.push(await openAiStyleGenerationJsonToBase64(json, signal, apiKey));
-              urlJsonOk = true;
-              break;
-            } catch {
-              /* 下一组 body */
-            }
-          }
-          if (urlJsonOk) break;
-        }
-        if (urlJsonOk) continue;
-      }
-
-      let multipartOk = false;
-      for (const tryModel of modelCandidates) {
-        for (const useBracket of [true, false] as const) {
-          const form = new FormData();
-          form.append('model', tryModel);
-          form.append('prompt', refAnchoredPrompt);
-          form.append('n', '1');
-          form.append('size', size);
-          form.append('response_format', 'b64_json');
-          if (useBracket) form.append('image[]', pngBlob, 'ref.png');
-          else form.append('image', pngBlob, 'ref.png');
-          const res = await fetch(genUrl, {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${apiKey}` },
-            body: form,
-            signal,
-          });
-          const text = await res.text();
-          if (res.ok) {
-            const json = JSON.parse(text) as unknown;
-            results.push(await openAiStyleGenerationJsonToBase64(json, signal, apiKey));
-            multipartOk = true;
-            break;
-          }
-          if (res.status === 401) {
-            throw new Error(
-              `图生图接口错误 (${res.status})${openAiCompatFailureHint(res.status, 'image-edit')}: ${text.slice(0, 800)}`
-            );
-          }
-          // 503/400 等：部分网关 multipart 不认参考图或模型路由错误，继续走 JSON 多字段尝试（避免误报为 dall-e 通道）
-        }
-        if (multipartOk) break;
-      }
-      if (multipartOk) continue;
-
-      const makeTryBodies = (tryModel: string): Record<string, unknown>[] => {
-        const urlFirst = makeUrlRefBodies(tryModel);
-        return [
-          ...urlFirst,
-          { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: [refPngDataUrl] },
-          { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image_urls: [refPngDataUrl] },
-          { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: refPngDataUrl },
-          { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: [refDataUrl] },
-          { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: refDataUrl },
-          { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', images: [refDataUrl] },
-          { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image_urls: [refDataUrl] },
-          { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', image: rawB64 },
-          { model: tryModel, prompt: refAnchoredPrompt, n: 1, size, response_format: 'b64_json', images: [rawB64] },
-        ];
-      };
-      let lastErr: Error | null = null;
-      for (const tryModel of modelCandidates) {
-        for (const body of makeTryBodies(tryModel)) {
-          try {
-            const json = await postJsonAtBase<Record<string, unknown>>(
-              baseNorm,
-              '/images/generations',
-              body,
-              apiKey
-            );
-            if (strictRejectInlineRefJson && !isStrongRefBindingJsonBody(body)) {
-              lastErr = new Error(
-                '上游在无公网 image_urls 时常忽略内联参考图（易退化为纯文生图），已跳过该次响应。'
-              );
-              continue;
-            }
-            results.push(await openAiStyleGenerationJsonToBase64(json, signal, apiKey));
-            lastErr = null;
-            break;
-          } catch (e) {
-            lastErr = e instanceof Error ? e : new Error(String(e));
-          }
-        }
-        if (!lastErr) break;
-      }
-      if (results.length === startLen) {
-        throw new Error(
-          refUpload404
-            ? '图生图：上游未开放参考图暂存（POST …/uploads/images 与 …/upload/image 均不可用），且 /images/edits 失败。此类网关对 JSON 里的 data URI/裸 base64 常会忽略参考图，结果易与参考无关。请改用支持「参考图上传」或稳定图生图的通道（例如 ToAPIs 主通道），或在 New API 管理端开启上传类路由。'
-            : lastErr?.message || '图生图：所有尝试均未返回有效图片。'
-        );
-      }
-    }
-  }
-  return results;
-}
-
 async function editImagesAtOpenAiCompatibleBase(
   baseNorm: string,
   apiKey: string,
@@ -2204,7 +1554,7 @@ async function editImagesAtOpenAiCompatibleBase(
     Math.max(numberOfImages, 1),
     resolvedEditModel === 'dall-e-2'
       ? 10
-      : resolvedEditModel === 'gpt-image-2' || resolvedEditModel.startsWith('firefly-')
+      : resolvedEditModel === 'gpt-image-2'
         ? 4
         : 1
   );
@@ -2212,7 +1562,7 @@ async function editImagesAtOpenAiCompatibleBase(
   for (let i = 0; i < count; i++) {
     assertNotAborted(signal);
     const form = new FormData();
-    // dall-e-2 沿用单字段 image；gpt-image-* / firefly 等支持多图（多张时使用 image[]）
+    // dall-e-2 沿用单字段 image；gpt-image-* 等支持多图（多张时使用 image[]）
     if (resolvedEditModel === 'dall-e-2') {
       form.append('image', imageBlobs[0].blob, imageBlobs[0].filename);
     } else {
@@ -2268,49 +1618,29 @@ export async function openAiGenerateNewImage(
   signal?: AbortSignal
 ): Promise<string[]> {
   const rawModel = (modelName || '').trim();
-  if (isNewApiFireflyCanvasModel(rawModel)) {
-    const naKey = getNewApiSavedKey().trim();
-    if (!naKey) {
-      throw new Error(
-        '未配置 New API 密钥。请在「设置 → API」中填写「New API（Firefly）」密钥（与 ToAPIs 主通道分开）。文档：https://docs.newapi.pro/zh/docs/api'
-      );
-    }
-    const rawBase = getNewApiBaseUrl().trim();
-    if (!rawBase) {
-      throw new Error('未配置 New API Base URL（须含 /v1）。请在「设置 → API」中填写自建 New API 地址。');
-    }
-    const naBase = normalizeBaseUrl(rawBase);
-    const upstream = newApiFireflyUpstreamModelId(rawModel);
-    return generateImagesAtOpenAiCompatibleBase(
-      naBase,
-      naKey,
-      prompt,
-      aspectRatio,
-      numberOfImages,
-      upstream,
-      nodeResolution,
-      quality,
-      signal
-    );
-  }
-
   if (rawModel === 'gpt-image-2-junlan') {
     const jlKey = getJunlanSavedKey().trim();
     if (!jlKey) {
-      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, 'gpt-image-2', nodeResolution, quality, signal);
+      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, 'gpt-image-2-codesonline', nodeResolution, quality, signal);
     }
     const jlBase = normalizeBaseUrl(getJunlanBaseUrl());
-    return generateImagesAtOpenAiCompatibleBase(
-      jlBase,
-      jlKey,
-      prompt,
-      aspectRatio,
-      numberOfImages,
-      'gpt-image-2',
-      nodeResolution,
-      quality,
-      signal
-    );
+    try {
+      return await generateImagesAtOpenAiCompatibleBase(
+        jlBase,
+        jlKey,
+        prompt,
+        aspectRatio,
+        numberOfImages,
+        'gpt-image-2',
+        nodeResolution,
+        quality,
+        signal
+      );
+    } catch (err) {
+      // 君澜服务不可用（503 等）时回退至 codesonline 通道
+      console.warn('[openAiGenerateNewImage] 君澜不可用，回退至 codesonline:', err);
+      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, 'gpt-image-2-codesonline', nodeResolution, quality, signal);
+    }
   }
 
   if (rawModel === 'gpt-image-2-codesonline') {
@@ -2332,34 +1662,6 @@ export async function openAiGenerateNewImage(
       quality,
       signal
     );
-  }
-
-  if (rawModel === 'gpt-image-2-gaorui') {
-    const grKey = getGaoruiSavedKey().trim();
-    if (!grKey) {
-      throw new Error('未配置高瑞 AI 图像通道。请在「设置 → API」填写「高瑞 API Key」。');
-    }
-    const grBase = normalizeBaseUrl(getGaoruiBaseUrl());
-    return gaoruiGenerateNewImage(grBase, grKey, prompt, aspectRatio, numberOfImages, 'gpt-image-2', nodeResolution, quality, signal);
-  }
-
-  if (rawModel === 'nano-banana-pro-gaorui') {
-    const grKey = getGaoruiSavedKey().trim();
-    if (!grKey) {
-      throw new Error('未配置高瑞 AI 图像通道。请在「设置 → API」填写「高瑞 API Key」。');
-    }
-    const grBase = normalizeBaseUrl(getGaoruiBaseUrl());
-    return gaoruiGenerateNewImage(grBase, grKey, prompt, aspectRatio, numberOfImages, 'nano-banana-pro', nodeResolution, quality, signal);
-  }
-
-  if (rawModel === 'nano-banana-pro-gaorui-v2') {
-    const grKey = getGaoruiSavedKey().trim();
-    if (!grKey) {
-      throw new Error('未配置高瑞 AI 图像通道。请在「设置 → API」填写「高瑞 API Key」。');
-    }
-    const grBase = normalizeBaseUrl(getGaoruiBaseUrl());
-    // 高瑞 NanoBanana Pro 使用异步 /nano-banana 接口 + /fetch 轮询
-    return gaoruiGenerateNewImage(grBase, grKey, prompt, aspectRatio, numberOfImages, 'nano-banana-pro', nodeResolution, quality, signal);
   }
 
   const base = normalizeBaseUrl(getOpenAiBaseUrl());
@@ -2394,48 +1696,29 @@ export async function openAiEditImage(
   signal?: AbortSignal
 ): Promise<string[]> {
   const rawModel = (modelName || '').trim();
-  if (isNewApiFireflyCanvasModel(rawModel)) {
-    const naKey = getNewApiSavedKey().trim();
-    if (!naKey) {
-      throw new Error(
-        '未配置 New API 密钥。请在「设置 → API」中填写「New API（Firefly）」密钥。文档：https://docs.newapi.pro/zh/docs/api'
-      );
-    }
-    const rawBase = getNewApiBaseUrl().trim();
-    if (!rawBase) {
-      throw new Error('未配置 New API Base URL（须含 /v1）。请在设置中填写。');
-    }
-    const naBase = normalizeBaseUrl(rawBase);
-    return editImagesNewApiFireflyWithRouteFallback(
-      naBase,
-      naKey,
-      base64Images,
-      prompt,
-      numberOfImages,
-      rawModel,
-      aspectRatio,
-      nodeResolution,
-      signal
-    );
-  }
-
   if (rawModel === 'gpt-image-2-junlan') {
     const jlKey = getJunlanSavedKey().trim();
     if (!jlKey) {
-      return openAiEditImage(base64Images, prompt, numberOfImages, 'gpt-image-2', aspectRatio, nodeResolution, quality, signal);
+      return openAiEditImage(base64Images, prompt, numberOfImages, 'gpt-image-2-codesonline', aspectRatio, nodeResolution, quality, signal);
     }
     const jlBase = normalizeBaseUrl(getJunlanBaseUrl());
-    return editImagesAtOpenAiCompatibleBase(
-      jlBase,
-      jlKey,
-      base64Images,
-      prompt,
-      numberOfImages,
-      'gpt-image-2',
-      aspectRatio,
-      quality,
-      signal
-    );
+    try {
+      return await editImagesAtOpenAiCompatibleBase(
+        jlBase,
+        jlKey,
+        base64Images,
+        prompt,
+        numberOfImages,
+        'gpt-image-2',
+        aspectRatio,
+        quality,
+        signal
+      );
+    } catch (err) {
+      // 君澜服务不可用（503 等）时回退至 codesonline 通道
+      console.warn('[openAiEditImage] 君澜不可用，回退至 codesonline:', err);
+      return openAiEditImage(base64Images, prompt, numberOfImages, 'gpt-image-2-codesonline', aspectRatio, nodeResolution, quality, signal);
+    }
   }
 
   if (rawModel === 'gpt-image-2-codesonline') {
@@ -2457,33 +1740,6 @@ export async function openAiEditImage(
       quality,
       signal
     );
-  }
-
-  if (rawModel === 'gpt-image-2-gaorui') {
-    const grKey = getGaoruiSavedKey().trim();
-    if (!grKey) {
-      throw new Error('未配置高瑞 AI 图像通道。请在「设置 → API」填写「高瑞 API Key」。');
-    }
-    const grBase = normalizeBaseUrl(getGaoruiBaseUrl());
-    return gaoruiEditImage(grBase, grKey, base64Images, prompt, numberOfImages, 'gpt-image-2', aspectRatio, quality, signal);
-  }
-
-  if (rawModel === 'nano-banana-pro-gaorui') {
-    const grKey = getGaoruiSavedKey().trim();
-    if (!grKey) {
-      throw new Error('未配置高瑞 AI 图像通道。请在「设置 → API」填写「高瑞 API Key」。');
-    }
-    const grBase = normalizeBaseUrl(getGaoruiBaseUrl());
-    return gaoruiEditImage(grBase, grKey, base64Images, prompt, numberOfImages, 'nano-banana-pro', aspectRatio, quality, signal);
-  }
-
-  if (rawModel === 'nano-banana-pro-gaorui-v2') {
-    const grKey = getGaoruiSavedKey().trim();
-    if (!grKey) {
-      throw new Error('未配置高瑞 AI 图像通道。请在「设置 → API」填写「高瑞 API Key」。');
-    }
-    const grBase = normalizeBaseUrl(getGaoruiBaseUrl());
-    return gaoruiEditImage(grBase, grKey, base64Images, prompt, numberOfImages, 'nano-banana-pro', aspectRatio, quality, signal);
   }
 
   if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
