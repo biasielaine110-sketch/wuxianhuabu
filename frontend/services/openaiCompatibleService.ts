@@ -141,7 +141,7 @@ function toApisT2iModel(modelName: string): string {
   if (m === 'gpt-image-2' || m === 'gpt-image-1' || m.startsWith('gpt-image')) return m;
   if (m === 'gpt-4o-image') return m;
   if (m === 'dall-e-3' || m === 'dall-e-2') return 'gemini-3-pro-image-preview';
-  if (m === 'nano-banana-2') return m;
+  if (m === 'nano-banana-2') return 'gemini-2.5-flash-image-preview';
   return m || 'gemini-3-pro-image-preview';
 }
 
@@ -1637,9 +1637,14 @@ export async function openAiGenerateNewImage(
         signal
       );
     } catch (err) {
-      // 君澜服务不可用（503 等）时回退至 codesonline 通道
-      console.warn('[openAiGenerateNewImage] 君澜不可用，回退至 codesonline:', err);
-      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, 'gpt-image-2-codesonline', nodeResolution, quality, signal);
+      // 君澜服务不可用（503 等）时依次回退 codesonline → ToAPIs
+      console.warn('[openAiGenerateNewImage] 君澜不可用，尝试回退:', err);
+      try {
+        return await openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, 'gpt-image-2-codesonline', nodeResolution, quality, signal);
+      } catch {
+        // codesonline 也无 Key 时兜底走 ToAPIs
+        return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, 'gpt-image-2', nodeResolution, quality, signal);
+      }
     }
   }
 
@@ -1715,9 +1720,13 @@ export async function openAiEditImage(
         signal
       );
     } catch (err) {
-      // 君澜服务不可用（503 等）时回退至 codesonline 通道
-      console.warn('[openAiEditImage] 君澜不可用，回退至 codesonline:', err);
-      return openAiEditImage(base64Images, prompt, numberOfImages, 'gpt-image-2-codesonline', aspectRatio, nodeResolution, quality, signal);
+      // 君澜服务不可用（503 等）时依次回退 codesonline → ToAPIs
+      console.warn('[openAiEditImage] 君澜不可用，尝试回退:', err);
+      try {
+        return await openAiEditImage(base64Images, prompt, numberOfImages, 'gpt-image-2-codesonline', aspectRatio, nodeResolution, quality, signal);
+      } catch {
+        return openAiEditImage(base64Images, prompt, numberOfImages, 'gpt-image-2', aspectRatio, nodeResolution, quality, signal);
+      }
     }
   }
 
