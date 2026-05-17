@@ -999,6 +999,7 @@ function I2iPresetCategorySelect({
         >
           <option value="">未使用</option>
           <option value={COMMON_TEMPLATE_KEY}>通用模板</option>
+          <option value="真人写实">真人写实</option>
         </select>
       </div>
     </div>
