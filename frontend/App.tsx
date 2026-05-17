@@ -124,10 +124,11 @@ function sniffImageMimeFromBase64(raw: string): string {
 }
 
 /** 视频节点模型 → ToAPIs 模型 */
-function videoNodeModelToToApis(m?: string): 'grok-video-3' | 'sora-2-vvip' | 'veo3.1-fast' {
+function videoNodeModelToToApis(m?: string): ToApisVideoModelId {
   const vm = (m || '').trim();
   if (vm === 'sora-2-vvip') return 'sora-2-vvip';
   if (isVeo31FastVideoModel(vm)) return 'veo3.1-fast';
+  if (vm === 'doubao-seedance-1-5-pro') return 'doubao-seedance-1-5-pro';
   return 'grok-video-3';
 }
 
@@ -4725,9 +4726,11 @@ export default function App() {
           ? (['1080p', '4k'].includes(node.videoResolution || '') ? (node.videoResolution as '1080p' | '4k') : '720p')
           : videoModel === 'sora-2-vvip'
             ? '720p'
-            : node.videoResolution === '480p'
-              ? '480p'
-              : '720p';
+            : videoModel === 'doubao-seedance-1-5-pro'
+              ? (['480p', '1080p'].includes(node.videoResolution || '') ? (node.videoResolution as '480p' | '1080p') : '720p')
+              : node.videoResolution === '480p'
+                ? '480p'
+                : '720p';
 
       videoUrl = await generateCanvasVideoViaToApis(combinedPrompt, {
         videoModel,
@@ -4736,7 +4739,7 @@ export default function App() {
           (videoModel === 'sora-2-vvip' || videoModel === 'veo3.1-fast' ? 8 : 10),
         aspectRatio: node.aspectRatio || '16:9',
         resolution,
-        referenceImagesBase64: imageInputs.slice(0, 3),
+        referenceImagesBase64: videoModel === 'doubao-seedance-1-5-pro' ? imageInputs.slice(0, 2) : imageInputs.slice(0, 3),
         referenceAudioBase64: audioBase64,
         signal: ac.signal,
       });
@@ -5921,6 +5924,7 @@ export default function App() {
           const isSora = isVideoSoraStyleModel(vm);
           const isVeo = isVideoVeoStyleModel(vm);
           const isGroDur = isVideoGrokDurationStyleModel(vm);
+          const isDoubao = vm === 'doubao-seedance-1-5-pro';
           const vSlots = buildIncomingRefSlots(node.id, edges, nodes);
           const imageSlots = vSlots.filter((s) => s.kind === 'image');
           const videoSlots = vSlots.filter((s) => s.kind === 'video');
@@ -6041,6 +6045,13 @@ export default function App() {
                         : '720p';
                     const ar = node.aspectRatio || '16:9';
                     if (!['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].includes(ar)) updates.aspectRatio = '16:9';
+                  } else if (m === 'doubao-seedance-1-5-pro') {
+                    const d = node.videoDuration ?? 8;
+                    updates.videoDuration = [4, 5, 8, 10, 12].includes(d) ? d : 8;
+                    updates.videoResolution =
+                      node.videoResolution === '480p' || node.videoResolution === '1080p'
+                        ? node.videoResolution
+                        : '720p';
                   } else {
                     const d = node.videoDuration ?? 8;
                     if (d === 4 || d === 8 || d === 12) updates.videoDuration = 10;
@@ -6056,6 +6067,7 @@ export default function App() {
                   <option value="veo3.1-fast">Veo 3.1 Fast</option>
                   <option value="grok-video-3">Grok Video 3</option>
                   <option value="sora-2-vvip">Sora2 VVIP</option>
+                  <option value="doubao-seedance-1-5-pro">Doubao SeeDance 1.5 Pro</option>
                 </optgroup>
             </select>
               <div className="nodemeta-skip-scale flex flex-wrap items-center gap-1.5">
@@ -6074,6 +6086,19 @@ export default function App() {
                   <option value={8}>8 秒</option>
                   <option value={12}>12 秒</option>
             </select>
+              ) : isDoubao ? (
+            <select
+                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  value={[4, 5, 8, 10, 12].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 8}
+                  onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
+                  onPointerDown={e => e.stopPropagation()}
+                >
+                  <option value={4}>4 秒</option>
+                  <option value={5}>5 秒</option>
+                  <option value={8}>8 秒</option>
+                  <option value={10}>10 秒</option>
+                  <option value={12}>12 秒</option>
+                </select>
               ) : (
             <select
                   className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
@@ -6114,6 +6139,20 @@ export default function App() {
                   <option value="16:9">16:9</option>
                   <option value="9:16">9:16</option>
                 </select>
+              ) : isDoubao ? (
+                <select
+                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  value={node.aspectRatio || '16:9'}
+                  onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })}
+                  onPointerDown={e => e.stopPropagation()}
+                >
+                  <option value="16:9">16:9</option>
+                  <option value="9:16">9:16</option>
+                  <option value="1:1">1:1</option>
+                  <option value="4:3">4:3</option>
+                  <option value="3:4">3:4</option>
+                  <option value="21:9">21:9</option>
+                </select>
               ) : (
                 <select
                   className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
@@ -6150,6 +6189,19 @@ export default function App() {
                   <option value="720p">720p</option>
                   <option value="1080p">1080p</option>
                   <option value="4k">4K</option>
+                </select>
+              ) : isDoubao ? (
+                <select
+                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  value={node.videoResolution === '480p' || node.videoResolution === '1080p' ? node.videoResolution : '720p'}
+                  onChange={(e) =>
+                    handleUpdateNode(node.id, { videoResolution: e.target.value as '480p' | '720p' | '1080p' })
+                  }
+                  onPointerDown={e => e.stopPropagation()}
+                >
+                  <option value="480p">480p</option>
+                  <option value="720p">720p</option>
+                  <option value="1080p">1080p</option>
                 </select>
               ) : (
                 <select

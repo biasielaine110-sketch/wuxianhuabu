@@ -648,7 +648,7 @@ async function toApisUploadVideoReferenceImageUrls(
   return imageUrls;
 }
 
-export type ToApisVideoModelId = 'grok-video-3' | 'sora-2-vvip' | 'veo3.1-fast';
+export type ToApisVideoModelId = 'grok-video-3' | 'sora-2-vvip' | 'veo3.1-fast' | 'doubao-seedance-1-5-pro';
 
 function isHttpUrlString(v: unknown): v is string {
   return typeof v === 'string' && /^https?:\/\//i.test(v.trim());
@@ -984,6 +984,66 @@ async function toApisVeo31FastVideoGenerate(params: {
   return toApisPollVideoTaskToPlayableUrl(id, params.signal);
 }
 
+/**
+ * ToAPIs：`doubao-seedance-1-5-pro`（豆包 SeeDance 1.5 Pro 视频生成）。
+ * 文档：https://docs.toapis.com/docs/cn/api-reference/videos/doubao-seedance-1-5/generation
+ * - `duration`：4–12 秒
+ * - `aspect_ratio`：16:9 / 9:16 / 1:1 / 4:3 / 3:4 / 21:9
+ * - `metadata.resolution`：480p / 720p / 1080p
+ * - 首帧图/尾帧图：以 `image_with_roles` 传入（最多 2 张，分别指定 first_frame / last_frame）
+ * - 1.5 Pro 不支持 reference_image 角色
+ */
+async function toApisDoubaoSeedance15ProVideoGenerate(params: {
+  prompt: string;
+  durationSeconds: number;
+  aspectRatio: string;
+  resolution: '480p' | '720p' | '1080p';
+  referenceImagesBase64?: string[];
+  signal?: AbortSignal;
+}): Promise<string> {
+  if (getAiProvider() !== 'openai-compatible') {
+    throw new Error(
+      '视频生成需在「设置 → API」中选择「OpenAI 兼容」，并将 Base URL 设为 ToAPIs（https://toapis.com/v1）。'
+    );
+  }
+  const base = normalizeBaseUrl(getOpenAiBaseUrl());
+  if (!isToApisHost(base)) {
+    throw new Error('视频生成当前仅支持 ToAPIs：请将 Base URL 设为 https://toapis.com/v1');
+  }
+  const apiKey = getOpenAiSavedKey();
+  if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key。');
+
+  // 首帧/尾帧图上传
+  const imageUrls = await toApisUploadVideoReferenceImageUrls(
+    params.referenceImagesBase64 || [],
+    'doubao-video-ref',
+    params.signal
+  );
+
+  // 构建 image_with_roles：最多 2 张，第一张为首帧，第二张为尾帧
+  const imageWithRoles: { url: string; role: string }[] = [];
+  if (imageUrls.length >= 1) {
+    imageWithRoles.push({ url: imageUrls[0], role: 'first_frame' });
+  }
+  if (imageUrls.length >= 2) {
+    imageWithRoles.push({ url: imageUrls[1], role: 'last_frame' });
+  }
+
+  const body: Record<string, unknown> = {
+    model: 'doubao-seedance-1-5-pro',
+    prompt: params.prompt,
+    duration: params.durationSeconds,
+    aspect_ratio: params.aspectRatio,
+    metadata: {
+      resolution: params.resolution,
+    },
+  };
+  if (imageWithRoles.length > 0) body.image_with_roles = imageWithRoles;
+
+  const { id } = await toApisSubmitVideoGeneration(body, params.signal);
+  return toApisPollVideoTaskToPlayableUrl(id, params.signal);
+}
+
 export async function toApisCanvasVideoGenerate(params: {
   prompt: string;
   videoModel: ToApisVideoModelId;
@@ -1017,6 +1077,20 @@ export async function toApisCanvasVideoGenerate(params: {
       resolution: params.resolution === '480p' ? '480p' : '720p',
       referenceImagesBase64: params.referenceImagesBase64,
       referenceAudioBase64: params.referenceAudioBase64,
+      signal: params.signal,
+    });
+  }
+  if (params.videoModel === 'doubao-seedance-1-5-pro') {
+    const res =
+      params.resolution === '1080p' || params.resolution === '480p'
+        ? params.resolution
+        : '720p';
+    return toApisDoubaoSeedance15ProVideoGenerate({
+      prompt: params.prompt,
+      durationSeconds: params.durationSeconds,
+      aspectRatio: params.aspectRatio,
+      resolution: res,
+      referenceImagesBase64: params.referenceImagesBase64,
       signal: params.signal,
     });
   }
