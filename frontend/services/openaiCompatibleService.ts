@@ -668,6 +668,24 @@ function extractVideoUrlFromPollPayload(data: unknown): string | null {
     if (isHttpUrlString(v)) return v.trim();
   }
 
+  // doubao-seedance-1-5-pro 等模型可能直接在顶层 data 数组返回
+  const topData = o.data;
+  if (Array.isArray(topData)) {
+    for (const item of topData) {
+      if (item && typeof item === 'object') {
+        const u = (item as Record<string, unknown>).url;
+        if (isHttpUrlString(u)) return u.trim();
+      }
+    }
+  } else if (topData && typeof topData === 'object') {
+    const td = topData as Record<string, unknown>;
+    if (isHttpUrlString(td.url)) return td.url.trim();
+    const vid = td.video;
+    if (vid && typeof vid === 'object' && isHttpUrlString((vid as Record<string, unknown>).url)) {
+      return String((vid as Record<string, unknown>).url).trim();
+    }
+  }
+
   let result: unknown = o.result;
   if (typeof result === 'string') {
     try {
@@ -780,7 +798,7 @@ async function toApisPollVideoTaskToPlayableUrl(taskId: string, signal?: AbortSi
       const rawUrl = extractVideoUrlFromPollPayload(data);
       if (!rawUrl) {
         throw new Error(
-          `ToAPIs 视频任务完成但未返回可播放 URL。响应片段：${text.slice(0, 600)}`
+          `ToAPIs 视频任务完成但未返回可播放 URL。完整响应：${text.slice(0, 2000)}`
         );
       }
       return rewriteKnownImageCdnToSameOrigin(rawUrl);
