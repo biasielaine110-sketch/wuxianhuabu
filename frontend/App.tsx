@@ -655,6 +655,7 @@ const DEFAULT_T2I_PRESET_KEYS = new Set([
   '真人古风',
   '古风国漫3D',
   '游戏cg动画',
+  '二维新海诚',
 ]);
 
 /** 内置图生图预设键（默认归入图生图类，包含故事板） */
@@ -779,6 +780,8 @@ const INITIAL_T2I_PROMPT_PRESETS: Record<string, string> = {
     '古风国漫3D CG风格，参考导演美学：田晓鹏，东方美学，精致3D建模，国漫电影质感，虚幻引擎渲染。',
   '游戏cg动画':
     '高质量动画游戏3DCG风格，参考导演美学：小岛秀夫，高燃游戏CG过场动画，科幻大片质感，强烈动作张力，精致3D建模，PBR材质，电影级灯光，虚幻引擎渲染。',
+  '二维新海诚':
+    '日系青春2D动画电影美术风格，参考导演美学：新海诚，光影清透，色彩明亮，空气感强，青春感，手绘动画背景，高细节2D插画，唯美治愈氛围。',
 };
 
 const PRESET_SETTINGS_GUARD_PASSWORD = 'zhangbiwen666';
@@ -1012,6 +1015,7 @@ function I2iPresetCategorySelect({
           <option value="真人古风">真人古风</option>
           <option value="古风国漫3D">古风国漫3D</option>
           <option value="游戏cg动画">游戏cg动画</option>
+          <option value="二维新海诚">二维新海诚</option>
         </select>
       </div>
     </div>
@@ -1138,6 +1142,7 @@ function T2iPresetCategorySelect({
           <option value="真人古风">真人古风</option>
           <option value="古风国漫3D">古风国漫3D</option>
           <option value="游戏cg动画">游戏cg动画</option>
+          <option value="二维新海诚">二维新海诚</option>
         </select>
       </div>
     </div>
