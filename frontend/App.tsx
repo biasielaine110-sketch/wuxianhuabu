@@ -5737,6 +5737,7 @@ export default function App() {
                 setNodes(prev => [...prev, newNode]);
               }}
               onFullscreenImage={(base64) => setFullscreenImage(base64)}
+              onDeleteEdge={handleDeleteEdge}
             />
           )}
 
@@ -5910,7 +5911,7 @@ export default function App() {
                     )}
                   </span>
                   <div className="flex gap-2 ml-2 flex-wrap">
-                    {vSlots.slice(0, 6).map((slot) => (
+                    {vSlots.slice(0, 12).map((slot) => (
                       <div key={`${node.id}-vslot-${slot.n}`} className="relative group">
                         <div className="absolute -top-1 left-0 z-[1] rounded bg-black/70 px-1 text-[8px] font-bold leading-none text-cyan-300">
                           R{slot.n}
@@ -5918,29 +5919,29 @@ export default function App() {
                         {slot.kind === 'image' && slot.imageBase64 ? (
                           <OptimizedImage
                             base64={slot.imageBase64}
-                            maxSide={160}
-                            quality={0.7}
+                            maxSide={80}
+                            quality={0.72}
                             alt={slot.label}
-                            className="h-10 w-10 rounded border border-[#444] object-cover"
+                            className="w-9 h-9 rounded border border-[#444] object-cover"
                           />
                         ) : slot.kind === 'video' && slot.videoUrl ? (
                           <video
                             src={slot.videoUrl}
-                            className="h-10 w-10 rounded border border-[#444] object-cover"
+                            className="w-9 h-9 rounded border border-[#444] object-cover"
                             muted
                             playsInline
                             preload="metadata"
                           />
                         ) : slot.kind === 'audio' ? (
-                          <div className="h-10 w-10 rounded border border-[#444] bg-[#333] flex items-center justify-center" title={slot.label}>
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <div className="w-9 h-9 rounded border border-[#444] bg-[#333] flex items-center justify-center" title={slot.label}>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                               <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
                               <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
                               <line x1="12" x2="12" y1="19" y2="22"/>
                             </svg>
                           </div>
                         ) : (
-                          <div className="h-8 w-8 rounded border border-[#444] bg-[#333]" title={slot.label} />
+                          <div className="w-9 h-9 rounded border border-[#444] bg-[#333]" title={slot.label} />
                         )}
                         <button
                           onPointerDown={(e) => {
@@ -5950,15 +5951,15 @@ export default function App() {
                             e.stopPropagation();
                             handleDeleteEdge(slot.edgeId);
                           }}
-                          className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-white opacity-0 transition-opacity hover:bg-red-500 group-hover:opacity-100"
+                          className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-600 hover:bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                           title="取消引用"
                         >
-                          <span className="text-[9px] leading-none">×</span>
+                          <svg viewBox="0 0 10 10" className="w-2.5 h-2.5 fill-white"><path d="M1 1L9 9M9 1L1 9" stroke="white" strokeWidth="1.5" strokeLinecap="round" /></svg>
                         </button>
                       </div>
                     ))}
-                    {vSlots.length > 6 && (
-                      <span className="flex items-center text-gray-500">+{vSlots.length - 6}</span>
+                    {vSlots.length > 12 && (
+                      <span className="flex items-center text-gray-500">+{vSlots.length - 12}</span>
                     )}
                   </div>
                   <button
@@ -6143,16 +6144,30 @@ export default function App() {
             const i2iSourceNodes = i2iIncomingEdges
               .map(e => nodes.find(n => n.id === e.sourceId))
               .filter(Boolean) as CanvasNode[];
-            const i2iSourceImages = i2iSourceNodes.flatMap(n => n.images || []).filter(img => img && img !== '');
-            return i2iSourceImages.length > 0 ? (
+            return i2iIncomingEdges.length > 0 ? (
               <div className="flex items-center gap-1 px-2 py-0.5 bg-[#1e1e1e] border-b border-[#333] text-[10px] shrink-0">
                 <span className="text-gray-500">参考:</span>
-                <span className="text-green-400 font-medium">{i2iSourceImages.length}张</span>
+                <span className="text-green-400 font-medium">{i2iIncomingEdges.length}张</span>
                 <div className="flex gap-0.5 ml-1 flex-wrap">
-                  {i2iSourceImages.slice(0, 4).map((img, idx) => (
-                    <OptimizedImage key={idx} base64={img} maxSide={64} quality={0.6} alt={`R${idx+1}`} className="w-5 h-5 object-cover rounded border border-[#444]" />
-                  ))}
-                  {i2iSourceImages.length > 4 && <span className="text-gray-600">+{i2iSourceImages.length-4}</span>}
+                  {i2iIncomingEdges.slice(0, 12).map((edge, idx) => {
+                    const srcNode = i2iSourceNodes[idx];
+                    const img = srcNode?.images?.[0];
+                    if (!img) return null;
+                    return (
+                      <div key={edge.id} className="relative group">
+                        <OptimizedImage base64={img} maxSide={64} quality={0.72} alt={`R${idx+1}`} className="w-9 h-9 object-cover rounded border border-[#444]" />
+                        <button
+                          onPointerDown={(e) => { e.stopPropagation(); }}
+                          onClick={(e) => { e.stopPropagation(); handleDeleteEdge(edge.id); }}
+                          className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-600 hover:bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="取消参考"
+                        >
+                          <svg viewBox="0 0 10 10" className="w-2.5 h-2.5 fill-white"><path d="M1 1L9 9M9 1L1 9" stroke="white" strokeWidth="1.5" strokeLinecap="round" /></svg>
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {i2iIncomingEdges.length > 12 && <span className="text-gray-600">+{i2iIncomingEdges.length-12}</span>}
                 </div>
                 <button
                   onPointerDown={(e) => { e.stopPropagation(); setEyedropperTargetNodeId(node.id); }}
@@ -12934,14 +12949,14 @@ function ChatNodeContent({
                     <OptimizedImage
                       key={`${slot.edgeId}-img-${imgIdx}`}
                       base64={img}
-                      maxSide={96}
+                      maxSide={80}
                       quality={0.72}
                       alt={`${slot.label}图${imgIdx + 1}`}
-                      className="w-11 h-11 object-cover rounded border border-[#444]"
+                      className="w-9 h-9 object-cover rounded border border-[#444]"
                     />
                   ))}
                   {slot.imageBase64s.length > 4 && (
-                    <div className="w-11 h-11 rounded border border-[#444] bg-[#333] flex items-center justify-center text-gray-400 text-[8px]">
+                    <div className="w-9 h-9 rounded border border-[#444] bg-[#333] flex items-center justify-center text-gray-400 text-[8px]">
                       +{slot.imageBase64s.length - 4}
                     </div>
                   )}
@@ -12949,15 +12964,15 @@ function ChatNodeContent({
               ) : slot.kind === 'image' && slot.imageBase64 ? (
                 <OptimizedImage
                   base64={slot.imageBase64}
-                  maxSide={200}
+                  maxSide={80}
                   quality={0.72}
                   alt={slot.label}
-                  className="w-11 h-11 object-cover rounded border border-[#444]"
+                  className="w-9 h-9 object-cover rounded border border-[#444]"
                 />
               ) : slot.kind === 'video' && slot.videoUrl ? (
                 <video
                   src={slot.videoUrl}
-                  className="h-9 w-9 rounded border border-[#444] object-cover"
+                  className="w-9 h-9 rounded border border-[#444] object-cover"
                   muted
                   playsInline
                   preload="metadata"
@@ -12968,7 +12983,7 @@ function ChatNodeContent({
                   文本
                 </div>
               ) : (
-                <div className="h-9 w-9 rounded border border-[#444] bg-[#333]" title={slot.label} />
+                <div className="w-9 h-9 rounded border border-[#444] bg-[#333]" title={slot.label} />
               )}
               <button
                 onPointerDown={(e) => {
@@ -12978,10 +12993,10 @@ function ChatNodeContent({
                   e.stopPropagation();
                   onDeleteEdge(slot.edgeId);
                 }}
-                className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-white opacity-0 transition-opacity hover:bg-red-500 group-hover:opacity-100"
+                className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-600 hover:bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                 title="取消引用"
               >
-                <span className="leading-none text-[8px]">×</span>
+                <svg viewBox="0 0 10 10" className="w-2.5 h-2.5 fill-white"><path d="M1 1L9 9M9 1L1 9" stroke="white" strokeWidth="1.5" strokeLinecap="round" /></svg>
               </button>
             </div>
           ))}
@@ -13074,10 +13089,22 @@ function ChatNodeContent({
           const target = e.target as HTMLElement;
           // 吸管模式：允许点击消息区域空白触发吸管连线
           if (eyedropperTargetNodeId) return;
+          // 判断是否点击在滚动条区域（容器右侧 40px 范围，与滚动条宽度匹配）
+          const rect = e.currentTarget.getBoundingClientRect();
+          const isScrollbarClick = e.clientX > rect.right - 40 && e.currentTarget.scrollHeight > e.currentTarget.clientHeight;
+          if (isScrollbarClick) {
+            // 滚动条上的交互不触发节点选中
+            e.stopPropagation();
+            return;
+          }
           // 点击消息气泡区域阻止冒泡，避免触发节点拖拽
           if (target.closest('.chat-bubble-wrap')) {
             e.stopPropagation();
           }
+        }}
+        onWheel={(e) => {
+          // 滚轮滚动阻止冒泡，避免触发画布缩放
+          e.stopPropagation();
         }}
       >
         <style>{`
@@ -13434,9 +13461,10 @@ interface AnnotationNodeContentProps {
   onUpdate: (updates: Partial<AnnotationNode>) => void;
   onCreateImageNode: (images: string[], nodeX: number, nodeY: number) => void;
   onFullscreenImage?: (base64: string) => void;
+  onDeleteEdge?: (edgeId: string) => void;
 }
 
-function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEyedropperSelect, onUpdate, onCreateImageNode, onFullscreenImage }: AnnotationNodeContentProps) {
+function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEyedropperSelect, onUpdate, onCreateImageNode, onFullscreenImage, onDeleteEdge }: AnnotationNodeContentProps) {
   // 计算链接到该节点的源图片
   const incomingEdges = edges.filter(e => e.targetId === node.id);
   const sourceNodes = incomingEdges
@@ -13559,8 +13587,8 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
   const fsTempRef = useRef<Partial<Annotation> | null>(null);
   const fsAnnotationsRef = useRef<Annotation[]>([]);
 
-  // 全屏标注历史记录
-  const [fsAnnotationHistory, setFsAnnotationHistory] = useState<Annotation[][]>([[]]);
+  // 全屏标注历史记录 — 使用 ref 存储避免闭包陷阱
+  const fsAnnotationHistoryRef = useRef<Annotation[][]>([[]]);
   const fsHistoryIndexRef = useRef(0);
   const fsLastSavedHistoryRef = useRef<string>('');
 
@@ -13568,10 +13596,11 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
   const fsUndo = () => {
     if (fsHistoryIndexRef.current > 0) {
       fsHistoryIndexRef.current--;
-      const prevAnnotations = fsAnnotationHistory[fsHistoryIndexRef.current];
+      const prevAnnotations = fsAnnotationHistoryRef.current[fsHistoryIndexRef.current];
       fsLastSavedHistoryRef.current = JSON.stringify(prevAnnotations);
       setFullscreenAnnotations(prevAnnotations);
       fsAnnotationsRef.current = prevAnnotations;
+      renderFsCanvas();
     }
   };
 
@@ -13579,16 +13608,15 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
   const fsSaveToHistory = (annots: Annotation[]) => {
     const currentJson = JSON.stringify(annots);
     if (currentJson !== fsLastSavedHistoryRef.current) {
-      setFsAnnotationHistory(prev => {
-        const newHistory = prev.slice(0, fsHistoryIndexRef.current + 1);
-        newHistory.push([...annots]);
-        fsHistoryIndexRef.current = newHistory.length - 1;
-        if (newHistory.length > 50) {
-          newHistory.shift();
-          fsHistoryIndexRef.current--;
-        }
-        return newHistory;
-      });
+      const history = fsAnnotationHistoryRef.current;
+      const newHistory = history.slice(0, fsHistoryIndexRef.current + 1);
+      newHistory.push([...annots]);
+      fsHistoryIndexRef.current = newHistory.length - 1;
+      if (newHistory.length > 50) {
+        newHistory.shift();
+        fsHistoryIndexRef.current--;
+      }
+      fsAnnotationHistoryRef.current = newHistory;
       fsLastSavedHistoryRef.current = currentJson;
     }
   };
@@ -13617,8 +13645,8 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
   // 图片缓存
   const imageCacheRef = useRef<{src: string, img: HTMLImageElement, x: number, y: number, w: number, h: number} | null>(null);
 
-  // 撤销历史记录
-  const [annotationHistory, setAnnotationHistory] = useState<Annotation[][]>([[]]);
+  // 撤销历史记录 — 使用 ref 存储避免闭包陷阱
+  const annotationHistoryRef = useRef<Annotation[][]>([[]]);
   const historyIndexRef = useRef(0);
   const lastSavedHistoryRef = useRef<string>('');
 
@@ -13626,9 +13654,10 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
   const undo = () => {
     if (historyIndexRef.current > 0) {
       historyIndexRef.current--;
-      const prevAnnotations = annotationHistory[historyIndexRef.current];
+      const prevAnnotations = annotationHistoryRef.current[historyIndexRef.current];
       lastSavedHistoryRef.current = JSON.stringify(prevAnnotations);
       onUpdate({ annotations: prevAnnotations });
+      renderCanvas();
     }
   };
 
@@ -13636,17 +13665,16 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
   const saveToHistory = (annots: Annotation[]) => {
     const currentJson = JSON.stringify(annots);
     if (currentJson !== lastSavedHistoryRef.current) {
-      setAnnotationHistory(prev => {
-        const newHistory = prev.slice(0, historyIndexRef.current + 1);
-        newHistory.push([...annots]);
-        historyIndexRef.current = newHistory.length - 1;
-        // 限制历史记录数量
-        if (newHistory.length > 50) {
-          newHistory.shift();
-          historyIndexRef.current--;
-        }
-        return newHistory;
-      });
+      const history = annotationHistoryRef.current;
+      const newHistory = history.slice(0, historyIndexRef.current + 1);
+      newHistory.push([...annots]);
+      historyIndexRef.current = newHistory.length - 1;
+      // 限制历史记录数量
+      if (newHistory.length > 50) {
+        newHistory.shift();
+        historyIndexRef.current--;
+      }
+      annotationHistoryRef.current = newHistory;
       lastSavedHistoryRef.current = currentJson;
     }
   };
@@ -14285,8 +14313,9 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
           color: currentColorRef.current,
           strokeWidth: 3,
         };
-        const newAnnotations = [...annotations, newAnnotation];
-        saveToHistory(annotations);
+        const currentAnnots = annotationsRef.current;
+        const newAnnotations = [...currentAnnots, newAnnotation];
+        saveToHistory(currentAnnots);
         onUpdate({ annotations: newAnnotations });
       }
       penPointsRef.current = [];
@@ -14316,15 +14345,17 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
             strokeWidth: ann.strokeWidth || 2,
             ...(ann.type === 'fillRect' || ann.type === 'fillCircle' ? { fillOpacity: fillOpacityRef.current } : {}),
           };
-          const newAnnotations = [...annotations, next];
-          saveToHistory(annotations);
+          const currentAnnots = annotationsRef.current;
+          const newAnnotations = [...currentAnnots, next];
+          saveToHistory(currentAnnots);
           onUpdate({ annotations: newAnnotations });
         }
       } else if (ann.type === 'arrow') {
         const dist = Math.hypot((ann.endX ?? 0) - (ann.x ?? 0), (ann.endY ?? 0) - (ann.y ?? 0));
         if (dist > 10) {
-          const newAnnotations = [...annotations, ann as Annotation];
-          saveToHistory(annotations);
+          const currentAnnots = annotationsRef.current;
+          const newAnnotations = [...currentAnnots, ann as Annotation];
+          saveToHistory(currentAnnots);
           onUpdate({ annotations: newAnnotations });
         }
       }
@@ -14520,7 +14551,7 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
 
           setFullscreenAnnotations(mapped);
           fsAnnotationsRef.current = mapped;
-          setFsAnnotationHistory([mapped]);
+          fsAnnotationHistoryRef.current = [mapped];
           fsHistoryIndexRef.current = 0;
           fsLastSavedHistoryRef.current = JSON.stringify(mapped);
           renderFsCanvas();
@@ -14542,10 +14573,14 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
   const closeFullscreenAnnotation = () => {
     const emb = imageCacheRef.current;
     const fs = fsImageRef.current;
-    if (emb && fs && fullscreenAnnotations.length > 0 && sourceImage) {
-      const mapped = fullscreenAnnotations.map((a) => mapAnnotationFsToEmb(a, fs, emb));
+    const currentFsAnnots = fsAnnotationsRef.current;
+    if (emb && fs) {
+      // 先将全屏标注映射回嵌入坐标，保存到节点状态
+      const mapped = currentFsAnnots.map((a) => mapAnnotationFsToEmb(a, fs, emb));
       onUpdate({ annotations: mapped });
-      // 渲染标注到原图并创建图片节点
+    }
+    // 有标注时，从全屏坐标直接渲染到原始图片
+    if (currentFsAnnots.length > 0 && sourceImage && fs) {
       const img = new Image();
       img.onload = () => {
         const tempCanvas = document.createElement('canvas');
@@ -14554,33 +14589,61 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
         const outCtx = tempCanvas.getContext('2d');
         if (!outCtx) return;
         outCtx.drawImage(img, 0, 0);
-        const cssW = emb.w, cssH = emb.h;
-        const ds = Math.min(cssW / img.width, cssH / img.height);
-        const dW = img.width * ds, dH = img.height * ds;
-        const dX = (cssW - dW) / 2, dY = (cssH - dH) / 2;
-        const toImg = (ax, ay) => ({ x: (ax - dX) / ds, y: (ay - dY) / ds });
-        mapped.forEach(ann => {
-          const ip = toImg(ann.x, ann.y);
-          let ox = ip.x, oy = ip.y, sw = 0, sh = 0;
-          if (ann.endX !== undefined && ann.endY !== undefined) {
-            const ep = toImg(ann.endX, ann.endY);
-            ox = Math.min(ip.x, ep.x); oy = Math.min(ip.y, ep.y);
-            sw = Math.abs(ep.x - ip.x); sh = Math.abs(ep.y - ip.y);
-          } else { sw = (ann.width || 0) / ds; sh = (ann.height || 0) / ds; }
+        // 全屏坐标 → 原始图片坐标的换算系数
+        const fsScaleX = fs.w / img.width;
+        const fsScaleY = fs.h / img.height;
+        const fsScale = Math.min(fsScaleX, fsScaleY);
+        const toFsImg = (ax: number, ay: number) => ({
+          x: (ax - fs.x) / fsScale,
+          y: (ay - fs.y) / fsScale,
+        });
+        currentFsAnnots.forEach(ann => {
           outCtx.strokeStyle = ann.color; outCtx.fillStyle = ann.color;
-          outCtx.lineWidth = Math.max(1, (ann.strokeWidth || 2) / ds);
+          const swImg = Math.max(1, (ann.strokeWidth || 2) / fsScale);
+          outCtx.lineWidth = swImg;
           outCtx.lineCap = 'round'; outCtx.lineJoin = 'round';
-          if (ann.type === 'rect') outCtx.strokeRect(ox, oy, sw, sh);
-          else if (ann.type === 'circle') { outCtx.beginPath(); outCtx.ellipse(ox+sw/2, oy+sh/2, sw/2, sh/2, 0, 0, Math.PI*2); outCtx.stroke(); }
-          else if (ann.type === 'fillRect') { outCtx.globalAlpha = ann.fillOpacity ?? 0.45; outCtx.fillRect(ox, oy, sw, sh); outCtx.globalAlpha = 1; outCtx.strokeStyle = ann.color; outCtx.lineWidth = Math.max(1, (ann.strokeWidth||2)*0.5/ds); outCtx.strokeRect(ox, oy, sw, sh); }
+          const boxTypes2 = ['rect', 'circle', 'fillRect', 'fillCircle'];
+          if (ann.type === 'arrow') {
+            const fromP = toFsImg(ann.x, ann.y);
+            const toP = toFsImg(ann.endX ?? ann.x, ann.endY ?? ann.y);
+            const headLen = Math.max(8, swImg * 3);
+            const angle = Math.atan2(toP.y - fromP.y, toP.x - fromP.x);
+            outCtx.beginPath(); outCtx.moveTo(fromP.x, fromP.y); outCtx.lineTo(toP.x, toP.y); outCtx.stroke();
+            outCtx.beginPath();
+            outCtx.moveTo(toP.x, toP.y);
+            outCtx.lineTo(toP.x - headLen * Math.cos(angle - Math.PI / 6), toP.y - headLen * Math.sin(angle - Math.PI / 6));
+            outCtx.lineTo(toP.x - headLen * Math.cos(angle + Math.PI / 6), toP.y - headLen * Math.sin(angle + Math.PI / 6));
+            outCtx.closePath(); outCtx.fill();
+          } else if (ann.type === 'text') {
+            const tp = toFsImg(ann.x, ann.y);
+            outCtx.font = `bold ${swImg}px sans-serif`;
+            outCtx.fillText(ann.text || '', tp.x, tp.y);
+          } else if (ann.type === 'pen' && ann.points && ann.points.length > 1) {
+            const scaledPoints = ann.points.map((pt) => toFsImg(pt.x, pt.y));
+            outCtx.beginPath(); outCtx.moveTo(scaledPoints[0].x, scaledPoints[0].y);
+            for (let i = 1; i < scaledPoints.length; i++) outCtx.lineTo(scaledPoints[i].x, scaledPoints[i].y);
+            outCtx.stroke();
+          } else if (boxTypes2.includes(ann.type)) {
+            const ip = toFsImg(ann.x, ann.y);
+            let ox = ip.x, oy = ip.y, w2 = 0, h2 = 0;
+            if (ann.endX !== undefined && ann.endY !== undefined) {
+              const ep = toFsImg(ann.endX, ann.endY);
+              ox = Math.min(ip.x, ep.x); oy = Math.min(ip.y, ep.y);
+              w2 = Math.abs(ep.x - ip.x); h2 = Math.abs(ep.y - ip.y);
+            } else {
+              w2 = (ann.width || 0) / fsScale;
+              h2 = (ann.height || 0) / fsScale;
+            }
+            if (ann.type === 'rect') outCtx.strokeRect(ox, oy, w2, h2);
+            else if (ann.type === 'circle') { outCtx.beginPath(); outCtx.ellipse(ox+w2/2, oy+h2/2, w2/2, h2/2, 0, 0, Math.PI*2); outCtx.stroke(); }
+            else if (ann.type === 'fillRect') { outCtx.globalAlpha = ann.fillOpacity ?? 0.45; outCtx.fillRect(ox, oy, w2, h2); outCtx.globalAlpha = 1; outCtx.strokeStyle = ann.color; outCtx.lineWidth = Math.max(1, swImg*0.5); outCtx.strokeRect(ox, oy, w2, h2); }
+            else if (ann.type === 'fillCircle') { outCtx.globalAlpha = ann.fillOpacity ?? 0.45; outCtx.beginPath(); outCtx.ellipse(ox+w2/2, oy+h2/2, w2/2, h2/2, 0, 0, Math.PI*2); outCtx.fill(); outCtx.globalAlpha = 1; outCtx.strokeStyle = ann.color; outCtx.lineWidth = Math.max(1, swImg*0.5); outCtx.stroke(); }
+          }
         });
         const base64 = tempCanvas.toDataURL('image/jpeg', 0.95).split(',')[1];
         onCreateImageNode([base64], node.x + node.width + 50, node.y);
       };
       img.src = 'data:image/jpeg;base64,' + sourceImage;
-    } else if (emb && fs) {
-      const mapped = fullscreenAnnotations.map((a) => mapAnnotationFsToEmb(a, fs, emb));
-      onUpdate({ annotations: mapped });
     }
     fsImageRef.current = null;
     setIsFullscreenAnnotation(false);
@@ -14709,7 +14772,8 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
       }
 
       if (toAdd) {
-        const newAnnotations = [...fullscreenAnnotations, toAdd];
+        const currentFs = fsAnnotationsRef.current;
+        const newAnnotations = [...currentFs, toAdd];
       setFullscreenAnnotations(newAnnotations);
       fsAnnotationsRef.current = newAnnotations;
       fsSaveToHistory(newAnnotations);
@@ -14725,7 +14789,8 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
 
   // 删除全屏标注
   const deleteFsAnnotation = (id: string) => {
-    const newAnnotations = fullscreenAnnotations.filter(a => a.id !== id);
+    const currentFs = fsAnnotationsRef.current;
+    const newAnnotations = currentFs.filter(a => a.id !== id);
     setFullscreenAnnotations(newAnnotations);
     fsAnnotationsRef.current = newAnnotations;
     fsSaveToHistory(newAnnotations);
@@ -14784,7 +14849,8 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
 
   // 确认标注并创建图片节点
   const confirmAnnotations = () => {
-    if (!sourceImage || annotations.length === 0) {
+    const currentAnnots = annotationsRef.current;
+    if (!sourceImage || currentAnnots.length === 0) {
       alert('请先导入图片并添加标注');
       return;
     }
@@ -14822,7 +14888,7 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
 
       const boxTypes = ['rect', 'circle', 'fillRect', 'fillCircle'];
 
-      annotations.forEach((ann) => {
+      currentAnnots.forEach((ann) => {
         let scaledAnn: Annotation;
 
         if (ann.type === 'arrow') {
@@ -14985,18 +15051,34 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
         <span className="text-[10px] text-gray-400">参考图:</span>
         <span className="text-green-400 font-medium">{sourceImages.length} 张</span>
         <div className="flex gap-1 ml-2">
-          {sourceImages.slice(0, 6).map((img, idx) => (
-            <OptimizedImage
-              key={idx}
-              base64={img}
-              maxSide={160}
-              quality={0.72}
-              alt={`参考图${idx + 1}`}
-              className="w-8 h-8 object-cover rounded border border-[#444]"
-            />
-          ))}
-          {sourceImages.length > 6 && (
-            <span className="text-gray-500 flex items-center">+{sourceImages.length - 6}</span>
+          {incomingEdges.slice(0, 12).map((edge, idx) => {
+            const srcNode = sourceNodes[idx];
+            const img = srcNode?.images?.[0];
+            if (!img) return null;
+            return (
+              <div key={edge.id} className="relative group">
+                <OptimizedImage
+                  base64={img}
+                  maxSide={80}
+                  quality={0.72}
+                  alt={`参考图${idx + 1}`}
+                  className="w-9 h-9 object-cover rounded border border-[#444]"
+                />
+                <button
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => onDeleteEdge?.(edge.id)}
+                  className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-600 hover:bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="取消参考"
+                >
+                  <svg viewBox="0 0 10 10" className="w-2.5 h-2.5 fill-white">
+                    <path d="M1 1L9 9M9 1L1 9" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                </button>
+              </div>
+            );
+          })}
+          {sourceImages.length > 12 && (
+            <span className="text-gray-500 flex items-center">+{sourceImages.length - 12}</span>
           )}
         </div>
         <button
@@ -15052,8 +15134,9 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
                     color: currentColorRef.current,
                     strokeWidth: currentFontSizeRef.current,
                   };
-                  const newAnnotations = [...annotations, newAnnotation];
-                  saveToHistory(annotations);
+                  const currentAnnots = annotationsRef.current;
+                  const newAnnotations = [...currentAnnots, newAnnotation];
+                  saveToHistory(currentAnnots);
                   onUpdate({ annotations: newAnnotations });
                 }
                 setIsTextInputMode(false);
@@ -15075,8 +15158,9 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
                   color: currentColorRef.current,
                   strokeWidth: currentFontSizeRef.current,
                 };
-                const newAnnotations = [...annotations, newAnnotation];
-                saveToHistory(annotations);
+                const currentAnnots = annotationsRef.current;
+                const newAnnotations = [...currentAnnots, newAnnotation];
+                saveToHistory(currentAnnots);
                 onUpdate({ annotations: newAnnotations });
               }
               setIsTextInputMode(false);
@@ -15234,7 +15318,11 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
         </button>
         <button
           onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => onUpdate({ annotations: [] })}
+          onClick={() => {
+            saveToHistory(annotations);
+            onUpdate({ annotations: [] });
+            renderCanvas();
+          }}
           className="py-1 px-2 rounded text-[10px] bg-red-900/50 hover:bg-red-800/50 text-red-300"
         >
           清除
@@ -15407,9 +15495,11 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
               </button>
               <button
                 onClick={() => {
+                  fsSaveToHistory(fullscreenAnnotations);
                   setFullscreenAnnotations([]);
                   setFullscreenSelectedId(undefined);
-                  fsSaveToHistory([]);
+                  fsAnnotationsRef.current = [];
+                  renderFsCanvas();
                 }}
                 className="ml-2 px-3 py-1.5 rounded text-xs bg-red-900 hover:bg-red-800 text-red-300"
               >
