@@ -653,6 +653,7 @@ const DEFAULT_T2I_PRESET_KEYS = new Set([
   '通用模板',
   '真人写实',
   '真人古风',
+  '古风国漫3D',
 ]);
 
 /** 内置图生图预设键（默认归入图生图类，包含故事板） */
@@ -773,6 +774,8 @@ const INITIAL_T2I_PROMPT_PRESETS: Record<string, string> = {
     '真人写实摄影风格，参考导演美学：王家卫 ，真实肤质，真实五官，电影级构图，环境光自然，情绪化光影，生活化细节，现实主义质感',
   '真人古风':
     '真人古风写实电影风格，参考导演美学张艺谋,东方史诗电影美学，真实人物质感，精致服化道，东方美学，电影级布光，史诗感构图，',
+  '古风国漫3D':
+    '古风国漫3D CG风格，参考导演美学：田晓鹏，东方美学，精致3D建模，国漫电影质感，虚幻引擎渲染。',
 };
 
 const PRESET_SETTINGS_GUARD_PASSWORD = 'zhangbiwen666';
@@ -1004,6 +1007,7 @@ function I2iPresetCategorySelect({
           <option value={COMMON_TEMPLATE_KEY}>通用模板</option>
           <option value="真人写实">真人写实</option>
           <option value="真人古风">真人古风</option>
+          <option value="古风国漫3D">古风国漫3D</option>
         </select>
       </div>
     </div>
@@ -1128,6 +1132,7 @@ function T2iPresetCategorySelect({
           <option value={COMMON_TEMPLATE_KEY}>通用模板</option>
           <option value="真人写实">真人写实</option>
           <option value="真人古风">真人古风</option>
+          <option value="古风国漫3D">古风国漫3D</option>
         </select>
       </div>
     </div>
