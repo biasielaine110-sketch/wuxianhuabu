@@ -651,7 +651,10 @@ async function toApisUploadVideoReferenceImageUrls(
 export type ToApisVideoModelId = 'grok-video-3' | 'sora-2-vvip' | 'veo3.1-fast' | 'doubao-seedance-1-5-pro';
 
 function isHttpUrlString(v: unknown): v is string {
-  return typeof v === 'string' && /^https?:\/\//i.test(v.trim());
+  if (typeof v !== 'string') return false;
+  const t = v.trim();
+  // 兼容 https:/xxx（单斜杠） 和 https://xxx（双斜杠）
+  return /^https?:\/[/]/i.test(t);
 }
 
 /**
@@ -801,7 +804,9 @@ async function toApisPollVideoTaskToPlayableUrl(taskId: string, signal?: AbortSi
           `ToAPIs 视频任务完成但未返回可播放 URL。完整响应：${text.slice(0, 2000)}`
         );
       }
-      return rewriteKnownImageCdnToSameOrigin(rawUrl);
+      // 规范化 URL：https:/xxx → https://xxx
+      const normalizedUrl = rawUrl.replace(/^(https?:\/)([^/])/i, '$1/$2');
+      return rewriteKnownImageCdnToSameOrigin(normalizedUrl);
     }
     const st = String(data.status || '').toLowerCase();
     if (st === 'failed') {
