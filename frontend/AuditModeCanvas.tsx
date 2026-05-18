@@ -69,7 +69,19 @@ export default function AuditModeCanvas({
   const textInputRef = useRef<HTMLInputElement>(null);
   const penPointsRef = useRef<{ x: number; y: number }[]>([]);
 
-  // 历史记录
+  // 文本图片创建
+  const [textImageEditorOpen, setTextImageEditorOpen] = useState(false);
+  const [textImageContent, setTextImageContent] = useState('');
+  const [textImageFontSize, setTextImageFontSize] = useState(48);
+  const [textImageColor, setTextImageColor] = useState('#ffffff');
+  const [textImageBgColor, setTextImageBgColor] = useState('#000000');
+  const [textImageBgOpacity, setTextImageBgOpacity] = useState(0.7);
+
+  // 右键菜单
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; canvasX: number; canvasY: number } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+
+  // 历史记录（最多保留1步撤销）
   const [annotationHistory, setAnnotationHistory] = useState<AuditAnnotation[][]>([[]]);
   const [historyIndex, setHistoryIndex] = useState(0);
 
@@ -83,6 +95,13 @@ export default function AuditModeCanvas({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawingStartRef = useRef({ x: 0, y: 0 });
   const clipboardRef = useRef<AuditImage[]>([]);
+  const lastMouseCanvasPosRef = useRef({ x: 0, y: 0 });
+  // 缩放起始数据 ref（避免每次从 state 读取导致卡顿）
+  const resizeStartDataRef = useRef<{ canvasX: number; canvasY: number; startScale: number; startScreenW: number; startScreenH: number; offsetX: number; offsetY: number } | null>(null);
+  // 文本图片元数据：imgId -> { content, fontSize, color, bgColor, bgOpacity }
+  const textImageMetaRef = useRef<Map<string, { content: string; fontSize: number; color: string; bgColor: string; bgOpacity: number }>>(new Map());
+  // 当前正在编辑的文本图片id
+  const [editingTextImageId, setEditingTextImageId] = useState<string | null>(null);
 
   // 图片的原始尺寸映射
   const imageSizeCacheRef = useRef<Map<string, { w: number; h: number }>>(new Map());
@@ -313,23 +332,32 @@ export default function AuditModeCanvas({
         return;
       }
 
-      // Ctrl+C / Meta+C：复制选中图片的 base64
-      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC' && !isInput) {
-        const selected = auditImagesRef.current.filter(img => selectedImageIds.includes(img.id));
-        if (selected.length === 0) return;
-        if (selected.length === 1) {
-          navigator.clipboard.writeText(`data:image/png;base64,${selected[0].base64}`);
-        }
-        clipboardRef.current = selected.map(img => ({ ...img }));
+      // Alt+Q 或 Backspace：删除选中图片
+      if ((e.altKey && e.code === 'KeyQ') || (e.code === 'Backspace' && !isInput)) {
+        if (selectedImageIds.length === 0) return;
+        const toDelete = new Set(selectedImageIds);
+        setAuditImages(prev => prev.filter(img => !toDelete.has(img.id)));
+        setSelectedImageIds([]);
+        e.preventDefault();
         return;
       }
 
-      // Ctrl+V / Meta+V：粘贴图片
+      // Ctrl+C / Meta+C：复制选中图片到内部剪贴板
+      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC' && !isInput) {
+        const selected = auditImagesRef.current.filter(img => selectedImageIds.includes(img.id));
+        if (selected.length === 0) return;
+        clipboardRef.current = selected.map(img => ({ ...img }));
+        e.preventDefault();
+        return;
+      }
+
+      // Ctrl+V / Meta+V：从内部剪贴板粘贴图片（不依赖系统剪贴板）
       if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV' && !isInput) {
         if (clipboardRef.current.length > 0) {
-          const centerX = window.innerWidth / 2;
-          const centerY = window.innerHeight / 2;
-          const pos = getCanvasCoords(centerX, centerY);
+          e.preventDefault();
+          // 使用记录的鼠标位置粘贴
+          const mousePos = lastMouseCanvasPosRef.current;
+          const pos = { x: mousePos.x, y: mousePos.y };
           const newImages = clipboardRef.current.map((img, i) => ({
             ...img,
             id: `audit-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${i}`,
@@ -527,26 +555,28 @@ export default function AuditModeCanvas({
       } else {
         // 缩放操作：只缩放被拖拽的那一张
         const rect = containerRef.current.getBoundingClientRect();
-        setAuditImages(prev => prev.map(img => {
-          if (img.id !== draggingImageId) return img;
-          // 拖拽开始时鼠标相对于图片左下角偏移量
-          const imgScreenX = img.x * transform.scale + transform.x + rect.left;
-          const imgScreenY = img.y * transform.scale + transform.y + rect.top;
-          // 新的屏幕宽度 = 鼠标当前x - 图片左边缘x
-          const newScreenW = e.clientX - imgScreenX;
-          const newScreenH = e.clientY - imgScreenY;
-          // 保持宽高比，取比例改变较小的那个值
-          const scaleW = newScreenW / (img.width * transform.scale);
-          const scaleH = newScreenH / (img.height * transform.scale);
-          const newScale = Math.max(0.02, Math.min(scaleW, scaleH));
-          return { ...img, scale: newScale };
-        }));
+        const startData = resizeStartDataRef.current;
+        if (!startData) return;
+        // 使用 ref 中记录的起始数据计算，避免每次从 prev 读取 img.x/img.y
+        const imgScreenX = startData.canvasX * transform.scale + transform.x + rect.left;
+        const imgScreenY = startData.canvasY * transform.scale + transform.y + rect.top;
+        let newScreenW = e.clientX - imgScreenX - startData.offsetX;
+        let newScreenH = e.clientY - imgScreenY - startData.offsetY;
+        newScreenW = Math.max(8, newScreenW);
+        newScreenH = Math.max(8, newScreenH);
+        const ratioW = newScreenW / startData.startScreenW;
+        const ratioH = newScreenH / startData.startScreenH;
+        const newScale = Math.max(0.02, startData.startScale * Math.min(ratioW, ratioH));
+        setAuditImages(prev => prev.map(img =>
+          img.id === draggingImageId ? { ...img, scale: newScale } : img
+        ));
       }
     };
     const handleUp = () => {
       setDraggingImageId(null);
       startPositions.clear();
       isResizingRef.current = false;
+      resizeStartDataRef.current = null;
     };
     window.addEventListener('pointermove', handleMove);
     window.addEventListener('pointerup', handleUp);
@@ -559,7 +589,8 @@ export default function AuditModeCanvas({
   // ====== 标注绘制 ======
 
   const saveToHistory = (newAnnotations: AuditAnnotation[]) => {
-    const newHistory = annotationHistory.slice(0, historyIndex + 1);
+    // 保留最多2步历史（当前 + 1步撤销）
+    const newHistory = annotationHistory.slice(0, 1);
     newHistory.push([...newAnnotations]);
     setAnnotationHistory(newHistory);
     setHistoryIndex(newHistory.length - 1);
@@ -631,6 +662,10 @@ export default function AuditModeCanvas({
   };
 
   const handleCanvasPointerMove = (e: React.PointerEvent) => {
+    // 持续记录鼠标在画布坐标中的位置
+    const canvasPos = getCanvasCoords(e.clientX, e.clientY);
+    lastMouseCanvasPosRef.current = canvasPos;
+
     // 平移画布
     if (isPanning && setTransform) {
       const dx = e.clientX - panStartRef.current.x;
@@ -909,12 +944,136 @@ export default function AuditModeCanvas({
     link.click();
   };
 
+  // 十六进制颜色转 rgba
+  const hexToRgba = (hex: string, opacity: number) => {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r},${g},${b},${opacity})`;
+  };
+
+  // 创建或更新文本图片
+  const createTextImage = useCallback(() => {
+    if (!textImageContent.trim()) return;
+    const fontSize = textImageFontSize;
+    const padding = 16;
+    // 在离屏 canvas 上测量文本真实尺寸
+    const measureCanvas = document.createElement('canvas');
+    const mCtx = measureCanvas.getContext('2d');
+    if (!mCtx) return;
+    mCtx.font = `bold ${fontSize}px "Microsoft YaHei", "PingFang SC", sans-serif`;
+    const metrics = mCtx.measureText(textImageContent);
+    const textWidth = metrics.width;
+    const textHeight = fontSize * 1.4;
+    const w = Math.ceil(textWidth + padding * 2);
+    const h = Math.ceil(textHeight + padding * 2);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // 绘制背景
+    ctx.fillStyle = hexToRgba(textImageBgColor, textImageBgOpacity);
+    // 圆角背景
+    const radius = 8;
+    ctx.beginPath();
+    ctx.moveTo(radius, 0);
+    ctx.lineTo(w - radius, 0);
+    ctx.quadraticCurveTo(w, 0, w, radius);
+    ctx.lineTo(w, h - radius);
+    ctx.quadraticCurveTo(w, h, w - radius, h);
+    ctx.lineTo(radius, h);
+    ctx.quadraticCurveTo(0, h, 0, h - radius);
+    ctx.lineTo(0, radius);
+    ctx.quadraticCurveTo(0, 0, radius, 0);
+    ctx.closePath();
+    ctx.fill();
+
+    // 绘制文字
+    ctx.font = `bold ${fontSize}px "Microsoft YaHei", "PingFang SC", sans-serif`;
+    ctx.fillStyle = textImageColor;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    ctx.fillText(textImageContent, w / 2, h / 2);
+
+    const base64 = canvas.toDataURL('image/png').split(',')[1];
+
+    if (editingTextImageId) {
+      // 更新已有文本图片
+      const pos = { ...lastMouseCanvasPosRef.current };
+      setAuditImages(prev => prev.map(img =>
+        img.id === editingTextImageId
+          ? { ...img, base64, width: w, height: h, x: pos.x - w / 2, y: pos.y - h / 2, scale: 1 }
+          : img
+      ));
+      textImageMetaRef.current.set(editingTextImageId, {
+        content: textImageContent,
+        fontSize,
+        color: textImageColor,
+        bgColor: textImageBgColor,
+        bgOpacity: textImageBgOpacity,
+      });
+      setEditingTextImageId(null);
+    } else {
+      // 创建新文本图片
+      const pos = { ...lastMouseCanvasPosRef.current };
+      const newId = `audit-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const newImage: AuditImage = {
+        id: newId,
+        base64,
+        x: pos.x - w / 2,
+        y: pos.y - h / 2,
+        width: w,
+        height: h,
+        scale: 1,
+      };
+      textImageMetaRef.current.set(newId, {
+        content: textImageContent,
+        fontSize,
+        color: textImageColor,
+        bgColor: textImageBgColor,
+        bgOpacity: textImageBgOpacity,
+      });
+      setAuditImages(prev => [...prev, newImage]);
+      setSelectedImageIds([newId]);
+    }
+    setTextImageEditorOpen(false);
+    setTextImageContent('');
+  }, [textImageContent, textImageFontSize, textImageColor, textImageBgColor, textImageBgOpacity, editingTextImageId, setAuditImages]);
+
+  // 右键菜单处理
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const pos = getCanvasCoords(e.clientX, e.clientY);
+    setContextMenu({ x: e.clientX, y: e.clientY, canvasX: pos.x, canvasY: pos.y });
+  }, [getCanvasCoords]);
+
+  // 点击其他地方关闭右键菜单
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = (e: PointerEvent) => {
+      // 如果点击在右键菜单内部则不关闭
+      if (contextMenuRef.current && contextMenuRef.current.contains(e.target as Node)) return;
+      setContextMenu(null);
+    };
+    // 使用 setTimeout 让事件先完成冒泡再关闭，避免刚打开就被关闭
+    const delayedClose = (e: PointerEvent) => {
+      setTimeout(() => close(e), 0);
+    };
+    window.addEventListener('pointerdown', delayedClose);
+    return () => window.removeEventListener('pointerdown', delayedClose);
+  }, [contextMenu]);
+
   return (
     <div
       className="absolute inset-0 z-[45] overflow-hidden"
       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
       onDrop={handleDrop}
       onWheel={onWheel}
+      onContextMenu={handleContextMenu}
       onPointerDown={handleCanvasPointerDown}
       onPointerMove={handleCanvasPointerMove}
       onPointerUp={handleCanvasPointerUp}
@@ -922,100 +1081,12 @@ export default function AuditModeCanvas({
     >
       {/* 工具栏 — 右上角 */}
       <div className="absolute top-4 right-4 z-[60] flex flex-col gap-2">
-        <div className="bg-[#1e1e1e]/95 backdrop-blur-md rounded-xl border border-[#333] p-2 shadow-2xl flex flex-col gap-1.5">
-          {/* 工具按钮 */}
-          <div className="flex items-center gap-1 flex-wrap max-w-[280px]">
-            {(['select', 'rect', 'circle', 'fillRect', 'fillCircle', 'arrow', 'pen', 'text'] as const).map((tool) => (
-              <button
-                key={tool}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={() => setCurrentTool(tool)}
-                className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
-                  currentTool === tool
-                    ? 'bg-amber-600 text-white'
-                    : 'bg-[#333] text-gray-400 hover:bg-[#444] hover:text-white'
-                }`}
-              >
-                {tool === 'select' ? '选择' : tool === 'rect' ? '矩形' : tool === 'circle' ? '圆形' : tool === 'fillRect' ? '填矩形' : tool === 'fillCircle' ? '填椭圆' : tool === 'arrow' ? '箭头' : tool === 'pen' ? '画笔' : '文字'}
-              </button>
-            ))}
-          </div>
-
-          {/* 颜色选择 */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-gray-500 shrink-0">颜色:</span>
-            <div className="flex gap-0.5">
-              {colors.map((color) => (
-                <button
-                  key={color}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={() => setCurrentColor(color)}
-                  className={`w-4 h-4 rounded border ${currentColor === color ? 'border-white ring-1 ring-white' : color === '#ffffff' ? 'border-gray-500' : 'border-transparent'}`}
-                  style={{ backgroundColor: color }}
-                />
-              ))}
-            </div>
-            <input
-              type="color"
-              value={currentColor}
-              onPointerDown={(e) => e.stopPropagation()}
-              onChange={(e) => setCurrentColor(e.target.value)}
-              className="w-6 h-4 rounded border border-[#555] cursor-pointer p-0 bg-transparent"
-            />
-          </div>
-
-          {/* 字体大小 */}
-          {currentTool === 'text' && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] text-gray-500">大小:</span>
-              <select
-                className="bg-[#222] border border-[#444] rounded px-1.5 py-0.5 text-[10px] text-gray-300 outline-none"
-                value={currentFontSize}
-                onPointerDown={(e) => e.stopPropagation()}
-                onChange={(e) => setCurrentFontSize(Number(e.target.value))}
-              >
-                <option value="12">12</option>
-                <option value="16">16</option>
-                <option value="20">20</option>
-                <option value="24">24</option>
-                <option value="32">32</option>
-                <option value="48">48</option>
-              </select>
-            </div>
-          )}
-        </div>
-
-        {/* 操作按钮 */}
+        {/* 操作按钮（仅保留导出合成图片和右键菜单触发的文本图片创建） */}
         <div className="bg-[#1e1e1e]/95 backdrop-blur-md rounded-xl border border-[#333] p-2 shadow-2xl flex flex-col gap-1">
-          <div className="flex gap-1">
-            <button
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={undo}
-              disabled={historyIndex <= 0}
-              className="flex-1 py-1 px-2 rounded text-[10px] bg-[#333] hover:bg-[#444] text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              撤销
-            </button>
-            <button
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={redo}
-              disabled={historyIndex >= annotationHistory.length - 1}
-              className="flex-1 py-1 px-2 rounded text-[10px] bg-[#333] hover:bg-[#444] text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              重做
-            </button>
-          </div>
-          <button
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={clearAnnotations}
-            className="w-full py-1 px-2 rounded text-[10px] bg-red-900/50 hover:bg-red-800/50 text-red-300"
-          >
-            清除标注
-          </button>
           <button
             onPointerDown={(e) => e.stopPropagation()}
             onClick={exportAsImage}
-            className="w-full py-1 px-2 rounded text-[10px] bg-green-700 hover:bg-green-600 text-white flex items-center justify-center gap-1"
+            className="w-full py-1.5 px-3 rounded text-[10px] bg-green-700 hover:bg-green-600 text-white flex items-center justify-center gap-1"
           >
             导出合成图片
           </button>
@@ -1041,7 +1112,7 @@ export default function AuditModeCanvas({
             key={img.id}
             className={`absolute pointer-events-auto ${
               selectedImageIds.includes(img.id)
-                ? 'outline outline-3 outline-amber-300 outline-offset-2 shadow-[0_0_0_4px_rgba(251,191,36,0.3)]'
+                ? 'outline outline-4 outline-amber-300 outline-offset-2 shadow-[0_0_0_6px_rgba(251,191,36,0.35)] ring-2 ring-amber-400/60'
                 : ''
             }`}
             style={{
@@ -1051,6 +1122,20 @@ export default function AuditModeCanvas({
               height: img.height * img.scale,
             }}
             onPointerDown={(e) => handleImagePointerDown(e, img.id)}
+            onDoubleClick={(e) => {
+              // 双击文本图片打开编辑器
+              const meta = textImageMetaRef.current.get(img.id);
+              if (meta) {
+                e.stopPropagation();
+                setEditingTextImageId(img.id);
+                setTextImageContent(meta.content);
+                setTextImageFontSize(meta.fontSize);
+                setTextImageColor(meta.color);
+                setTextImageBgColor(meta.bgColor);
+                setTextImageBgOpacity(meta.bgOpacity);
+                setTextImageEditorOpen(true);
+              }
+            }}
           >
             <img
               src={'data:image/png;base64,' + img.base64}
@@ -1062,9 +1147,36 @@ export default function AuditModeCanvas({
             {/* 缩放手柄 — 右下角 */}
             {selectedImageIds.includes(img.id) && (
               <div
-                className="absolute bottom-0 right-0 w-4 h-4 bg-amber-500 border-2 border-white rounded-sm cursor-se-resize"
+                className="absolute bottom-0 right-0 w-5 h-5 bg-amber-400 border-2 border-white rounded-sm cursor-se-resize shadow-lg shadow-amber-600/40"
                 style={{ transform: 'translate(50%, 50%)' }}
-                onPointerDown={(e) => handleImagePointerDown(e, img.id)}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  if (currentTool !== 'select') return;
+                  const currentImg = auditImages.find(i => i.id === img.id);
+                  if (!currentImg) return;
+                  const rect = containerRef.current?.getBoundingClientRect();
+                  if (!rect) return;
+                  isResizingRef.current = true;
+                  setDraggingImageId(currentImg.id);
+                  const imgScreenX = currentImg.x * transform.scale + transform.x + rect.left;
+                  const imgScreenY = currentImg.y * transform.scale + transform.y + rect.top;
+                  const imgScreenW = currentImg.width * currentImg.scale * transform.scale;
+                  const imgScreenH = currentImg.height * currentImg.scale * transform.scale;
+                  const offsetX = e.clientX - (imgScreenX + imgScreenW);
+                  const offsetY = e.clientY - (imgScreenY + imgScreenH);
+                  // 写入缩放起始数据 ref（handleMove 从中读取，不依赖 state）
+                  resizeStartDataRef.current = {
+                    canvasX: currentImg.x,
+                    canvasY: currentImg.y,
+                    startScale: currentImg.scale,
+                    startScreenW: imgScreenW,
+                    startScreenH: imgScreenH,
+                    offsetX,
+                    offsetY,
+                  };
+                  // 保留 dragOffsetRef 给拖拽移动用
+                  dragOffsetRef.current = { x: offsetX, y: offsetY };
+                }}
               />
             )}
           </div>
@@ -1093,7 +1205,7 @@ export default function AuditModeCanvas({
       )}
 
       {/* 清空画布按钮（左上角） */}
-      <div className="absolute top-4 left-4 z-[60]">
+      <div className="absolute top-4 left-[204px] z-[60]">
         <button
           onPointerDown={(e) => e.stopPropagation()}
           onClick={() => {
@@ -1132,6 +1244,157 @@ export default function AuditModeCanvas({
             onBlur={() => confirmTextAnnotation()}
             placeholder="输入标注文字..."
           />
+        </div>
+      )}
+
+      {/* 右键菜单 */}
+      {contextMenu && (
+        <div
+          ref={contextMenuRef}
+          className="absolute z-[80] bg-[#252525] border border-[#444] rounded-lg shadow-2xl py-1 min-w-[140px] overflow-hidden"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <button
+            className="w-full text-left px-3 py-1.5 text-[12px] text-gray-300 hover:bg-[#333] hover:text-white transition-colors flex items-center gap-2"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => {
+              setTextImageEditorOpen(true);
+              setContextMenu(null);
+            }}
+          >
+            <span className="text-amber-400 text-[14px]">T</span>
+            创建文本图片
+          </button>
+        </div>
+      )}
+
+      {/* 文本图片编辑器 */}
+      {textImageEditorOpen && (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          onPointerDown={(e) => {
+            if (e.target === e.currentTarget) setTextImageEditorOpen(false);
+          }}
+        >
+          <div
+            className="bg-[#1e1e1e] border border-[#444] rounded-xl shadow-2xl p-6 w-[520px] max-w-[90vw] flex flex-col gap-4"
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <div className="text-[16px] font-medium text-gray-200">{editingTextImageId ? '编辑文本图片' : '创建文本图片'}</div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[12px] text-gray-500">文本内容</label>
+              <textarea
+                autoFocus
+                className="bg-[#2a2a2a] border border-[#444] rounded px-3 py-2 text-[16px] text-white outline-none focus:border-amber-500 resize-none"
+                value={textImageContent}
+                onChange={(e) => setTextImageContent(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && e.ctrlKey) createTextImage();
+                  if (e.key === 'Escape') setTextImageEditorOpen(false);
+                }}
+                placeholder="输入文本..."
+                rows={6}
+                style={{ minHeight: '120px' }}
+              />
+              <div className="text-[10px] text-gray-600">按 Ctrl+Enter 确认</div>
+            </div>
+
+            <div className="flex gap-4">
+              <div className="flex flex-col gap-1.5 flex-1">
+                <label className="text-[12px] text-gray-500">字体大小</label>
+                <select
+                  className="bg-[#2a2a2a] border border-[#444] rounded px-2 py-1.5 text-[14px] text-gray-300 outline-none"
+                  value={textImageFontSize}
+                  onChange={(e) => setTextImageFontSize(Number(e.target.value))}
+                >
+                  <option value="24">24px</option>
+                  <option value="32">32px</option>
+                  <option value="48">48px</option>
+                  <option value="64">64px</option>
+                  <option value="80">80px</option>
+                  <option value="100">100px</option>
+                  <option value="120">120px</option>
+                  <option value="150">150px</option>
+                </select>
+              </div>
+              <div className="flex flex-col gap-1.5 flex-1">
+                <label className="text-[12px] text-gray-500">字体颜色</label>
+                <input
+                  type="color"
+                  value={textImageColor}
+                  onChange={(e) => setTextImageColor(e.target.value)}
+                  className="w-full h-9 rounded border border-[#444] cursor-pointer bg-transparent"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-4">
+              <div className="flex flex-col gap-1.5 flex-1">
+                <label className="text-[12px] text-gray-500">背景颜色</label>
+                <input
+                  type="color"
+                  value={textImageBgColor}
+                  onChange={(e) => setTextImageBgColor(e.target.value)}
+                  className="w-full h-9 rounded border border-[#444] cursor-pointer bg-transparent"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5 flex-1">
+                <label className="text-[12px] text-gray-500">背景透明度</label>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.1"
+                  value={textImageBgOpacity}
+                  onChange={(e) => setTextImageBgOpacity(Number(e.target.value))}
+                  className="w-full h-2"
+                />
+              </div>
+            </div>
+            <div className="text-[12px] text-gray-500 text-center">
+              背景透明度: {Math.round(textImageBgOpacity * 100)}%
+            </div>
+
+            {/* 预览 */}
+            <div
+              className="rounded-lg p-5 flex items-center justify-center min-h-[100px] border border-[#333]"
+              style={{
+                backgroundColor: hexToRgba(textImageBgColor, textImageBgOpacity),
+              }}
+            >
+              {textImageContent ? (
+                <span
+                  style={{
+                    font: `bold ${Math.min(textImageFontSize, 48)}px "Microsoft YaHei", "PingFang SC", sans-serif`,
+                    color: textImageColor,
+                    textAlign: 'center',
+                    wordBreak: 'break-all',
+                  }}
+                >
+                  {textImageContent}
+                </span>
+              ) : (
+                <span className="text-[13px] text-gray-600">预览</span>
+              )}
+            </div>
+
+            <div className="flex gap-2 justify-end">
+              <button
+                className="px-5 py-2 rounded-lg text-[14px] bg-[#333] hover:bg-[#444] text-gray-300 transition-colors"
+                onClick={() => setTextImageEditorOpen(false)}
+              >
+                取消
+              </button>
+              <button
+                className="px-5 py-2 rounded-lg text-[14px] bg-amber-600 hover:bg-amber-500 text-white transition-colors"
+                onClick={createTextImage}
+              >
+                {editingTextImageId ? '确认更新' : '确认创建'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

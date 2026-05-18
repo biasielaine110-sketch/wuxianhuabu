@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
-import { createPortal, flushSync } from 'react-dom';
+import { createPortal } from 'react-dom';
 import { CanvasNode, Edge, Transform, Tool, NodeType, Annotation, AnnotationNode, PanoramaNode, GridSplitNode, GridMergeNode, PanoramaT2iNode, Director3DNode, Figure3D, ChatNode, ChatMessage, CanvasMode, AuditImage, AuditModeData } from './types';
 import AuditModeCanvas from './AuditModeCanvas';
 import type { AiProvider } from './services/aiSettings';
@@ -1209,6 +1209,7 @@ export default function App() {
   const [isSelecting, setIsSelecting] = useState(false);
   const selectionBoxRef = useRef<{ x: number, y: number, width: number, height: number } | null>(null);
   const isSelectingRef = useRef(false);
+  const frameRequestRef = useRef<number | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const pressStartPosRef = useRef<{ x: number, y: number } | null>(null);
   const selectionModifiersRef = useRef<{ ctrl: boolean, alt: boolean }>({ ctrl: false, alt: false });
@@ -3186,6 +3187,7 @@ export default function App() {
         nodeDragAccumRef.current = null;
       }
       if (isSelectingRef.current) {
+        if (frameRequestRef.current !== null) { cancelAnimationFrame(frameRequestRef.current); frameRequestRef.current = null; }
         isSelectingRef.current = false;
         setIsSelecting(false);
         selectionBoxRef.current = null;
@@ -3274,17 +3276,23 @@ export default function App() {
         const dx = e.clientX - startX;
         const dy = e.clientY - startY;
 
-        setSelectionBox({
-          x: Math.min(startX, startX + dx),
-          y: Math.min(startY, startY + dy),
-          width: Math.abs(dx),
-          height: Math.abs(dy)
-        }); selectionBoxRef.current = {
+        const box = {
           x: Math.min(startX, startX + dx),
           y: Math.min(startY, startY + dy),
           width: Math.abs(dx),
           height: Math.abs(dy)
         };
+        selectionBoxRef.current = box;
+        // RAF throttle，避免每帧 setState（看图模式的流畅策略）
+        if (frameRequestRef.current === null) {
+          frameRequestRef.current = requestAnimationFrame(() => {
+            frameRequestRef.current = null;
+            const b = selectionBoxRef.current;
+            if (b) {
+              setSelectionBox({ ...b });
+            }
+          });
+        }
       }
     } else if (pointerType === 'edge') {
       const rect = containerRef.current!.getBoundingClientRect();
@@ -3408,6 +3416,7 @@ export default function App() {
         }
 
         setIsSelecting(false); isSelectingRef.current = false;
+        if (frameRequestRef.current !== null) { cancelAnimationFrame(frameRequestRef.current); frameRequestRef.current = null; }
         setSelectionBox(null); selectionBoxRef.current = null;
         pressStartPosRef.current = null;
       } else if (pointerType === 'edge' && draftEdgeRef.current) {
@@ -3657,6 +3666,7 @@ export default function App() {
           nodeDragAccumRef.current = null;
         }
         if (isSelectingRef.current) {
+          if (frameRequestRef.current !== null) { cancelAnimationFrame(frameRequestRef.current); frameRequestRef.current = null; }
           isSelectingRef.current = false;
           setIsSelecting(false);
           selectionBoxRef.current = null;
@@ -3922,7 +3932,7 @@ export default function App() {
 
     const zoomSensitivity = 0.001;
     const delta = -e.deltaY * zoomSensitivity;
-    const newScale = Math.min(Math.max(0.1, transform.scale * (1 + delta)), 5);
+    const newScale = Math.min(Math.max(0.05, transform.scale * (1 + delta)), 5);
 
     const rect = containerRef.current.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
@@ -3947,12 +3957,10 @@ export default function App() {
       pressStartPosRef.current = { x: e.clientX, y: e.clientY };
       selectionModifiersRef.current = { ctrl: e.ctrlKey, alt: e.altKey };
       activePointerTypeRef.current = 'boxSelect';
-      flushSync(() => {
-        isSelectingRef.current = true;
-        setIsSelecting(true);
-        selectionBoxRef.current = { x: e.clientX, y: e.clientY, width: 0, height: 0 };
-        setSelectionBox({ x: e.clientX, y: e.clientY, width: 0, height: 0 }); selectionBoxRef.current = { x: e.clientX, y: e.clientY, width: 0, height: 0 };
-      });
+      isSelectingRef.current = true;
+      setIsSelecting(true);
+      selectionBoxRef.current = { x: e.clientX, y: e.clientY, width: 0, height: 0 };
+      setSelectionBox({ x: e.clientX, y: e.clientY, width: 0, height: 0 });
     } else if (activeTool === 'select') {
       const target = e.target as HTMLElement | SVGElement;
       const isCanvasClick = target.id === 'canvas-container' || target.id === 'svg-layer' || target.tagName === 'path';
@@ -3970,20 +3978,16 @@ export default function App() {
       longPressTimerRef.current = window.setTimeout(() => {
         // 长按触发框选
         activePointerTypeRef.current = 'selection';
-        flushSync(() => {
-          isSelectingRef.current = true;
-          setIsSelecting(true);
-          selectionBoxRef.current = { x: e.clientX, y: e.clientY, width: 0, height: 0 };
-          setSelectionBox({ x: e.clientX, y: e.clientY, width: 0, height: 0 }); selectionBoxRef.current = { x: e.clientX, y: e.clientY, width: 0, height: 0 };
-        });
+        isSelectingRef.current = true;
+        setIsSelecting(true);
+        selectionBoxRef.current = { x: e.clientX, y: e.clientY, width: 0, height: 0 };
+        setSelectionBox({ x: e.clientX, y: e.clientY, width: 0, height: 0 });
       }, 300);
     }
   }, [activeTool, fullscreenImage]);
 
-  // 框选移动处理
+  // 框选移动处理（RAF 节流，避免每帧 setState 卡顿）
   const handleCanvasPointerMove = useCallback((e: React.PointerEvent) => {
-    // 节点缩放仅由 window pointermove + session 处理（此处曾用未除 scale 的 delta，易与全局监听叠加导致跳动）
-
     if (!isSelecting || !pressStartPosRef.current) return;
 
     // 更新修饰键状态
@@ -3994,12 +3998,24 @@ export default function App() {
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
 
-    setSelectionBox({
+    // 写 ref（同步更新，保证 pointerUp 时读到最新值）
+    selectionBoxRef.current = {
       x: Math.min(startX, startX + dx),
       y: Math.min(startY, startY + dy),
       width: Math.abs(dx),
       height: Math.abs(dy)
-    });
+    };
+
+    // RAF 节流 setSelectionBox，避免每帧触发 React 渲染
+    if (frameRequestRef.current === null) {
+      frameRequestRef.current = requestAnimationFrame(() => {
+        frameRequestRef.current = null;
+        const box = selectionBoxRef.current;
+        if (box) {
+          setSelectionBox({ ...box });
+        }
+      });
+    }
   }, [isSelecting]);
 
   // 处理画布上的指针释放（用于框选和节点缩放）
@@ -4023,15 +4039,24 @@ export default function App() {
       return;
     }
 
-    if ((pointerType === 'boxSelect' || pointerType === 'selection') && isSelecting && selectionBox) {
+    if ((pointerType === 'boxSelect' || pointerType === 'selection') && isSelecting && (selectionBox || selectionBoxRef.current)) {
+      // 使用 selectionBoxRef.current 优先（RAF 节流时 ref 值总是最新）
+      const box = selectionBoxRef.current || selectionBox;
+      if (!box || (box.width === 0 && box.height === 0)) {
+        setIsSelecting(false);
+        setSelectionBox(null);
+        pressStartPosRef.current = null;
+        activePointerTypeRef.current = null;
+        return;
+      }
       const rect = containerRef.current!.getBoundingClientRect();
       const scale = transformRef.current.scale;
 
       // 将屏幕坐标转换为画布坐标
-      const boxX = (selectionBox.x - rect.left - transformRef.current.x) / scale;
-      const boxY = (selectionBox.y - rect.top - transformRef.current.y) / scale;
-      const boxWidth = selectionBox.width / scale;
-      const boxHeight = selectionBox.height / scale;
+      const boxX = (box.x - rect.left - transformRef.current.x) / scale;
+      const boxY = (box.y - rect.top - transformRef.current.y) / scale;
+      const boxWidth = box.width / scale;
+      const boxHeight = box.height / scale;
 
       // 找出所有与选框相交的节点
       const selectedNodes = nodesRef.current.filter(node => {
@@ -4063,6 +4088,8 @@ export default function App() {
         setSelectedIds([]);
       }
 
+      // 清除 RAF
+      if (frameRequestRef.current !== null) { cancelAnimationFrame(frameRequestRef.current); frameRequestRef.current = null; }
       setIsSelecting(false);
       setSelectionBox(null);
       pressStartPosRef.current = null;
