@@ -3,7 +3,7 @@ import { AuditImage, Transform } from './types';
 
 /** 根据 base64 魔数字节识别真实的图片 MIME 类型 */
 function sniffImageMimeFromBase64(raw: string): string {
-  if (!raw || raw.length < 8) return 'image/jpeg';
+  if (!raw || raw.length < 8) return 'image/png';
   try {
     const dec = atob(raw.slice(0, 48));
     const a = dec.charCodeAt(0);
@@ -15,7 +15,7 @@ function sniffImageMimeFromBase64(raw: string): string {
   } catch {
     /* ignore */
   }
-  return 'image/jpeg';
+  return 'image/png';
 }
 
 /** 将纯 base64 转换为带正确 MIME 类型的 data URL */
@@ -429,52 +429,32 @@ export default function AuditModeCanvas({
         return;
       }
 
-      // Ctrl+V / Meta+V：粘贴图片（优先共享剪贴板 > 内部剪贴板 > 系统剪贴板）
+      // Ctrl+V / Meta+V：粘贴图片（统一从系统剪贴板读取，清除残留的内部缓存）
       if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV' && !isInput) {
+        e.preventDefault();
         const mousePos = lastMouseCanvasPosRef.current;
         const pos = { x: mousePos.x, y: mousePos.y };
-        // 1) 从共享剪贴板粘贴（跨模式复制最高优先级）
-        if (sharedClipboardImageRef.current) {
-          e.preventDefault();
-          const img = sharedClipboardImageRef.current;
-          const newImage: AuditImage = {
-            ...img,
-            id: `audit-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            x: pos.x - img.width / 2,
-            y: pos.y - img.height / 2,
-          };
-          setAuditImages(prev => [...prev, newImage]);
-          setSelectedImageIds([newImage.id]);
-          return;
-        }
-        // 2) 从内部剪贴板粘贴
-        if (clipboardRef.current.length > 0) {
-          e.preventDefault();
-          const newImages = clipboardRef.current.map((img, i) => ({
-            ...img,
-            id: `audit-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${i}`,
-            x: pos.x + i * 30,
-            y: pos.y + i * 30,
-          }));
-          setAuditImages(prev => [...prev, ...newImages]);
-          setSelectedImageIds(newImages.map(img => img.id));
-          return;
-        }
-        // 3) 没有内部剪贴板内容时，尝试直接从系统剪贴板读取（双保险）
+        const now = Date.now();
+        lastPasteTimeRef.current = now;
+
+        // 从系统剪贴板读取（内部/外部复制都写入了系统剪贴板）
         if (typeof navigator?.clipboard?.read === 'function') {
-          const now = Date.now();
-          lastPasteTimeRef.current = now;
           navigator.clipboard.read().then(clipboardItems => {
+            if (lastPasteTimeRef.current !== now) return;
             const imageItem = clipboardItems.find(item => item.types.some(t => t.startsWith('image/')));
-            if (!imageItem) return;
-            imageItem.getType('image/png').then(blob => {
+            if (!imageItem) { fallbackInternal(); return; }
+            const targetType = imageItem.types.find(t => t.startsWith('image/')) || 'image/png';
+            imageItem.getType(targetType).then(blob => {
+              if (lastPasteTimeRef.current !== now) return;
               const reader = new FileReader();
               reader.onload = (ev) => {
+                if (lastPasteTimeRef.current !== now) return;
                 const result = ev.target?.result as string;
                 const base64 = result?.split(',')[1];
                 if (!base64) return;
                 const mimeType = result?.startsWith('data:') ? result.slice(5).split(';')[0] : 'image/png';
                 getImageNaturalSize(base64, mimeType).then(naturalSize => {
+                  if (lastPasteTimeRef.current !== now) return;
                   const newImage: AuditImage = {
                     id: `audit-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                     base64,
@@ -489,10 +469,27 @@ export default function AuditModeCanvas({
                 });
               };
               reader.readAsDataURL(blob);
-            }).catch(() => {});
-          }).catch(() => {});
+            }).catch(() => fallbackInternal());
+          }).catch(() => fallbackInternal());
+        } else {
+          fallbackInternal();
         }
-        // 不 preventDefault，让 paste 事件也能并行触发以增加成功率
+
+        function fallbackInternal() {
+          if (lastPasteTimeRef.current !== now) return;
+          // 系统剪贴板无图片时，回退到共享剪贴板
+          if (sharedClipboardImageRef.current) {
+            const img = sharedClipboardImageRef.current;
+            const newImage: AuditImage = {
+              ...img,
+              id: `audit-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              x: pos.x - img.width / 2,
+              y: pos.y - img.height / 2,
+            };
+            setAuditImages(prev => [...prev, newImage]);
+            setSelectedImageIds([newImage.id]);
+          }
+        }
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {

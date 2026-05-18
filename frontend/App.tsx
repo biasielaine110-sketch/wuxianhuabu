@@ -109,7 +109,7 @@ const AudioIcon = ({ size = 16 }) => <svg xmlns="http://www.w3.org/2000/svg" wid
 
 /** ToAPIs 等返回的 base64 可能是 PNG/WebP，一律按魔数识别后再喂给 Image/canvas */
 function sniffImageMimeFromBase64(raw: string): string {
-  if (!raw || raw.length < 8) return 'image/jpeg';
+  if (!raw || raw.length < 8) return 'image/png';
   try {
     const dec = atob(raw.slice(0, 48));
     const a = dec.charCodeAt(0);
@@ -121,7 +121,7 @@ function sniffImageMimeFromBase64(raw: string): string {
   } catch {
     /* ignore */
   }
-  return 'image/jpeg';
+  return 'image/png';
 }
 
 /** 视频节点模型 → ToAPIs 模型 */
@@ -3725,77 +3725,101 @@ export default function App() {
               const fullSrc = rawSrc.includes(',') ? rawSrc : 'data:image/png;base64,' + rawSrc;
               // 写入共享剪贴板（跨模式使用）
               const imgEl = new Image();
+              imgEl.onload = () => {
+                const imgWidth = imgEl.naturalWidth || 512;
+                const imgHeight = imgEl.naturalHeight || 512;
+                if (base64) {
+                  sharedClipboardImageRef.current = {
+                    id: `shared-copy-${Date.now()}`,
+                    base64,
+                    x: 0, y: 0,
+                    width: imgWidth,
+                    height: imgHeight,
+                    scale: 1,
+                  };
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = imgWidth;
+                canvas.height = imgHeight;
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                  ctx.drawImage(imgEl, 0, 0, canvas.width, canvas.height);
+                  canvas.toBlob(async (blob) => {
+                    if (blob) {
+                      try {
+                        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                      } catch (_) {}
+                    }
+                  }, 'image/png');
+                }
+              };
+              imgEl.onerror = () => {
+                // 图片加载失败时，使用节点尺寸作为 fallback
+                const fallbackW = imgNode.width || 512;
+                const fallbackH = imgNode.height || 512;
+                if (base64) {
+                  sharedClipboardImageRef.current = {
+                    id: `shared-copy-${Date.now()}`,
+                    base64,
+                    x: 0, y: 0,
+                    width: fallbackW,
+                    height: fallbackH,
+                    scale: 1,
+                  };
+                }
+              };
               imgEl.src = fullSrc;
-              const imgWidth = imgNode.width || imgEl.naturalWidth || 512;
-              const imgHeight = imgNode.height || imgEl.naturalHeight || 512;
-              if (base64) {
-                sharedClipboardImageRef.current = {
-                  id: `shared-copy-${Date.now()}`,
-                  base64,
-                  x: 0, y: 0,
-                  width: imgWidth,
-                  height: imgHeight,
-                  scale: 1,
-                };
-              }
-              const canvas = document.createElement('canvas');
-              canvas.width = imgWidth;
-              canvas.height = imgHeight;
-              const ctx = canvas.getContext('2d');
-              if (ctx) {
-                ctx.drawImage(imgEl, 0, 0, canvas.width, canvas.height);
-                canvas.toBlob(async (blob) => {
-                  if (blob) {
-                    try {
-                      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-                    } catch (_) {}
-                  }
-                }, 'image/png');
-              }
             }
           }
         }
       } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV' && !isInput) {
-        // 兜底：优先从共享剪贴板粘贴（跨模式复制）
-        if (sharedClipboardImageRef.current) {
-          e.preventDefault();
-          const img = sharedClipboardImageRef.current;
-          const mp = canvasMouseRef.current;
-          const newNode: CanvasNode = {
-            id: `image-${Date.now()}`,
-            type: 'image',
-            x: mp.x - img.width / 2,
-            y: mp.y - img.height / 2,
-            width: img.width,
-            height: img.height,
-            prompt: '',
-            images: [img.base64],
-            viewMode: 'single',
-            currentImageIndex: 0
-          };
-          setNodes(prev => [...prev, newNode]);
-          setSelectedIds([newNode.id]);
-          return;
-        }
-        // 没有共享剪贴板内容时，尝试直接从系统剪贴板读取（双保险）
-        if (!sharedClipboardImageRef.current && typeof navigator?.clipboard?.read === 'function') {
-          const now = Date.now();
-          lastPasteTimeRef.current = now;
+        e.preventDefault();
+        // 统一从系统剪贴板读取（内部/外部复制都写入了系统剪贴板，确保最新内容优先）
+        const now = Date.now();
+        lastPasteTimeRef.current = now;
+        if (typeof navigator?.clipboard?.read === 'function') {
           navigator.clipboard.read().then(clipboardItems => {
+            if (lastPasteTimeRef.current !== now) return;
             const imageItem = clipboardItems.find(item => item.types.some(t => t.startsWith('image/')));
-            if (!imageItem) return;
-            imageItem.getType('image/png').then(blob => {
+            if (!imageItem) { fallbackSharedClipboard(); return; }
+            const targetType = imageItem.types.find(t => t.startsWith('image/')) || 'image/png';
+            imageItem.getType(targetType).then(blob => {
+              if (lastPasteTimeRef.current !== now) return;
               const reader = new FileReader();
               reader.onload = (ev) => {
+                if (lastPasteTimeRef.current !== now) return;
                 const result = ev.target?.result as string;
                 const base64 = result?.split(',')[1];
                 if (base64) createImageNodeFromBase64(base64);
               };
               reader.readAsDataURL(blob);
-            }).catch(() => {});
-          }).catch(() => {});
+            }).catch(() => fallbackSharedClipboard());
+          }).catch(() => fallbackSharedClipboard());
+        } else {
+          fallbackSharedClipboard();
         }
-        // 不 preventDefault，让 paste 事件也能并行触发以增加成功率
+
+        function fallbackSharedClipboard() {
+          if (lastPasteTimeRef.current !== now) return;
+          if (sharedClipboardImageRef.current) {
+            const img = sharedClipboardImageRef.current;
+            const mp = canvasMouseRef.current;
+            const newNode: CanvasNode = {
+              id: `image-${Date.now()}`,
+              type: 'image',
+              x: mp.x - img.width / 2,
+              y: mp.y - img.height / 2,
+              width: img.width,
+              height: img.height,
+              prompt: '',
+              images: [img.base64],
+              viewMode: 'single',
+              currentImageIndex: 0,
+            };
+            setNodes(prev => [...prev, newNode]);
+            setSelectedIds([newNode.id]);
+          }
+        }
       } else if ((e.ctrlKey || e.metaKey) && e.altKey && e.code === 'KeyS' && !isInput && !(e.target as HTMLElement).isContentEditable) {
         e.preventDefault();
         void handleSaveDraftJsonSaveAs();
