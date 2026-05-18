@@ -119,6 +119,22 @@ export interface Transform {
 
 export type Tool = 'select' | 'pan' | 'boxSelect';
 
+export type CanvasMode = 'canvas' | 'audit';
+
+export interface AuditImage {
+  id: string;
+  base64: string;
+  x: number;    // 画布坐标
+  y: number;    // 画布坐标
+  width: number;  // 原始宽度（像素）
+  height: number; // 原始高度（像素）
+  scale: number;   // 缩放比例（初始为 1）
+}
+
+export interface AuditModeData {
+  images: AuditImage[];
+}
+
 // 宫格拆分节点
 export interface GridSplitNode extends CanvasNode {
   type: 'gridSplit';

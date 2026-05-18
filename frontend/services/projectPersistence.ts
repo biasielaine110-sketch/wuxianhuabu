@@ -1,5 +1,5 @@
 import JSZip from 'jszip';
-import type { CanvasNode, Edge, Transform } from '../types';
+import type { CanvasNode, Edge, Transform, AuditModeData } from '../types';
 
 /** 与 App 内 CanvasProject 结构一致，单独放在此模块避免循环依赖 */
 export type CanvasProjectSnapshot = {
@@ -17,6 +17,8 @@ export type CanvasProjectSnapshot = {
   draftStoragePathNote?: string;
   /** 已绑定本地草稿 JSON 后的定时保存间隔（分钟）；未写入时打开该项目默认按 5 分钟 */
   draftAutosaveIntervalMin?: 0 | 5 | 10 | 20 | 30;
+  /** 审核模式数据 */
+  auditModeData?: AuditModeData;
 };
 
 const DB_NAME = 'infinite-ai-canvas-db';

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
 import { createPortal, flushSync } from 'react-dom';
-import { CanvasNode, Edge, Transform, Tool, NodeType, Annotation, AnnotationNode, PanoramaNode, GridSplitNode, GridMergeNode, PanoramaT2iNode, Director3DNode, Figure3D, ChatNode, ChatMessage } from './types';
+import { CanvasNode, Edge, Transform, Tool, NodeType, Annotation, AnnotationNode, PanoramaNode, GridSplitNode, GridMergeNode, PanoramaT2iNode, Director3DNode, Figure3D, ChatNode, ChatMessage, CanvasMode, AuditImage, AuditModeData } from './types';
+import AuditModeCanvas from './AuditModeCanvas';
 import type { AiProvider } from './services/aiSettings';
 import {
   DEFAULT_CODESONLINE_IMAGE_BASE_URL,
@@ -477,16 +478,17 @@ function mergeCurrentCanvasIntoProjectList(
   activeId: string | null,
   nodes: CanvasNode[],
   edges: Edge[],
-  transform: Transform
+  transform: Transform,
+  auditModeData?: AuditModeData
 ): CanvasProject[] {
   if (!activeId) return projects;
   const { nodes: nc, edges: ec, transform: tc } = cloneCanvasForProject(nodes, edges, transform);
   const now = Date.now();
   const idx = projects.findIndex((p) => p.id === activeId);
   if (idx === -1) {
-    return [{ id: activeId, name: '未命名项目', updatedAt: now, nodes: nc, edges: ec, transform: tc }, ...projects];
+    return [{ id: activeId, name: '未命名项目', updatedAt: now, nodes: nc, edges: ec, transform: tc, auditModeData }, ...projects];
   }
-  return projects.map((p) => (p.id === activeId ? { ...p, nodes: nc, edges: ec, transform: tc, updatedAt: now } : p));
+  return projects.map((p) => (p.id === activeId ? { ...p, nodes: nc, edges: ec, transform: tc, updatedAt: now, auditModeData } : p));
 }
 
 function projectDraftDisplayName(p: CanvasProject): string {
@@ -1195,6 +1197,10 @@ export default function App() {
   const [edges, setEdges] = useState<Edge[]>([]);
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: 0.4 });
   const [activeTool, setActiveTool] = useState<Tool>('select');
+  const [canvasMode, setCanvasMode] = useState<CanvasMode>('canvas');
+  const [auditImages, setAuditImages] = useState<AuditImage[]>([]);
+  const auditImagesRef = useRef<AuditImage[]>([]);
+  useEffect(() => { auditImagesRef.current = auditImages; }, [auditImages]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]); // 多选支持
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
 
@@ -1958,7 +1964,8 @@ export default function App() {
         pid,
         nodesRef.current,
         edgesRef.current,
-        transformRef.current
+        transformRef.current,
+        auditImagesRef.current.length > 0 ? { images: auditImagesRef.current } : undefined
       );
       const cur = nextProjects.find((p) => p.id === pid);
       const needsDiskPrompt = !options?.skipDiskPrompt && cur != null && !cur.diskSaveEstablished;
@@ -2326,6 +2333,13 @@ export default function App() {
     setNodes(normalizedTarget.nodes || []);
     setEdges(normalizedTarget.edges || []);
     setTransform(normalizedTarget.transform || { x: 0, y: 0, scale: 1 });
+    if (normalizedTarget.auditModeData?.images) {
+      setAuditImages(normalizedTarget.auditModeData.images);
+      auditImagesRef.current = normalizedTarget.auditModeData.images;
+    } else {
+      setAuditImages([]);
+      auditImagesRef.current = [];
+    }
     void getProjectBackupFileHandle(projectId).then((h) => {
       lastJsonFileHandleRef.current = h ?? null;
       lastZipFileHandleRef.current = null;
@@ -2497,6 +2511,13 @@ export default function App() {
     setNodes(newProject.nodes);
     setEdges(newProject.edges);
     setTransform(newProject.transform);
+    if (newProject.auditModeData?.images) {
+      setAuditImages(newProject.auditModeData.images);
+      auditImagesRef.current = newProject.auditModeData.images;
+    } else {
+      setAuditImages([]);
+      auditImagesRef.current = [];
+    }
     void saveProjectLibrary(nextList, newProject.id).then((ok) => {
       if (!ok) {
         alert('导入已生效，但写入草稿库失败。请导出 ZIP/JSON 备份后重试。');
@@ -2588,6 +2609,13 @@ export default function App() {
           setNodes(initial.nodes || []);
           setEdges(initial.edges || []);
           setTransform(initial.transform || { x: 0, y: 0, scale: 1 });
+          if (initial.auditModeData?.images) {
+            setAuditImages(initial.auditModeData.images);
+            auditImagesRef.current = initial.auditModeData.images;
+          } else {
+            setAuditImages([]);
+            auditImagesRef.current = [];
+          }
           if (libStrippedLegacy) {
             void saveProjectLibrary(patchedProjects, initial.id).then((ok) => {
               if (!ok) console.warn('[canvas] 已剥离旧版默认文生图占位，但写回草稿库失败');
@@ -3519,6 +3547,15 @@ export default function App() {
       const isInput = (e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA' || (e.target as HTMLElement).tagName === 'SELECT';
       const isContentEditable = (e.target as HTMLElement).isContentEditable;
 
+      // 看图模式下：仅支持空格平移（其他快捷键在 AuditModeCanvas 内部处理）
+      if (canvasMode === 'audit') {
+        if (e.code === 'Space' && !isInput) {
+          e.preventDefault();
+          setActiveTool('pan');
+        }
+        return;
+      }
+
       const shortcutCreatesNode =
         !isInput &&
         !isContentEditable &&
@@ -3786,6 +3823,9 @@ export default function App() {
     };
 
     const handlePaste = (e: ClipboardEvent) => {
+      // 看图模式下不处理粘贴（AuditModeCanvas 内部处理）
+      if (canvasMode === 'audit') return;
+
       const target = e.target as HTMLElement | null;
       const isInput = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.tagName === 'SELECT';
       if (isInput) return;
@@ -4032,15 +4072,15 @@ export default function App() {
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    if (fullscreenImage) return;
+    if (fullscreenImage || canvasMode === 'audit') return;
     const rect = containerRef.current!.getBoundingClientRect();
     const canvasX = (e.clientX - rect.left - transform.x) / transform.scale;
     const canvasY = (e.clientY - rect.top - transform.y) / transform.scale;
     setContextMenu({ x: e.clientX, y: e.clientY, canvasX, canvasY });
-  }, [transform, fullscreenImage]);
+  }, [transform, fullscreenImage, canvasMode]);
 
   const handleCanvasDoubleClick = useCallback((e: React.MouseEvent) => {
-    if (fullscreenImage) return;
+    if (fullscreenImage || canvasMode === 'audit') return;
     const target = e.target as HTMLElement;
     // 只响应画布空白区域双击，忽略节点/按钮/SVG等
     if (target.closest('[data-node-root]') || target.closest('button') || target.closest('svg') || target.closest('select') || target.closest('textarea') || target.closest('input')) return;
@@ -6779,6 +6819,13 @@ export default function App() {
     setActiveProjectId(p.id);
     setNodes(target.nodes || []); setEdges(target.edges || []);
     setTransform(target.transform || { x: 0, y: 0, scale: 1 });
+    if (target.auditModeData?.images) {
+      setAuditImages(target.auditModeData.images);
+      auditImagesRef.current = target.auditModeData.images;
+    } else {
+      setAuditImages([]);
+      auditImagesRef.current = [];
+    }
     await saveProjectLibrary(projects, p.id);
     setShowHomePage(false);
   };
@@ -7150,7 +7197,7 @@ export default function App() {
       <div 
         id="canvas-container"
         ref={containerRef}
-        className={`absolute inset-0 w-full h-full ${activeTool === 'pan' ? 'cursor-grab active:cursor-grabbing' : activeTool === 'boxSelect' ? 'cursor-crosshair' : 'cursor-default'}`}
+        className={`absolute inset-0 w-full h-full ${canvasMode === 'audit' ? 'hidden' : ''} ${activeTool === 'pan' ? 'cursor-grab active:cursor-grabbing' : activeTool === 'boxSelect' ? 'cursor-crosshair' : 'cursor-default'}`}
         onWheel={handleWheel}
         onPointerDown={handleCanvasPointerDown}
         onDragOver={handleDragOver}
@@ -7362,8 +7409,20 @@ export default function App() {
         )}
       </div>
 
+      {/* 看图模式覆盖层 */}
+      {canvasMode === 'audit' && (
+        <AuditModeCanvas
+          auditImages={auditImages}
+          setAuditImages={setAuditImages}
+          transform={transform}
+          setTransform={setTransform}
+          containerRef={containerRef}
+          onWheel={handleWheel}
+        />
+      )}
+
     {/* Context Menu */}
-    {contextMenu && (
+    {contextMenu && canvasMode !== 'audit' && (
       <div
         className="absolute z-50 bg-[#252525] border border-[#444] rounded-lg shadow-2xl py-1 min-w-[160px] overflow-hidden canvas-chrome-150"
         style={{ left: contextMenu.x, top: contextMenu.y, transform: 'scale(0.55)', transformOrigin: 'top left' }}
@@ -7415,7 +7474,7 @@ export default function App() {
       )}
 
       {/* UI Overlay: 快捷键 + 工具栏（左上） */}
-      <div className="absolute top-6 left-6 z-40 flex flex-col gap-1.5">
+      <div className={`absolute top-6 left-6 z-40 flex flex-col gap-1.5 ${canvasMode === 'audit' ? 'hidden' : ''}`}>
         <button
           type="button"
           onPointerDown={(e) => e.stopPropagation()}
@@ -7460,7 +7519,7 @@ export default function App() {
       </div>
 
       {/* Settings + project actions（左上第二列） */}
-      <div className="canvas-chrome-150 absolute top-6 left-28 z-40 flex flex-wrap items-center gap-2" style={{ transform: 'scale(0.67)', transformOrigin: 'top left' }}>
+      <div className={`canvas-chrome-150 absolute top-6 left-28 z-40 flex flex-wrap items-center gap-2 ${canvasMode === 'audit' ? 'hidden' : ''}`} style={{ transform: 'scale(0.67)', transformOrigin: 'top left' }}>
       <button
         onClick={() => {
           setSettingsTab('api');
@@ -7550,13 +7609,42 @@ export default function App() {
         </div>
       )}
 
+      {/* 模式切换按钮 — 固定在顶部，不影响审核模式叠加层 */}
+      {activeProjectId && (
+        <div className="fixed top-[20px] left-1/2 z-[55] -translate-x-1/2 flex items-center gap-2">
+          <button
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => setCanvasMode('canvas')}
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+              canvasMode === 'canvas'
+                ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/30'
+                : 'bg-[#1e1e1e]/80 border border-[#333] text-gray-400 hover:bg-[#333] hover:text-white'
+            }`}
+          >
+            画布模式
+          </button>
+          <button
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => setCanvasMode('audit')}
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+              canvasMode === 'audit'
+                ? 'bg-amber-600 text-white shadow-lg shadow-amber-900/30'
+                : 'bg-[#1e1e1e]/80 border border-[#333] text-gray-400 hover:bg-[#333] hover:text-white'
+            }`}
+          >
+            看图模式
+          </button>
+        </div>
+      )}
+
       {/* Center — current draft / project title（双击改项目名，与草稿展示同步并写回 IndexedDB） */}
       {activeProjectId ? (() => {
         const curProj = projects.find((p) => p.id === activeProjectId);
         if (!curProj) return null;
         const editing = centerTitleEditValue !== null;
         return (
-          <div className="absolute top-[70px] left-1/2 z-[35] -translate-x-1/2 flex items-center gap-[50px]">
+          <>
+          <div className={`absolute top-[70px] left-1/2 z-[35] -translate-x-1/2 flex items-center gap-[50px] ${canvasMode === 'audit' ? 'hidden' : ''}`}>
             <button
               onPointerDown={(e) => e.stopPropagation()}
               onClick={() => { loadProjectLibrary().then(lib => { if (lib) setHomeProjects(lib.projects); }); setShowHomePage(true); }}
@@ -7624,6 +7712,7 @@ export default function App() {
       )}
           </div>
           </div>
+          </>
         );
       })() : null}
 
@@ -8903,7 +8992,7 @@ export default function App() {
       )}
 
       {/* Fullscreen Image Modal */}
-      {fullscreenImage && (
+      {fullscreenImage && canvasMode !== 'audit' && (
         <div 
           className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center overflow-hidden backdrop-blur-sm" 
           onPointerDown={() => { setFullscreenImage(null); setFsContextMenu(null); }}
@@ -9001,7 +9090,7 @@ export default function App() {
 
       {/* 快捷节点面板（左侧） */}
       <div
-        className="absolute left-6 top-1/2 -translate-y-1/2 z-30 flex flex-col gap-1 canvas-chrome-150"
+        className={`absolute left-6 top-1/2 -translate-y-1/2 z-30 flex flex-col gap-1 canvas-chrome-150 ${canvasMode === 'audit' ? 'hidden' : ''}`}
         onPointerDown={(e) => e.stopPropagation()}
       >
         <button
@@ -9046,7 +9135,7 @@ export default function App() {
 
       {/* 缩放指示器 + 控制按钮（左下角） */}
       <div
-        className="absolute bottom-6 left-6 z-30 flex items-center gap-1 bg-[#1e1e1e]/90 backdrop-blur-md rounded-xl border border-[#333] px-2 py-1.5 shadow-lg canvas-chrome-150"
+        className={`absolute bottom-6 left-6 z-30 flex items-center gap-1 bg-[#1e1e1e]/90 backdrop-blur-md rounded-xl border border-[#333] px-2 py-1.5 shadow-lg canvas-chrome-150 ${canvasMode === 'audit' ? 'hidden' : ''}`}
         onPointerDown={(e) => e.stopPropagation()}
       >
         <button
@@ -9101,7 +9190,7 @@ export default function App() {
           title="重置为 100%"
         >1:1</button>
       </div>
-      {bigEditorPortal}
+      {canvasMode !== 'audit' && bigEditorPortal}
 
     </div>
   );
