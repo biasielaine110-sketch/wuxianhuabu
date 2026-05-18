@@ -1,6 +1,28 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { AuditImage, Transform } from './types';
 
+/** 根据 base64 魔数字节识别真实的图片 MIME 类型 */
+function sniffImageMimeFromBase64(raw: string): string {
+  if (!raw || raw.length < 8) return 'image/jpeg';
+  try {
+    const dec = atob(raw.slice(0, 48));
+    const a = dec.charCodeAt(0);
+    const b = dec.charCodeAt(1);
+    if (a === 0xff && b === 0xd8) return 'image/jpeg';
+    if (a === 0x89 && b === 0x50) return 'image/png';
+    if (a === 0x47 && b === 0x49) return 'image/gif';
+    if (a === 0x52 && b === 0x49 && dec.startsWith('RIFF')) return 'image/webp';
+  } catch {
+    /* ignore */
+  }
+  return 'image/jpeg';
+}
+
+/** 将纯 base64 转换为带正确 MIME 类型的 data URL */
+function base64ToImageDataUrl(raw: string): string {
+  return `data:${sniffImageMimeFromBase64(raw)};base64,${raw}`;
+}
+
 const colors = ['#ffffff', '#000000', '#ff6b6b', '#feca57', '#48dbfb', '#1dd1a1', '#ff9ff3', '#54a0ff'];
 
 interface AuditModeCanvasProps {
@@ -111,6 +133,8 @@ export default function AuditModeCanvas({
 
   // 图片的原始尺寸映射
   const imageSizeCacheRef = useRef<Map<string, { w: number; h: number }>>(new Map());
+  // 防止 keydown + paste 事件双重触发导致重复粘贴
+  const lastPasteTimeRef = useRef(0);
 
   // 鼠标在画布坐标系中的坐标计算
   const getCanvasCoords = useCallback((clientX: number, clientY: number) => {
@@ -222,7 +246,7 @@ export default function AuditModeCanvas({
   // ====== 图片处理 ======
 
   // 获取图片原始尺寸
-  const getImageNaturalSize = (base64: string): Promise<{ width: number; height: number }> => {
+  const getImageNaturalSize = (base64: string, mimeType?: string): Promise<{ width: number; height: number }> => {
     return new Promise((resolve) => {
       // 检查缓存
       const cached = imageSizeCacheRef.current.get(base64);
@@ -237,7 +261,12 @@ export default function AuditModeCanvas({
         resolve(size);
       };
       img.onerror = () => resolve({ width: 480, height: 360 }); // fallback
-      img.src = 'data:image/png;base64,' + base64;
+      // 优先使用传入的 MIME 类型，否则根据魔数自动识别
+      if (mimeType) {
+        img.src = `data:${mimeType};base64,${base64}`;
+      } else {
+        img.src = base64ToImageDataUrl(base64);
+      }
     });
   };
 
@@ -251,10 +280,12 @@ export default function AuditModeCanvas({
     const file = files.find(f => f.type.startsWith('image/'));
     if (!file) return;
 
+    const mimeType = file.type || 'image/png';
+
     const reader = new FileReader();
     reader.onload = async (event) => {
       const base64 = (event.target?.result as string).split(',')[1];
-      const naturalSize = await getImageNaturalSize(base64);
+      const naturalSize = await getImageNaturalSize(base64, mimeType);
       const pos = getCanvasCoords(e.clientX, e.clientY);
 
       const newImage: AuditImage = {
@@ -277,6 +308,9 @@ export default function AuditModeCanvas({
     const target = e.target as HTMLElement | null;
     if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.tagName === 'SELECT') return;
 
+    // 防止 keydown 已处理过后的重复触发
+    if (Date.now() - lastPasteTimeRef.current < 1000) return;
+
     const items = e.clipboardData?.items;
     const imageItem = items ? Array.from(items).find(item => item.type.startsWith('image/')) : null;
     if (!imageItem) return;
@@ -285,13 +319,15 @@ export default function AuditModeCanvas({
     const file = imageItem.getAsFile();
     if (!file) return;
 
+    const mimeType = file.type || 'image/png';
+
     const reader = new FileReader();
     reader.onload = async (event) => {
       const result = event.target?.result as string;
       const base64 = result.split(',')[1];
       if (!base64) return;
 
-      const naturalSize = await getImageNaturalSize(base64);
+      const naturalSize = await getImageNaturalSize(base64, mimeType);
       // 使用鼠标当前在画布中的位置粘贴（onWindowPointerMove 已转换为画布坐标）
       const pos = lastMouseCanvasPosRef.current;
 
@@ -376,7 +412,7 @@ export default function AuditModeCanvas({
           const ctx = canvas.getContext('2d');
           if (ctx) {
             const img = new Image();
-            img.src = 'data:image/png;base64,' + firstImg.base64;
+            img.src = base64ToImageDataUrl(firstImg.base64);
             // canvas 在 drawImage 时要求图片已加载完毕（但如果 base64 是完整 base64，图片可同步解码）
             ctx.drawImage(img, 0, 0);
             canvas.toBlob(async (blob) => {
@@ -424,7 +460,39 @@ export default function AuditModeCanvas({
           setSelectedImageIds(newImages.map(img => img.id));
           return;
         }
-        // 3) 没有内部剪贴板内容时，不 preventDefault，让 paste 事件从系统剪贴板读取
+        // 3) 没有内部剪贴板内容时，尝试直接从系统剪贴板读取（双保险）
+        if (typeof navigator?.clipboard?.read === 'function') {
+          const now = Date.now();
+          lastPasteTimeRef.current = now;
+          navigator.clipboard.read().then(clipboardItems => {
+            const imageItem = clipboardItems.find(item => item.types.some(t => t.startsWith('image/')));
+            if (!imageItem) return;
+            imageItem.getType('image/png').then(blob => {
+              const reader = new FileReader();
+              reader.onload = (ev) => {
+                const result = ev.target?.result as string;
+                const base64 = result?.split(',')[1];
+                if (!base64) return;
+                const mimeType = result?.startsWith('data:') ? result.slice(5).split(';')[0] : 'image/png';
+                getImageNaturalSize(base64, mimeType).then(naturalSize => {
+                  const newImage: AuditImage = {
+                    id: `audit-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                    base64,
+                    x: pos.x - naturalSize.width / 2,
+                    y: pos.y - naturalSize.height / 2,
+                    width: naturalSize.width,
+                    height: naturalSize.height,
+                    scale: 1,
+                  };
+                  setAuditImages(prev => [...prev, newImage]);
+                  setSelectedImageIds([newImage.id]);
+                });
+              };
+              reader.readAsDataURL(blob);
+            }).catch(() => {});
+          }).catch(() => {});
+        }
+        // 不 preventDefault，让 paste 事件也能并行触发以增加成功率
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
@@ -929,7 +997,7 @@ export default function AuditModeCanvas({
           resolve();
         };
         imgEl.onerror = () => resolve();
-        imgEl.src = 'data:image/png;base64,' + img.base64;
+        imgEl.src = base64ToImageDataUrl(img.base64);
       });
     }
 
@@ -1204,7 +1272,7 @@ export default function AuditModeCanvas({
             }}
           >
             <img
-              src={'data:image/png;base64,' + img.base64}
+              src={base64ToImageDataUrl(img.base64)}
               alt="audit"
               className="w-full h-full"
               style={{ objectFit: 'fill', display: 'block' }}

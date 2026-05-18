@@ -1214,6 +1214,7 @@ export default function App() {
   const frameRequestRef = useRef<number | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const pressStartPosRef = useRef<{ x: number, y: number } | null>(null);
+  const lastPasteTimeRef = useRef(0);
   const selectionModifiersRef = useRef<{ ctrl: boolean, alt: boolean }>({ ctrl: false, alt: false });
 
   // Edge Drag State
@@ -3776,7 +3777,25 @@ export default function App() {
           setSelectedIds([newNode.id]);
           return;
         }
-        // 没有共享剪贴板内容时，不 preventDefault，让 paste 事件从系统剪贴板读取
+        // 没有共享剪贴板内容时，尝试直接从系统剪贴板读取（双保险）
+        if (!sharedClipboardImageRef.current && typeof navigator?.clipboard?.read === 'function') {
+          const now = Date.now();
+          lastPasteTimeRef.current = now;
+          navigator.clipboard.read().then(clipboardItems => {
+            const imageItem = clipboardItems.find(item => item.types.some(t => t.startsWith('image/')));
+            if (!imageItem) return;
+            imageItem.getType('image/png').then(blob => {
+              const reader = new FileReader();
+              reader.onload = (ev) => {
+                const result = ev.target?.result as string;
+                const base64 = result?.split(',')[1];
+                if (base64) createImageNodeFromBase64(base64);
+              };
+              reader.readAsDataURL(blob);
+            }).catch(() => {});
+          }).catch(() => {});
+        }
+        // 不 preventDefault，让 paste 事件也能并行触发以增加成功率
       } else if ((e.ctrlKey || e.metaKey) && e.altKey && e.code === 'KeyS' && !isInput && !(e.target as HTMLElement).isContentEditable) {
         e.preventDefault();
         void handleSaveDraftJsonSaveAs();
@@ -3903,6 +3922,9 @@ export default function App() {
     };
 
     const handlePaste = (e: ClipboardEvent) => {
+      // 防止 keydown 已处理过后的重复触发
+      if (Date.now() - lastPasteTimeRef.current < 1000) return;
+
       // 看图模式下不处理粘贴（AuditModeCanvas 内部处理）
       if (canvasMode === 'audit') return;
 
