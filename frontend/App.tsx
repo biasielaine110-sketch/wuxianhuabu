@@ -1201,6 +1201,8 @@ export default function App() {
   const [auditImages, setAuditImages] = useState<AuditImage[]>([]);
   const auditImagesRef = useRef<AuditImage[]>([]);
   useEffect(() => { auditImagesRef.current = auditImages; }, [auditImages]);
+  // 跨模式共享剪贴板：两个画布模式下最后一次复制的图片
+  const sharedClipboardImageRef = useRef<AuditImage | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]); // 多选支持
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
 
@@ -3201,7 +3203,7 @@ export default function App() {
     const pointerType = activePointerTypeRef.current;
 
     // 始终追踪鼠标在画布坐标中的位置（供快捷键/右键菜单创建节点定位）
-    if (containerRef.current) {
+    if (containerRef.current && containerRef.current.offsetWidth > 0) {
       const r = containerRef.current.getBoundingClientRect();
       const tf = transformRef.current;
       canvasMouseRef.current = {
@@ -3498,15 +3500,15 @@ export default function App() {
 
   const createImageNodeFromBase64 = useCallback((base64: string) => {
     const mp = canvasMouseRef.current;
-    const x = mp.x - 240;
-    const y = mp.y - 264;
+    const x = mp.x - 200;
+    const y = mp.y - 240;
     const newNode: CanvasNode = {
       id: `image-${Date.now()}`,
       type: 'image',
-      x: Math.max(0, x),
-      y: Math.max(0, y),
-      width: 480,
-      height: 528,
+      x,
+      y,
+      width: 400,
+      height: 480,
       prompt: '',
       images: [base64],
       viewMode: 'single',
@@ -3558,6 +3560,10 @@ export default function App() {
 
       // 看图模式下：仅支持空格平移（其他快捷键在 AuditModeCanvas 内部处理）
       if (canvasMode === 'audit') {
+        // 看图模式下 Ctrl+C 需要 preventDefault 以避免浏览器默认复制文本行为干扰
+        if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC') {
+          e.preventDefault();
+        }
         if (e.code === 'Space' && !isInput) {
           e.preventDefault();
           setActiveTool('pan');
@@ -3701,9 +3707,49 @@ export default function App() {
         if (sel.length === 0) return;
         sel.forEach((id) => handleDeleteNode(id));
       } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC' && !isInput) {
-        if (selectedIdsRef.current.length === 1) {
-          const node = nodes.find(n => n.id === selectedIdsRef.current[0]);
-          if (node) setClipboard(node);
+        // 阻止浏览器默认复制行为（如复制选中文本）
+        e.preventDefault();
+        // 画布模式下复制选中节点
+        if (selectedIdsRef.current.length > 0) {
+          const nodesList = selectedIdsRef.current.map(id => nodes.find(n => n.id === id)).filter(Boolean) as CanvasNode[];
+          if (nodesList.length > 0) {
+            // 只取第一个作为内部 clipboard（节点复制）
+            setClipboard(nodesList[0]);
+            // 如果有图片节点，写入图片到系统剪贴板 + 共享剪贴板
+            const imgNode = nodesList.find(n => n.type === 'image' && n.images?.[0]?.startsWith('data:image/png;base64,'));
+            if (imgNode) {
+              // 写入共享剪贴板（跨模式使用）
+              const imgEl = new Image();
+              imgEl.src = imgNode.images![0];
+              const imgWidth = imgNode.width || imgEl.naturalWidth || 512;
+              const imgHeight = imgNode.height || imgEl.naturalHeight || 512;
+              const base64 = imgNode.images![0].split(',')[1];
+              if (base64) {
+                sharedClipboardImageRef.current = {
+                  id: `shared-copy-${Date.now()}`,
+                  base64,
+                  x: 0, y: 0,
+                  width: imgWidth,
+                  height: imgHeight,
+                  scale: 1,
+                };
+              }
+              const canvas = document.createElement('canvas');
+              canvas.width = imgWidth;
+              canvas.height = imgHeight;
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                ctx.drawImage(imgEl, 0, 0, canvas.width, canvas.height);
+                canvas.toBlob(async (blob) => {
+                  if (blob) {
+                    try {
+                      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                    } catch (_) {}
+                  }
+                }, 'image/png');
+              }
+            }
+          }
         }
       } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV' && !isInput) {
         // 交给 paste 事件统一处理（优先粘贴外部图片）
@@ -3856,6 +3902,28 @@ export default function App() {
         return;
       }
 
+      // 优先从共享剪贴板粘贴（跨模式复制）
+      if (sharedClipboardImageRef.current) {
+        e.preventDefault();
+        const img = sharedClipboardImageRef.current;
+        const mp = canvasMouseRef.current;
+        const newNode: CanvasNode = {
+          id: `image-${Date.now()}`,
+          type: 'image',
+          x: mp.x - img.width / 2,
+          y: mp.y - img.height / 2,
+          width: img.width,
+          height: img.height,
+          prompt: '',
+          images: [img.base64],
+          viewMode: 'single',
+          currentImageIndex: 0
+        };
+        setNodes(prev => [...prev, newNode]);
+        setSelectedIds([newNode.id]);
+        return;
+      }
+
       // 非图片剪贴板时，回退为节点复制粘贴
       if (clipboard) {
         e.preventDefault();
@@ -3897,6 +3965,7 @@ export default function App() {
     saveCurrentProject,
     handleSaveDraftJsonSaveAs,
     fitViewportToSelectedNodes,
+    canvasMode,
   ]);
 
   // --- Fullscreen Modal Handlers ---
@@ -7445,6 +7514,7 @@ export default function App() {
           setTransform={setTransform}
           containerRef={containerRef}
           onWheel={handleWheel}
+          sharedClipboardImageRef={sharedClipboardImageRef}
         />
       )}
 

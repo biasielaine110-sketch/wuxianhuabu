@@ -10,6 +10,7 @@ interface AuditModeCanvasProps {
   setTransform?: React.Dispatch<React.SetStateAction<Transform>>;
   containerRef: React.RefObject<HTMLDivElement | null>;
   onWheel?: (e: React.WheelEvent) => void;
+  sharedClipboardImageRef: React.MutableRefObject<AuditImage | null>;
 }
 
 type AnnotationTool = 'rect' | 'circle' | 'arrow' | 'pen' | 'text' | 'fillRect' | 'fillCircle' | 'select';
@@ -39,6 +40,7 @@ export default function AuditModeCanvas({
   setTransform,
   containerRef,
   onWheel,
+  sharedClipboardImageRef,
 }: AuditModeCanvasProps) {
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
   const [draggingImageId, setDraggingImageId] = useState<string | null>(null);
@@ -92,6 +94,8 @@ export default function AuditModeCanvas({
   useEffect(() => { currentColorRef.current = currentColor; }, [currentColor]);
   const auditAnnotationsRef = useRef(auditAnnotations);
   useEffect(() => { auditAnnotationsRef.current = auditAnnotations; }, [auditAnnotations]);
+  const auditImagesRef = useRef(auditImages);
+  useEffect(() => { auditImagesRef.current = auditImages; }, [auditImages]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawingStartRef = useRef({ x: 0, y: 0 });
   const clipboardRef = useRef<AuditImage[]>([]);
@@ -286,9 +290,8 @@ export default function AuditModeCanvas({
       if (!base64) return;
 
       const naturalSize = await getImageNaturalSize(base64);
-      const centerX = window.innerWidth / 2;
-      const centerY = window.innerHeight / 2;
-      const pos = getCanvasCoords(centerX, centerY);
+      // 使用鼠标当前在画布中的位置粘贴（非屏幕中央）
+      const pos = getCanvasCoords(lastMouseCanvasPosRef.current.x, lastMouseCanvasPosRef.current.y);
 
       const newImage: AuditImage = {
         id: `audit-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -342,22 +345,63 @@ export default function AuditModeCanvas({
         return;
       }
 
-      // Ctrl+C / Meta+C：复制选中图片到内部剪贴板
-      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC' && !isInput) {
+      // Ctrl+C / Meta+C：复制选中图片到内部剪贴板 + 系统剪贴板 + 共享剪贴板
+      // 看图模式下放宽 isInput 限制（不拦截 input 内的 Ctrl+C 以防用户期望复制画布内容）
+      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC' && !e.target.closest('textarea')) {
+        // 阻止浏览器默认复制行为
+        e.preventDefault();
         const selected = auditImagesRef.current.filter(img => selectedImageIds.includes(img.id));
         if (selected.length === 0) return;
         clipboardRef.current = selected.map(img => ({ ...img }));
-        e.preventDefault();
+        // 写入共享剪贴板（跨模式互通）
+        const firstImg = selected[0];
+        sharedClipboardImageRef.current = { ...firstImg };
+        // 写入系统剪贴板（base64 图片），让外部应用也能粘贴
+        try {
+          // 使用 canvas 转 blob 更可靠
+          const canvas = document.createElement('canvas');
+          canvas.width = firstImg.width;
+          canvas.height = firstImg.height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            const img = new Image();
+            img.src = 'data:image/png;base64,' + firstImg.base64;
+            // canvas 在 drawImage 时要求图片已加载完毕（但如果 base64 是完整 base64，图片可同步解码）
+            ctx.drawImage(img, 0, 0);
+            canvas.toBlob(async (blob) => {
+              if (blob) {
+                try {
+                  await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                } catch (_) {}
+              }
+            }, 'image/png');
+          }
+        } catch (_) {
+          // 某些浏览器可能不支持 ClipboardItem，静默失败
+        }
         return;
       }
 
-      // Ctrl+V / Meta+V：从内部剪贴板粘贴图片（不依赖系统剪贴板）
+      // Ctrl+V / Meta+V：粘贴图片（优先共享剪贴板 > 内部剪贴板 > 系统剪贴板）
       if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV' && !isInput) {
+        e.preventDefault();
+        const mousePos = lastMouseCanvasPosRef.current;
+        const pos = { x: mousePos.x, y: mousePos.y };
+        // 1) 从共享剪贴板粘贴（跨模式复制最高优先级）
+        if (sharedClipboardImageRef.current) {
+          const img = sharedClipboardImageRef.current;
+          const newImage: AuditImage = {
+            ...img,
+            id: `audit-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            x: pos.x - img.width / 2,
+            y: pos.y - img.height / 2,
+          };
+          setAuditImages(prev => [...prev, newImage]);
+          setSelectedImageIds([newImage.id]);
+          return;
+        }
+        // 2) 从内部剪贴板粘贴
         if (clipboardRef.current.length > 0) {
-          e.preventDefault();
-          // 使用记录的鼠标位置粘贴
-          const mousePos = lastMouseCanvasPosRef.current;
-          const pos = { x: mousePos.x, y: mousePos.y };
           const newImages = clipboardRef.current.map((img, i) => ({
             ...img,
             id: `audit-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${i}`,
@@ -366,7 +410,10 @@ export default function AuditModeCanvas({
           }));
           setAuditImages(prev => [...prev, ...newImages]);
           setSelectedImageIds(newImages.map(img => img.id));
+          return;
         }
+        // 3) 系统剪贴板粘贴将由 window paste 事件自动处理
+        // 这里不 preventDefault 让 paste 事件处理
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
@@ -378,10 +425,18 @@ export default function AuditModeCanvas({
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
 
+    // 全局 pointermove 记录鼠标位置供粘贴使用（不受 canvas div onPointerMove 区域限制）
+    const onWindowPointerMove = (e: PointerEvent) => {
+      const canvasPos = getCanvasCoords(e.clientX, e.clientY);
+      lastMouseCanvasPosRef.current = canvasPos;
+    };
+    window.addEventListener('pointermove', onWindowPointerMove);
+
     return () => {
       window.removeEventListener('paste', onPaste);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('pointermove', onWindowPointerMove);
     };
   }, [handlePaste, containerRef, selectedImageIds, getCanvasCoords, setAuditImages]);
 
