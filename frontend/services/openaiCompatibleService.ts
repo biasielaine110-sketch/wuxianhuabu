@@ -683,6 +683,9 @@ function extractVideoUrlFromPollPayload(data: unknown): string | null {
   } else if (topData && typeof topData === 'object') {
     const td = topData as Record<string, unknown>;
     if (isHttpUrlString(td.url)) return td.url.trim();
+    for (const k of ['video_url', 'download_url', 'file_url'] as const) {
+      if (isHttpUrlString(td[k])) return String(td[k]).trim();
+    }
     const vid = td.video;
     if (vid && typeof vid === 'object' && isHttpUrlString((vid as Record<string, unknown>).url)) {
       return String((vid as Record<string, unknown>).url).trim();
@@ -716,6 +719,9 @@ function extractVideoUrlFromPollPayload(data: unknown): string | null {
     } else if (d && typeof d === 'object') {
       const rd = d as Record<string, unknown>;
       if (isHttpUrlString(rd.url)) return rd.url.trim();
+      for (const k of ['video_url', 'download_url', 'file_url'] as const) {
+        if (isHttpUrlString(rd[k])) return String(rd[k]).trim();
+      }
       const vid = rd.video;
       if (vid && typeof vid === 'object' && isHttpUrlString((vid as Record<string, unknown>).url)) {
         return String((vid as Record<string, unknown>).url).trim();
@@ -741,6 +747,12 @@ function extractVideoUrlFromPollPayload(data: unknown): string | null {
   const output = o.output;
   if (output && typeof output === 'object' && isHttpUrlString((output as Record<string, unknown>).url)) {
     return String((output as Record<string, unknown>).url).trim();
+  }
+
+  // doubao-seedance-1-5-pro 等模型可能将 url 放在顶层 metadata.url 中
+  const meta = o.metadata;
+  if (meta && typeof meta === 'object' && isHttpUrlString((meta as Record<string, unknown>).url)) {
+    return String((meta as Record<string, unknown>).url).trim();
   }
 
   return null;

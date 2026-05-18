@@ -3716,14 +3716,17 @@ export default function App() {
             // 只取第一个作为内部 clipboard（节点复制）
             setClipboard(nodesList[0]);
             // 如果有图片节点，写入图片到系统剪贴板 + 共享剪贴板
-            const imgNode = nodesList.find(n => n.type === 'image' && n.images?.[0]?.startsWith('data:image/png;base64,'));
+            const imgNode = nodesList.find(n => n.images?.[0] && typeof n.images[0] === 'string');
             if (imgNode) {
+              // 统一处理 base64（可能带 data:image/... 前缀也可能只有纯 base64）
+              const rawSrc = imgNode.images![0];
+              const base64 = rawSrc.includes(',') ? rawSrc.split(',')[1] : rawSrc;
+              const fullSrc = rawSrc.includes(',') ? rawSrc : 'data:image/png;base64,' + rawSrc;
               // 写入共享剪贴板（跨模式使用）
               const imgEl = new Image();
-              imgEl.src = imgNode.images![0];
+              imgEl.src = fullSrc;
               const imgWidth = imgNode.width || imgEl.naturalWidth || 512;
               const imgHeight = imgNode.height || imgEl.naturalHeight || 512;
-              const base64 = imgNode.images![0].split(',')[1];
               if (base64) {
                 sharedClipboardImageRef.current = {
                   id: `shared-copy-${Date.now()}`,
@@ -3752,7 +3755,28 @@ export default function App() {
           }
         }
       } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV' && !isInput) {
-        // 交给 paste 事件统一处理（优先粘贴外部图片）
+        // 兜底：优先从共享剪贴板粘贴（跨模式复制）
+        if (sharedClipboardImageRef.current) {
+          e.preventDefault();
+          const img = sharedClipboardImageRef.current;
+          const mp = canvasMouseRef.current;
+          const newNode: CanvasNode = {
+            id: `image-${Date.now()}`,
+            type: 'image',
+            x: mp.x - img.width / 2,
+            y: mp.y - img.height / 2,
+            width: img.width,
+            height: img.height,
+            prompt: '',
+            images: [img.base64],
+            viewMode: 'single',
+            currentImageIndex: 0
+          };
+          setNodes(prev => [...prev, newNode]);
+          setSelectedIds([newNode.id]);
+          return;
+        }
+        // 没有共享剪贴板内容时，不 preventDefault，让 paste 事件从系统剪贴板读取
       } else if ((e.ctrlKey || e.metaKey) && e.altKey && e.code === 'KeyS' && !isInput && !(e.target as HTMLElement).isContentEditable) {
         e.preventDefault();
         void handleSaveDraftJsonSaveAs();
@@ -7515,6 +7539,7 @@ export default function App() {
           containerRef={containerRef}
           onWheel={handleWheel}
           sharedClipboardImageRef={sharedClipboardImageRef}
+          saveCurrentProject={saveCurrentProject}
         />
       )}
 

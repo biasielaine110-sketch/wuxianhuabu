@@ -11,6 +11,7 @@ interface AuditModeCanvasProps {
   containerRef: React.RefObject<HTMLDivElement | null>;
   onWheel?: (e: React.WheelEvent) => void;
   sharedClipboardImageRef: React.MutableRefObject<AuditImage | null>;
+  saveCurrentProject?: () => void;
 }
 
 type AnnotationTool = 'rect' | 'circle' | 'arrow' | 'pen' | 'text' | 'fillRect' | 'fillCircle' | 'select';
@@ -41,6 +42,7 @@ export default function AuditModeCanvas({
   containerRef,
   onWheel,
   sharedClipboardImageRef,
+  saveCurrentProject,
 }: AuditModeCanvasProps) {
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
   const [draggingImageId, setDraggingImageId] = useState<string | null>(null);
@@ -290,8 +292,8 @@ export default function AuditModeCanvas({
       if (!base64) return;
 
       const naturalSize = await getImageNaturalSize(base64);
-      // 使用鼠标当前在画布中的位置粘贴（非屏幕中央）
-      const pos = getCanvasCoords(lastMouseCanvasPosRef.current.x, lastMouseCanvasPosRef.current.y);
+      // 使用鼠标当前在画布中的位置粘贴（onWindowPointerMove 已转换为画布坐标）
+      const pos = lastMouseCanvasPosRef.current;
 
       const newImage: AuditImage = {
         id: `audit-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -324,6 +326,15 @@ export default function AuditModeCanvas({
       if (e.code === 'Space' && !isInput) {
         e.preventDefault();
         isSpaceDownRef.current = true;
+        return;
+      }
+
+      // Ctrl+S：保存草稿（同画布模式）
+      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyS' && !isInput) {
+        e.preventDefault();
+        if (saveCurrentProject) {
+          saveCurrentProject();
+        }
         return;
       }
 
@@ -384,11 +395,11 @@ export default function AuditModeCanvas({
 
       // Ctrl+V / Meta+V：粘贴图片（优先共享剪贴板 > 内部剪贴板 > 系统剪贴板）
       if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV' && !isInput) {
-        e.preventDefault();
         const mousePos = lastMouseCanvasPosRef.current;
         const pos = { x: mousePos.x, y: mousePos.y };
         // 1) 从共享剪贴板粘贴（跨模式复制最高优先级）
         if (sharedClipboardImageRef.current) {
+          e.preventDefault();
           const img = sharedClipboardImageRef.current;
           const newImage: AuditImage = {
             ...img,
@@ -402,6 +413,7 @@ export default function AuditModeCanvas({
         }
         // 2) 从内部剪贴板粘贴
         if (clipboardRef.current.length > 0) {
+          e.preventDefault();
           const newImages = clipboardRef.current.map((img, i) => ({
             ...img,
             id: `audit-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${i}`,
@@ -412,8 +424,7 @@ export default function AuditModeCanvas({
           setSelectedImageIds(newImages.map(img => img.id));
           return;
         }
-        // 3) 系统剪贴板粘贴将由 window paste 事件自动处理
-        // 这里不 preventDefault 让 paste 事件处理
+        // 3) 没有内部剪贴板内容时，不 preventDefault，让 paste 事件从系统剪贴板读取
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
