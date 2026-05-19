@@ -64,7 +64,9 @@ function buildWslCmd(args) {
   // 使用完整路径避免 Windows PATH 环境变量干扰
   const cmdStr = `/root/.local/bin/dreamina ${args.map(a => {
     if (typeof a !== "string") return String(a);
+    // 对于包含空格或特殊字符的参数，用引号包裹
     if (a.includes("'") || a.includes(" ") || a.includes("$") || a.includes("\\") || a.includes('"')) {
+      // 先转义单引号，然后包裹在单引号中
       return `'${a.replace(/'/g, "'\\''")}'`;
     }
     return a;
@@ -77,8 +79,9 @@ async function execJimeng(args, options = {}) {
     return execa(DREAMINA_CMD, args, options);
   }
   // Windows 上通过 WSL 调用 dreamina CLI
+  // 需要将所有参数合并成一个命令字符串传递给 bash -c
   const cmdStr = buildWslCmd(args);
-  return execa(WSL_EXE, ["-d", WSL_DISTRO, "--", "bash", "-c", cmdStr], options);
+  return execa(WSL_EXE, ["-d", WSL_DISTRO, "--", "bash", "-lc", cmdStr], options);
 }
 
 async function execWslDreamina(args, options = {}) {
@@ -336,17 +339,93 @@ app.post("/api/jimeng/video/generate", async (req, res) => {
   const params = req.body;
   console.log('[jimeng-video-generate] 收到请求参数:', JSON.stringify({
     model: params.model,
+    videoMode: params.videoMode,
     promptLength: params.prompt?.length,
     hasImage: !!params.imageUrl,
     duration: params.duration,
     ratio: params.ratio
   }, null, 2));
-  
+
   if (!params.prompt || typeof params.prompt !== "string") {
     return res.status(400).json({ ok: false, message: "缺少 prompt" });
   }
 
-    if (IS_WINDOWS && !HAS_WSL_DREAMINA) {
+  // 处理参考图片：如果是 HTTP URL，需要先下载到本地临时文件
+  // 支持单个 imageUrl 和多个 images（用于全能参考、智能多帧等）
+  let imageFilePath = params.imageUrl;
+  const imageFilePaths = [];
+
+  // 处理 params.images 数组（用于多图模式）
+  if (params.images && Array.isArray(params.images)) {
+    for (const imgUrl of params.images) {
+      if (!imgUrl) continue;
+      try {
+        let tempImageBuffer = null;
+        if (imgUrl.startsWith('data:')) {
+          const base64Data = imgUrl.replace(/^data:image\/\w+;base64,/, '');
+          tempImageBuffer = Buffer.from(base64Data, 'base64');
+        } else if (imgUrl.startsWith('http://') || imgUrl.startsWith('https://')) {
+          console.log(`[jimeng-video] 下载参考图片: ${imgUrl.substring(0, 80)}...`);
+          const resp = await fetch(imgUrl, {
+            headers: { 'Referer': 'https://jimeng.jianying.com/' }
+          });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          tempImageBuffer = Buffer.from(await resp.arrayBuffer());
+        }
+
+        if (tempImageBuffer) {
+          const ext = imgUrl.includes('png') ? 'png' : 'jpg';
+          const tempPath = path.join(OUTPUT_DIR, `temp_video_input_${Date.now()}_${Math.random().toString(36).substr(2, 6)}.${ext}`);
+          await fs.writeFile(tempPath, tempImageBuffer);
+          console.log(`[jimeng-video] 临时图片保存到: ${tempPath}`);
+          let wslPath = tempPath;
+          if (IS_WINDOWS) {
+            wslPath = tempPath.replace(/^([A-Z]):/, (match, letter) => `/mnt/${letter.toLowerCase()}`).replace(/\\/g, '/');
+            console.log(`[jimeng-video] WSL 路径: ${wslPath}`);
+          }
+          imageFilePaths.push(wslPath);
+        }
+      } catch (err) {
+        console.error(`[jimeng-video] 处理图片失败: ${err.message}`);
+        // 继续处理其他图片
+      }
+      // 避免请求过快
+      await new Promise(r => setTimeout(r, 100));
+    }
+  }
+
+  // 处理单个 imageUrl
+  if (params.imageUrl) {
+    try {
+      let tempImageBuffer = null;
+      if (params.imageUrl.startsWith('data:')) {
+        const base64Data = params.imageUrl.replace(/^data:image\/\w+;base64,/, '');
+        tempImageBuffer = Buffer.from(base64Data, 'base64');
+      } else if (params.imageUrl.startsWith('http://') || params.imageUrl.startsWith('https://')) {
+        console.log(`[jimeng-video] 下载参考图片: ${params.imageUrl.substring(0, 80)}...`);
+        const resp = await fetch(params.imageUrl, {
+          headers: { 'Referer': 'https://jimeng.jianying.com/' }
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        tempImageBuffer = Buffer.from(await resp.arrayBuffer());
+      }
+
+      if (tempImageBuffer) {
+        const ext = params.imageUrl.includes('png') ? 'png' : 'jpg';
+        imageFilePath = path.join(OUTPUT_DIR, `temp_video_input_${Date.now()}.${ext}`);
+        await fs.writeFile(imageFilePath, tempImageBuffer);
+        console.log(`[jimeng-video] 临时图片保存到: ${imageFilePath}`);
+        if (IS_WINDOWS) {
+          imageFilePath = imageFilePath.replace(/^([A-Z]):/, (match, letter) => `/mnt/${letter.toLowerCase()}`).replace(/\\/g, '/');
+          console.log(`[jimeng-video] WSL 路径: ${imageFilePath}`);
+        }
+      }
+    } catch (err) {
+      return res.status(500).json({ ok: false, message: "处理输入图片失败", detail: err.message });
+    }
+  }
+
+  if (IS_WINDOWS && !HAS_WSL_DREAMINA) {
     // Windows 且 WSL dreamina 不可用时回退为 opencli 生图
     try {
       const cmdArgs = buildOpencliImageArgs(params);
@@ -369,10 +448,22 @@ app.post("/api/jimeng/video/generate", async (req, res) => {
     
     // 调试：记录模型映射过程
     console.log('[jimeng-video-generate] 原始模型参数:', params.model);
-    const args = buildDreaminaVideoArgs(params);
+    const args = buildDreaminaVideoArgs({ ...params, imageUrl: imageFilePath, images: imageFilePaths });
     console.log('[jimeng-video-generate] 构建的命令行参数:', args);
-    
+
     const result = await execJimeng(args, { timeout: 300000 });
+
+    // 清理所有临时文件
+    const allTempFiles = [imageFilePath, ...imageFilePaths];
+    for (const tempFile of allTempFiles) {
+      if (tempFile && tempFile.includes('temp_video_input_')) {
+        try {
+          await fs.unlink(tempFile);
+          console.log(`[jimeng-video] 临时文件已删除: ${tempFile}`);
+        } catch {}
+      }
+    }
+
     const payload = JSON.parse(result.stdout);
     return handleJimengResult(res, payload, OUTPUT_DIR, PORT, "video");
   } catch (error) {
@@ -652,27 +743,75 @@ function mapOpencliModel(model) {
 //  Dreamina CLI args（macOS/Linux 原生）
 // ============================================================
 function buildDreaminaVideoArgs(params) {
+  const videoMode = params.videoMode || 'image2video';
   const hasImage = Boolean(params.imageUrl);
-  const command = hasImage ? "image2video" : "text2video";
-  const args = [command, `--prompt=${params.prompt}`];
-  if (hasImage) args.push("--image", params.imageUrl);
-  if (params.duration) args.push("--duration", String(params.duration));
-  if (params.ratio) args.push("--ratio", String(params.ratio));
-  
+
+  // 根据 videoMode 选择命令
+  let command;
+  switch (videoMode) {
+    case 'frames2video':
+      command = 'frames2video';
+      break;
+    case 'multiframe2video':
+      command = 'multiframe2video';
+      break;
+    case 'multimodal2video':
+      command = 'multimodal2video';
+      break;
+    case 'image2video':
+    default:
+      command = hasImage ? 'image2video' : 'text2video';
+      break;
+  }
+
+  const args = [command];
+
+  // 根据不同命令添加参数
+  if (videoMode === 'frames2video') {
+    // 首尾帧模式: --first, --last, --prompt
+    args.push(`--first=${params.firstImage || ''}`);
+    args.push(`--last=${params.lastImage || ''}`);
+    args.push(`--prompt=${params.prompt}`);
+  } else if (videoMode === 'multiframe2video') {
+    // 智能多帧模式: --images (多个), --prompt 或 --transition-prompt
+    if (params.images && Array.isArray(params.images)) {
+      params.images.forEach(img => args.push('--images', img));
+    } else if (hasImage) {
+      args.push('--images', params.imageUrl);
+    }
+    args.push(`--prompt=${params.prompt}`);
+  } else if (videoMode === 'multimodal2video') {
+    // 全能参考模式: --image(s), --prompt
+    if (params.images && Array.isArray(params.images)) {
+      params.images.forEach(img => args.push('--image', img));
+    } else if (hasImage) {
+      args.push('--image', params.imageUrl);
+    }
+    if (params.audio) args.push('--audio', params.audio);
+    args.push(`--prompt=${params.prompt}`);
+  } else {
+    // 图生视频/文生视频
+    args.push(`--prompt=${params.prompt}`);
+    if (hasImage) args.push('--image', params.imageUrl);
+  }
+
+  if (params.duration) args.push('--duration', String(params.duration));
+  if (params.ratio && videoMode !== 'image2video') args.push('--ratio', String(params.ratio));
+
   // 调试：记录模型映射过程
   const originalModel = params.model;
   const mappedModel = mapDreaminaVideoModel(originalModel);
   console.log('[buildDreaminaVideoArgs] 模型映射:', {
     original: originalModel,
     mapped: mappedModel,
-    hasImage,
+    videoMode,
     command
   });
-  
-  if (mappedModel) args.push("--model_version", mappedModel);
-  args.push("--video_resolution", "720p");
-  args.push("--poll", "180");
-  
+
+  if (mappedModel) args.push('--model_version', mappedModel);
+  args.push('--video_resolution', '720p');
+  args.push('--poll', '180');
+
   console.log('[buildDreaminaVideoArgs] 最终参数:', args);
   return args;
 }
@@ -701,7 +840,7 @@ function buildDreaminaImageArgs(params) {
 function mapDreaminaVideoModel(model) {
   const raw = String(model || "").trim().toLowerCase();
   const normalized = raw.replace(/[\s_]/g, "-");
-  
+
   // 调试日志
   console.log('[mapDreaminaVideoModel] 输入处理:', {
     original: model,
@@ -709,20 +848,24 @@ function mapDreaminaVideoModel(model) {
     normalized: normalized
   });
 
-  // 精确映射（避免 includes 串匹配导致 fast-vip 被映射成 2.0-vip）
+  // 精确映射（避免 includes 串匹配导致误匹配）
+  // 注意：CLI 支持的 model_version: 3.0, 3.0fast, 3.0pro, 3.0_fast, 3.0_pro, 3.5pro, 3.5_pro, seedance2.0, seedance2.0fast, seedance2.0_vip, seedance2.0fast_vip
   const exactMap = {
+    // 即梦视频模型 -> CLI model_version
     "jimeng-seedance2.0fast-vip": "seedance2.0fast_vip",
     "jimeng-seedance2.0-vip": "seedance2.0_vip",
     "jimeng-seedance2.0fast": "seedance2.0fast",
     "jimeng-seedance2.0": "seedance2.0",
-    "jimeng-seedance1.5pro": "1.5pro",
-    "seedance2.0fast-vip": "seedance2.0fast_vip",
-    "seedance2.0-vip": "seedance2.0_vip",
-    "seedance2.0fast": "seedance2.0fast",
-    "seedance2.0": "seedance2.0",
-    "1.5pro": "1.5pro",
+    "jimeng-seedance1.5pro": "seedance2.0", // 1.5pro 映射到 seedance2.0（CLI 不支持 1.5 模型）
+    "jimeng-seedance3.0": "3.0",
+    "jimeng-seedance3.0fast": "3.0fast",
+    "jimeng-seedance3.0pro": "3.0pro",
+    "jimeng-seedance3.5pro": "3.5pro",
+    // 兼容旧值
+    "jimeng-video-v3": "seedance2.0fast",
+    "jimeng-image-to-video": "seedance2.0fast",
   };
-  
+
   if (exactMap[normalized]) {
     console.log('[mapDreaminaVideoModel] 精确匹配:', {
       normalized: normalized,
@@ -733,31 +876,41 @@ function mapDreaminaVideoModel(model) {
     console.log('[mapDreaminaVideoModel] 未找到精确匹配:', normalized);
   }
 
-  // 兼容旧值
-  if (normalized === "jimeng-video-v3" || normalized === "jimeng-image-to-video") {
-    console.log('[mapDreaminaVideoModel] 兼容旧值匹配 -> seedance2.0fast');
-    return "seedance2.0fast";
-  }
-
-  // 容错（未知格式时的保守判断）
-  if (normalized.includes("1.5")) {
-    console.log('[mapDreaminaVideoModel] 容错匹配 1.5 -> 1.5pro');
-    return "1.5pro";
-  }
-  if (normalized.includes("fast") && normalized.includes("vip")) {
-    console.log('[mapDreaminaVideoModel] 容错匹配 fast+vip -> seedance2.0fast_vip');
+  // 容错匹配（按优先级）
+  if (normalized.includes("2.0fast") && normalized.includes("vip")) {
+    console.log('[mapDreaminaVideoModel] 容错匹配 2.0fast+vip -> seedance2.0fast_vip');
     return "seedance2.0fast_vip";
   }
-  if (normalized.includes("vip")) {
-    console.log('[mapDreaminaVideoModel] 容错匹配 vip -> seedance2.0_vip');
+  if (normalized.includes("2.0") && normalized.includes("vip")) {
+    console.log('[mapDreaminaVideoModel] 容错匹配 2.0+vip -> seedance2.0_vip');
     return "seedance2.0_vip";
   }
-  if (normalized.includes("fast")) {
-    console.log('[mapDreaminaVideoModel] 容错匹配 fast -> seedance2.0fast');
+  if (normalized.includes("2.0fast")) {
+    console.log('[mapDreaminaVideoModel] 容错匹配 2.0fast -> seedance2.0fast');
     return "seedance2.0fast";
   }
-  if (normalized.includes("seedance2.0")) {
-    console.log('[mapDreaminaVideoModel] 容错匹配 seedance2.0 -> seedance2.0');
+  if (normalized.includes("2.0")) {
+    console.log('[mapDreaminaVideoModel] 容错匹配 2.0 -> seedance2.0');
+    return "seedance2.0";
+  }
+  if (normalized.includes("3.5pro")) {
+    console.log('[mapDreaminaVideoModel] 容错匹配 3.5pro -> 3.5pro');
+    return "3.5pro";
+  }
+  if (normalized.includes("3.0pro")) {
+    console.log('[mapDreaminaVideoModel] 容错匹配 3.0pro -> 3.0pro');
+    return "3.0pro";
+  }
+  if (normalized.includes("3.0fast")) {
+    console.log('[mapDreaminaVideoModel] 容错匹配 3.0fast -> 3.0fast');
+    return "3.0fast";
+  }
+  if (normalized.includes("3.0")) {
+    console.log('[mapDreaminaVideoModel] 容错匹配 3.0 -> 3.0');
+    return "3.0";
+  }
+  if (normalized.includes("1.5")) {
+    console.log('[mapDreaminaVideoModel] 容错匹配 1.5 -> seedance2.0（1.5 系列 CLI 不支持）');
     return "seedance2.0";
   }
 

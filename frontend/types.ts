@@ -103,6 +103,8 @@ export interface CanvasNode {
   audioUrl?: string;
   /** 语音参考：音频时长（秒） */
   audioDuration?: number;
+  /** 即梦视频模式: 'image2video'(图生视频), 'frames2video'(首尾帧), 'multiframe2video'(智能多帧), 'multimodal2video'(全能参考) */
+  videoMode?: 'image2video' | 'frames2video' | 'multiframe2video' | 'multimodal2video';
 }
 
 export interface Edge {

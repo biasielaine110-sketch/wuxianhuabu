@@ -784,6 +784,8 @@ const INITIAL_I2I_PROMPT_PRESETS: Record<string, string> = {
     '专业游戏角色设定参考图，标准三视图+细节特写排版，左侧3张全身站姿（正面、左侧面、背面），右侧4行3列细节分镜，保持角色设计完全统一，极简纯白背景，细黑线分割网格，超写实人像摄影，8K分辨率，锐度拉满，电影级柔光，角色100%一致，无变形无穿模，包含头部多角度、面部五官、服装面料、拉链细节、背包细节、鞋履细节、手部细节，专业3D建模参考图，棚拍质感，并在每格左上角标注格数数字。',
   '角色身高比例图':
     '帮我生成全身身高比例图，角色均正视面向镜头。',
+  '角色刷光':
+    '角色图上半部分(面部)和下半(全身)部分的光线设定都按照场景图中的光线以及色相色温来做设定。不要改变角色人设图的构图,背景白色。',
   '场景9视图':
     '根据所有画面中保持外观、比例、材质、颜色和风格的完美一致性的原则。生成一个(16:9比例)设计的电影级专业3X3(共9张)的电影分镜网格。共9个面板。每个面板标记1-9的数字，该网格需采用3D电影截图风格。每一帧都是根据场景下不同角度，不同面的场景图。AI自动选择所有摄像机角度和构图。确保电影级布光、一致的调色、真实的景深以及连贯的环境演变。无重复镜头。',
   '场景九视图':
@@ -1255,7 +1257,7 @@ export default function App() {
   const [isSelecting, setIsSelecting] = useState(false);
   const selectionBoxRef = useRef<{ x: number, y: number, width: number, height: number } | null>(null);
   const isSelectingRef = useRef(false);
-  const frameRequestRef = useRef<number | null>(null);
+  const boxSelectRafRef = useRef<number | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const pressStartPosRef = useRef<{ x: number, y: number } | null>(null);
   const lastPasteTimeRef = useRef(0);
@@ -3234,7 +3236,7 @@ export default function App() {
         nodeDragAccumRef.current = null;
       }
       if (isSelectingRef.current) {
-        if (frameRequestRef.current !== null) { cancelAnimationFrame(frameRequestRef.current); frameRequestRef.current = null; }
+        if (boxSelectRafRef.current !== null) { cancelAnimationFrame(boxSelectRafRef.current); boxSelectRafRef.current = null; }
         isSelectingRef.current = false;
         setIsSelecting(false);
         selectionBoxRef.current = null;
@@ -3315,32 +3317,6 @@ export default function App() {
       }
       
       lastMousePosRef.current = { x: e.clientX, y: e.clientY };
-    } else if (pointerType === 'boxSelect') {
-      // 框选移动处理 - 使用屏幕坐标
-      if (isSelecting && pressStartPosRef.current) {
-        const startX = pressStartPosRef.current.x;
-        const startY = pressStartPosRef.current.y;
-        const dx = e.clientX - startX;
-        const dy = e.clientY - startY;
-
-        const box = {
-          x: Math.min(startX, startX + dx),
-          y: Math.min(startY, startY + dy),
-          width: Math.abs(dx),
-          height: Math.abs(dy)
-        };
-        selectionBoxRef.current = box;
-        // RAF throttle，避免每帧 setState（看图模式的流畅策略）
-        if (frameRequestRef.current === null) {
-          frameRequestRef.current = requestAnimationFrame(() => {
-            frameRequestRef.current = null;
-            const b = selectionBoxRef.current;
-            if (b) {
-              setSelectionBox({ ...b });
-            }
-          });
-        }
-      }
     } else if (pointerType === 'edge') {
       const rect = containerRef.current!.getBoundingClientRect();
       const mouseX = (e.clientX - rect.left - transformRef.current.x) / transformRef.current.scale;
@@ -3463,7 +3439,7 @@ export default function App() {
         }
 
         setIsSelecting(false); isSelectingRef.current = false;
-        if (frameRequestRef.current !== null) { cancelAnimationFrame(frameRequestRef.current); frameRequestRef.current = null; }
+        if (boxSelectRafRef.current !== null) { cancelAnimationFrame(boxSelectRafRef.current); boxSelectRafRef.current = null; }
         setSelectionBox(null); selectionBoxRef.current = null;
         pressStartPosRef.current = null;
       } else if (pointerType === 'edge' && draftEdgeRef.current) {
@@ -3717,7 +3693,7 @@ export default function App() {
           nodeDragAccumRef.current = null;
         }
         if (isSelectingRef.current) {
-          if (frameRequestRef.current !== null) { cancelAnimationFrame(frameRequestRef.current); frameRequestRef.current = null; }
+          if (boxSelectRafRef.current !== null) { cancelAnimationFrame(boxSelectRafRef.current); boxSelectRafRef.current = null; }
           isSelectingRef.current = false;
           setIsSelecting(false);
           selectionBoxRef.current = null;
@@ -4169,9 +4145,9 @@ export default function App() {
     }
   }, [activeTool, fullscreenImage]);
 
-  // 框选移动处理（RAF 节流，避免每帧 setState 卡顿）
+  // 框选移动处理 - 直接更新状态，不使用 RAF 节流
   const handleCanvasPointerMove = useCallback((e: React.PointerEvent) => {
-    if (!isSelecting || !pressStartPosRef.current) return;
+    if (!isSelectingRef.current || !pressStartPosRef.current) return;
 
     // 更新修饰键状态
     selectionModifiersRef.current = { ctrl: e.ctrlKey, alt: e.altKey };
@@ -4181,25 +4157,16 @@ export default function App() {
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
 
-    // 写 ref（同步更新，保证 pointerUp 时读到最新值）
-    selectionBoxRef.current = {
+    // 同步更新 ref 和 state（选择框是简单 div，性能足够）
+    const box = {
       x: Math.min(startX, startX + dx),
       y: Math.min(startY, startY + dy),
       width: Math.abs(dx),
       height: Math.abs(dy)
     };
-
-    // RAF 节流 setSelectionBox，避免每帧触发 React 渲染
-    if (frameRequestRef.current === null) {
-      frameRequestRef.current = requestAnimationFrame(() => {
-        frameRequestRef.current = null;
-        const box = selectionBoxRef.current;
-        if (box) {
-          setSelectionBox({ ...box });
-        }
-      });
-    }
-  }, [isSelecting]);
+    selectionBoxRef.current = box;
+    setSelectionBox(box);
+  }, []);
 
   // 处理画布上的指针释放（用于框选和节点缩放）
   const handleCanvasPointerUp = useCallback((e: React.PointerEvent) => {
@@ -4222,7 +4189,7 @@ export default function App() {
       return;
     }
 
-    if ((pointerType === 'boxSelect' || pointerType === 'selection') && isSelecting && (selectionBox || selectionBoxRef.current)) {
+    if ((pointerType === 'boxSelect' || pointerType === 'selection') && isSelectingRef.current && (selectionBox || selectionBoxRef.current)) {
       // 使用 selectionBoxRef.current 优先（RAF 节流时 ref 值总是最新）
       const box = selectionBoxRef.current || selectionBox;
       if (!box || (box.width === 0 && box.height === 0)) {
@@ -4272,7 +4239,7 @@ export default function App() {
       }
 
       // 清除 RAF
-      if (frameRequestRef.current !== null) { cancelAnimationFrame(frameRequestRef.current); frameRequestRef.current = null; }
+      if (boxSelectRafRef.current !== null) { cancelAnimationFrame(boxSelectRafRef.current); boxSelectRafRef.current = null; }
       setIsSelecting(false);
       setSelectionBox(null);
       pressStartPosRef.current = null;
@@ -5085,6 +5052,8 @@ export default function App() {
           prompt: combinedPrompt,
           model: node.model || 'jimeng-video-v3',
           imageUrl,
+          images: imageInputs, // 传递所有参考图（用于全能参考、智能多帧等模式）
+          videoMode: node.videoMode || 'image2video',
           duration: node.videoDuration || 8,
           ratio: node.aspectRatio || '16:9',
           nodeId,
@@ -6562,9 +6531,21 @@ export default function App() {
                   <option value="jimeng-seedance2.0">即梦 Seedance 2.0</option>
                   <option value="jimeng-seedance2.0fast-vip">即梦 Seedance 2.0 Fast (VIP)</option>
                   <option value="jimeng-seedance2.0-vip">即梦 Seedance 2.0 (VIP)</option>
-                  <option value="jimeng-seedance1.5pro">即梦 Seedance 1.5 Pro</option>
                 </optgroup>
             </select>
+              {isJimengVideoModel(node.model) && (
+                <select
+                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500"
+                  value={node.videoMode || 'image2video'}
+                  onChange={(e) => handleUpdateNode(node.id, { videoMode: e.target.value as any })}
+                  onPointerDown={e => e.stopPropagation()}
+                >
+                  <option value="image2video">图生视频</option>
+                  <option value="frames2video">首尾帧</option>
+                  <option value="multiframe2video">智能多帧</option>
+                  <option value="multimodal2video">全能参考</option>
+                </select>
+              )}
               <div className="nodemeta-skip-scale flex flex-wrap items-center gap-1.5">
               {isVeo ? (
                 <span className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-400 text-xs whitespace-nowrap">
@@ -6756,8 +6737,8 @@ export default function App() {
               </div>
             ) : null;
           })()}
-          {/* Text Area - panoramaT2i 使用内置提示词，不显示输入框 */}
-          {(node.type === 't2i' || node.type === 'i2i' || node.type === 'text' || node.type === 'video') && (
+          {/* Text Area - panoramaT2i 使用内置提示词，不显示输入框；视频节点未选中且有视频时隐藏 */}
+          {(node.type === 't2i' || node.type === 'i2i' || node.type === 'text' || (node.type === 'video' && (isSelected || videoUrls.length === 0))) && (
             <div
               className={`flex flex-col min-h-0 overflow-hidden ${
                 node.type === 't2i' || node.type === 'i2i' ? 'flex-[3] basis-0' : 'flex-1'
@@ -7840,12 +7821,13 @@ export default function App() {
         {/* Selection Box - 直接使用屏幕坐标 */}
         {selectionBox && (
           <div
-            className="absolute border-2 border-blue-400 bg-blue-400/10 pointer-events-none z-50"
+            className="absolute border border-blue-400 bg-blue-400/10 pointer-events-none z-50"
             style={{
               left: selectionBox.x,
               top: selectionBox.y,
               width: selectionBox.width,
               height: selectionBox.height,
+              willChange: 'left, top, width, height',
             }}
           />
         )}
@@ -8022,8 +8004,12 @@ export default function App() {
         onClick={(e) => { e.stopPropagation(); openLogin(); }}
         style={{ cursor: 'pointer' }}
       >
-        <span className="px-4 py-2 rounded-lg text-base font-medium border bg-[#1a1a2e]/80 border-[#e94560]/40 text-[#e94560] hover:bg-[#e94560]/20 inline-block tracking-wider">
-          即梦
+        <span className={`px-4 py-2 rounded-lg text-base font-medium border bg-[#1a1a2e]/80 hover:bg-[#e94560]/20 inline-block tracking-wider ${
+          authInfo.loggedIn
+            ? 'border-green-500/60 text-green-400'
+            : 'border-[#e94560]/40 text-[#e94560]'
+        }`}>
+          即梦 {authInfo.loggedIn ? '✓' : ''}
         </span>
       </div>
 

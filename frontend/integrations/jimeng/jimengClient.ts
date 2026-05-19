@@ -31,6 +31,8 @@ export async function generateJimengVideo(params: {
   prompt: string;
   model: string;
   imageUrl?: string;
+  images?: string[];
+  videoMode?: 'image2video' | 'frames2video' | 'multiframe2video' | 'multimodal2video';
   duration?: number;
   ratio?: string;
   nodeId?: string;
