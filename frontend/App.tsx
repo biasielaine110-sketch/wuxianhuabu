@@ -585,7 +585,7 @@ const I2I_PRESET_CATEGORY_OPTIONS: { id: I2iPresetCategoryId; label: string }[] 
 /** 通用模板预设键 */
 const COMMON_TEMPLATE_KEY = '通用模板';
 
-/** 文生图预设分类 */
+/** 文生图预设分类——只保留故事板，通用模板以独立下拉框存在 */
 type T2iPresetCategoryId = 'storyboard';
 
 const T2I_PRESET_CATEGORY_OPTIONS: { id: T2iPresetCategoryId; label: string }[] = [
@@ -629,7 +629,7 @@ const I2I_PRESET_FLAT = (Object.keys(I2I_PRESETS_BY_CATEGORY) as I2iPresetCatego
   (id) => I2I_PRESETS_BY_CATEGORY[id]
 );
 
-/** 文生图预设分类数据 */
+/** 文生图预设分类数据——只包含故事板预设 */
 const T2I_PRESETS_BY_CATEGORY: Record<T2iPresetCategoryId, { key: string; label: string }[]> = {
   storyboard: [
     { key: '故事板_A', label: '故事板_A' },
@@ -751,7 +751,8 @@ function t2iPresetListForCategory(
       (name) =>
         name !== COMMON_TEMPLATE_KEY &&
         (settingsPresetDomain(name, domainOverrides) === 't2i' || isStoryboardPreset(name)) &&
-        t2iCategoryForPreset(name) === cat
+        t2iCategoryForPreset(name) === cat &&
+        isStoryboardPreset(name) // 文生图分类下拉仅展示故事板预设
     )
     .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
     .map((name) => ({
@@ -1127,7 +1128,7 @@ function T2iPresetCategorySelect({
         <span className="text-gray-500 shrink-0" style={{ fontSize: 35 }}>分类</span>
         <select
           className="t2i-preset-select bg-[#222222] border border-[#444] rounded px-2 py-1 text-gray-300 outline-none focus:border-purple-500 min-w-[72px]"
-          style={{ fontSize: 20 }}          
+          style={{ fontSize: 20 }}
           value={category}
           onPointerDown={(e) => e.stopPropagation()}
           onChange={(e) => {
@@ -1150,7 +1151,6 @@ function T2iPresetCategorySelect({
             if (key) {
               onTogglePreset(nodeId, key);
             } else if (activePresets?.length) {
-              // 选择空选项时清除所有预设
               activePresets.forEach(k => onTogglePreset(nodeId, k));
             }
           }}
@@ -1231,6 +1231,8 @@ export default function App() {
   const [edges, setEdges] = useState<Edge[]>([]);
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: 0.4 });
   const { ensureJimengReady, openLogin, authInfo } = useJimengAuth();
+  const openLoginRef = useRef(openLogin);
+  useEffect(() => { openLoginRef.current = openLogin; }, [openLogin]);
   const [activeTool, setActiveTool] = useState<Tool>('select');
   const [canvasMode, setCanvasMode] = useState<CanvasMode>('canvas');
   const [auditImages, setAuditImages] = useState<AuditImage[]>([]);
@@ -5114,6 +5116,10 @@ export default function App() {
         } else {
           const message = err instanceof Error ? err.message : '即梦视频生成失败';
           console.error('[jimeng] error:', message, 'node.model=', node.model);
+          // 如果是登录过期，自动弹出登录对话框
+          if ((err as any).loginRequired && typeof openLoginRef.current === 'function') {
+            openLoginRef.current();
+          }
           setNodes(prev => prev.map(n => (n.id === nodeId ? { ...n, isGenerating: false, error: `[即梦] ${message}` } : n)));
         }
       } finally {

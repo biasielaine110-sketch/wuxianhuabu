@@ -56,7 +56,9 @@ export async function generateJimengVideo(params: {
   }
 
   if (!data.ok) {
-    throw new Error(data.message || data.detail || "即梦视频生成失败");
+    const err: any = new Error(data.message || data.detail || "即梦视频生成失败");
+    (err as any).loginRequired = data.loginRequired === true;
+    throw err;
   }
 
   return data as {

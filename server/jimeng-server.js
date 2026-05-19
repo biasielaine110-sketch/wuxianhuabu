@@ -218,12 +218,15 @@ app.post("/api/jimeng/image/generate", async (req, res) => {
     const result = await execa(OPENCLI_CMD, cmdArgs, { timeout: 180000 });
     return handleOpencliImageResult(res, result, OUTPUT_DIR, PORT);
   } catch (error) {
+    const stderr = error.stderr || "";
+    const loginRequired = stderr.includes("登录") || stderr.includes("login") || stderr.includes("未检测");
     return res.status(500).json({
       ok: false,
-      message: "即梦图片生成失败",
+      message: loginRequired ? "即梦登录已过期，请重新登录" : "即梦图片生成失败",
       detail: error.shortMessage || error.message,
       stdout: error.stdout,
-      stderr: error.stderr,
+      stderr,
+      loginRequired,
     });
   }
 });
@@ -258,12 +261,15 @@ app.post("/api/jimeng/video/generate", async (req, res) => {
     const payload = JSON.parse(result.stdout);
     return handleJimengResult(res, payload, OUTPUT_DIR, PORT, "video");
   } catch (error) {
+    const stderr = error.stderr || "";
+    const loginRequired = stderr.includes("登录") || stderr.includes("login") || stderr.includes("未检测");
     return res.status(500).json({
       ok: false,
-      message: "即梦视频生成失败",
+      message: loginRequired ? "即梦登录已过期，请重新登录" : "即梦视频生成失败",
       detail: error.shortMessage || error.message,
       stdout: error.stdout,
-      stderr: error.stderr,
+      stderr,
+      loginRequired,
     });
   }
 });
@@ -414,7 +420,7 @@ function mapOpencliModel(model) {
 function buildDreaminaVideoArgs(params) {
   const hasImage = Boolean(params.imageUrl);
   const command = hasImage ? "image2video" : "text2video";
-  const args = [command, "--prompt", params.prompt];
+  const args = [command, `--prompt=${params.prompt}`];
   if (hasImage) args.push("--image", params.imageUrl);
   if (params.duration) args.push("--duration", String(params.duration));
   if (params.ratio) args.push("--ratio", String(params.ratio));
@@ -428,7 +434,7 @@ function buildDreaminaVideoArgs(params) {
 function buildDreaminaImageArgs(params) {
   const hasImage = Boolean(params.imageUrl);
   const command = hasImage ? "image2image" : "text2image";
-  const args = [command, "--prompt", params.prompt];
+  const args = [command, `--prompt=${params.prompt}`];
   if (hasImage) args.push("--images", params.imageUrl);
   if (params.ratio) args.push("--ratio", String(params.ratio));
   args.push("--resolution_type", params.resolution || "2k");
