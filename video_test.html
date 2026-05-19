@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>视频播放测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .test-section {
+            background: #2a2a2a;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            border: 1px solid #444;
+        }
+        .video-container {
+            margin: 20px 0;
+        }
+        video {
+            width: 100%;
+            max-width: 640px;
+            background: #000;
+            border: 2px solid #555;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .success {
+            background: #2e7d32;
+            color: #fff;
+        }
+        .error {
+            background: #c62828;
+            color: #fff;
+        }
+        .info {
+            background: #1565c0;
+            color: #fff;
+        }
+        button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #2563eb;
+        }
+        .log {
+            background: #333;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎬 视频播放测试</h1>
+        
+        <div class="test-section">
+            <h2>测试1: 本地视频URL</h2>
+            <div class="video-container">
+                <video id="localVideo" controls>
+                    <source src="http://localhost:3107/outputs/jimeng_video_1779177756122.mp4" type="video/mp4">
+                    您的浏览器不支持视频播放
+                </video>
+            </div>
+            <div id="localStatus" class="status"></div>
+            <button onclick="testLocalVideo()">测试本地视频</button>
+        </div>
+
+        <div class="test-section">
+            <h2>测试2: 即梦API查询</h2>
+            <div id="apiStatus" class="status"></div>
+            <button onclick="testApiQuery()">测试API查询</button>
+            <div id="apiResult" class="log"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>测试3: 视频生成</h2>
+            <div id="generateStatus" class="status"></div>
+            <button onclick="testVideoGenerate()">测试视频生成</button>
+            <div id="generateResult" class="log"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>测试日志</h2>
+            <div id="testLog" class="log"></div>
+        </div>
+    </div>
+
+    <script>
+        const log = document.getElementById('testLog');
+        
+        function addLog(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const entry = `[${timestamp}] ${message}`;
+            log.textContent = entry + '\n' + log.textContent;
+            console.log(`[${type.toUpperCase()}] ${message}`);
+        }
+
+        function testLocalVideo() {
+            const video = document.getElementById('localVideo');
+            const status = document.getElementById('localStatus');
+            
+            status.className = 'status info';
+            status.textContent = '测试中...';
+            
+            video.onloadeddata = () => {
+                status.className = 'status success';
+                status.textContent = `✅ 视频加载成功！时长: ${video.duration.toFixed(2)}秒, 尺寸: ${video.videoWidth}x${video.videoHeight}`;
+                addLog(`本地视频加载成功: ${video.duration.toFixed(2)}秒`);
+            };
+            
+            video.onerror = (e) => {
+                status.className = 'status error';
+                status.textContent = `❌ 视频加载失败: ${video.error?.message || '未知错误'}`;
+                addLog(`本地视频加载失败: ${video.error?.message || '未知错误'}`, 'error');
+            };
+            
+            // 触发加载
+            video.load();
+        }
+
+        async function testApiQuery() {
+            const status = document.getElementById('apiStatus');
+            const result = document.getElementById('apiResult');
+            
+            status.className = 'status info';
+            status.textContent = '查询中...';
+            result.textContent = '';
+            
+            try {
+                const response = await fetch('http://localhost:3107/api/jimeng/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ submitId: '9a0d0e62-6481-4737-a5c6-2374f6856d64' })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.ok) {
+                    status.className = 'status success';
+                    status.textContent = '✅ API查询成功';
+                    
+                    const videoUrl = data.data?.video_url;
+                    const isLocal = videoUrl?.includes('localhost:3107');
+                    
+                    result.textContent = JSON.stringify(data, null, 2);
+                    addLog(`API查询成功: ${isLocal ? '本地URL' : '远程URL'}`, 'success');
+                    
+                    if (isLocal) {
+                        addLog(`本地视频URL: ${videoUrl}`);
+                    } else {
+                        addLog(`警告: 返回的是远程URL，可能403错误`, 'warning');
+                    }
+                } else {
+                    status.className = 'status error';
+                    status.textContent = `❌ API查询失败: ${data.message || response.statusText}`;
+                    result.textContent = JSON.stringify(data, null, 2);
+                    addLog(`API查询失败: ${data.message || response.statusText}`, 'error');
+                }
+            } catch (error) {
+                status.className = 'status error';
+                status.textContent = `❌ 请求失败: ${error.message}`;
+                addLog(`请求失败: ${error.message}`, 'error');
+            }
+        }
+
+        async function testVideoGenerate() {
+            const status = document.getElementById('generateStatus');
+            const result = document.getElementById('generateResult');
+            
+            status.className = 'status info';
+            status.textContent = '生成中...';
+            result.textContent = '';
+            
+            try {
+                const response = await fetch('http://localhost:3107/api/jimeng/video/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt: '测试视频生成功能',
+                        model: 'jimeng-seedance2.0fast',
+                        duration: 4
+                    })
+                });
+                
+                const data = await response.json();
+                result.textContent = JSON.stringify(data, null, 2);
+                
+                if (response.ok && data.ok) {
+                    status.className = 'status success';
+                    status.textContent = '✅ 视频生成请求成功';
+                    addLog(`视频生成成功: ${data.videoUrl || data.submitId}`, 'success');
+                } else {
+                    status.className = 'status error';
+                    status.textContent = `❌ 视频生成失败: ${data.message || response.statusText}`;
+                    addLog(`视频生成失败: ${data.message || response.statusText}`, 'error');
+                }
+            } catch (error) {
+                status.className = 'status error';
+                status.textContent = `❌ 请求失败: ${error.message}`;
+                addLog(`请求失败: ${error.message}`, 'error');
+            }
+        }
+
+        // 页面加载时自动测试本地视频
+        window.addEventListener('load', () => {
+            addLog('测试页面已加载');
+            setTimeout(testLocalVideo, 1000);
+        });
+    </script>
+</body>
+</html>
