@@ -252,8 +252,54 @@ app.post("/api/jimeng/image/generate", async (req, res) => {
       if (!session.loggedIn) {
         return sendDreaminaLoginRequired(res, session);
       }
-      const args = buildDreaminaImageArgs(params);
+
+      // 处理图片：如果是 base64 或 HTTP URL，都下载/保存到临时文件
+      let imageFilePath = params.imageUrl;
+      if (params.imageUrl) {
+        try {
+          let tempImageBuffer = null;
+          // 如果是 base64
+          if (params.imageUrl.startsWith('data:')) {
+            const base64Data = params.imageUrl.replace(/^data:image\/\w+;base64,/, '');
+            tempImageBuffer = Buffer.from(base64Data, 'base64');
+          }
+          // 如果是 HTTP URL，下载到本地
+          else if (params.imageUrl.startsWith('http://') || params.imageUrl.startsWith('https://')) {
+            console.log(`[jimeng-image] 下载参考图片: ${params.imageUrl.substring(0, 80)}...`);
+            const resp = await fetch(params.imageUrl, {
+              headers: { 'Referer': 'https://jimeng.jianying.com/' }
+            });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            tempImageBuffer = Buffer.from(await resp.arrayBuffer());
+          }
+
+          if (tempImageBuffer) {
+            const ext = params.imageUrl.includes('png') ? 'png' : 'jpg';
+            imageFilePath = path.join(OUTPUT_DIR, `temp_input_${Date.now()}.${ext}`);
+            await fs.writeFile(imageFilePath, tempImageBuffer);
+            console.log(`[jimeng-image] 临时图片保存到: ${imageFilePath}`);
+            // Windows WSL 环境需要转换为 /mnt/d/... 路径格式
+            if (IS_WINDOWS) {
+              imageFilePath = imageFilePath.replace(/^([A-Z]):/, (match, letter) => `/mnt/${letter.toLowerCase()}`).replace(/\\/g, '/');
+              console.log(`[jimeng-image] WSL 路径: ${imageFilePath}`);
+            }
+          }
+        } catch (err) {
+          return res.status(500).json({ ok: false, message: "处理输入图片失败", detail: err.message });
+        }
+      }
+
+      const args = buildDreaminaImageArgs({ ...params, imageUrl: imageFilePath });
       const result = await execJimeng(args, { timeout: 240000 });
+
+      // 清理临时文件
+      if (imageFilePath && imageFilePath.includes('temp_input_')) {
+        try {
+          await fs.unlink(imageFilePath);
+          console.log(`[jimeng-image] 临时文件已删除: ${imageFilePath}`);
+        } catch {}
+      }
+
       const payload = JSON.parse(result.stdout);
       return handleJimengResult(res, payload, OUTPUT_DIR, PORT, "image");
     }
@@ -635,7 +681,15 @@ function buildDreaminaImageArgs(params) {
   const hasImage = Boolean(params.imageUrl);
   const command = hasImage ? "image2image" : "text2image";
   const args = [command, `--prompt=${params.prompt}`];
-  if (hasImage) args.push("--images", params.imageUrl);
+  if (hasImage) {
+    // 如果是 base64 data URL，需要先保存到临时文件
+    if (params.imageUrl.startsWith('data:')) {
+      // 延迟到运行时通过 execJimengWithImage 回调处理
+      args.push("--images", params.imageUrl); // 临时标记，会在 exec 时转换
+    } else {
+      args.push("--images", params.imageUrl);
+    }
+  }
   if (params.ratio) args.push("--ratio", String(params.ratio));
   args.push("--resolution_type", params.resolution || "2k");
   const model = mapDreaminaImageModel(params.model);

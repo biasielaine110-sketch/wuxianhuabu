@@ -342,6 +342,13 @@ function OptimizedImage({
       return;
     }
     const currentMaxSide = dynamicMaxSide;
+
+    // 如果是 HTTP(S) URL，直接使用（不做缩略图缓存，避免跨域问题）
+    if (base64.startsWith('http://') || base64.startsWith('https://')) {
+      setSrc(base64);
+      return;
+    }
+
     const cacheKey = `${base64.slice(0, 48)}|${base64.slice(-48)}|${base64.length}|${currentMaxSide}|${quality}`;
     const cached = thumbnailCache.get(cacheKey);
     if (cached) {
@@ -5905,14 +5912,15 @@ export default function App() {
           )}
 
           {node.type === 'video' && (
-            <div className="w-full h-[680px] shrink-0 bg-[#2a2a2a] relative border-b border-[#333] overflow-hidden group">
+            <div className={`w-full h-[680px] shrink-0 relative border-b border-[#333] overflow-hidden group ${isSelected ? 'bg-[#2a2a2a]' : 'bg-[#1a1a1a]'}`}>
               {videoUrls.length > 0 ? (
                 <>
                 <div className="relative w-full h-full">
                   <video
                     key={videoUrls[currentVideoIdx] || 'v'}
                     src={videoUrls[currentVideoIdx]}
-                    controls
+                    controls={isSelected}
+                    autoPlay={!isSelected}
                     preload="metadata"
                     crossOrigin="anonymous"
                     onError={(e) => {
@@ -5952,7 +5960,7 @@ export default function App() {
                         readyState: e.target.readyState
                       });
                     }}
-                    className="w-full h-full object-contain bg-black"
+                    className={`w-full h-full object-contain bg-black ${isSelected ? '' : 'pointer-events-none'}`}
                   />
                   {/* 调试信息 */}
                   <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded opacity-50 hover:opacity-100">
@@ -6352,7 +6360,7 @@ export default function App() {
           {(node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' || node.type === 'panorama') && (
             <>
               <select className="nodemodel-select bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500 flex-1 min-w-[90px]" value={node.model || defaultCanvasImageModel()} onChange={(e) => { const m = e.target.value; const patch: Partial<CanvasNode> = { model: m }; if (isGptImage2CanvasModelId(m)) patch.resolution = '2k'; handleUpdateNode(node.id, patch); }} onPointerDown={e => e.stopPropagation()}>
-                {(node.type === 't2i' || node.type === 'panoramaT2i') ? (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="nano-banana-2">Nano-Banana 2（ToAPIs）</option><option value="imagen-4">Imagen 4</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option><optgroup label="即梦 (Dreamina)"><option value="jimeng-image-5.0">即梦 5.0</option><option value="jimeng-image-4.6">即梦 4.6</option><option value="jimeng-image-4.5">即梦 4.5</option></optgroup></>) : (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="nano-banana-2">Nano-Banana 2（ToAPIs）</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option><optgroup label="即梦 (Dreamina)"><option value="jimeng-image-5.0">即梦 5.0</option><option value="jimeng-image-4.6">即梦 4.6</option><option value="jimeng-image-4.5">即梦 4.5</option></optgroup></>)}
+                {(node.type === 't2i' || node.type === 'panoramaT2i') ? (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="nano-banana-2">Nano-Banana 2（ToAPIs）</option><option value="imagen-4">Imagen 4</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option><optgroup label="即梦 (Dreamina)"><option value="jimeng-image-5.0">即梦 5.0</option><option value="jimeng-image-4.6">即梦 4.6</option><option value="jimeng-image-4.5">即梦 4.5</option><option value="jimeng-image-4.0">即梦 4.0</option></optgroup></>) : (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="nano-banana-2">Nano-Banana 2（ToAPIs）</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option><optgroup label="即梦 (Dreamina)"><option value="jimeng-image-5.0">即梦 5.0</option><option value="jimeng-image-4.6">即梦 4.6</option><option value="jimeng-image-4.5">即梦 4.5</option><option value="jimeng-image-4.0">即梦 4.0</option></optgroup></>)}
               </select>
               <div className="nodemeta-skip-scale flex items-center gap-0.5">
                 <select className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.aspectRatio || (node.type === 'panoramaT2i' ? '2:1' : '16:9')} onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })} onPointerDown={e => e.stopPropagation()}>
@@ -9463,7 +9471,7 @@ export default function App() {
             onPointerDown={(e) => { e.stopPropagation(); handleFsPointerDown(e); }}
           >
             <img
-              src={`data:image/jpeg;base64,${fullscreenImage}`}
+              src={fullscreenImage.startsWith('http://') || fullscreenImage.startsWith('https://') ? fullscreenImage : `data:image/jpeg;base64,${fullscreenImage}`}
               className="max-w-[95vw] max-h-[90vh] object-contain shadow-2xl"
               style={{
                 transform: `translate(${fsTransform.x}px, ${fsTransform.y}px) scale(${fsTransform.scale})`,
