@@ -247,9 +247,19 @@ function JimengLoginDialog(props: {
     window.open(loginUrl, "_blank");
   }, [loginUrl]);
 
-  const handleConfirmLoggedIn = useCallback(() => {
-    setStatus("✅ 已登录");
-    props.onLoggedIn();
+  const handleConfirmLoggedIn = useCallback(async () => {
+    setStatus("正在验证即梦登录状态...");
+    try {
+      const login = await checkJimengLoginStatus();
+      if (login.ok && login.loggedIn) {
+        setStatus("已登录");
+        props.onLoggedIn();
+        return;
+      }
+      setStatus("未检测到 CLI 登录态，请先在终端完成 dreamina login");
+    } catch {
+      setStatus("登录状态验证失败，请确认本地即梦服务正在运行");
+    }
   }, [props.onLoggedIn]);
 
   if (!props.open) return null;

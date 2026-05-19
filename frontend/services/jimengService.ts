@@ -175,7 +175,14 @@ export async function jimengVideoGenerate(params: JimengVideoParams): Promise<st
 
   const data = await res.json();
   if (!data.ok) {
-    throw new Error(data.message || '即梦视频生成失败');
+    const message = data.message || data.detail || data.stderr || '即梦视频生成失败';
+    const err: any = new Error(message);
+    err.loginRequired =
+      data.loginRequired === true ||
+      String(data.detail || data.stderr || data.message || '').includes('dreamina login');
+    err.detail = data.detail;
+    err.stderr = data.stderr;
+    throw err;
   }
   return data.videoUrl;
 }

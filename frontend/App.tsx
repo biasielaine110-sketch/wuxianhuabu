@@ -5101,6 +5101,10 @@ export default function App() {
                   isGenerating: false,
                   videos: newVideos,
                   currentVideoIndex: prevVideos.length,
+                  // 保存原始URL用于错误回退
+                  originalVideoUrl: result.videoUrl.includes('localhost:3107') 
+                    ? result.originalUrl || result.videoUrl 
+                    : result.videoUrl,
                 }
               : n
           )
@@ -5904,12 +5908,57 @@ export default function App() {
             <div className="w-full h-[680px] shrink-0 bg-[#2a2a2a] relative border-b border-[#333] overflow-hidden group">
               {videoUrls.length > 0 ? (
                 <>
-                <video
+                <div className="relative w-full h-full">
+                  <video
                     key={videoUrls[currentVideoIdx] || 'v'}
                     src={videoUrls[currentVideoIdx]}
-                  controls
+                    controls
+                    preload="metadata"
+                    crossOrigin="anonymous"
+                    onError={(e) => {
+                      console.error('视频加载错误:', e);
+                      console.log('视频URL:', videoUrls[currentVideoIdx]);
+                      const videoEl = e.target as HTMLVideoElement;
+                      const error = videoEl.error;
+                      console.error('视频错误详情:', {
+                        code: error?.code,
+                        message: error?.message,
+                        mediaError: error
+                      });
+                      
+                      // 尝试修复方案
+                      const originalUrl = videoUrls[currentVideoIdx];
+                      
+                      // 方案1: 添加缓存避免
+                      if (originalUrl.includes('localhost')) {
+                        videoEl.src = originalUrl + '?t=' + Date.now();
+                      }
+                      // 方案2: 回退到原始即梦URL（如果当前是本地URL）
+                      else if (originalUrl.includes('localhost:3107')) {
+                        // 尝试从节点数据中获取原始URL
+                        const node = nodes.find(n => n.id === nodeId);
+                        if (node?.originalVideoUrl) {
+                          console.log('尝试回退到原始URL:', node.originalVideoUrl);
+                          videoEl.src = node.originalVideoUrl;
+                        }
+                      }
+                    }}
+                    onLoadedData={(e) => {
+                      console.log('视频已加载:', videoUrls[currentVideoIdx]);
+                      console.log('视频信息:', {
+                        duration: e.target.duration,
+                        videoWidth: e.target.videoWidth,
+                        videoHeight: e.target.videoHeight,
+                        readyState: e.target.readyState
+                      });
+                    }}
                     className="w-full h-full object-contain bg-black"
                   />
+                  {/* 调试信息 */}
+                  <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded opacity-50 hover:opacity-100">
+                    {videoUrls[currentVideoIdx]?.includes('localhost:3107') ? '本地' : '远程'}
+                  </div>
+                </div>
                   <div className="absolute top-2 right-2 z-10 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     {videoUrls.length > 1 && (
                       <>

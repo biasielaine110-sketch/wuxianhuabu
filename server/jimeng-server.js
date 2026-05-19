@@ -86,6 +86,47 @@ async function execWslDreamina(args, options = {}) {
   return execa(WSL_EXE, ["-d", WSL_DISTRO, "--", "bash", "-c", cmdStr], options);
 }
 
+async function checkDreaminaLogin() {
+  try {
+    const r = await execJimeng(["user_credit"], { timeout: 15000 });
+    const data = JSON.parse(r.stdout);
+    const loggedIn = data.total_credit !== undefined || data.ok === true || data.credit !== undefined || data.credits !== undefined;
+    return { loggedIn, data };
+  } catch (error) {
+    return {
+      loggedIn: false,
+      detail: error.shortMessage || error.message,
+      stdout: error.stdout,
+      stderr: error.stderr,
+    };
+  }
+}
+
+function isDreaminaLoginError(error) {
+  const text = [
+    error?.stderr,
+    error?.stdout,
+    error?.shortMessage,
+    error?.message,
+  ].filter(Boolean).join("\n").toLowerCase();
+
+  return (
+    text.includes("dreamina login") ||
+    text.includes("login") ||
+    text.includes("未检测") ||
+    text.includes("登录")
+  );
+}
+
+function sendDreaminaLoginRequired(res, detail = {}) {
+  return res.status(401).json({
+    ok: false,
+    message: "即梦登录已过期，请重新登录",
+    loginRequired: true,
+    ...detail,
+  });
+}
+
 const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: "20mb" }));
@@ -207,6 +248,10 @@ app.post("/api/jimeng/image/generate", async (req, res) => {
   try {
     if (!IS_WINDOWS || HAS_WSL_DREAMINA) {
       // dreamina text2image / image2image (通过 WSL 或原生)
+      const session = await checkDreaminaLogin();
+      if (!session.loggedIn) {
+        return sendDreaminaLoginRequired(res, session);
+      }
       const args = buildDreaminaImageArgs(params);
       const result = await execJimeng(args, { timeout: 240000 });
       const payload = JSON.parse(result.stdout);
@@ -219,7 +264,14 @@ app.post("/api/jimeng/image/generate", async (req, res) => {
     return handleOpencliImageResult(res, result, OUTPUT_DIR, PORT);
   } catch (error) {
     const stderr = error.stderr || "";
-    const loginRequired = stderr.includes("登录") || stderr.includes("login") || stderr.includes("未检测");
+    const loginRequired = isDreaminaLoginError(error);
+    if (loginRequired) {
+      return sendDreaminaLoginRequired(res, {
+        detail: error.shortMessage || error.message,
+        stdout: error.stdout,
+        stderr,
+      });
+    }
     return res.status(500).json({
       ok: false,
       message: loginRequired ? "即梦登录已过期，请重新登录" : "即梦图片生成失败",
@@ -256,13 +308,24 @@ app.post("/api/jimeng/video/generate", async (req, res) => {
   }
 
   try {
+    const session = await checkDreaminaLogin();
+    if (!session.loggedIn) {
+      return sendDreaminaLoginRequired(res, session);
+    }
     const args = buildDreaminaVideoArgs(params);
     const result = await execJimeng(args, { timeout: 300000 });
     const payload = JSON.parse(result.stdout);
     return handleJimengResult(res, payload, OUTPUT_DIR, PORT, "video");
   } catch (error) {
     const stderr = error.stderr || "";
-    const loginRequired = stderr.includes("登录") || stderr.includes("login") || stderr.includes("未检测");
+    const loginRequired = isDreaminaLoginError(error);
+    if (loginRequired) {
+      return sendDreaminaLoginRequired(res, {
+        detail: error.shortMessage || error.message,
+        stdout: error.stdout,
+        stderr,
+      });
+    }
     return res.status(500).json({
       ok: false,
       message: loginRequired ? "即梦登录已过期，请重新登录" : "即梦视频生成失败",
@@ -285,14 +348,67 @@ app.post("/api/jimeng/query", async (req, res) => {
     const payload = JSON.parse(r.stdout);
     const data = payload.data || payload;
 
-    // 如果已完成且包含 URL，直接返回解析结果
+    // 如果已完成且包含 URL，下载到本地并返回本地URL
     const genStatus = data.gen_status || data.status || "";
-    if (genStatus === "completed" || genStatus === "done") {
-      const videoUrl = data.video_url || data.url || "";
+    if (genStatus === "completed" || genStatus === "done" || genStatus === "success") {
+      let videoUrl = data.video_url || data.url || "";
       const results = data.results || [];
-      const finalUrl = videoUrl || (results[0]?.video_url) || (results[0]?.url) || "";
-      if (finalUrl) {
-        return res.json({ ok: true, data: { ...data, video_url: finalUrl, gen_status: "completed" } });
+      if (!videoUrl) {
+        videoUrl = (results[0]?.video_url) || (results[0]?.url) || "";
+      }
+      
+      // 检查 result_json.videos[0].video_url（即梦API返回格式）
+      if (!videoUrl && data.result_json?.videos?.length > 0) {
+        videoUrl = data.result_json.videos[0].video_url || data.result_json.videos[0].url || "";
+      }
+      
+      if (videoUrl) {
+        // 尝试下载视频到本地
+        try {
+          const ext = ".mp4";
+          const filename = `jimeng_video_${Date.now()}${ext}`;
+          const localPath = path.join(OUTPUT_DIR, filename);
+          
+          console.log(`[jimeng-query] 下载视频: ${videoUrl.substring(0, 100)}...`);
+          const resp = await fetch(videoUrl, {
+            headers: {
+              'Referer': 'https://jimeng.jianying.com/',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            }
+          });
+          
+          if (resp.ok) {
+            const buf = Buffer.from(await resp.arrayBuffer());
+            await fs.writeFile(localPath, buf);
+            const localVideoUrl = `http://localhost:${PORT}/outputs/${encodeURIComponent(filename)}`;
+            console.log(`[jimeng-query] 视频下载成功: ${localVideoUrl}`);
+            
+            return res.json({ 
+              ok: true, 
+              data: { 
+                ...data, 
+                video_url: localVideoUrl, 
+                original_video_url: videoUrl, // 保存原始URL用于调试
+                gen_status: "completed" 
+              } 
+            });
+          } else {
+            console.warn(`[jimeng-query] 视频下载失败 HTTP ${resp.status}`);
+          }
+        } catch (downloadError) {
+          console.error(`[jimeng-query] 视频下载错误:`, downloadError.message);
+        }
+        
+        // 如果下载失败，至少返回原始URL（前端会显示错误）
+        return res.json({ 
+          ok: true, 
+          data: { 
+            ...data, 
+            video_url: videoUrl, 
+            gen_status: "completed",
+            download_warning: "视频下载失败，使用原始URL（可能403 Forbidden）"
+          } 
+        });
       }
     }
 
@@ -318,6 +434,16 @@ async function handleJimengResult(res, payload, outputDir, port, mediaType) {
 
   const urlKey = mediaType === "video" ? "video_url" : "image_url";
   let mediaUrl = data[urlKey] || data.url || "";
+  
+  // 检查 result_json.videos[0].video_url（即梦API返回格式）
+  if (!mediaUrl && data.result_json?.videos?.length > 0) {
+    mediaUrl = data.result_json.videos[0][urlKey] || data.result_json.videos[0].url || "";
+  }
+  // 检查 result_json.images[0].image_url
+  if (!mediaUrl && mediaType === "image" && data.result_json?.images?.length > 0) {
+    mediaUrl = data.result_json.images[0].image_url || data.result_json.images[0].url || "";
+  }
+  
   if (!mediaUrl && data.result) {
     mediaUrl = data.result[urlKey] || data.result.url || "";
   }
@@ -325,7 +451,10 @@ async function handleJimengResult(res, payload, outputDir, port, mediaType) {
     mediaUrl = data.results[0][urlKey] || data.results[0].url || "";
   }
 
-  if (!mediaUrl && submitId && ["querying", "pending", "running"].includes(genStatus)) {
+  // 支持 success 状态（即梦返回的成功状态）
+  const isCompleted = ["completed", "done", "success"].includes(genStatus);
+  
+  if (!mediaUrl && submitId && !isCompleted && ["querying", "pending", "running"].includes(genStatus)) {
     return res.json({ ok: false, message: "任务仍在生成中", submitId, genStatus, platform: "native" });
   }
 
@@ -333,14 +462,60 @@ async function handleJimengResult(res, payload, outputDir, port, mediaType) {
     const ext = mediaType === "video" ? ".mp4" : ".png";
     const filename = `jimeng_${mediaType}_${Date.now()}${ext}`;
     const localPath = path.join(outputDir, filename);
+    let downloadedSuccessfully = false;
+    let localMediaUrl = mediaUrl;
+    
     try {
+      console.log(`[jimeng] 开始下载 ${mediaType}: ${mediaUrl.substring(0, 100)}...`);
       const resp = await fetch(mediaUrl);
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+      }
       const buf = Buffer.from(await resp.arrayBuffer());
+      console.log(`[jimeng] 下载完成，大小: ${buf.length} bytes`);
       await fs.writeFile(localPath, buf);
-      mediaUrl = `http://localhost:${port}/outputs/${encodeURIComponent(filename)}`;
-    } catch { /* 回退原始 URL */ }
+      localMediaUrl = `http://localhost:${port}/outputs/${encodeURIComponent(filename)}`;
+      downloadedSuccessfully = true;
+      console.log(`[jimeng] 文件保存到: ${localPath}, 本地URL: ${localMediaUrl}`);
+    } catch (error) {
+      console.error(`[jimeng] 下载失败:`, error.message);
+      // 尝试添加referer和user-agent头重试
+      console.log(`[jimeng] 尝试使用referer重试...`);
+      try {
+        const resp = await fetch(mediaUrl, {
+          headers: {
+            'Referer': 'https://jimeng.jianying.com/',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'video/mp4,video/*;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          }
+        });
+        if (resp.ok) {
+          const buf = Buffer.from(await resp.arrayBuffer());
+          await fs.writeFile(localPath, buf);
+          localMediaUrl = `http://localhost:${port}/outputs/${encodeURIComponent(filename)}`;
+          downloadedSuccessfully = true;
+          console.log(`[jimeng] 重试下载成功！`);
+        } else {
+          throw new Error(`重试也失败: HTTP ${resp.status}`);
+        }
+      } catch (retryError) {
+        console.error(`[jimeng] 重试也失败:`, retryError.message);
+        // 如果下载失败，我们不能返回不可用的CDN URL
+        return res.status(500).json({ 
+          ok: false, 
+          message: `视频下载失败: ${error.message}. 即梦CDN拒绝了访问(403 Forbidden).`,
+          detail: 'CDN视频URL有访问限制，无法直接在前端播放。',
+          mediaUrl: mediaUrl, // 仅供调试
+          downloadFailed: true
+        });
+      }
+    }
 
-    return res.json({ ok: true, [`${mediaType}Url`]: mediaUrl, filename, submitId });
+    // 只有下载成功才返回本地URL
+    if (downloadedSuccessfully) {
+      return res.json({ ok: true, [`${mediaType}Url`]: localMediaUrl, filename, submitId, originalUrl: mediaUrl });
+    }
   }
 
   return res.status(500).json({ ok: false, message: "未找到生成结果", data: payload });

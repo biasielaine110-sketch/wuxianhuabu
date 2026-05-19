@@ -56,8 +56,13 @@ export async function generateJimengVideo(params: {
   }
 
   if (!data.ok) {
-    const err: any = new Error(data.message || data.detail || "即梦视频生成失败");
-    (err as any).loginRequired = data.loginRequired === true;
+    const message = data.message || data.detail || data.stderr || "即梦视频生成失败";
+    const err: any = new Error(message);
+    (err as any).loginRequired =
+      data.loginRequired === true ||
+      String(data.detail || data.stderr || data.message || "").includes("dreamina login");
+    (err as any).detail = data.detail;
+    (err as any).stderr = data.stderr;
     throw err;
   }
 
