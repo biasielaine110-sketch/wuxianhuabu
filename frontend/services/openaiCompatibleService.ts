@@ -648,7 +648,7 @@ async function toApisUploadVideoReferenceImageUrls(
   return imageUrls;
 }
 
-export type ToApisVideoModelId = 'grok-video-3' | 'sora-2-vvip' | 'veo3.1-fast' | 'doubao-seedance-1-5-pro';
+export type ToApisVideoModelId = 'grok-video-3' | 'sora-2-vvip' | 'veo3.1-fast' | 'doubao-seedance-1-5-pro' | 'jimeng-video-v3' | 'jimeng-image-to-video';
 
 function isHttpUrlString(v: unknown): v is string {
   if (typeof v !== 'string') return false;
@@ -1128,6 +1128,9 @@ export async function toApisCanvasVideoGenerate(params: {
       referenceImagesBase64: params.referenceImagesBase64,
       signal: params.signal,
     });
+  }
+  if (params.videoModel.startsWith('jimeng-')) {
+    throw new Error('即梦模型请通过前端即梦客户端调用，不支持直接走 ToAPIs');
   }
   return toApisGrokVideoGenerate({
     prompt: params.prompt,

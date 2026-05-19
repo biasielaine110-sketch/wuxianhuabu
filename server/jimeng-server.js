@@ -1,0 +1,470 @@
+import express from "express";
+import cors from "cors";
+import path from "node:path";
+import fs from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { execa } from "execa";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const PORT = Number(process.env.PORT || 3107);
+const OUTPUT_DIR = path.join(__dirname, "outputs");
+await fs.mkdir(OUTPUT_DIR, { recursive: true });
+
+// ============================================================
+//  环境检测
+//  macOS/Linux → dreamina CLI（原生 CLI）
+//  Windows      → wsl dreamina CLI（通过 WSL 调用）
+// ============================================================
+const IS_WINDOWS = process.platform === "win32";
+const DREAMINA_CMD = process.env.DREAMINA_CMD || "dreamina";
+const OPENCLI_CMD = process.env.OPENCLI_CMD || "opencli";
+
+// WSL 发行版名称
+const WSL_DISTRO = process.env.WSL_DISTRO || "Ubuntu";
+
+// Windows 上 wsl.exe 的完整路径
+const WSL_EXE = IS_WINDOWS
+  ? path.join(process.env.SYSTEMROOT || "C:\\Windows", "System32", "wsl.exe")
+  : "wsl";
+
+let hasWslDreamina = false;
+let wslChecked = false;
+
+async function detectWslDreamina() {
+  if (wslChecked) return hasWslDreamina;
+  wslChecked = true;
+  if (!IS_WINDOWS) {
+    hasWslDreamina = false;
+    return false;
+  }
+  try {
+    // 直接用完整路径调用，避免 $PATH 被 Windows 环境变量污染
+    const r = await execa(WSL_EXE, ["-d", WSL_DISTRO, "--", "bash", "-c", "/root/.local/bin/dreamina --version"], { timeout: 30000 });
+    hasWslDreamina = r.exitCode === 0;
+  } catch {
+    hasWslDreamina = false;
+  }
+  return hasWslDreamina;
+}
+
+// 是否优先使用 dreamina CLI（macOS/Linux 原生 或 Windows 上通过 WSL）
+async function canUseDreaminaCli() {
+  if (!IS_WINDOWS) return true;
+  return await detectWslDreamina();
+}
+
+// ============================================================
+//  Helper：执行即梦 CLI 命令
+//  macOS/Linux → dreamina 直接调用
+//  Windows     → wsl -d Ubuntu -- bash -l -c "... dreamina ..."
+// ============================================================
+function buildWslCmd(args) {
+  // 使用完整路径避免 Windows PATH 环境变量干扰
+  const cmdStr = `/root/.local/bin/dreamina ${args.map(a => {
+    if (typeof a !== "string") return String(a);
+    if (a.includes("'") || a.includes(" ") || a.includes("$") || a.includes("\\") || a.includes('"')) {
+      return `'${a.replace(/'/g, "'\\''")}'`;
+    }
+    return a;
+  }).join(" ")}`;
+  return cmdStr;
+}
+
+async function execJimeng(args, options = {}) {
+  if (!IS_WINDOWS) {
+    return execa(DREAMINA_CMD, args, options);
+  }
+  // Windows 上通过 WSL 调用 dreamina CLI
+  const cmdStr = buildWslCmd(args);
+  return execa(WSL_EXE, ["-d", WSL_DISTRO, "--", "bash", "-c", cmdStr], options);
+}
+
+async function execWslDreamina(args, options = {}) {
+  const cmdStr = buildWslCmd(args);
+  return execa(WSL_EXE, ["-d", WSL_DISTRO, "--", "bash", "-c", cmdStr], options);
+}
+
+const app = express();
+app.use(cors({ origin: true }));
+app.use(express.json({ limit: "20mb" }));
+app.use("/outputs", express.static(OUTPUT_DIR));
+
+// ============================================================
+//  Health
+// ============================================================
+app.get("/api/jimeng/health", async (_req, res) => {
+  try {
+    if (!IS_WINDOWS || HAS_WSL_DREAMINA) {
+      const r = await execWslDreamina(["--version"], { timeout: 10000 });
+      const version = (r.stdout || r.stderr || "").trim();
+      return res.json({
+        ok: true,
+        cli: IS_WINDOWS ? "wsl dreamina" : "dreamina",
+        version,
+        platform: IS_WINDOWS ? "wsl-dreamina" : "native",
+      });
+    }
+    // Windows WSL 不可用时，回退检查 opencli
+    const r = await execa(OPENCLI_CMD, ["jimeng", "--help", "-f", "json"], { timeout: 15000 });
+    const data = JSON.parse(r.stdout);
+    return res.json({
+      ok: true,
+      cli: OPENCLI_CMD,
+      platform: "opencli-windows",
+      commands: data.commands?.map(c => c.name),
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      message: IS_WINDOWS
+        ? "Dreamina CLI (WSL) 不可用。请确保已安装 WSL Ubuntu，并在 WSL 中运行: curl -fsSL https://jimeng.jianying.com/cli | bash"
+        : "Dreamina CLI 不可用。macOS/Linux 请运行: curl -fsSL https://jimeng.jianying.com/cli | bash",
+      detail: error.shortMessage || error.message,
+    });
+  }
+});
+
+// ============================================================
+//  Session（检测是否已登录）
+// ============================================================
+app.get("/api/jimeng/session", async (_req, res) => {
+  try {
+    if (!IS_WINDOWS || HAS_WSL_DREAMINA) {
+      const r = await execWslDreamina(["user_credit"], { timeout: 15000 });
+      const data = JSON.parse(r.stdout);
+      const loggedIn = data.total_credit !== undefined || data.ok === true || data.credit !== undefined || data.credits !== undefined;
+      return res.json({ ok: true, loggedIn, data });
+    }
+    // Windows WSL 不可用时，回退 opencli
+    try {
+      const r = await execa(OPENCLI_CMD, ["jimeng", "history", "-f", "json", "--site-session", "persistent", "--window", "background"], { timeout: 15000 });
+      const data = JSON.parse(r.stdout);
+      return res.json({ ok: true, loggedIn: true, data });
+    } catch {
+      return res.json({ ok: true, loggedIn: false, platform: "opencli", message: "未登录" });
+    }
+  } catch (error) {
+    res.json({ ok: true, loggedIn: false, detail: error.shortMessage || error.message });
+  }
+});
+
+// ============================================================
+//  Login Start
+// ============================================================
+app.post("/api/jimeng/login/start", async (_req, res) => {
+  // 直接返回即梦登录页面 URL（毫秒级响应，不调用 CLI）
+  res.json({
+    ok: true,
+    message: "请扫码或打开链接登录即梦",
+    verificationUrl: "https://jimeng.jianying.com/ai-tool/login",
+    userCode: "",
+    platform: IS_WINDOWS ? "wsl-dreamina" : "native",
+  });
+});
+
+// ============================================================
+//  Login Screenshot（WSL 模式不需要截图）
+// ============================================================
+app.get("/api/jimeng/login/screenshot", async (_req, res) => {
+  res.json({ ok: true, message: "请查看终端输出或浏览器窗口完成登录" });
+});
+
+// ============================================================
+//  Login Status
+// ============================================================
+app.get("/api/jimeng/login/status", async (_req, res) => {
+  try {
+    if (!IS_WINDOWS || HAS_WSL_DREAMINA) {
+      const r = await execWslDreamina(["user_credit"], { timeout: 15000 });
+      const data = JSON.parse(r.stdout);
+      const loggedIn = data.total_credit !== undefined || data.ok === true || data.credit !== undefined;
+      return res.json({ ok: true, loggedIn, data });
+    }
+    // Windows WSL 不可用时回退 opencli
+    try {
+      const r = await execa(OPENCLI_CMD, ["jimeng", "history", "-f", "json", "--site-session", "persistent", "--window", "background"], { timeout: 15000 });
+      const data = JSON.parse(r.stdout);
+      return res.json({ ok: true, loggedIn: true, data });
+    } catch {
+      return res.json({ ok: true, loggedIn: false, platform: "opencli" });
+    }
+  } catch {
+    res.json({ ok: true, loggedIn: false });
+  }
+});
+
+// ============================================================
+//  Image Generate（文生图 / 图生图）
+// ============================================================
+app.post("/api/jimeng/image/generate", async (req, res) => {
+  const params = req.body;
+  if (!params.prompt || typeof params.prompt !== "string") {
+    return res.status(400).json({ ok: false, message: "缺少 prompt" });
+  }
+
+  try {
+    if (!IS_WINDOWS || HAS_WSL_DREAMINA) {
+      // dreamina text2image / image2image (通过 WSL 或原生)
+      const args = buildDreaminaImageArgs(params);
+      const result = await execJimeng(args, { timeout: 240000 });
+      const payload = JSON.parse(result.stdout);
+      return handleJimengResult(res, payload, OUTPUT_DIR, PORT, "image");
+    }
+
+    // Windows WSL 不可用时回退 opencli
+    const cmdArgs = buildOpencliImageArgs(params);
+    const result = await execa(OPENCLI_CMD, cmdArgs, { timeout: 180000 });
+    return handleOpencliImageResult(res, result, OUTPUT_DIR, PORT);
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      message: "即梦图片生成失败",
+      detail: error.shortMessage || error.message,
+      stdout: error.stdout,
+      stderr: error.stderr,
+    });
+  }
+});
+
+// ============================================================
+//  Video Generate（文生视频 / 图生视频）
+// ============================================================
+app.post("/api/jimeng/video/generate", async (req, res) => {
+  const params = req.body;
+  if (!params.prompt || typeof params.prompt !== "string") {
+    return res.status(400).json({ ok: false, message: "缺少 prompt" });
+  }
+
+    if (IS_WINDOWS && !HAS_WSL_DREAMINA) {
+    // Windows 且 WSL dreamina 不可用时回退为 opencli 生图
+    try {
+      const cmdArgs = buildOpencliImageArgs(params);
+      const result = await execa(OPENCLI_CMD, cmdArgs, { timeout: 180000 });
+      return handleOpencliImageResult(res, result, OUTPUT_DIR, PORT, true);
+    } catch (error) {
+      return res.status(500).json({
+        ok: false,
+        message: "Windows 暂不支持即梦视频生成。请确保 WSL Ubuntu 已安装 dreamina CLI（curl -fsSL https://jimeng.jianying.com/cli | bash）",
+        detail: error.shortMessage || error.message,
+      });
+    }
+  }
+
+  try {
+    const args = buildDreaminaVideoArgs(params);
+    const result = await execJimeng(args, { timeout: 300000 });
+    const payload = JSON.parse(result.stdout);
+    return handleJimengResult(res, payload, OUTPUT_DIR, PORT, "video");
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      message: "即梦视频生成失败",
+      detail: error.shortMessage || error.message,
+      stdout: error.stdout,
+      stderr: error.stderr,
+    });
+  }
+});
+
+// ============================================================
+//  Query Result
+// ============================================================
+app.post("/api/jimeng/query", async (req, res) => {
+  const { submitId } = req.body;
+  if (!submitId) return res.status(400).json({ ok: false, message: "缺少 submitId" });
+  try {
+    const r = await execJimeng(["query_result", "--submit_id", submitId], { timeout: 30000 });
+    const payload = JSON.parse(r.stdout);
+    const data = payload.data || payload;
+
+    // 如果已完成且包含 URL，直接返回解析结果
+    const genStatus = data.gen_status || data.status || "";
+    if (genStatus === "completed" || genStatus === "done") {
+      const videoUrl = data.video_url || data.url || "";
+      const results = data.results || [];
+      const finalUrl = videoUrl || (results[0]?.video_url) || (results[0]?.url) || "";
+      if (finalUrl) {
+        return res.json({ ok: true, data: { ...data, video_url: finalUrl, gen_status: "completed" } });
+      }
+    }
+
+    return res.json({ ok: true, data });
+  } catch (error) {
+    return res.status(500).json({ ok: false, message: "查询失败", detail: error.shortMessage || error.message });
+  }
+});
+
+// ============================================================
+//  Handle Jimeng Result（dreamina CLI JSON 结果解析）
+// ============================================================
+async function handleJimengResult(res, payload, outputDir, port, mediaType) {
+  if (payload.ok === false) {
+    return res.status(500).json({ ok: false, message: payload.error || "生成失败", details: payload.details });
+  }
+  const data = payload.data || payload;
+  const submitId = data.submit_id || "";
+  const genStatus = data.gen_status || data.status || "";
+  if (genStatus === "fail") {
+    return res.status(500).json({ ok: false, message: data.fail_reason || "任务失败", submitId });
+  }
+
+  const urlKey = mediaType === "video" ? "video_url" : "image_url";
+  let mediaUrl = data[urlKey] || data.url || "";
+  if (!mediaUrl && data.result) {
+    mediaUrl = data.result[urlKey] || data.result.url || "";
+  }
+  if (!mediaUrl && data.results?.length > 0) {
+    mediaUrl = data.results[0][urlKey] || data.results[0].url || "";
+  }
+
+  if (!mediaUrl && submitId && ["querying", "pending", "running"].includes(genStatus)) {
+    return res.json({ ok: false, message: "任务仍在生成中", submitId, genStatus, platform: "native" });
+  }
+
+  if (mediaUrl) {
+    const ext = mediaType === "video" ? ".mp4" : ".png";
+    const filename = `jimeng_${mediaType}_${Date.now()}${ext}`;
+    const localPath = path.join(outputDir, filename);
+    try {
+      const resp = await fetch(mediaUrl);
+      const buf = Buffer.from(await resp.arrayBuffer());
+      await fs.writeFile(localPath, buf);
+      mediaUrl = `http://localhost:${port}/outputs/${encodeURIComponent(filename)}`;
+    } catch { /* 回退原始 URL */ }
+
+    return res.json({ ok: true, [`${mediaType}Url`]: mediaUrl, filename, submitId });
+  }
+
+  return res.status(500).json({ ok: false, message: "未找到生成结果", data: payload });
+}
+
+// ============================================================
+//  Handle OpenCLI Image Result（opencli jimeng generate JSON 解析）
+// ============================================================
+async function handleOpencliImageResult(res, result, outputDir, port, returnAsVideo = false) {
+  const stdout = (result.stdout || "").trim();
+  let imageUrl = "";
+  let status = "";
+
+  try {
+    const parsed = JSON.parse(stdout);
+    if (parsed.image_urls?.length > 0) {
+      imageUrl = parsed.image_urls[0];
+    } else if (parsed.image_url) {
+      imageUrl = parsed.image_url;
+    }
+    status = parsed.status || "";
+  } catch {
+    const urlMatch = stdout.match(/https?:\/\/[^\s"'<>]+\.(png|jpg|jpeg|webp)/i);
+    if (urlMatch) imageUrl = urlMatch[0];
+  }
+
+  if (!imageUrl) {
+    return res.status(500).json({
+      ok: false,
+      message: "OpenCLI 未返回图片 URL",
+      stdout,
+    });
+  }
+
+  const ext = returnAsVideo ? ".mp4" : ".png";
+  const filename = `jimeng_${returnAsVideo ? 'video' : 'image'}_${Date.now()}${ext}`;
+  const localPath = path.join(outputDir, filename);
+  try {
+    const resp = await fetch(imageUrl);
+    const buf = Buffer.from(await resp.arrayBuffer());
+    await fs.writeFile(localPath, buf);
+    imageUrl = `http://localhost:${port}/outputs/${encodeURIComponent(filename)}`;
+  } catch { /* 回退 */ }
+
+  if (returnAsVideo) {
+    return res.json({ ok: true, videoUrl: imageUrl, filename, status });
+  }
+  return res.json({ ok: true, imageUrl, filename, status });
+}
+
+// ============================================================
+//  OpenCLI args for opencli jimeng generate
+// ============================================================
+function buildOpencliImageArgs(params) {
+  const args = ["jimeng", "generate", params.prompt, "-f", "json"];
+  if (params.wait) args.push("--wait", String(params.wait));
+  if (params.model) {
+    const m = mapOpencliModel(params.model);
+    if (m) args.push("--model", m);
+  }
+  args.push("--site-session", "persistent");
+  args.push("--window", "background");
+  return args;
+}
+
+function mapOpencliModel(model) {
+  const m = (model || "").toLowerCase();
+  if (m.includes("5.0")) return "high_aes_general_v50";
+  if (m.includes("4.6")) return "high_aes_general_v42";
+  if (m.includes("4.0")) return "high_aes_general_v40";
+  return "high_aes_general_v50";
+}
+
+// ============================================================
+//  Dreamina CLI args（macOS/Linux 原生）
+// ============================================================
+function buildDreaminaVideoArgs(params) {
+  const hasImage = Boolean(params.imageUrl);
+  const command = hasImage ? "image2video" : "text2video";
+  const args = [command, "--prompt", params.prompt];
+  if (hasImage) args.push("--image", params.imageUrl);
+  if (params.duration) args.push("--duration", String(params.duration));
+  if (params.ratio) args.push("--ratio", String(params.ratio));
+  const model = mapDreaminaVideoModel(params.model);
+  if (model) args.push("--model_version", model);
+  args.push("--video_resolution", "720p");
+  args.push("--poll", "180");
+  return args;
+}
+
+function buildDreaminaImageArgs(params) {
+  const hasImage = Boolean(params.imageUrl);
+  const command = hasImage ? "image2image" : "text2image";
+  const args = [command, "--prompt", params.prompt];
+  if (hasImage) args.push("--images", params.imageUrl);
+  if (params.ratio) args.push("--ratio", String(params.ratio));
+  args.push("--resolution_type", params.resolution || "2k");
+  const model = mapDreaminaImageModel(params.model);
+  if (model) args.push("--model_version", model);
+  args.push("--poll", "120");
+  return args;
+}
+
+function mapDreaminaVideoModel(model) {
+  const m = (model || "").toLowerCase();
+  // 前端选项: jimeng-seedance2.0fast, jimeng-seedance2.0, jimeng-seedance2.0fast-vip, jimeng-seedance2.0-vip, jimeng-seedance1.5pro
+  if (m.includes("1.5pro") || m.includes("1.5")) return "1.5pro";
+  if (m.includes("vip")) return "seedance2.0_vip";
+  if (m.includes("fast")) return "seedance2.0fast";
+  if (m.includes("seedance2.0")) return "seedance2.0";
+  // 兼容旧值: jimeng-video-v3, jimeng-image-to-video
+  return "seedance2.0fast";
+}
+
+function mapDreaminaImageModel(model) {
+  const m = (model || "").toLowerCase();
+  if (m.includes("5.0")) return "5.0";
+  if (m.includes("4.6")) return "4.6";
+  if (m.includes("4.5")) return "4.5";
+  if (m.includes("4.1")) return "4.1";
+  if (m.includes("4.0")) return "4.0";
+  if (m.includes("3.1")) return "3.1";
+  return "5.0";
+}
+
+// 在服务启动前检测 WSL dreamina 可用性
+console.log("[detect] Checking WSL dreamina...");
+const HAS_WSL_DREAMINA = await detectWslDreamina();
+console.log("[detect] HAS_WSL_DREAMINA =", HAS_WSL_DREAMINA);
+
+app.listen(PORT, () => {
+  console.log(`Jimeng local server running: http://localhost:${PORT} [platform: ${process.platform}, cli: ${HAS_WSL_DREAMINA ? "dreamina" : "opencli"}]`);
+});

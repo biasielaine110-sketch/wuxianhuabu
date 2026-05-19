@@ -1,9 +1,11 @@
 import './vertex-ai-proxy-interceptor.js';
 import './index.css';
+import './styles/jimeng.css';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import SiteAccessGate from './SiteAccessGate';
+import { JimengAuthProvider } from './integrations/jimeng/JimengAuthProvider';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -14,7 +16,9 @@ const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
     <SiteAccessGate>
-      <App />
+      <JimengAuthProvider>
+        <App />
+      </JimengAuthProvider>
     </SiteAccessGate>
   </React.StrictMode>
 );

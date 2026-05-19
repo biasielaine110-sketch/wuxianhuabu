@@ -1,0 +1,147 @@
+.jimeng-login-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.jimeng-login-dialog {
+  width: min(920px, calc(100vw - 32px));
+  height: min(720px, calc(100vh - 32px));
+  background: #ffffff;
+  border: 1px solid #d9dde3;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.jimeng-login-header {
+  height: 48px;
+  padding: 0 14px;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.jimeng-login-header button {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid #cfd5dd;
+  border-radius: 6px;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.jimeng-login-body {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  background: #f6f7f9;
+  overflow: hidden;
+}
+
+.jimeng-login-screenshot {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.jimeng-login-loading {
+  color: #555f6d;
+}
+
+.jimeng-login-status {
+  min-height: 40px;
+  padding: 10px 14px;
+  border-top: 1px solid #e5e7eb;
+  color: #374151;
+  font-size: 14px;
+}
+
+.jimeng-login-tip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+  padding: 20px;
+}
+
+.jimeng-login-tip-icon {
+  font-size: 48px;
+  line-height: 1;
+}
+
+.jimeng-login-tip-text {
+  font-size: 16px;
+  color: #374151;
+  max-width: 400px;
+  line-height: 1.5;
+}
+
+.jimeng-login-open-btn {
+  margin-top: 8px;
+  height: 44px;
+  padding: 0 28px;
+  border: none;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #1677ff, #0958d9);
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.35);
+}
+
+.jimeng-login-open-btn:hover {
+  background: linear-gradient(135deg, #4096ff, #1677ff);
+  box-shadow: 0 4px 16px rgba(22, 119, 255, 0.5);
+  transform: translateY(-1px);
+}
+
+.jimeng-login-confirm-btn {
+  height: 44px;
+  padding: 0 28px;
+  border: 2px solid #52c41a;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #52c41a;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.jimeng-login-confirm-btn:hover {
+  background: #52c41a;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(82, 196, 26, 0.35);
+}
+
+.jimeng-login-usercode {
+  font-size: 14px;
+  color: #374151;
+  background: #f0f5ff;
+  border: 1px solid #d6e4ff;
+  border-radius: 6px;
+  padding: 10px 20px;
+  margin: 4px 0;
+}
+
+.jimeng-login-usercode strong {
+  font-size: 18px;
+  color: #1677ff;
+  letter-spacing: 2px;
+}
+
+.jimeng-login-url-hint {
+  font-size: 13px;
+  color: #8c8c8c;
+  max-width: 480px;
+  line-height: 1.4;
+}

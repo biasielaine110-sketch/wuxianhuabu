@@ -32,6 +32,8 @@ import {
   removeProjectBackupFileHandle,
 } from './services/projectBackupHandleStore';
 import type { CanvasProjectSnapshot } from './services/projectPersistence';
+import { useJimengAuth } from './integrations/jimeng/JimengAuthProvider';
+import { generateJimengVideo, queryJimengTask } from './integrations/jimeng/jimengClient';
 import {
   callGeminiChatWithHistory,
   editExistingImage,
@@ -130,7 +132,39 @@ function videoNodeModelToToApis(m?: string): ToApisVideoModelId {
   if (vm === 'sora-2-vvip') return 'sora-2-vvip';
   if (isVeo31FastVideoModel(vm)) return 'veo3.1-fast';
   if (vm === 'doubao-seedance-1-5-pro') return 'doubao-seedance-1-5-pro';
+  if (vm === 'jimeng-video-v3' || vm === 'jimeng-image-to-video') return vm as ToApisVideoModelId;
   return 'grok-video-3';
+}
+
+/**
+ * 判断当前选择的模型是否为即梦模型。
+ * 兼容多种字段命名（model / selectedModel / provider / id / value）。
+ */
+function isJimengVideoModel(modelOrConfig: unknown): boolean {
+  if (!modelOrConfig) return false;
+
+  if (typeof modelOrConfig === 'string') {
+    return modelOrConfig.startsWith('jimeng-') || modelOrConfig.includes('jimeng');
+  }
+
+  if (typeof modelOrConfig === 'object' && modelOrConfig !== null) {
+    const obj = modelOrConfig as Record<string, unknown>;
+    return (
+      obj.provider === 'jimeng' ||
+      obj.providerId === 'jimeng' ||
+      typeof obj.id === 'string' && (obj.id as string).startsWith('jimeng-') ||
+      typeof obj.model === 'string' && (obj.model as string).startsWith('jimeng-') ||
+      typeof obj.value === 'string' && (obj.value as string).startsWith('jimeng-')
+    );
+  }
+
+  return false;
+}
+
+/** 判断是否为即梦生图模型 */
+function isJimengImageModel(model?: string): boolean {
+  if (!model) return false;
+  return model.startsWith('jimeng-image-');
 }
 
 /** 视频节点 Veo：当前存 `veo3.1-fast`；旧工程可能仍为 `veo3.1-fast-official` */
@@ -1196,6 +1230,7 @@ export default function App() {
   const [nodes, setNodes] = useState<CanvasNode[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: 0.4 });
+  const { ensureJimengReady, openLogin, authInfo } = useJimengAuth();
   const [activeTool, setActiveTool] = useState<Tool>('select');
   const [canvasMode, setCanvasMode] = useState<CanvasMode>('canvas');
   const [auditImages, setAuditImages] = useState<AuditImage[]>([]);
@@ -4617,6 +4652,52 @@ export default function App() {
     setNodes(prev => prev.map(n => n.id === nodeId ? { ...n, isGenerating: true, error: undefined } : n));
 
     try {
+      // ---- 即梦生图分支 ----
+      const imageModel = node.model || defaultCanvasImageModel();
+      if (isJimengImageModel(imageModel)) {
+        const isI2i = node.type === 'i2i' || node.type === 'panoramaT2i';
+
+        // 构建 prompt（即梦分支独立构建）
+        const incomingEdges = edges.filter(e => e.targetId === nodeId);
+        const inputNodes = incomingEdges.map(e => nodes.find(n => n.id === e.sourceId)).filter(Boolean) as CanvasNode[];
+        const textInputs = inputNodes.map(n => n.prompt).filter(Boolean);
+        const presetPrompts = (node.activePresets ?? []).map(key => promptPresets[key] || '').filter(Boolean);
+        const combined = [...presetPrompts, node.prompt, ...textInputs].filter(Boolean).join('\n');
+        const prompt = stripRefMarkers(combined) || combined;
+
+        if (!prompt) throw new Error("请输入提示词或连接文本节点");
+
+        await ensureJimengReady();
+        const { generateJimengImage } = await import('./integrations/jimeng/jimengClient');
+
+        // 图生图：取第一张参考图
+        let imageUrl: string | undefined;
+        if (isI2i) {
+          const slots = buildIncomingRefSlots(nodeId, edges, nodes);
+          const pickIndices = parseRefPickIndices(combined);
+          const { base64s: imageInputs } = await resolveSlotImagesForIndices(slots, pickIndices);
+          if (imageInputs.length > 0) imageUrl = imageInputs[0];
+        }
+
+        const result = await generateJimengImage({
+          prompt,
+          model: imageModel,
+          imageUrl,
+          ratio: node.aspectRatio || '16:9',
+          nodeId,
+        });
+
+        const prevImages = node.images || [];
+        const newImages = [...prevImages, result.imageUrl];
+        setNodes(prev => prev.map(n => n.id === nodeId ? {
+          ...n,
+          isGenerating: false,
+          images: newImages,
+          currentImageIndex: prevImages.length,
+        } : n));
+        return;
+      }
+
       const incomingEdges = edges.filter(e => e.targetId === nodeId);
       const inputNodes = incomingEdges.map(e => nodes.find(n => n.id === e.sourceId)).filter(Boolean) as CanvasNode[];
 
@@ -4629,14 +4710,14 @@ export default function App() {
       const combinedPrompt = [...presetPrompts, node.prompt, ...textInputs].filter(Boolean).join('\n');
       
       // Do NOT append resolution/aspect ratio to the prompt text to avoid confusing the model's style adherence.
-      const finalPrompt = combinedPrompt;
+      const finalPrompt2 = combinedPrompt;
 
       let base64DataArray: string[] = [];
 
       if (node.type === 't2i') {
-        if (!finalPrompt) throw new Error("请输入提示词或连接文本节点");
+        if (!finalPrompt2) throw new Error("请输入提示词或连接文本节点");
         base64DataArray = await generateNewImage(
-          finalPrompt,
+          finalPrompt2,
           node.aspectRatio || '16:9',
           node.imageCount || 1,
           node.model || defaultCanvasImageModel(),
@@ -4646,9 +4727,9 @@ export default function App() {
         );
       } else if (node.type === 'i2i' || node.type === 'panoramaT2i') {
         const slots = buildIncomingRefSlots(nodeId, edges, nodes);
-        const pickIndices = parseRefPickIndices(finalPrompt);
+        const pickIndices = parseRefPickIndices(finalPrompt2);
         const { base64s: imageInputs } = await resolveSlotImagesForIndices(slots, pickIndices);
-        const promptForModel = stripRefMarkers(finalPrompt) || finalPrompt;
+        const promptForModel = stripRefMarkers(finalPrompt2) || finalPrompt2;
         if (imageInputs.length === 0) throw new Error("请连接参考图片或视频节点，或使用 @R 引用有效参考槽位");
         if (!promptForModel) throw new Error("请输入编辑指令或连接文本节点");
         // 全景图生成使用节点配置的画幅
@@ -4896,9 +4977,64 @@ export default function App() {
     }
   }, []);
 
+  /** 轮询即梦任务直到完成 */
+  const pollJimengTask = useCallback(async (nodeId: string, submitId: string, setNodesFn: any, edgesList: Edge[], nodesList: CanvasNode[]) => {
+    const maxAttempts = 2160; // 最长轮询 3 小时（5 秒一次）
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise(r => setTimeout(r, 5000));
+      try {
+        const res = await queryJimengTask(submitId);
+        if (res.ok && res.data) {
+          const data = res.data;
+          const genStatus = data.gen_status || data.status || "";
+          if (genStatus === "completed" || genStatus === "done") {
+            // 任务完成，获取视频 URL
+            const videoUrl = data.video_url || data.url || "";
+            if (videoUrl) {
+              setNodesFn((prev: CanvasNode[]) => prev.map(n =>
+                n.id === nodeId
+                  ? {
+                      ...n,
+                      isGenerating: false,
+                      videos: [...(n.videos || []), videoUrl],
+                      currentVideoIndex: (n.videos || []).length,
+                    }
+                  : n
+              ));
+              return;
+            }
+          }
+          if (genStatus === "fail") {
+            setNodesFn((prev: CanvasNode[]) => prev.map(n =>
+              n.id === nodeId ? { ...n, isGenerating: false, error: `[即梦] ${data.fail_reason || "生成失败"}` } : n
+            ));
+            return;
+          }
+          // querying / pending / running — 继续等待
+          const queueInfo = data.queue_info || {};
+          const pos = queueInfo.queue_idx ?? "?";
+          const total = queueInfo.queue_length ?? "?";
+          setNodesFn((prev: CanvasNode[]) => prev.map(n =>
+            n.id === nodeId ? { ...n, status: `队列 ${pos}/${total}` } : n
+          ));
+        }
+      } catch (e) {
+        console.warn("[jimeng] poll error:", e);
+      }
+    }
+    // 超时
+    setNodesFn((prev: CanvasNode[]) => prev.map(n =>
+      n.id === nodeId ? { ...n, isGenerating: false, error: "[即梦] 生成超时，请稍后重试" } : n
+    ));
+  }, []);
+
   const handleGenerateVideo = async (nodeId: string) => {
     const node = nodes.find(n => n.id === nodeId);
     if (!node || node.type !== 'video') return;
+
+    // 日志：确认选择的模型值
+    console.log('[jimeng] handleGenerateVideo node.model =', node.model);
+    console.log('[jimeng] isJimengVideoModel(node.model) =', isJimengVideoModel(node.model));
 
     generationAbortControllersRef.current.get(nodeId)?.abort();
     const ac = new AbortController();
@@ -4907,6 +5043,87 @@ export default function App() {
 
     setNodes(prev => prev.map(n => (n.id === nodeId ? { ...n, isGenerating: true, error: undefined } : n)));
 
+    // ---- 提前判断是否为即梦模型 ----
+    const isJimeng = isJimengVideoModel(node.model);
+
+    if (isJimeng) {
+      console.log('[jimeng] entering jimeng video generation');
+
+      try {
+        // 检查 prompt（即梦也需 prompt）
+        const incomingEdges = edges.filter(e => e.targetId === nodeId);
+        const inputNodes = incomingEdges.map(e => nodes.find(n => n.id === e.sourceId)).filter(Boolean) as CanvasNode[];
+        const textInputs = inputNodes.map(n => n.prompt).filter(Boolean);
+
+        const combinedRaw = [node.prompt, ...textInputs].filter(Boolean).join('\n').trim();
+        if (!combinedRaw) throw new Error('请输入提示词');
+
+        const slots = buildIncomingRefSlots(nodeId, edges, nodes);
+        const pickIndices = parseRefPickIndices(combinedRaw);
+        const combinedPrompt = stripRefMarkers(combinedRaw) || combinedRaw;
+        const { base64s: imageInputs } = await resolveSlotImagesForIndices(slots, pickIndices);
+
+        // 即梦路径：先确保登录
+        await ensureJimengReady();
+
+        // 如果有参考图，取第一张作为 imageUrl
+        let imageUrl: string | undefined;
+        if (imageInputs.length > 0) {
+          imageUrl = imageInputs[0];
+        }
+
+        const result = await generateJimengVideo({
+          prompt: combinedPrompt,
+          model: node.model || 'jimeng-video-v3',
+          imageUrl,
+          duration: node.videoDuration || 8,
+          ratio: node.aspectRatio || '16:9',
+          nodeId,
+        });
+
+        // 如果返回了 submitId（任务在队列中），启动轮询
+        if (!result.ok && (result as any).submitId) {
+          const submitId = (result as any).submitId;
+          setNodes(prev => prev.map(n => (n.id === nodeId ? { ...n, isGenerating: true, error: undefined, status: '队列中...' } : n)));
+          await pollJimengTask(nodeId, submitId, setNodes, edges, nodes);
+          return;
+        }
+
+        const prevVideos = node.videos || [];
+        const newVideos = [...prevVideos, result.videoUrl];
+        setNodes(prev =>
+          prev.map(n =>
+            n.id === nodeId
+              ? {
+                  ...n,
+                  isGenerating: false,
+                  videos: newVideos,
+                  currentVideoIndex: prevVideos.length,
+                }
+              : n
+          )
+        );
+      } catch (err: unknown) {
+        const aborted =
+          (err as { name?: string })?.name === 'AbortError' ||
+          (err instanceof DOMException && err.name === 'AbortError');
+        if (aborted) {
+          setNodes(prev =>
+            prev.map(n => (n.id === nodeId ? { ...n, isGenerating: false, error: undefined } : n))
+          );
+        } else {
+          const message = err instanceof Error ? err.message : '即梦视频生成失败';
+          console.error('[jimeng] error:', message, 'node.model=', node.model);
+          setNodes(prev => prev.map(n => (n.id === nodeId ? { ...n, isGenerating: false, error: `[即梦] ${message}` } : n)));
+        }
+      } finally {
+        generationAbortControllersRef.current.delete(nodeId);
+        generationStartedAtRef.current.delete(nodeId);
+      }
+      return; // 即梦分支处理完毕，直接返回
+    }
+
+    // ---- 非即梦模型，走原有 ToAPIs 逻辑 ----
     try {
       const incomingEdges = edges.filter(e => e.targetId === nodeId);
       const inputNodes = incomingEdges.map(e => nodes.find(n => n.id === e.sourceId)).filter(Boolean) as CanvasNode[];
@@ -4924,46 +5141,48 @@ export default function App() {
       const audioRefs = resolveSlotAudios(slots);
       const audioBase64 = audioRefs.length > 0 ? audioRefs[0].base64 : undefined;
 
-      let videoUrl: string;
       const videoModel = videoNodeModelToToApis(node.model);
 
-      const resolution: '480p' | '720p' | '1080p' | '4k' =
-        videoModel === 'veo3.1-fast'
-          ? (['1080p', '4k'].includes(node.videoResolution || '') ? (node.videoResolution as '1080p' | '4k') : '720p')
-          : videoModel === 'sora-2-vvip'
-            ? '720p'
-            : videoModel === 'doubao-seedance-1-5-pro'
-              ? (['480p', '1080p'].includes(node.videoResolution || '') ? (node.videoResolution as '480p' | '1080p') : '720p')
-              : node.videoResolution === '480p'
-                ? '480p'
-                : '720p';
+      // --- ToAPIs 路径（原有逻辑） ---
+        let videoUrl: string;
 
-      videoUrl = await generateCanvasVideoViaToApis(combinedPrompt, {
-        videoModel,
-        durationSeconds:
-          node.videoDuration ??
-          (videoModel === 'sora-2-vvip' || videoModel === 'veo3.1-fast' ? 8 : 10),
-        aspectRatio: node.aspectRatio || '16:9',
-        resolution,
-        referenceImagesBase64: videoModel === 'doubao-seedance-1-5-pro' ? imageInputs.slice(0, 2) : imageInputs.slice(0, 3),
-        referenceAudioBase64: audioBase64,
-        signal: ac.signal,
-      });
+        const resolution: '480p' | '720p' | '1080p' | '4k' =
+          videoModel === 'veo3.1-fast'
+            ? (['1080p', '4k'].includes(node.videoResolution || '') ? (node.videoResolution as '1080p' | '4k') : '720p')
+            : videoModel === 'sora-2-vvip'
+              ? '720p'
+              : videoModel === 'doubao-seedance-1-5-pro'
+                ? (['480p', '1080p'].includes(node.videoResolution || '') ? (node.videoResolution as '480p' | '1080p') : '720p')
+                : node.videoResolution === '480p'
+                  ? '480p'
+                  : '720p';
 
-      const prevVideos = node.videos || [];
-      const newVideos = [...prevVideos, videoUrl];
-      setNodes(prev =>
-        prev.map(n =>
-          n.id === nodeId
-            ? {
-                ...n,
-                isGenerating: false,
-                videos: newVideos,
-                currentVideoIndex: prevVideos.length,
-              }
-            : n
-        )
-      );
+        videoUrl = await generateCanvasVideoViaToApis(combinedPrompt, {
+          videoModel,
+          durationSeconds:
+            node.videoDuration ??
+            (videoModel === 'sora-2-vvip' || videoModel === 'veo3.1-fast' ? 8 : 10),
+          aspectRatio: node.aspectRatio || '16:9',
+          resolution,
+          referenceImagesBase64: videoModel === 'doubao-seedance-1-5-pro' ? imageInputs.slice(0, 2) : imageInputs.slice(0, 3),
+          referenceAudioBase64: audioBase64,
+          signal: ac.signal,
+        });
+
+        const prevVideos = node.videos || [];
+        const newVideos = [...prevVideos, videoUrl];
+        setNodes(prev =>
+          prev.map(n =>
+            n.id === nodeId
+              ? {
+                  ...n,
+                  isGenerating: false,
+                  videos: newVideos,
+                  currentVideoIndex: prevVideos.length,
+                }
+              : n
+          )
+        );
     } catch (err: unknown) {
       const aborted =
         (err as { name?: string })?.name === 'AbortError' ||
@@ -6078,7 +6297,7 @@ export default function App() {
           {(node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' || node.type === 'panorama') && (
             <>
               <select className="nodemodel-select bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500 flex-1 min-w-[90px]" value={node.model || defaultCanvasImageModel()} onChange={(e) => { const m = e.target.value; const patch: Partial<CanvasNode> = { model: m }; if (isGptImage2CanvasModelId(m)) patch.resolution = '2k'; handleUpdateNode(node.id, patch); }} onPointerDown={e => e.stopPropagation()}>
-                {(node.type === 't2i' || node.type === 'panoramaT2i') ? (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="nano-banana-2">Nano-Banana 2（ToAPIs）</option><option value="imagen-4">Imagen 4</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option></>) : (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="nano-banana-2">Nano-Banana 2（ToAPIs）</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option></>)}
+                {(node.type === 't2i' || node.type === 'panoramaT2i') ? (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="nano-banana-2">Nano-Banana 2（ToAPIs）</option><option value="imagen-4">Imagen 4</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option><optgroup label="即梦 (Dreamina)"><option value="jimeng-image-5.0">即梦 5.0</option><option value="jimeng-image-4.6">即梦 4.6</option><option value="jimeng-image-4.5">即梦 4.5</option></optgroup></>) : (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="nano-banana-2">Nano-Banana 2（ToAPIs）</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option><optgroup label="即梦 (Dreamina)"><option value="jimeng-image-5.0">即梦 5.0</option><option value="jimeng-image-4.6">即梦 4.6</option><option value="jimeng-image-4.5">即梦 4.5</option></optgroup></>)}
               </select>
               <div className="nodemeta-skip-scale flex items-center gap-0.5">
                 <select className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.aspectRatio || (node.type === 'panoramaT2i' ? '2:1' : '16:9')} onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })} onPointerDown={e => e.stopPropagation()}>
@@ -6126,7 +6345,7 @@ export default function App() {
 
                 {node.type === 'video' && (() => {
           const vm = node.model || '';
-          const modelSelectValue = videoNodeModelToToApis(vm);
+          const modelSelectValue = node.model || '';
           const isSora = isVideoSoraStyleModel(vm);
           const isVeo = isVideoVeoStyleModel(vm);
           const isGroDur = isVideoGrokDurationStyleModel(vm);
@@ -6274,6 +6493,13 @@ export default function App() {
                   <option value="grok-video-3">Grok Video 3</option>
                   <option value="sora-2-vvip">Sora2 VVIP</option>
                   <option value="doubao-seedance-1-5-pro">Doubao SeeDance 1.5 Pro</option>
+                </optgroup>
+                <optgroup label="即梦 (Dreamina)">
+                  <option value="jimeng-seedance2.0fast">即梦 Seedance 2.0 (Fast)</option>
+                  <option value="jimeng-seedance2.0">即梦 Seedance 2.0</option>
+                  <option value="jimeng-seedance2.0fast-vip">即梦 Seedance 2.0 Fast (VIP)</option>
+                  <option value="jimeng-seedance2.0-vip">即梦 Seedance 2.0 (VIP)</option>
+                  <option value="jimeng-seedance1.5pro">即梦 Seedance 1.5 Pro</option>
                 </optgroup>
             </select>
               <div className="nodemeta-skip-scale flex flex-wrap items-center gap-1.5">
@@ -7726,6 +7952,16 @@ export default function App() {
         >
           <span className="text-amber-500/90 text-xs font-medium whitespace-nowrap">清预览缓存</span>
       </button>
+      </div>
+
+      {/* Jimeng login button — 右上角（看图模式下隐藏） */}
+      <div className={`fixed top-[12px] right-[304px] z-[60] ${canvasMode === 'audit' ? 'hidden' : ''}`}
+        onClick={(e) => { e.stopPropagation(); openLogin(); }}
+        style={{ cursor: 'pointer' }}
+      >
+        <span className="px-4 py-2 rounded-lg text-base font-medium border bg-[#1a1a2e]/80 border-[#e94560]/40 text-[#e94560] hover:bg-[#e94560]/20 inline-block tracking-wider">
+          即梦
+        </span>
       </div>
 
       {showShortcutsPanel && (
