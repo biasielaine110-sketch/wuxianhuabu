@@ -4663,14 +4663,26 @@ export default function App() {
           nodeId,
         });
 
-        const prevImages = node.images || [];
-        const newImages = [...prevImages, result.imageUrl];
-        setNodes(prev => prev.map(n => n.id === nodeId ? {
-          ...n,
-          isGenerating: false,
-          images: newImages,
-          currentImageIndex: prevImages.length,
-        } : n));
+        // 处理多张图片生成
+        if (result.imageUrls && result.imageUrls.length > 0) {
+          const prevImages = node.images || [];
+          const newImages = [...prevImages, ...result.imageUrls];
+          setNodes(prev => prev.map(n => n.id === nodeId ? {
+            ...n,
+            isGenerating: false,
+            images: newImages,
+            currentImageIndex: prevImages.length,
+          } : n));
+        } else {
+          const prevImages = node.images || [];
+          const newImages = [...prevImages, result.imageUrl];
+          setNodes(prev => prev.map(n => n.id === nodeId ? {
+            ...n,
+            isGenerating: false,
+            images: newImages,
+            currentImageIndex: prevImages.length,
+          } : n));
+        }
         return;
       }
 
@@ -6574,6 +6586,21 @@ export default function App() {
                   <option value={8}>8 秒</option>
                   <option value={10}>10 秒</option>
                   <option value={12}>12 秒</option>
+                </select>
+              ) : isJimengVideoModel(node.model) ? (
+            <select
+                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  value={[4, 5, 7, 8, 10, 12, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 8}
+                  onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
+                  onPointerDown={e => e.stopPropagation()}
+                >
+                  <option value={4}>4 秒</option>
+                  <option value={5}>5 秒</option>
+                  <option value={7}>7 秒</option>
+                  <option value={8}>8 秒</option>
+                  <option value={10}>10 秒</option>
+                  <option value={12}>12 秒</option>
+                  <option value={15}>15 秒</option>
                 </select>
               ) : (
             <select

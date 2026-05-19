@@ -111,6 +111,8 @@ export async function generateJimengImage(params: {
   return data as {
     ok: true;
     imageUrl: string;
+    imageUrls?: string[];
+    count?: number;
     filename: string;
   };
 }

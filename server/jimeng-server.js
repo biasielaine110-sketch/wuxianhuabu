@@ -589,7 +589,44 @@ async function handleJimengResult(res, payload, outputDir, port, mediaType) {
   if (!mediaUrl && data.result_json?.videos?.length > 0) {
     mediaUrl = data.result_json.videos[0][urlKey] || data.result_json.videos[0].url || "";
   }
-  // 检查 result_json.images[0].image_url
+  // 检查 result_json.images（支持多张图片生成）
+  const allImageUrls = [];
+  if (mediaType === "image" && data.result_json?.images?.length > 0) {
+    for (const img of data.result_json.images) {
+      const url = img.image_url || img.url || "";
+      if (url) allImageUrls.push(url);
+    }
+  }
+
+  // 如果有多张图片，返回多张图片的URLs
+  if (allImageUrls.length > 1) {
+    console.log(`[jimeng] 检测到多张图片生成，共 ${allImageUrls.length} 张`);
+    const downloadedUrls = [];
+    for (let i = 0; i < allImageUrls.length; i++) {
+      const imgUrl = allImageUrls[i];
+      const filename = `jimeng_${mediaType}_${Date.now()}_${i}.png`;
+      const localPath = path.join(outputDir, filename);
+      try {
+        const resp = await fetch(imgUrl, {
+          headers: { 'Referer': 'https://jimeng.jianying.com/' }
+        });
+        if (resp.ok) {
+          const buf = Buffer.from(await resp.arrayBuffer());
+          await fs.writeFile(localPath, buf);
+          const localUrl = `http://localhost:${port}/outputs/${encodeURIComponent(filename)}`;
+          downloadedUrls.push(localUrl);
+          console.log(`[jimeng] 多图下载成功 ${i + 1}/${allImageUrls.length}: ${localUrl}`);
+        }
+      } catch (err) {
+        console.error(`[jimeng] 多图下载失败 ${i}: ${err.message}`);
+      }
+    }
+    if (downloadedUrls.length > 0) {
+      return res.json({ ok: true, imageUrls: downloadedUrls, count: downloadedUrls.length, submitId });
+    }
+  }
+
+  // 单张图片逻辑（原有逻辑）
   if (!mediaUrl && mediaType === "image" && data.result_json?.images?.length > 0) {
     mediaUrl = data.result_json.images[0].image_url || data.result_json.images[0].url || "";
   }
