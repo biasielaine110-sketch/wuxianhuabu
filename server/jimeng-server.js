@@ -214,12 +214,24 @@ app.get("/api/jimeng/health", async (_req, res) => {
       });
     }
     // Windows WSL 涓嶅彲鐢ㄦ椂锛屽洖閫€妫€鏌?opencli
-    return res.status(503).json({
-      ok: false,
-      cli: "wsl dreamina",
-      platform: "wsl-dreamina",
-      message: "Dreamina CLI (WSL) is not available. Install WSL Ubuntu and /root/.local/bin/dreamina first.",
-    });
+    try {
+      const r = await execa(OPENCLI_CMD, ["jimeng", "--help", "-f", "json"], { timeout: 8000 });
+      const data = r.stdout ? JSON.parse(r.stdout) : {};
+      return res.json({
+        ok: true,
+        cli: "opencli",
+        version: data.version || "unknown",
+        platform: "opencli-windows",
+        commands: data.commands?.map(c => c.name) || [],
+      });
+    } catch (opencliErr) {
+      return res.status(503).json({
+        ok: false,
+        cli: "opencli",
+        platform: "opencli-windows",
+        message: "opencli not available: " + (opencliErr.shortMessage || opencliErr.message),
+      });
+    }
   } catch (error) {
     res.status(500).json({
       ok: false,
@@ -367,6 +379,15 @@ app.post("/api/jimeng/image/upscale", async (req, res) => {
       if (imageUrl.startsWith('data:')) {
         const base64Data = imageUrl.replace(/^data:image\/\w+;base64,/, '');
         tempImageBuffer = Buffer.from(base64Data, 'base64');
+      } else if (imageUrl.startsWith('blob:')) {
+        // 支持 blob URL（来自 Canvas 等）
+        try {
+          const resp = await fetch(imageUrl);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          tempImageBuffer = Buffer.from(await resp.arrayBuffer());
+        } catch (blobErr) {
+          return res.status(400).json({ ok: false, message: "无法读取 blob 图片: " + (blobErr.message || "未知错误") });
+        }
       } else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
         const resp = await fetch(imageUrl, { headers: { 'Referer': 'https://jimeng.jianying.com/' } });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -374,7 +395,7 @@ app.post("/api/jimeng/image/upscale", async (req, res) => {
       }
 
       if (!tempImageBuffer) {
-        return res.status(400).json({ ok: false, message: "鍥剧墖鏍煎紡鏃犳晥" });
+        return res.status(400).json({ ok: false, message: "图片格式无效或无法识别" });
       }
 
       const ext = imageUrl.includes('png') ? 'png' : 'jpg';
@@ -401,7 +422,9 @@ app.post("/api/jimeng/image/upscale", async (req, res) => {
       return handleJimengResult(res, payload, OUTPUT_DIR, PORT, "image");
     }
 
-    return res.status(500).json({ ok: false, message: "Windows 鏆備笉鏀寔鏅鸿兘瓒呮竻鍔熻兘" });
+    return res.status(503).json({ ok: false, message: "opencli 模式暂不支持智能超清，请在 WSL 环境下使用此功能" });
+
+
   } catch (error) {
     res.status(500).json({
       ok: false,
