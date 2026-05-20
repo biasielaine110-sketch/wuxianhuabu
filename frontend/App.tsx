@@ -8072,7 +8072,7 @@ export default function App() {
             ? 'border-green-500/60 text-green-400'
             : 'border-[#e94560]/40 text-[#e94560]'
         }`}>
-          即梦 {authInfo.loggedIn ? '✓' : ''}
+          即梦 {authInfo.loggedIn ? '✓ 已登录' : ''}
         </span>
       </div>
 
