@@ -6564,7 +6564,7 @@ export default function App() {
                     if (!['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].includes(ar)) updates.aspectRatio = '16:9';
                   } else if (m === 'doubao-seedance-1-5-pro') {
                     const d = node.videoDuration ?? 8;
-                    updates.videoDuration = [4, 5, 8, 10, 12].includes(d) ? d : 8;
+                    updates.videoDuration = [4, 5, 8, 10, 12, 15].includes(d) ? d : 8;
                     updates.videoResolution =
                       node.videoResolution === '480p' || node.videoResolution === '1080p'
                         ? node.videoResolution
@@ -6630,7 +6630,7 @@ export default function App() {
               ) : isDoubao ? (
             <select
                   className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={[4, 5, 8, 10, 12].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 8}
+                  value={[4, 5, 8, 10, 12, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 8}
                   onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
                   onPointerDown={e => e.stopPropagation()}
                 >
@@ -6639,6 +6639,7 @@ export default function App() {
                   <option value={8}>8 秒</option>
                   <option value={10}>10 秒</option>
                   <option value={12}>12 秒</option>
+                  <option value={15}>15 秒</option>
                 </select>
               ) : isGemini ? (
                 <select
@@ -6764,9 +6765,9 @@ export default function App() {
                   }
                   onPointerDown={e => e.stopPropagation()}
                 >
-                  <option value="480p">480p</option>
-                  <option value="720p">720p</option>
-                  <option value="1080p">1080p</option>
+                  <option value="480p">480p (1.4毛/秒)</option>
+                  <option value="720p">720p (2.9毛/秒)</option>
+                  <option value="1080p">1080p (7.5毛/秒)</option>
                 </select>
               ) : isGemini ? (
                 <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p</span>
