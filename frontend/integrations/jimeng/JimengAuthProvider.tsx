@@ -14,6 +14,7 @@ import {
   startJimengLogin,
   logoutJimeng,
   reloginJimeng,
+  installOpencli,
 } from "./jimengClient";
 
 type JimengAuthInfo = {
@@ -32,6 +33,7 @@ type JimengAuthContextValue = {
   refreshAuthInfo: () => Promise<void>;
   logout: () => Promise<void>;
   relogin: () => Promise<void>;
+  installOpencli: () => Promise<{ ok: boolean; message: string }>;
 };
 
 const DEFAULT_AUTH_INFO: JimengAuthInfo = {
@@ -162,6 +164,11 @@ export function JimengAuthProvider(props: { children: React.ReactNode }) {
     await waitForLogin();
   }, [waitForLogin]);
 
+  const installOpencliFn = useCallback(async () => {
+    const result = await installOpencli();
+    return result;
+  }, []);
+
   return (
     <JimengAuthContext.Provider
       value={{
@@ -173,6 +180,7 @@ export function JimengAuthProvider(props: { children: React.ReactNode }) {
         refreshAuthInfo,
         logout,
         relogin,
+        installOpencli: installOpencliFn,
       }}
     >
       {props.children}
@@ -296,6 +304,20 @@ function JimengLoginDialog(props: {
     setStatus("已登录");
     props.onLoggedIn();
   }, [props.onLoggedIn]);
+
+  const handleInstallOpencli = useCallback(async () => {
+    setStatus("正在安装 opencli...");
+    try {
+      const result = await installOpencli();
+      if (result.ok) {
+        setStatus(result.alreadyInstalled ? "✅ opencli 已安装" : "✅ opencli 安装成功！请刷新页面");
+      } else {
+        setStatus("安装失败: " + (result.detail || result.message));
+      }
+    } catch (err: any) {
+      setStatus("安装失败: " + (err.message || "未知错误"));
+    }
+  }, []);
 
   if (!props.open) return null;
 
@@ -438,6 +460,23 @@ function JimengLoginDialog(props: {
               }}
             >
               验证登录状态
+            </button>
+
+            <button
+              type="button"
+              onClick={handleInstallOpencli}
+              style={{
+                padding: "11px 0",
+                border: "1px solid #10b981",
+                borderRadius: 8,
+                background: "transparent",
+                color: "#34d399",
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              安装 opencli 环境
             </button>
           </div>
 

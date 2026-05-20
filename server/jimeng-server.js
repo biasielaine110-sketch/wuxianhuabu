@@ -348,6 +348,31 @@ app.post("/api/jimeng/logout", async (_req, res) => {
 });
 
 // ============================================================
+//  Install opencli
+// ============================================================
+app.post("/api/jimeng/install-opencli", async (_req, res) => {
+  try {
+    // Check if already installed
+    try {
+      const r = await execa(OPENCLI_CMD, ["--version"], { timeout: 5000 });
+      return res.json({ ok: true, message: "opencli 已安装", version: r.stdout.trim(), alreadyInstalled: true });
+    } catch {}
+
+    // Install opencli
+    const npmCmd = IS_WINDOWS ? "npm.cmd" : "npm";
+    const r = await execa(npmCmd, ["install", "-g", "opencli"], { timeout: 120000 });
+    return res.json({ ok: true, message: "opencli 安装成功", stdout: r.stdout, stderr: r.stderr });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      message: "opencli 安装失败",
+      detail: error.shortMessage || error.message,
+      stderr: error.stderr,
+    });
+  }
+});
+
+// ============================================================
 //  Re-login锛堥噸鏂扮櫥褰曪級
 // ============================================================
 app.post("/api/jimeng/relogin", async (_req, res) => {

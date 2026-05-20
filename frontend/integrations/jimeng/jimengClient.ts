@@ -37,6 +37,11 @@ export async function reloginJimeng() {
   return res.json();
 }
 
+export async function installOpencli() {
+  const res = await fetch(`${JIMENG_SERVER}/install-opencli`, { method: "POST" });
+  return res.json();
+}
+
 export async function upscaleJimengImage(imageUrl: string, scale: number = 2) {
   const res = await fetch(`${JIMENG_SERVER}/image/upscale`, {
     method: "POST",
