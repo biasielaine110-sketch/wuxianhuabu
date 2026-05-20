@@ -435,7 +435,7 @@ app.post("/api/jimeng/image/upscale", async (req, res) => {
 
       // 调用 image_upscale 命令
       // scale: 2 -> 2k, 4 -> 4k, 8 -> 8k
-      const resolutionMap: Record<number, string> = { 2: "2k", 4: "4k", 8: "8k" };
+      const resolutionMap = { 2: "2k", 4: "4k", 8: "8k" };
       const resolutionType = resolutionMap[scale] || "2k";
       const args = ["image_upscale", `--image=${wslPath}`, `--resolution_type=${resolutionType}`, "--poll", "120"];
       const result = await execJimeng(args, { timeout: 300000 });
