@@ -133,7 +133,7 @@ function videoNodeModelToToApis(m?: string): ToApisVideoModelId {
   if (vm === 'sora-2-vvip') return 'sora-2-vvip';
   if (isVeo31FastVideoModel(vm)) return 'veo3.1-fast';
   if (vm === 'doubao-seedance-1-5-pro') return 'doubao-seedance-1-5-pro';
-  if (vm === 'gemini-omni-flash') return 'gemini-omni-flash';
+  if (vm === 'gemini-omni') return 'gemini-omni';
   if (vm === 'jimeng-video-v3' || vm === 'jimeng-image-to-video') return vm as ToApisVideoModelId;
   return 'grok-video-3';
 }
@@ -3743,6 +3743,10 @@ export default function App() {
         if (sel.length === 0) return;
         sel.forEach((id) => handleDeleteNode(id));
       } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC' && !isInput) {
+        // 节点内 textarea 选中文本时，交给浏览器默认复制（不拦截）
+        const sel = window.getSelection();
+        const activeTextarea = document.activeElement?.closest?.('textarea');
+        if (activeTextarea && sel && sel.toString().length > 0) return;
         // 阻止浏览器默认复制行为（如复制选中文本）
         e.preventDefault();
         // 画布模式下复制选中节点
@@ -4121,6 +4125,9 @@ export default function App() {
 
   const handleCanvasPointerDown = useCallback((e: React.PointerEvent) => {
     if (e.button === 2 || fullscreenImage) return;
+    // 节点内右键不弹出创建面板
+    const target = e.target as HTMLElement;
+    if (target.closest('[data-node-root]')) return;
     setContextMenu(null);
 
     if (activeTool === 'pan' || e.button === 1) {
@@ -4265,6 +4272,9 @@ export default function App() {
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     if (fullscreenImage || canvasMode === 'audit') return;
+    // 节点内右键不弹出创建面板
+    const target = e.target as HTMLElement;
+    if (target.closest('[data-node-root]')) return;
     const rect = containerRef.current!.getBoundingClientRect();
     const canvasX = (e.clientX - rect.left - transform.x) / transform.scale;
     const canvasY = (e.clientY - rect.top - transform.y) / transform.scale;
@@ -5178,7 +5188,7 @@ export default function App() {
             (videoModel === 'sora-2-vvip' || videoModel === 'veo3.1-fast' ? 8 : 10),
           aspectRatio: node.aspectRatio || '16:9',
           resolution,
-          referenceImagesBase64: (videoModel === 'doubao-seedance-1-5-pro' || videoModel === 'gemini-omni-flash') ? imageInputs.slice(0, 2) : imageInputs.slice(0, 3),
+          referenceImagesBase64: (videoModel === 'doubao-seedance-1-5-pro' || videoModel === 'gemini-omni') ? imageInputs.slice(0, 2) : imageInputs.slice(0, 3),
           referenceAudioBase64: audioBase64,
           signal: ac.signal,
         });
@@ -6441,7 +6451,7 @@ export default function App() {
           const isVeo = isVideoVeoStyleModel(vm);
           const isGroDur = isVideoGrokDurationStyleModel(vm);
           const isDoubao = vm === 'doubao-seedance-1-5-pro';
-          const isGemini = vm === 'gemini-omni-flash';
+          const isGemini = vm === 'gemini-omni';
           const vSlots = buildIncomingRefSlots(node.id, edges, nodes);
           const imageSlots = vSlots.filter((s) => s.kind === 'image');
           const videoSlots = vSlots.filter((s) => s.kind === 'video');
@@ -6569,7 +6579,7 @@ export default function App() {
                       node.videoResolution === '480p' || node.videoResolution === '1080p'
                         ? node.videoResolution
                         : '720p';
-                  } else if (m === 'gemini-omni-flash') {
+                  } else if (m === 'gemini-omni') {
                     const d = node.videoDuration ?? 6;
                     updates.videoDuration = [6, 10].includes(d) ? d : 6;
                     updates.videoResolution = '720p';
@@ -6589,7 +6599,7 @@ export default function App() {
                   <option value="grok-video-3">Grok Video 3</option>
                   <option value="sora-2-vvip">Sora2 VVIP</option>
                   <option value="doubao-seedance-1-5-pro">Doubao SeeDance 1.5 Pro</option>
-                  <option value="gemini-omni-flash">Gemini Omni Flash</option>
+                  <option value="gemini-omni">Gemini Omni</option>
                 </optgroup>
                 <optgroup label="即梦 (Dreamina)">
                   <option value="jimeng-seedance2.0fast">即梦 Seedance 2.0 (Fast)</option>

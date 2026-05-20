@@ -648,7 +648,7 @@ async function toApisUploadVideoReferenceImageUrls(
   return imageUrls;
 }
 
-export type ToApisVideoModelId = 'grok-video-3' | 'sora-2-vvip' | 'veo3.1-fast' | 'doubao-seedance-1-5-pro' | 'jimeng-video-v3' | 'jimeng-image-to-video' | 'gemini-omni-flash';
+export type ToApisVideoModelId = 'grok-video-3' | 'sora-2-vvip' | 'veo3.1-fast' | 'doubao-seedance-1-5-pro' | 'jimeng-video-v3' | 'jimeng-image-to-video' | 'gemini-omni';
 
 function isHttpUrlString(v: unknown): v is string {
   if (typeof v !== 'string') return false;
@@ -1079,7 +1079,7 @@ async function toApisDoubaoSeedance15ProVideoGenerate(params: {
   return toApisPollVideoTaskToPlayableUrl(id, params.signal);
 }
 
-async function toApisGeminiOmniFlashVideoGenerate(params: {
+async function toApisGeminiOmniVideoGenerate(params: {
   prompt: string;
   durationSeconds: number;
   aspectRatio: string;
@@ -1116,7 +1116,7 @@ async function toApisGeminiOmniFlashVideoGenerate(params: {
   }
 
   const body: Record<string, unknown> = {
-    model: 'gemini-omni-flash',
+    model: 'gemini_omni',
     prompt: params.prompt,
     duration: params.durationSeconds,
     aspect_ratio: params.aspectRatio,
@@ -1180,8 +1180,8 @@ export async function toApisCanvasVideoGenerate(params: {
       signal: params.signal,
     });
   }
-  if (params.videoModel === 'gemini-omni-flash') {
-    return toApisGeminiOmniFlashVideoGenerate({
+  if (params.videoModel === 'gemini-omni') {
+    return toApisGeminiOmniVideoGenerate({
       prompt: params.prompt,
       durationSeconds: params.durationSeconds,
       aspectRatio: params.aspectRatio,
