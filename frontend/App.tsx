@@ -8073,7 +8073,7 @@ export default function App() {
       </div>
 
       {/* Jimeng login button — 右上角（看图模式下隐藏） */}
-      <div className={`fixed top-[12px] right-[304px] z-[60] flex items-center gap-2 ${canvasMode === 'audit' ? 'hidden' : ''}`}
+      <div className={`fixed top-[17px] right-[304px] z-[60] flex items-center gap-2 ${canvasMode === 'audit' ? 'hidden' : ''}`}
         onClick={(e) => { e.stopPropagation(); openLogin(); }}
         style={{ cursor: 'pointer' }}
       >
@@ -8089,7 +8089,7 @@ export default function App() {
       {/* 退出即梦按钮 - 右上角（已登录时显示） */}
       {authInfo.loggedIn && (
         <div
-          className={`fixed top-[12px] right-[160px] z-[60] ${canvasMode === 'audit' ? 'hidden' : ''}`}
+          className={`fixed top-[25px] right-[200px] z-[60] ${canvasMode === 'audit' ? 'hidden' : ''}`}
           onClick={(e) => { e.stopPropagation(); handleLogout(); }}
           style={{ cursor: 'pointer' }}
         >

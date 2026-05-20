@@ -387,8 +387,11 @@ app.post("/api/jimeng/image/upscale", async (req, res) => {
         wslPath = imageFilePath.replace(/^([A-Z]):/, (match, letter) => `/mnt/${letter.toLowerCase()}`).replace(/\\/g, '/');
       }
 
-      // 璋冪敤 image_upscale 鍛戒护
-      const args = ["image_upscale", `--image=${wslPath}`, `--scale=${scale}`, "--poll", "120"];
+      // 调用 image_upscale 命令
+      // scale: 2 -> 2k, 4 -> 4k, 8 -> 8k
+      const resolutionMap: Record<number, string> = { 2: "2k", 4: "4k", 8: "8k" };
+      const resolutionType = resolutionMap[scale] || "2k";
+      const args = ["image_upscale", `--image=${wslPath}`, `--resolution_type=${resolutionType}`, "--poll", "120"];
       const result = await execJimeng(args, { timeout: 300000 });
 
       // 娓呯悊涓存椂鏂囦欢
@@ -414,11 +417,31 @@ app.post("/api/jimeng/image/upscale", async (req, res) => {
 // ============================================================
 app.get("/api/jimeng/login/status", async (_req, res) => {
   try {
-    // 调用 dreamina user_credit 验证是否真正登录
+    // 使用 login checklogin 验证 OAuth 是否真正完成
     if (IS_WINDOWS && HAS_WSL_DREAMINA) {
-      const r = await execWslDreamina(["user_credit"], { timeout: 10000 });
-      const data = JSON.parse(r.stdout);
-      const loggedIn = data && (data.total_credit !== undefined || data.ok === true || data.credit !== undefined);
+      // 通过 WSL 读取 token 文件检查是否有有效 access_token
+      let hasToken = false;
+      let tokenData = "";
+      try {
+        const { stdout } = await execa(WSL_EXE, ["-d", WSL_DISTRO, "-u", WSL_DREAMINA_USER, "--", "bash", "-c", "cat /root/.local/share/dreamina/byted_cli_user_token.json"]);
+        tokenData = stdout;
+        const token = JSON.parse(stdout);
+        // 有 access_token 说明 OAuth 已完成
+        hasToken = !!(token.access_token && token.token_expires_at && token.token_expires_at !== "0001-01-01T00:00:00Z");
+      } catch {}
+
+      if (!hasToken) {
+        return res.json({ ok: true, loggedIn: false, detail: "未完成 OAuth 授权" });
+      }
+
+      // 用 user_credit 验证登录（需要 TTY）
+      const r = await execWslDreamina(["user_credit"], { timeout: 15000 });
+      const output = r.stdout + r.stderr;
+      let data = {};
+      try {
+        data = JSON.parse(r.stdout);
+      } catch {}
+      const loggedIn = data && (data.total_credit !== undefined || data.ok === true);
       return res.json({ ok: true, loggedIn, data });
     }
     // opencli 模式

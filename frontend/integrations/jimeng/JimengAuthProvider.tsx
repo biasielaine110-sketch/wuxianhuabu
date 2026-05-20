@@ -98,21 +98,15 @@ export function JimengAuthProvider(props: { children: React.ReactNode }) {
   }, []);
 
   const openLogin = useCallback(async () => {
-    // 已登录时，直接刷新状态并显示当前登录信息，不弹登录框
+    // 已登录时，刷新状态并显示登录信息对话框
     if (authInfo.loggedIn) {
-      await refreshAuthInfo();
-      window.alert(
-        `✅ 即梦已登录\n` +
-        `积分: ${authInfo.credit}\n` +
-        `VIP: ${authInfo.vipLevel || "普通"}\n\n` +
-        `如需切换账号，请点击右上角"退出即梦"按钮`
-      );
+      setLoginOpen(true);
       return;
     }
 
     // 未登录则弹窗
     setLoginOpen(true);
-  }, [authInfo, refreshAuthInfo]);
+  }, [authInfo]);
 
   const ensureJimengReady = useCallback(async () => {
     console.log('[jimeng-auth] ensureJimengReady called');
@@ -187,6 +181,7 @@ export function JimengAuthProvider(props: { children: React.ReactNode }) {
         open={loginOpen}
         onClose={closeLogin}
         onLoggedIn={handleLoggedIn}
+        authInfo={authInfo}
       />
     </JimengAuthContext.Provider>
   );
@@ -206,6 +201,12 @@ function JimengLoginDialog(props: {
   open: boolean;
   onClose: () => void;
   onLoggedIn: () => void;
+  authInfo: {
+    loggedIn: boolean;
+    credit: number | string;
+    vipLevel: string;
+    userName: string;
+  };
 }) {
   const [status, setStatus] = useState("正在获取授权二维码");
   const [loginUrl, setLoginUrl] = useState("https://jimeng.jianying.com/ai-tool/login");
@@ -215,6 +216,13 @@ function JimengLoginDialog(props: {
   // 弹窗打开时异步获取 OAuth URL
   useEffect(() => {
     if (!props.open) return;
+
+    // 如果已登录，显示登录信息
+    if (props.authInfo.loggedIn) {
+      setStatus(`✅ 已登录 | 积分: ${props.authInfo.credit} | VIP: ${props.authInfo.vipLevel || "普通"}`);
+      setQrLoaded(true);
+      return;
+    }
 
     setStatus("正在获取授权二维码");
     setQrLoaded(false);
