@@ -6441,6 +6441,7 @@ export default function App() {
           const isVeo = isVideoVeoStyleModel(vm);
           const isGroDur = isVideoGrokDurationStyleModel(vm);
           const isDoubao = vm === 'doubao-seedance-1-5-pro';
+          const isGemini = vm === 'gemini-omni-flash';
           const vSlots = buildIncomingRefSlots(node.id, edges, nodes);
           const imageSlots = vSlots.filter((s) => s.kind === 'image');
           const videoSlots = vSlots.filter((s) => s.kind === 'video');
@@ -6569,12 +6570,9 @@ export default function App() {
                         ? node.videoResolution
                         : '720p';
                   } else if (m === 'gemini-omni-flash') {
-                    const d = node.videoDuration ?? 8;
-                    updates.videoDuration = [4, 5, 8, 10, 12].includes(d) ? d : 8;
-                    updates.videoResolution =
-                      node.videoResolution === '480p' || node.videoResolution === '1080p'
-                        ? node.videoResolution
-                        : '720p';
+                    const d = node.videoDuration ?? 6;
+                    updates.videoDuration = [6, 10].includes(d) ? d : 6;
+                    updates.videoResolution = '720p';
                   } else {
                     const d = node.videoDuration ?? 8;
                     if (d === 4 || d === 8 || d === 12) updates.videoDuration = 10;
@@ -6642,6 +6640,10 @@ export default function App() {
                   <option value={10}>10 秒</option>
                   <option value={12}>12 秒</option>
                 </select>
+              ) : isGemini ? (
+                <span className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-400 text-xs whitespace-nowrap">
+                  6 / 10 秒（固定）
+                </span>
               ) : isJimengVideoModel(node.model) ? (
             <select
                   className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
@@ -6761,6 +6763,8 @@ export default function App() {
                   <option value="720p">720p</option>
                   <option value="1080p">1080p</option>
                 </select>
+              ) : isGemini ? (
+                <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p</span>
               ) : (
                 <select
                   className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
