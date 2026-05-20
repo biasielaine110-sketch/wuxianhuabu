@@ -133,6 +133,7 @@ function videoNodeModelToToApis(m?: string): ToApisVideoModelId {
   if (vm === 'sora-2-vvip') return 'sora-2-vvip';
   if (isVeo31FastVideoModel(vm)) return 'veo3.1-fast';
   if (vm === 'doubao-seedance-1-5-pro') return 'doubao-seedance-1-5-pro';
+  if (vm === 'gemini-omni-flash') return 'gemini-omni-flash';
   if (vm === 'jimeng-video-v3' || vm === 'jimeng-image-to-video') return vm as ToApisVideoModelId;
   return 'grok-video-3';
 }
@@ -5177,7 +5178,7 @@ export default function App() {
             (videoModel === 'sora-2-vvip' || videoModel === 'veo3.1-fast' ? 8 : 10),
           aspectRatio: node.aspectRatio || '16:9',
           resolution,
-          referenceImagesBase64: videoModel === 'doubao-seedance-1-5-pro' ? imageInputs.slice(0, 2) : imageInputs.slice(0, 3),
+          referenceImagesBase64: (videoModel === 'doubao-seedance-1-5-pro' || videoModel === 'gemini-omni-flash') ? imageInputs.slice(0, 2) : imageInputs.slice(0, 3),
           referenceAudioBase64: audioBase64,
           signal: ac.signal,
         });
@@ -6567,6 +6568,13 @@ export default function App() {
                       node.videoResolution === '480p' || node.videoResolution === '1080p'
                         ? node.videoResolution
                         : '720p';
+                  } else if (m === 'gemini-omni-flash') {
+                    const d = node.videoDuration ?? 8;
+                    updates.videoDuration = [4, 5, 8, 10, 12].includes(d) ? d : 8;
+                    updates.videoResolution =
+                      node.videoResolution === '480p' || node.videoResolution === '1080p'
+                        ? node.videoResolution
+                        : '720p';
                   } else {
                     const d = node.videoDuration ?? 8;
                     if (d === 4 || d === 8 || d === 12) updates.videoDuration = 10;
@@ -6583,6 +6591,7 @@ export default function App() {
                   <option value="grok-video-3">Grok Video 3</option>
                   <option value="sora-2-vvip">Sora2 VVIP</option>
                   <option value="doubao-seedance-1-5-pro">Doubao SeeDance 1.5 Pro</option>
+                  <option value="gemini-omni-flash">Gemini Omni Flash</option>
                 </optgroup>
                 <optgroup label="即梦 (Dreamina)">
                   <option value="jimeng-seedance2.0fast">即梦 Seedance 2.0 (Fast)</option>
