@@ -262,6 +262,13 @@ function JimengLoginDialog(props: {
     window.open(loginUrl, "_blank");
   }, [loginUrl]);
 
+  const handleCopyLink = useCallback(() => {
+    navigator.clipboard.writeText(loginUrl).then(() => {
+      setStatus("链接已复制到剪贴板");
+      setTimeout(() => setStatus("请使用即梦 App 扫码登录"), 1500);
+    });
+  }, [loginUrl]);
+
   const handleConfirmLoggedIn = useCallback(async () => {
     setStatus("已登录");
     props.onLoggedIn();
@@ -433,11 +440,29 @@ function JimengLoginDialog(props: {
             >
               我已登录，继续
             </button>
+
+            <button
+              type="button"
+              onClick={handleCopyLink}
+              style={{
+                padding: "11px 0",
+                border: "1px solid #8b5cf6",
+                borderRadius: 8,
+                background: "transparent",
+                color: "#a78bfa",
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              复制登录链接
+            </button>
           </div>
 
           <div style={{ fontSize: 11, color: "#555", marginTop: 4, maxWidth: 300, lineHeight: 1.4 }}>
             方法一：打开即梦 App 扫码二维码<br />
-            方法二：点击上方按钮在浏览器中登录<br />
+            方法二：复制链接后用即梦 App 扫码<br />
+            方法三：点击上方按钮在浏览器中登录<br />
             登录后点击「我已登录，继续」
           </div>
         </div>
