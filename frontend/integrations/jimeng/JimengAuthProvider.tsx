@@ -269,6 +269,21 @@ function JimengLoginDialog(props: {
     });
   }, [loginUrl]);
 
+  const handleCheckLogin = useCallback(async () => {
+    setStatus("正在验证登录状态...");
+    try {
+      const login = await checkJimengLoginStatus();
+      if (login.ok && login.loggedIn) {
+        setStatus("✅ 已登录");
+        setTimeout(() => props.onLoggedIn(), 600);
+      } else {
+        setStatus("尚未登录，请先授权");
+      }
+    } catch {
+      setStatus("验证失败，请重试");
+    }
+  }, [props]);
+
   const handleConfirmLoggedIn = useCallback(async () => {
     setStatus("已登录");
     props.onLoggedIn();
@@ -457,13 +472,30 @@ function JimengLoginDialog(props: {
             >
               复制登录链接
             </button>
+
+            <button
+              type="button"
+              onClick={handleCheckLogin}
+              style={{
+                padding: "11px 0",
+                border: "1px solid #f59e0b",
+                borderRadius: 8,
+                background: "transparent",
+                color: "#fbbf24",
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              验证登录状态
+            </button>
           </div>
 
           <div style={{ fontSize: 11, color: "#555", marginTop: 4, maxWidth: 300, lineHeight: 1.4 }}>
             方法一：打开即梦 App 扫码二维码<br />
             方法二：复制链接后用即梦 App 扫码<br />
             方法三：点击上方按钮在浏览器中登录<br />
-            登录后点击「我已登录，继续」
+            授权后点击「验证登录状态」确认
           </div>
         </div>
 
