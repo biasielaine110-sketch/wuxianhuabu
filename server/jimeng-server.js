@@ -89,12 +89,15 @@ async function execJimeng(args, options = {}) {
   // Windows 涓婇€氳繃 WSL 璋冪敤 dreamina CLI
   // 闇€瑕佸皢鎵€鏈夊弬鏁板悎骞舵垚涓€涓懡浠ゅ瓧绗︿覆浼犻€掔粰 bash -c
   const cmdStr = buildWslCmd(args);
-  return execa(WSL_EXE, ["-d", WSL_DISTRO, "-u", WSL_DREAMINA_USER, "--", "bash", "-lc", cmdStr], options);
+  const scriptCmd = `script -q -c '${cmdStr.replace(/'/g, "'\\''")}' /dev/null`;
+  return execa(WSL_EXE, ["-d", WSL_DISTRO, "-u", WSL_DREAMINA_USER, "--", "bash", "-c", scriptCmd], options);
 }
 
 async function execWslDreamina(args, options = {}) {
+  // 使用 script 命令分配伪终端，解决 dreamina 需要 TTY 的问题
   const cmdStr = buildWslCmd(args);
-  return execa(WSL_EXE, ["-d", WSL_DISTRO, "-u", WSL_DREAMINA_USER, "--", "bash", "-lc", cmdStr], options);
+  const scriptCmd = `script -q -c '${cmdStr.replace(/'/g, "'\\''")}' /dev/null`;
+  return execa(WSL_EXE, ["-d", WSL_DISTRO, "-u", WSL_DREAMINA_USER, "--", "bash", "-c", scriptCmd], options);
 }
 
 async function checkOpencliJimengLogin(timeout = 5000) {
@@ -229,15 +232,23 @@ app.get("/api/jimeng/health", async (_req, res) => {
 });
 
 // ============================================================
-//  Session（检测是否已登录）- 快速返回避免超时
+//  Session（检测是否已登录）
 // ============================================================
 app.get("/api/jimeng/session", async (_req, res) => {
-  return res.json({
-    ok: true,
-    loggedIn: true,
-    platform: "wsl-dreamina",
-    data: { total_credit: 13252, vip_level: "maestro" }
-  });
+  try {
+    if (IS_WINDOWS && HAS_WSL_DREAMINA) {
+      const r = await execWslDreamina(["user_credit"], { timeout: 10000 });
+      const data = JSON.parse(r.stdout);
+      const loggedIn = data && (data.total_credit !== undefined || data.ok === true || data.credit !== undefined);
+      return res.json({ ok: true, loggedIn, data, platform: "wsl-dreamina" });
+    }
+    // opencli 模式
+    const r = await execa(OPENCLI_CMD, ["jimeng", "history", "-f", "json", "--site-session", "persistent", "--window", "background"], { timeout: 10000 });
+    const data = JSON.parse(r.stdout);
+    return res.json({ ok: true, loggedIn: true, data, platform: "opencli" });
+  } catch (error) {
+    return res.json({ ok: true, loggedIn: false, detail: error.shortMessage || error.message, platform: "none" });
+  }
 });
 
 // ============================================================
@@ -399,15 +410,24 @@ app.post("/api/jimeng/image/upscale", async (req, res) => {
 });
 
 // ============================================================
-//  Login Status（轮询 OAuth 完成状态）- 快速返回
+//  Login Status（轮询 OAuth 完成状态）
 // ============================================================
 app.get("/api/jimeng/login/status", async (_req, res) => {
-  return res.json({
-    ok: true,
-    loggedIn: true,
-    platform: "wsl-dreamina",
-    data: { total_credit: 13252, vip_level: "maestro" }
-  });
+  try {
+    // 调用 dreamina user_credit 验证是否真正登录
+    if (IS_WINDOWS && HAS_WSL_DREAMINA) {
+      const r = await execWslDreamina(["user_credit"], { timeout: 10000 });
+      const data = JSON.parse(r.stdout);
+      const loggedIn = data && (data.total_credit !== undefined || data.ok === true || data.credit !== undefined);
+      return res.json({ ok: true, loggedIn, data });
+    }
+    // opencli 模式
+    const r = await execa(OPENCLI_CMD, ["jimeng", "history", "-f", "json", "--site-session", "persistent", "--window", "background"], { timeout: 10000 });
+    const data = JSON.parse(r.stdout);
+    return res.json({ ok: true, loggedIn: true, data });
+  } catch (error) {
+    return res.json({ ok: true, loggedIn: false, detail: error.shortMessage || error.message });
+  }
 });
 
 // ============================================================

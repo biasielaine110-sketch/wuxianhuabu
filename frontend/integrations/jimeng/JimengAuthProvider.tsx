@@ -98,28 +98,21 @@ export function JimengAuthProvider(props: { children: React.ReactNode }) {
   }, []);
 
   const openLogin = useCallback(async () => {
-    // 先检查登录状态
-    try {
-      const r = await fetch("/api/jimeng/session");
-      const session = await r.json();
-
-      if (session?.loggedIn) {
-        // 已登录，直接关闭登录弹窗并刷新状态
-        setLoginOpen(false);
-        setAuthInfo({
-          loggedIn: true,
-          credit: session.data?.total_credit ?? session.data?.credit ?? "?",
-          vipLevel: session.data?.vip_level || "",
-          userName: session.data?.user_name || "",
-        });
-        return;
-      }
-    } catch (e) {
-      console.warn('[jimeng] session 检查失败:', e);
+    // 已登录时，直接刷新状态并显示当前登录信息，不弹登录框
+    if (authInfo.loggedIn) {
+      await refreshAuthInfo();
+      window.alert(
+        `✅ 即梦已登录\n` +
+        `积分: ${authInfo.credit}\n` +
+        `VIP: ${authInfo.vipLevel || "普通"}\n\n` +
+        `如需切换账号，请点击右上角"退出即梦"按钮`
+      );
+      return;
     }
+
     // 未登录则弹窗
     setLoginOpen(true);
-  }, []);
+  }, [authInfo, refreshAuthInfo]);
 
   const ensureJimengReady = useCallback(async () => {
     console.log('[jimeng-auth] ensureJimengReady called');
