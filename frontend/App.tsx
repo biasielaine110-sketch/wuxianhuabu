@@ -5162,7 +5162,7 @@ export default function App() {
 
         const resolution: '480p' | '720p' | '1080p' | '4k' =
           videoModel === 'veo3.1-fast'
-            ? (['1080p', '4k'].includes(node.videoResolution || '') ? (node.videoResolution as '1080p' | '4k') : '720p')
+            ? (['1080p', '4k'].includes(node.videoResolution || '') ? (node.videoResolution as '1080p' | '4k') : '1080p')
             : videoModel === 'sora-2-vvip'
               ? '720p'
               : videoModel === 'doubao-seedance-1-5-pro'
@@ -6735,20 +6735,19 @@ export default function App() {
                 <select
                   className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
                   value={
-                    node.videoResolution === '1080p' || node.videoResolution === '4k'
+                    node.videoResolution === '4k'
                       ? node.videoResolution
-                      : '720p'
+                      : '1080p'
                   }
                   onChange={(e) =>
                     handleUpdateNode(node.id, {
-                      videoResolution: e.target.value as '720p' | '1080p' | '4k',
+                      videoResolution: e.target.value as '1080p' | '4k',
                     })
                   }
                   onPointerDown={e => e.stopPropagation()}
                 >
-                  <option value="720p">720p</option>
-                  <option value="1080p">1080p</option>
-                  <option value="4k">4K</option>
+                  <option value="1080p">1080p (6毛/次)</option>
+                  <option value="4k">4K (1.5元/次)</option>
                 </select>
               ) : isDoubao ? (
                 <select
