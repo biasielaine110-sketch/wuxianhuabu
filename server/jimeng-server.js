@@ -247,14 +247,20 @@ app.get("/api/jimeng/health", async (_req, res) => {
 //  Session（检测是否已登录）
 // ============================================================
 app.get("/api/jimeng/session", async (_req, res) => {
-  try {
-    if (IS_WINDOWS && HAS_WSL_DREAMINA) {
+  // 优先尝试 WSL dreamina
+  if (IS_WINDOWS && HAS_WSL_DREAMINA) {
+    try {
       const r = await execWslDreamina(["user_credit"], { timeout: 10000 });
       const data = JSON.parse(r.stdout);
       const loggedIn = data && (data.total_credit !== undefined || data.ok === true || data.credit !== undefined);
       return res.json({ ok: true, loggedIn, data, platform: "wsl-dreamina" });
+    } catch (wslErr) {
+      // WSL dreamina 失败，继续尝试 opencli
+      console.log('[session] WSL dreamina failed, trying opencli:', wslErr.shortMessage || wslErr.message);
     }
-    // opencli 模式
+  }
+  // opencli 降级
+  try {
     const r = await execa(OPENCLI_CMD, ["jimeng", "history", "-f", "json", "--site-session", "persistent", "--window", "background"], { timeout: 10000 });
     const data = JSON.parse(r.stdout);
     return res.json({ ok: true, loggedIn: true, data, platform: "opencli" });
@@ -348,7 +354,7 @@ app.post("/api/jimeng/logout", async (_req, res) => {
 });
 
 // ============================================================
-//  Install opencli
+//  Install opencli (Windows)
 // ============================================================
 app.post("/api/jimeng/install-opencli", async (_req, res) => {
   try {
@@ -368,6 +374,51 @@ app.post("/api/jimeng/install-opencli", async (_req, res) => {
       message: "opencli 安装失败",
       detail: error.shortMessage || error.message,
       stderr: error.stderr,
+    });
+  }
+});
+
+// ============================================================
+//  Setup Dreamina WSL Environment (Windows)
+// ============================================================
+app.post("/api/jimeng/setup-wsl", async (_req, res) => {
+  if (!IS_WINDOWS) {
+    return res.status(501).json({ ok: false, message: "仅支持 Windows 系统" });
+  }
+
+  try {
+    const steps = [];
+
+    // Step 1: Enable WSL
+    steps.push("启用 WSL...");
+    await execa("dism.exe", ["/online", "/enable-feature", "/featurename:Microsoft-Windows-Subsystem-Linux", "/all", "/norestart"], { timeout: 120000 });
+
+    // Step 2: Enable Virtual Machine Platform
+    steps.push("启用虚拟机平台...");
+    await execa("dism.exe", ["/online", "/enable-feature", "/featurename:VirtualMachinePlatform", "/all", "/norestart"], { timeout: 120000 });
+
+    // Step 3: Update WSL
+    steps.push("更新 WSL...");
+    await execa("wsl.exe", ["--update", "--web-download"], { timeout: 60000 });
+
+    // Step 4: Install Ubuntu if not exists
+    steps.push("安装 Ubuntu...");
+    try {
+      await execa("wsl.exe", ["--install", "-d", "Ubuntu", "--web-download"], { timeout: 180000 });
+    } catch {}
+
+    steps.push("安装 dreamina CLI...");
+    const dreaminaInstall = 'set -e; curl -fsSL https://jimeng.jianying.com/cli | bash';
+    await execa("wsl.exe", ["-d", "Ubuntu", "-u", "root", "--", "bash", "-lc", dreaminaInstall], { timeout: 120000 });
+
+    steps.push("✅ 安装完成！请刷新页面并重新登录");
+    return res.json({ ok: true, message: steps.join("\n"), steps });
+
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      message: "WSL 环境安装失败",
+      detail: error.shortMessage || error.message,
     });
   }
 });

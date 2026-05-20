@@ -42,6 +42,11 @@ export async function installOpencli() {
   return res.json();
 }
 
+export async function setupWSL() {
+  const res = await fetch(`${JIMENG_SERVER}/setup-wsl`, { method: "POST" });
+  return res.json();
+}
+
 export async function upscaleJimengImage(imageUrl: string, scale: number = 2) {
   const res = await fetch(`${JIMENG_SERVER}/image/upscale`, {
     method: "POST",

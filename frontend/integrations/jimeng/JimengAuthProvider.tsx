@@ -15,6 +15,7 @@ import {
   logoutJimeng,
   reloginJimeng,
   installOpencli,
+  setupWSL,
 } from "./jimengClient";
 
 type JimengAuthInfo = {
@@ -34,6 +35,7 @@ type JimengAuthContextValue = {
   logout: () => Promise<void>;
   relogin: () => Promise<void>;
   installOpencli: () => Promise<{ ok: boolean; message: string }>;
+  setupWSL: () => Promise<{ ok: boolean; message: string }>;
 };
 
 const DEFAULT_AUTH_INFO: JimengAuthInfo = {
@@ -169,6 +171,11 @@ export function JimengAuthProvider(props: { children: React.ReactNode }) {
     return result;
   }, []);
 
+  const setupWSLFn = useCallback(async () => {
+    const result = await setupWSL();
+    return result;
+  }, []);
+
   return (
     <JimengAuthContext.Provider
       value={{
@@ -181,6 +188,7 @@ export function JimengAuthProvider(props: { children: React.ReactNode }) {
         logout,
         relogin,
         installOpencli: installOpencliFn,
+        setupWSL: setupWSLFn,
       }}
     >
       {props.children}
@@ -311,6 +319,20 @@ function JimengLoginDialog(props: {
       const result = await installOpencli();
       if (result.ok) {
         setStatus(result.alreadyInstalled ? "✅ opencli 已安装" : "✅ opencli 安装成功！请刷新页面");
+      } else {
+        setStatus("安装失败: " + (result.detail || result.message));
+      }
+    } catch (err: any) {
+      setStatus("安装失败: " + (err.message || "未知错误"));
+    }
+  }, []);
+
+  const handleSetupWSL = useCallback(async () => {
+    setStatus("正在安装 WSL 环境（需要管理员权限）...");
+    try {
+      const result = await setupWSL();
+      if (result.ok) {
+        setStatus("✅ WSL 环境安装完成！请刷新页面");
       } else {
         setStatus("安装失败: " + (result.detail || result.message));
       }
@@ -477,6 +499,23 @@ function JimengLoginDialog(props: {
               }}
             >
               安装 opencli 环境
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSetupWSL}
+              style={{
+                padding: "11px 0",
+                border: "1px solid #f97316",
+                borderRadius: 8,
+                background: "transparent",
+                color: "#fb923c",
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              一键安装 WSL + 即梦环境
             </button>
           </div>
 
