@@ -6641,9 +6641,15 @@ export default function App() {
                   <option value={12}>12 秒</option>
                 </select>
               ) : isGemini ? (
-                <span className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-400 text-xs whitespace-nowrap">
-                  6 / 10 秒（固定）
-                </span>
+                <select
+                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  value={[6, 10].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 6}
+                  onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
+                  onPointerDown={e => e.stopPropagation()}
+                >
+                  <option value={6}>6 秒 (1元)</option>
+                  <option value={10}>10 秒 (1.4元)</option>
+                </select>
               ) : isJimengVideoModel(node.model) ? (
             <select
                   className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
