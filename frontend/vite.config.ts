@@ -83,6 +83,12 @@ const toapisFileCdnProxy = {
     secure: true,
     rewrite: (p: string) => p.replace(/^\/codesonline-image-api/, ''),
   },
+  '/api/jimeng': {
+    target: 'http://localhost:3107',
+    changeOrigin: true,
+    secure: false,
+    rewrite: (p: string) => p.replace(/^\/api\/jimeng/, '/api/jimeng'),
+  },
 } as const;
 
 export default defineConfig(({ mode }) => {

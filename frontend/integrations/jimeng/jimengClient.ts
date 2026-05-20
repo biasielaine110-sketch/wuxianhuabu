@@ -1,17 +1,17 @@
-const JIMENG_SERVER = "http://localhost:3107";
+const JIMENG_SERVER = "/api/jimeng";
 
 export async function checkJimengCli() {
-  const res = await fetch(`${JIMENG_SERVER}/api/jimeng/health`);
+  const res = await fetch(`${JIMENG_SERVER}/health`);
   return res.json();
 }
 
 export async function checkJimengSession() {
-  const res = await fetch(`${JIMENG_SERVER}/api/jimeng/session`);
+  const res = await fetch(`${JIMENG_SERVER}/session`);
   return res.json();
 }
 
 export async function startJimengLogin() {
-  const res = await fetch(`${JIMENG_SERVER}/api/jimeng/login/start`, {
+  const res = await fetch(`${JIMENG_SERVER}/login/start`, {
     method: "POST"
   });
 
@@ -19,12 +19,35 @@ export async function startJimengLogin() {
 }
 
 export function getJimengLoginScreenshotUrl() {
-  return `${JIMENG_SERVER}/api/jimeng/login/screenshot?t=${Date.now()}`;
+  return `${JIMENG_SERVER}/login/screenshot?t=${Date.now()}`;
 }
 
 export async function checkJimengLoginStatus() {
-  const res = await fetch(`${JIMENG_SERVER}/api/jimeng/login/status`);
+  const res = await fetch(`${JIMENG_SERVER}/login/status`);
   return res.json();
+}
+
+export async function logoutJimeng() {
+  const res = await fetch(`${JIMENG_SERVER}/logout`, { method: "POST" });
+  return res.json();
+}
+
+export async function reloginJimeng() {
+  const res = await fetch(`${JIMENG_SERVER}/relogin`, { method: "POST" });
+  return res.json();
+}
+
+export async function upscaleJimengImage(imageUrl: string, scale: number = 2) {
+  const res = await fetch(`${JIMENG_SERVER}/image/upscale`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ imageUrl, scale })
+  });
+  const data = await res.json();
+  if (!data.ok) {
+    throw new Error(data.message || "智能超清失败");
+  }
+  return data as { ok: true; imageUrl: string; filename: string };
 }
 
 export async function generateJimengVideo(params: {
@@ -37,7 +60,7 @@ export async function generateJimengVideo(params: {
   ratio?: string;
   nodeId?: string;
 }) {
-  const res = await fetch(`${JIMENG_SERVER}/api/jimeng/video/generate`, {
+  const res = await fetch(`${JIMENG_SERVER}/video/generate`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -77,7 +100,7 @@ export async function generateJimengVideo(params: {
 
 /** 查询即梦任务进度 */
 export async function queryJimengTask(submitId: string) {
-  const res = await fetch(`${JIMENG_SERVER}/api/jimeng/query`, {
+  const res = await fetch(`${JIMENG_SERVER}/query`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ submitId }),
@@ -90,11 +113,12 @@ export async function generateJimengImage(params: {
   model: string;
   imageUrl?: string;
   ratio?: string;
+  resolution?: string;
   width?: number;
   height?: number;
   nodeId?: string;
 }) {
-  const res = await fetch(`${JIMENG_SERVER}/api/jimeng/image/generate`, {
+  const res = await fetch(`${JIMENG_SERVER}/image/generate`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"

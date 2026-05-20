@@ -33,7 +33,7 @@ import {
 } from './services/projectBackupHandleStore';
 import type { CanvasProjectSnapshot } from './services/projectPersistence';
 import { useJimengAuth } from './integrations/jimeng/JimengAuthProvider';
-import { generateJimengVideo, queryJimengTask } from './integrations/jimeng/jimengClient';
+import { generateJimengVideo, queryJimengTask, upscaleJimengImage } from './integrations/jimeng/jimengClient';
 import {
   callGeminiChatWithHistory,
   editExistingImage,
@@ -108,6 +108,7 @@ const MessageIcon = ({ size = 16 }) => <svg xmlns="http://www.w3.org/2000/svg" w
 const SendIcon = ({ size = 16 }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>;
 // 语音/音频图标
 const AudioIcon = ({ size = 16 }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>;
+const SparklesIcon = ({ size = 16 }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M19 17v4"/><path d="M3 5h4"/><path d="M17 19h4"/></svg>;
 
 /** ToAPIs 等返回的 base64 可能是 PNG/WebP，一律按魔数识别后再喂给 Image/canvas */
 function sniffImageMimeFromBase64(raw: string): string {
@@ -164,7 +165,10 @@ function isJimengVideoModel(modelOrConfig: unknown): boolean {
 /** 判断是否为即梦生图模型 */
 function isJimengImageModel(model?: string): boolean {
   if (!model) return false;
-  return model.startsWith('jimeng-image-');
+  const m = model.toLowerCase();
+  return m.startsWith('jimeng-image-') ||
+         m.startsWith('jimeng-') ||
+         m.includes('jimeng');
 }
 
 /** 视频节点 Veo：当前存 `veo3.1-fast`；旧工程可能仍为 `veo3.1-fast-official` */
@@ -4660,6 +4664,7 @@ export default function App() {
           model: imageModel,
           imageUrl,
           ratio: node.aspectRatio || '16:9',
+          resolution: node.resolution || '4k',
           nodeId,
         });
 
@@ -5683,6 +5688,37 @@ export default function App() {
                     >
                       {viewMode === 'grid' ? <SingleIcon size={25}/> : <GridIcon size={25}/>}
                     </button>
+                    {/* 智能超清按钮 - 所有图片节点可用 */}
+                    {images.length > 0 && (
+                      <div className="relative">
+                        <button
+                          onPointerDown={async (e) => {
+                            e.stopPropagation();
+                            const scale = window.prompt('请输入超清倍数 (2 或 4):', '2');
+                            if (!scale) return;
+                            const scaleNum = parseInt(scale, 10);
+                            if (![2, 4].includes(scaleNum)) {
+                              alert('仅支持 2x 或 4x 超清');
+                              return;
+                            }
+                            const imgData = images[currentIndex];
+                            if (!imgData) return;
+                            try {
+                              const result = await upscaleJimengImage(imgData, scaleNum);
+                              const newImages = [...(node.images || []), result.imageUrl];
+                              handleUpdateNode(node.id, { images: newImages });
+                            } catch (err: any) {
+                              alert('智能超清失败: ' + err.message);
+                            }
+                          }}
+                          className="p-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg text-white backdrop-blur-sm shadow-lg flex items-center justify-center"
+                          title="智能超清 (2x/4x)"
+                          style={{ minWidth: '48px', minHeight: '48px' }}
+                        >
+                          <SparklesIcon size={30}/>
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {viewMode === 'grid' ? (

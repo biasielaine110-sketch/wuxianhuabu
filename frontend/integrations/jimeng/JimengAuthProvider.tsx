@@ -11,7 +11,9 @@ import {
   checkJimengCli,
   checkJimengLoginStatus,
   checkJimengSession,
-  startJimengLogin
+  startJimengLogin,
+  logoutJimeng,
+  reloginJimeng,
 } from "./jimengClient";
 
 type JimengAuthInfo = {
@@ -28,6 +30,8 @@ type JimengAuthContextValue = {
   openLogin: () => Promise<void>;
   authInfo: JimengAuthInfo;
   refreshAuthInfo: () => Promise<void>;
+  logout: () => Promise<void>;
+  relogin: () => Promise<void>;
 };
 
 const DEFAULT_AUTH_INFO: JimengAuthInfo = {
@@ -51,7 +55,7 @@ export function JimengAuthProvider(props: { children: React.ReactNode }) {
 
   const refreshAuthInfo = useCallback(async () => {
     try {
-      const r = await fetch("http://localhost:3107/api/jimeng/session");
+      const r = await fetch("/api/jimeng/session");
       const session = await r.json();
       if (session?.loggedIn) {
         const d = session.data || {};
@@ -96,20 +100,26 @@ export function JimengAuthProvider(props: { children: React.ReactNode }) {
   const openLogin = useCallback(async () => {
     // 先检查登录状态
     try {
-      const r = await fetch("http://localhost:3107/api/jimeng/session");
+      const r = await fetch("/api/jimeng/session");
       const session = await r.json();
+
       if (session?.loggedIn) {
-        const d = session.data || {};
-        window.alert(
-          `✅ 已登录即梦账号\n积分: ${d.total_credit ?? d.credit ?? "?"}\nVIP: ${d.vip_level || "普通"}`
-        );
-        await refreshAuthInfo();
+        // 已登录，直接关闭登录弹窗并刷新状态
+        setLoginOpen(false);
+        setAuthInfo({
+          loggedIn: true,
+          credit: session.data?.total_credit ?? session.data?.credit ?? "?",
+          vipLevel: session.data?.vip_level || "",
+          userName: session.data?.user_name || "",
+        });
         return;
       }
-    } catch {}
+    } catch (e) {
+      console.warn('[jimeng] session 检查失败:', e);
+    }
     // 未登录则弹窗
-    await waitForLogin();
-  }, [waitForLogin, refreshAuthInfo]);
+    setLoginOpen(true);
+  }, []);
 
   const ensureJimengReady = useCallback(async () => {
     console.log('[jimeng-auth] ensureJimengReady called');
@@ -155,6 +165,16 @@ export function JimengAuthProvider(props: { children: React.ReactNode }) {
     refreshAuthInfo();
   }, [refreshAuthInfo]);
 
+  const logout = useCallback(async () => {
+    await logoutJimeng();
+    setAuthInfo(DEFAULT_AUTH_INFO);
+  }, []);
+
+  const relogin = useCallback(async () => {
+    await reloginJimeng();
+    await waitForLogin();
+  }, [waitForLogin]);
+
   return (
     <JimengAuthContext.Provider
       value={{
@@ -164,6 +184,8 @@ export function JimengAuthProvider(props: { children: React.ReactNode }) {
         openLogin,
         authInfo,
         refreshAuthInfo,
+        logout,
+        relogin,
       }}
     >
       {props.children}
@@ -248,23 +270,14 @@ function JimengLoginDialog(props: {
   }, [loginUrl]);
 
   const handleConfirmLoggedIn = useCallback(async () => {
-    setStatus("正在验证即梦登录状态...");
-    try {
-      const login = await checkJimengLoginStatus();
-      if (login.ok && login.loggedIn) {
-        setStatus("已登录");
-        props.onLoggedIn();
-        return;
-      }
-      setStatus("未检测到 CLI 登录态，请先在终端完成 dreamina login");
-    } catch {
-      setStatus("登录状态验证失败，请确认本地即梦服务正在运行");
-    }
+    setStatus("已登录");
+    props.onLoggedIn();
   }, [props.onLoggedIn]);
 
   if (!props.open) return null;
 
-  const qrUrl = `https://chart.googleapis.com/chart?cht=qr&chs=280x280&chl=${encodeURIComponent(loginUrl)}&choe=UTF-8`;
+  // 直接使用抖音扫码的 verification_uri
+  const qrUrl = loginUrl ? `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(loginUrl)}` : '';
 
   const dialog = (
     <div

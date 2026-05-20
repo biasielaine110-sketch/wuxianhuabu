@@ -148,7 +148,8 @@
             p.startsWith('/ws-proxy') ||
             p.startsWith('/yunzhi-openai') ||
             p.startsWith('/api/yunzhi-proxy') ||
-            p.startsWith('/codesonline-image-api')
+            p.startsWith('/codesonline-image-api') ||
+            p.startsWith('/api/jimeng')
           ) {
             return originalFetch(url, options);
           }
