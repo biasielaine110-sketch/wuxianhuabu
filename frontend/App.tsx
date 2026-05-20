@@ -6623,9 +6623,9 @@ export default function App() {
               onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
               onPointerDown={e => e.stopPropagation()}
             >
-                  <option value={4}>4 秒</option>
-                  <option value={8}>8 秒</option>
-                  <option value={12}>12 秒</option>
+                  <option value={4}>4 秒 (7毛)</option>
+                  <option value={8}>8 秒 (1元)</option>
+                  <option value={12}>12 秒 (1.3元)</option>
             </select>
               ) : isDoubao ? (
             <select
