@@ -1243,7 +1243,7 @@ export default function App() {
   const [nodes, setNodes] = useState<CanvasNode[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: 0.4 });
-  const { ensureJimengReady, openLogin, authInfo } = useJimengAuth();
+  const { ensureJimengReady, openLogin, authInfo, logout } = useJimengAuth();
   const openLoginRef = useRef(openLogin);
   useEffect(() => { openLoginRef.current = openLogin; }, [openLogin]);
   const [activeTool, setActiveTool] = useState<Tool>('select');
@@ -1498,6 +1498,16 @@ export default function App() {
     clearCanvasThumbnailCache();
     alert('已清理画布预览缩略图缓存（内存）。大图仍可从节点数据加载；本地项目存档不受影响。');
   }, []);
+
+  const handleLogout = useCallback(async () => {
+    if (!window.confirm('确定要退出即梦账号吗？')) return;
+    try {
+      await logout();
+      alert('已退出即梦账号');
+    } catch (e: any) {
+      alert('退出失败: ' + (e.message || '未知错误'));
+    }
+  }, [logout]);
 
   // --- Error Classification & Quick Fix ---
   const classifyError = useCallback((rawError: string, node: CanvasNode) => {
@@ -8063,7 +8073,7 @@ export default function App() {
       </div>
 
       {/* Jimeng login button — 右上角（看图模式下隐藏） */}
-      <div className={`fixed top-[12px] right-[304px] z-[60] ${canvasMode === 'audit' ? 'hidden' : ''}`}
+      <div className={`fixed top-[12px] right-[304px] z-[60] flex items-center gap-2 ${canvasMode === 'audit' ? 'hidden' : ''}`}
         onClick={(e) => { e.stopPropagation(); openLogin(); }}
         style={{ cursor: 'pointer' }}
       >
@@ -8075,6 +8085,19 @@ export default function App() {
           即梦 {authInfo.loggedIn ? '✓ 已登录' : ''}
         </span>
       </div>
+
+      {/* 退出即梦按钮 - 右上角（已登录时显示） */}
+      {authInfo.loggedIn && (
+        <div
+          className={`fixed top-[12px] right-[160px] z-[60] ${canvasMode === 'audit' ? 'hidden' : ''}`}
+          onClick={(e) => { e.stopPropagation(); handleLogout(); }}
+          style={{ cursor: 'pointer' }}
+        >
+          <span className="px-3 py-2 rounded-lg text-sm font-medium border border-red-500/40 text-red-400 bg-[#1a1a2e]/80 hover:bg-red-500/20">
+            退出即梦
+          </span>
+        </div>
+      )}
 
       {showShortcutsPanel && (
         <div

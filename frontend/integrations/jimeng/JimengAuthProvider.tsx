@@ -366,30 +366,6 @@ function JimengLoginDialog(props: {
           }}
         >
           {/* QR Code */}
-          <div
-            style={{
-              width: 200,
-              height: 200,
-              background: "#fff",
-              borderRadius: 10,
-              padding: 8,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              marginBottom: 4,
-            }}
-          >
-            {qrLoaded ? (
-              <img
-                src={qrUrl}
-                alt="即梦登录二维码"
-                style={{ width: "100%", height: "100%", objectFit: "contain" }}
-              />
-            ) : (
-              <div style={{ color: "#999", fontSize: 13 }}>加载中...</div>
-            )}
-          </div>
-
           <div style={{ fontSize: 14, color: "#c0c0c0", lineHeight: 1.5, maxWidth: 320 }}>
             {status}
           </div>
@@ -422,40 +398,6 @@ function JimengLoginDialog(props: {
               marginTop: 6,
             }}
           >
-            <button
-              type="button"
-              onClick={handleOpenLoginPage}
-              style={{
-                padding: "11px 0",
-                border: "none",
-                borderRadius: 8,
-                background: "linear-gradient(135deg, #3b82f6, #2563eb)",
-                color: "#fff",
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
-            >
-              在浏览器中打开登录
-            </button>
-
-            <button
-              type="button"
-              onClick={handleConfirmLoggedIn}
-              style={{
-                padding: "11px 0",
-                border: "1px solid #22c55e",
-                borderRadius: 8,
-                background: "transparent",
-                color: "#22c55e",
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
-            >
-              我已登录，继续
-            </button>
-
             <button
               type="button"
               onClick={handleCopyLink}
@@ -492,10 +434,7 @@ function JimengLoginDialog(props: {
           </div>
 
           <div style={{ fontSize: 11, color: "#555", marginTop: 4, maxWidth: 300, lineHeight: 1.4 }}>
-            方法一：打开即梦 App 扫码二维码<br />
-            方法二：复制链接后用即梦 App 扫码<br />
-            方法三：点击上方按钮在浏览器中登录<br />
-            授权后点击「验证登录状态」确认
+            复制登录链接 → 用即梦 App 扫码授权 → 点击「验证登录状态」确认
           </div>
         </div>
 
