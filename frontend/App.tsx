@@ -1274,6 +1274,7 @@ export default function App() {
   const [selectionBox, setSelectionBox] = useState<{ x: number, y: number, width: number, height: number } | null>(null);
   const [isSelecting, setIsSelecting] = useState(false);
   const selectionBoxRef = useRef<{ x: number, y: number, width: number, height: number } | null>(null);
+  const selectionBoxDomRef = useRef<HTMLDivElement | null>(null);
   const isSelectingRef = useRef(false);
   const boxSelectRafRef = useRef<number | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
@@ -4191,7 +4192,7 @@ export default function App() {
     }
   }, [activeTool, fullscreenImage]);
 
-  // 框选移动处理 - 直接更新状态，不使用 RAF 节流
+  // 框选移动处理 - 直接操作 DOM 避免 React 渲染延迟
   const handleCanvasPointerMove = useCallback((e: React.PointerEvent) => {
     if (!isSelectingRef.current || !pressStartPosRef.current) return;
 
@@ -4203,7 +4204,6 @@ export default function App() {
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
 
-    // 同步更新 ref 和 state（选择框是简单 div，性能足够）
     const box = {
       x: Math.min(startX, startX + dx),
       y: Math.min(startY, startY + dy),
@@ -4211,7 +4211,15 @@ export default function App() {
       height: Math.abs(dy)
     };
     selectionBoxRef.current = box;
-    setSelectionBox(box);
+
+    // 直接操作 DOM 避免 React 渲染延迟
+    if (selectionBoxDomRef.current) {
+      const dom = selectionBoxDomRef.current;
+      dom.style.left = box.x + 'px';
+      dom.style.top = box.y + 'px';
+      dom.style.width = box.width + 'px';
+      dom.style.height = box.height + 'px';
+    }
   }, []);
 
   // 处理画布上的指针释放（用于框选和节点缩放）
@@ -4235,12 +4243,11 @@ export default function App() {
       return;
     }
 
-    if ((pointerType === 'boxSelect' || pointerType === 'selection') && isSelectingRef.current && (selectionBox || selectionBoxRef.current)) {
-      // 使用 selectionBoxRef.current 优先（RAF 节流时 ref 值总是最新）
-      const box = selectionBoxRef.current || selectionBox;
+    if ((pointerType === 'boxSelect' || pointerType === 'selection') && isSelectingRef.current && selectionBoxRef.current) {
+      // 使用 selectionBoxRef.current
+      const box = selectionBoxRef.current;
       if (!box || (box.width === 0 && box.height === 0)) {
         setIsSelecting(false);
-        setSelectionBox(null);
         pressStartPosRef.current = null;
         activePointerTypeRef.current = null;
         return;
@@ -4287,11 +4294,10 @@ export default function App() {
       // 清除 RAF
       if (boxSelectRafRef.current !== null) { cancelAnimationFrame(boxSelectRafRef.current); boxSelectRafRef.current = null; }
       setIsSelecting(false);
-      setSelectionBox(null);
       pressStartPosRef.current = null;
       activePointerTypeRef.current = null;
     }
-  }, [selectionBox, isSelecting]);
+  }, []);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -5985,8 +5991,8 @@ export default function App() {
                   <video
                     key={videoUrls[currentVideoIdx] || 'v'}
                     src={videoUrls[currentVideoIdx]}
-                    controls={isSelected}
-                    autoPlay={!isSelected}
+                    controls={true}
+                    autoPlay={false}
                     preload="metadata"
                     crossOrigin="anonymous"
                     onError={(e) => {
@@ -7799,14 +7805,27 @@ export default function App() {
         onChange={handleFileChange} 
       />
 
-      {/* Selection Overlay - 捕获所有框选事件（放在最外层避免transform影响） */}
-      {isSelecting && (
-        <div
-          className="fixed inset-0 z-[100]"
-          onPointerMove={handleCanvasPointerMove}
-          onPointerUp={handleCanvasPointerUp}
-        />
-      )}
+      {/* Selection Overlay - 始终渲染避免条件渲染延迟 */}
+      <div
+        className="fixed inset-0 z-[100]"
+        style={{ pointerEvents: isSelecting ? 'auto' : 'none' }}
+        onPointerMove={handleCanvasPointerMove}
+        onPointerUp={handleCanvasPointerUp}
+      />
+
+      {/* Selection Box - 直接操作 DOM 避免 React 渲染延迟 */}
+      <div
+        ref={selectionBoxDomRef}
+        className="fixed border-2 border-blue-400 bg-blue-400/20 pointer-events-none"
+        style={{
+          left: 0,
+          top: 0,
+          width: 0,
+          height: 0,
+          zIndex: 9999,
+          display: isSelecting ? 'block' : 'none',
+        }}
+      />
 
       {/* Resize Overlay - 只在缩放时激活 */}
       {isResizing && (
@@ -8006,20 +8025,6 @@ export default function App() {
           {/* Nodes Layer */}
           {nodes.map(renderNode)}
         </div>
-
-        {/* Selection Box - 直接使用屏幕坐标 */}
-        {selectionBox && (
-          <div
-            className="absolute border border-blue-400 bg-blue-400/10 pointer-events-none z-50"
-            style={{
-              left: selectionBox.x,
-              top: selectionBox.y,
-              width: selectionBox.width,
-              height: selectionBox.height,
-              willChange: 'left, top, width, height',
-            }}
-          />
-        )}
 
         {/* Global Eyedropper Overlay - 透明层，让图片仍可点击 */}
         {eyedropperTargetNodeId && (
@@ -13507,6 +13512,25 @@ function buildReversePromptPresetText(): string {
   ].join('\n');
 }
 
+/** DDD_15秒剧本时间轴：即梦 Seedance 2.0 · 导演讲戏分镜时间轴模板 */
+const CHAT_PROMPT_DDD_15S_TIMELINE = `把以上剧情改为适合即梦seedance2.0的提示词，提示词不要超过1700字，以上剧情做到一个15s【导演讲戏·分镜时间轴】内。模板为
+
+【集数 X | 镜头 X | 时长 XXs | 核心叙事节拍：XXXX】
+【导演讲戏·分镜时间轴】
+0-Xs：[景别+运镜+画面内容+人物动作（起点→过程→终点）+台词/旁白原文+光影氛围+音效卡点，五维融合为连续自然叙述，角色以完整姓名写入，场景以完整地点名写入，情绪转化为具体面部肌肉状态，严禁分条列举]
+X-Xs：[承接上段动作终点，递进物理动作链+台词/旁白（如有）+环境细节+音效卡点]
+X-XXs：[动作闭环+物理余韵+台词/旁白（如有）+收尾定格+转场方式（硬切/淡出）+音效卡点]
+【风格光影定调】[本镜头画风+光影色调+布光方式+色温+明暗对比+画面质感，结合本镜头情绪完整独立描述]，8K超高清，超细节，
+【正向稳定约束】全程画面流畅丝滑，无跳帧、无抖动、无突兀切换；角色五官、妆容、发型、服饰全程100%固定不变；人物肢体自然正常，无多手指、无肢体扭曲、无穿模；画面焦点始终锁定核心主体；竖屏主体居中，纵向空间充分利用；动作连贯闭环，无逻辑断裂
+【音效专属约束】
+基础环境音：[内容/无]
+卡点动作音：[内容/无]
+氛围音效：[内容/无]
+硬性约束：全程有适配的BGM，音效与画面动作完全同步，人声清晰优先，无穿帮音效
+【本镜头专项负面词】[3～5条，仅针对当前镜头AI易错点；无则标「无」]`;
+
+
+
 /** 与对话节点「功能」按钮一致的预设条目（可在设置 → 预设 → AI对话 中编辑） */
 const INITIAL_CHAT_PROMPT_PRESETS: Record<string, string> = {
   'AAAA_全能资产': CHAT_PROMPT_AAAA_ALL_ASSET,
@@ -13515,6 +13539,7 @@ const INITIAL_CHAT_PROMPT_PRESETS: Record<string, string> = {
   'EEEE_备选万能资产': CHAT_PROMPT_EEEE_ALT_UNIVERSAL_ASSET,
   'CCC即梦分镜': CHAT_PROMPT_JIMENG_CCC_ASSETS,
   'CCC即梦视频': CHAT_PROMPT_JIMENG_CCC_VIDEO_SEEDANCE,
+  'DDD_15秒剧本时间轴': CHAT_PROMPT_DDD_15S_TIMELINE,
 };
 
 const INITIAL_PROMPT_PRESETS_ALL: Record<string, string> = {
@@ -13579,6 +13604,14 @@ const CHAT_FEATURE_BUTTON_SPECS: ChatFeatureButtonSpec[] = [
     icon: 'message',
     title:
       'CCC_视频提示词_即梦（Seedance 2.0）：单镜标准化提示词工程模板。发送前请连接或粘贴分镜工程文件要点，并在参考区绑定角色/场景参考图。',
+  },
+  {
+    id: 'ddd-15s-timeline',
+    presetKey: 'DDD_15秒剧本时间轴',
+    label: 'DDD_15秒剧本时间轴',
+    icon: 'wand',
+    title:
+      'DDD_15秒剧本时间轴：将剧情转换为即梦 Seedance 2.0 的15秒导演讲戏分镜时间轴提示词，1700字以内，可直接复制使用。',
   },
 ];
 
