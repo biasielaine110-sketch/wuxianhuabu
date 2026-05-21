@@ -5805,7 +5805,7 @@ ${text}`,
                         className="p-1.5 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
                         title="放大查看"
                       >
-                        <MaximizeIcon size={25}/>
+                        <MaximizeIcon size={50}/>
                       </button>
                     )}
                     <button
@@ -5897,7 +5897,7 @@ ${text}`,
                             className="absolute inset-0 m-auto w-8 h-8 flex items-center justify-center bg-black/60 hover:bg-black/80 rounded-full text-white backdrop-blur-sm opacity-0 group-hover/item:opacity-100 transition-opacity"
                             title="放大查看"
                           >
-                            <MaximizeIcon size={25}/>
+                            <MaximizeIcon size={50}/>
                           </button>
                         </div>
                       ))}
@@ -5930,7 +5930,7 @@ ${text}`,
                         className="absolute inset-0 m-auto w-10 h-10 flex items-center justify-center bg-black/60 hover:bg-black/80 rounded-full text-white backdrop-blur-sm opacity-0 group-hover/single:opacity-100 transition-opacity"
                         title="放大查看"
                       >
-                        <MaximizeIcon size={25}/>
+                        <MaximizeIcon size={50}/>
                       </button>
 
                       {/* Pagination Controls */}
@@ -5941,14 +5941,14 @@ ${text}`,
                             disabled={currentIndex === 0}
                             className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 bg-black/60 hover:bg-black/80 rounded-full text-white backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-30"
                           >
-                            <ChevronLeftIcon size={25}/>
+                            <ChevronLeftIcon size={75}/>
                           </button>
                           <button
                             onPointerDown={(e) => { e.stopPropagation(); handleUpdateNode(node.id, { currentImageIndex: Math.min(images.length - 1, currentIndex + 1) }); }}
                             disabled={currentIndex === images.length - 1}
                             className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-black/60 hover:bg-black/80 rounded-full text-white backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-30"
                           >
-                            <ChevronRightIcon size={25}/>
+                            <ChevronRightIcon size={75}/>
                           </button>
                           <div className="absolute bottom-2 left-1/2 -translate-x-1/2 px-2 py-1 bg-black/60 rounded-full text-[10px] text-white backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity">
                             {currentIndex + 1} / {images.length}
@@ -16460,7 +16460,7 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
           className="py-1 px-2 rounded text-[10px] bg-cyan-700 hover:bg-cyan-600 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
           title={sourceImage ? '最大化查看图片（仅看图，不含标注工具）' : '请先导入图片'}
         >
-          <FullscreenIcon size={10} /> 最大化
+          <FullscreenIcon size={20} /> 最大化
         </button>
         <button
           onPointerDown={(e) => e.stopPropagation()}
