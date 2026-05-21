@@ -6563,7 +6563,9 @@ export default function App() {
                   ? ' · Sora 系：4/8/12 秒、16:9 或 9:16、720p'
                   : isGroDur
                     ? ' · Grok：多档秒数与画幅'
-                    : ''}
+                    : isDoubao
+                      ? ' · Seedance 2：5-10 秒；画幅 16:9/9:16/1:1；720p/1080p'
+                      : ''}
             </div>
             {!isSora && !isVeo && isGroDur && (
               <div className="text-[9px] text-amber-600/95 px-1 leading-snug">
@@ -6605,6 +6607,7 @@ export default function App() {
                       node.videoResolution === '480p' || node.videoResolution === '1080p'
                         ? node.videoResolution
                         : '720p';
+                    const ar = node.aspectRatio || '16:9';
                     if (!['16:9', '9:16', '1:1'].includes(ar)) updates.aspectRatio = '16:9';
                   } else if (m === 'gemini-omni') {
                     const d = node.videoDuration ?? 6;
