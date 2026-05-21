@@ -134,6 +134,7 @@ function videoNodeModelToToApis(m?: string): ToApisVideoModelId {
   if (vm === 'sora-2-vvip') return 'sora-2-vvip';
   if (isVeo31FastVideoModel(vm)) return 'veo3.1-fast';
   if (vm === 'doubao-seedance-1-5-pro') return 'doubao-seedance-1-5-pro';
+  if (vm === 'seedance-2' || vm === 'seedance-2-fast') return vm as ToApisVideoModelId;
   if (vm === 'gemini-omni') return 'gemini-omni';
   if (vm === 'jimeng-video-v3' || vm === 'jimeng-image-to-video') return vm as ToApisVideoModelId;
   return 'grok-video-3';
@@ -5193,7 +5194,7 @@ export default function App() {
             ? (['1080p', '4k'].includes(node.videoResolution || '') ? (node.videoResolution as '1080p' | '4k') : '1080p')
             : videoModel === 'sora-2-vvip'
               ? '720p'
-              : videoModel === 'doubao-seedance-1-5-pro'
+              : videoModel === 'doubao-seedance-1-5-pro' || videoModel === 'seedance-2' || videoModel === 'seedance-2-fast'
                 ? (['480p', '1080p'].includes(node.videoResolution || '') ? (node.videoResolution as '480p' | '1080p') : '720p')
                 : node.videoResolution === '480p'
                   ? '480p'
@@ -5206,7 +5207,7 @@ export default function App() {
             (videoModel === 'sora-2-vvip' || videoModel === 'veo3.1-fast' ? 8 : 10),
           aspectRatio: node.aspectRatio || '16:9',
           resolution,
-          referenceImagesBase64: (videoModel === 'doubao-seedance-1-5-pro' || videoModel === 'gemini-omni') ? imageInputs.slice(0, 2) : imageInputs.slice(0, 3),
+          referenceImagesBase64: (videoModel === 'doubao-seedance-1-5-pro' || videoModel === 'gemini-omni' || videoModel === 'seedance-2' || videoModel === 'seedance-2-fast') ? imageInputs.slice(0, 2) : imageInputs.slice(0, 3),
           referenceAudioBase64: audioBase64,
           signal: ac.signal,
         });
@@ -6468,7 +6469,7 @@ export default function App() {
           const isSora = isVideoSoraStyleModel(vm);
           const isVeo = isVideoVeoStyleModel(vm);
           const isGroDur = isVideoGrokDurationStyleModel(vm);
-          const isDoubao = vm === 'doubao-seedance-1-5-pro';
+          const isDoubao = vm === 'doubao-seedance-1-5-pro' || vm === 'seedance-2' || vm === 'seedance-2-fast';
           const isGemini = vm === 'gemini-omni';
           const vSlots = buildIncomingRefSlots(node.id, edges, nodes);
           const imageSlots = vSlots.filter((s) => s.kind === 'image');
@@ -6597,6 +6598,14 @@ export default function App() {
                       node.videoResolution === '480p' || node.videoResolution === '1080p'
                         ? node.videoResolution
                         : '720p';
+                  } else if (m === 'seedance-2' || m === 'seedance-2-fast') {
+                    const d = node.videoDuration ?? 8;
+                    updates.videoDuration = [5, 6, 8, 10].includes(d) ? d : 8;
+                    updates.videoResolution =
+                      node.videoResolution === '480p' || node.videoResolution === '1080p'
+                        ? node.videoResolution
+                        : '720p';
+                    if (!['16:9', '9:16', '1:1'].includes(ar)) updates.aspectRatio = '16:9';
                   } else if (m === 'gemini-omni') {
                     const d = node.videoDuration ?? 6;
                     updates.videoDuration = [6, 10].includes(d) ? d : 6;
@@ -6617,6 +6626,8 @@ export default function App() {
                   <option value="grok-video-3">Grok Video 3</option>
                   <option value="sora-2-vvip">Sora2 VVIP</option>
                   <option value="doubao-seedance-1-5-pro">Doubao SeeDance 1.5 Pro</option>
+                  <option value="seedance-2">Seedance 2</option>
+                  <option value="seedance-2-fast">Seedance 2 Fast</option>
                   <option value="gemini-omni">Gemini Omni</option>
                 </optgroup>
                 <optgroup label="即梦 (Dreamina)">

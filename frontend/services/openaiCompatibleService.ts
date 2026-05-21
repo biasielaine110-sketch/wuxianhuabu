@@ -991,7 +991,7 @@ async function toApisUploadVideoReferenceImageUrls(
   return imageUrls;
 }
 
-export type ToApisVideoModelId = 'grok-video-3' | 'sora-2-vvip' | 'veo3.1-fast' | 'doubao-seedance-1-5-pro' | 'jimeng-video-v3' | 'jimeng-image-to-video' | 'gemini-omni';
+export type ToApisVideoModelId = 'grok-video-3' | 'sora-2-vvip' | 'veo3.1-fast' | 'doubao-seedance-1-5-pro' | 'jimeng-video-v3' | 'jimeng-image-to-video' | 'gemini-omni' | 'seedance-2' | 'seedance-2-fast';
 
 function isHttpUrlString(v: unknown): v is string {
   if (typeof v !== 'string') return false;
@@ -1473,6 +1473,65 @@ async function toApisGeminiOmniVideoGenerate(params: {
   return toApisPollVideoTaskToPlayableUrl(id, params.signal);
 }
 
+/**
+ * ToAPIs：`seedance-2` / `seedance-2-fast`（Seedance 2 视频生成）。
+ * 文档：https://docs.toapis.com/docs/cn/api-reference/videos/seedance-2/generation
+ * - `duration`：5–10 秒
+ * - `aspect_ratio`：16:9 / 9:16 / 1:1
+ * - `metadata.resolution`：720p / 1080p
+ * - 参考图：通过 `image_with_roles` 传入（首帧/尾帧）
+ */
+async function toApisSeedance2VideoGenerate(params: {
+  prompt: string;
+  durationSeconds: number;
+  aspectRatio: string;
+  resolution: '480p' | '720p' | '1080p';
+  referenceImagesBase64?: string[];
+  signal?: AbortSignal;
+}): Promise<string> {
+  if (getAiProvider() !== 'openai-compatible') {
+    throw new Error(
+      '视频生成需在「设置 → API」中选择「OpenAI 兼容」，并将 Base URL 设为 ToAPIs（https://toapis.com/v1）。'
+    );
+  }
+  const base = normalizeBaseUrl(getOpenAiBaseUrl());
+  if (!isToApisHost(base)) {
+    throw new Error('视频生成当前仅支持 ToAPIs：请将 Base URL 设为 https://toapis.com/v1');
+  }
+  const apiKey = getOpenAiSavedKey();
+  if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key。');
+
+  // 参考图上传
+  const imageUrls = await toApisUploadVideoReferenceImageUrls(
+    params.referenceImagesBase64 || [],
+    'seedance-video-ref',
+    params.signal
+  );
+
+  // 构建 image_with_roles：最多 2 张，第一张为首帧，第二张为尾帧
+  const imageWithRoles: { url: string; role: string }[] = [];
+  if (imageUrls.length >= 1) {
+    imageWithRoles.push({ url: imageUrls[0], role: 'first_frame' });
+  }
+  if (imageUrls.length >= 2) {
+    imageWithRoles.push({ url: imageUrls[1], role: 'last_frame' });
+  }
+
+  const body: Record<string, unknown> = {
+    model: 'seedance-2',
+    prompt: params.prompt,
+    duration: params.durationSeconds,
+    aspect_ratio: params.aspectRatio,
+    metadata: {
+      resolution: params.resolution,
+    },
+  };
+  if (imageWithRoles.length > 0) body.image_with_roles = imageWithRoles;
+
+  const { id } = await toApisSubmitVideoGeneration(body, params.signal);
+  return toApisPollVideoTaskToPlayableUrl(id, params.signal);
+}
+
 export async function toApisCanvasVideoGenerate(params: {
   prompt: string;
   videoModel: ToApisVideoModelId;
@@ -1515,6 +1574,20 @@ export async function toApisCanvasVideoGenerate(params: {
         ? params.resolution
         : '720p';
     return toApisDoubaoSeedance15ProVideoGenerate({
+      prompt: params.prompt,
+      durationSeconds: params.durationSeconds,
+      aspectRatio: params.aspectRatio,
+      resolution: res,
+      referenceImagesBase64: params.referenceImagesBase64,
+      signal: params.signal,
+    });
+  }
+  if (params.videoModel === 'seedance-2' || params.videoModel === 'seedance-2-fast') {
+    const res =
+      params.resolution === '1080p' || params.resolution === '480p'
+        ? params.resolution
+        : '720p';
+    return toApisSeedance2VideoGenerate({
       prompt: params.prompt,
       durationSeconds: params.durationSeconds,
       aspectRatio: params.aspectRatio,
