@@ -1487,6 +1487,7 @@ async function toApisSeedance2VideoGenerate(params: {
   aspectRatio: string;
   resolution: '480p' | '720p' | '1080p';
   referenceImagesBase64?: string[];
+  videoModel: 'seedance-2' | 'seedance-2-fast';
   signal?: AbortSignal;
 }): Promise<string> {
   if (getAiProvider() !== 'openai-compatible') {
@@ -1518,7 +1519,7 @@ async function toApisSeedance2VideoGenerate(params: {
   }
 
   const body: Record<string, unknown> = {
-    model: 'seedance-2',
+    model: params.videoModel,
     prompt: params.prompt,
     duration: params.durationSeconds,
     aspect_ratio: params.aspectRatio,
@@ -1593,6 +1594,7 @@ export async function toApisCanvasVideoGenerate(params: {
       aspectRatio: params.aspectRatio,
       resolution: res,
       referenceImagesBase64: params.referenceImagesBase64,
+      videoModel: params.videoModel as 'seedance-2' | 'seedance-2-fast',
       signal: params.signal,
     });
   }
