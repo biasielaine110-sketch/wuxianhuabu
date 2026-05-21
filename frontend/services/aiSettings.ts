@@ -12,6 +12,9 @@ const JUNLAN_BASE_URL_STORAGE_KEY = 'junlan-openai-compatible-base-url-v1';
 /** [codesonline 控制台](https://image.codesonline.dev/personal/docs) OpenAI 兼容图像网关；画布模型 id 为 `gpt-image-2-codesonline`，与 ToAPIs/君澜的 gpt-image-2 分流 */
 const CODESONLINE_IMAGE_API_KEY_STORAGE_KEY = 'codesonline-image-openai-api-key-v1';
 const CODESONLINE_IMAGE_BASE_URL_STORAGE_KEY = 'codesonline-image-openai-base-url-v1';
+/** 满 eAPI（manxueapi.com）OpenAI 兼容网关：画布「GPT Image 2（满 e）」与「Gemini 3 Pro Image」等 */
+const MANXUE_API_KEY_STORAGE_KEY = 'manxue-openai-compatible-api-key-v1';
+const MANXUE_BASE_URL_STORAGE_KEY = 'manxue-openai-compatible-base-url-v1';
 
 export const DEFAULT_OPENAI_BASE_URL = 'https://toapis.com/v1';
 /** 文档：https://stsg17lkjz.apifox.cn/8682367m0 — Base URL 须含 /v1 */
@@ -20,6 +23,9 @@ export const DEFAULT_JUNLAN_BASE_URL = 'https://www.junlanai.com/v1';
 export const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1';
 /** 画布「AI 对话」默认 DeepSeek 模型（与 {@link DEFAULT_DEEPSEEK_BASE_URL} 配合；官方 ID：deepseek-v4-flash / deepseek-v4-pro） */
 export const DEFAULT_DEEPSEEK_CHAT_MODEL_ID = 'deepseek-v4-flash';
+
+/** 满 eAPI manxueapi.com OpenAI 兼容入口（Base URL 须含 /v1） */
+export const DEFAULT_MANXUE_BASE_URL = 'https://manxueapi.com/v1';
 
 /** 旧版存盘中的 model id → 当前官方命名（不在界面展示旧名） */
 export function normalizeDeepSeekChatModelId(modelId: string): string {
@@ -211,6 +217,43 @@ export function setCodesonlineBaseUrl(url: string): void {
   }
 }
 
+export function getManxueSavedKey(): string {
+  try {
+    return localStorage.getItem(MANXUE_API_KEY_STORAGE_KEY)?.trim() || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setManxueKey(apiKey: string): void {
+  const normalized = apiKey.trim();
+  try {
+    if (normalized) localStorage.setItem(MANXUE_API_KEY_STORAGE_KEY, normalized);
+    else localStorage.removeItem(MANXUE_API_KEY_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getManxueBaseUrl(): string {
+  try {
+    const raw = localStorage.getItem(MANXUE_BASE_URL_STORAGE_KEY)?.trim();
+    return raw || DEFAULT_MANXUE_BASE_URL;
+  } catch {
+    return DEFAULT_MANXUE_BASE_URL;
+  }
+}
+
+export function setManxueBaseUrl(url: string): void {
+  const normalized = url.trim();
+  try {
+    if (normalized) localStorage.setItem(MANXUE_BASE_URL_STORAGE_KEY, normalized);
+    else localStorage.removeItem(MANXUE_BASE_URL_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function getDeepSeekSavedKey(): string {
   try {
     return localStorage.getItem(DEEPSEEK_API_KEY_STORAGE_KEY)?.trim() || '';
@@ -259,6 +302,8 @@ export type AiSettingsSnapshot = {
   codesonlineBaseUrl: string;
   deepSeekKey: string;
   deepSeekBaseUrl: string;
+  manxueKey: string;
+  manxueBaseUrl: string;
 };
 
 export function getAiSettingsSnapshot(): AiSettingsSnapshot {
@@ -273,6 +318,8 @@ export function getAiSettingsSnapshot(): AiSettingsSnapshot {
     codesonlineBaseUrl: getCodesonlineBaseUrl(),
     deepSeekKey: getDeepSeekSavedKey(),
     deepSeekBaseUrl: getDeepSeekBaseUrl(),
+    manxueKey: getManxueSavedKey(),
+    manxueBaseUrl: getManxueBaseUrl(),
   };
 }
 
@@ -292,6 +339,9 @@ export type PersistAiSettingsInput = {
   /** DeepSeek 对话专用；不传则保留原值 */
   deepSeekApiKey?: string;
   deepSeekBaseUrl?: string;
+  /** 满 eAPI（manxueapi.com）专用；不传则保留原值 */
+  manxueApiKey?: string;
+  manxueBaseUrl?: string;
 };
 
 export function persistAiSettings(opts: PersistAiSettingsInput): void {
@@ -305,4 +355,6 @@ export function persistAiSettings(opts: PersistAiSettingsInput): void {
   if (opts.codesonlineBaseUrl !== undefined) setCodesonlineBaseUrl(opts.codesonlineBaseUrl);
   if (opts.deepSeekApiKey !== undefined) setDeepSeekKey(opts.deepSeekApiKey);
   if (opts.deepSeekBaseUrl !== undefined) setDeepSeekBaseUrl(opts.deepSeekBaseUrl);
+  if (opts.manxueApiKey !== undefined) setManxueKey(opts.manxueApiKey);
+  if (opts.manxueBaseUrl !== undefined) setManxueBaseUrl(opts.manxueBaseUrl);
 }

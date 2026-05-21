@@ -1,11 +1,14 @@
 import {
   DEFAULT_DEEPSEEK_CHAT_MODEL_ID,
+  DEFAULT_MANXUE_BASE_URL,
   normalizeDeepSeekChatModelId,
   getAiProvider,
   getCodesonlineBaseUrl,
   getCodesonlineSavedKey,
   getJunlanBaseUrl,
   getJunlanSavedKey,
+  getManxueBaseUrl,
+  getManxueSavedKey,
   getOpenAiBaseUrl,
   getOpenAiSavedKey,
 } from './aiSettings';
@@ -107,11 +110,24 @@ function isJunlanHost(baseNormalized: string): boolean {
   }
 }
 
+/** 判断是否为满 eAPI 域名（manxueapi.com） */
+function isManxueHost(baseNormalized: string): boolean {
+  try {
+    const host = new URL(baseNormalized).hostname.toLowerCase();
+    return host === 'manxueapi.com' || host.endsWith('.manxueapi.com');
+  } catch {
+    return false;
+  }
+}
+
 /** ToAPIs 异步任务轮询最长等待（文生图 / 图生图等） */
 const TOAPIS_TASK_MAX_WAIT_MS = 1_800_000;
 
 /** ToAPIs 视频任务轮询最长等待 */
 const TOAPIS_VIDEO_TASK_MAX_WAIT_MS = 1_800_000;
+
+/** 满 eAPI（manxueapi.com）任务轮询最长等待 */
+const MANXUE_TASK_MAX_WAIT_MS = 1_800_000;
 
 function assertNotAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException('已取消生成', 'AbortError');
@@ -143,6 +159,145 @@ function toApisT2iModel(modelName: string): string {
   if (m === 'dall-e-3' || m === 'dall-e-2') return 'gemini-3-pro-image-preview';
   if (m === 'nano-banana-2') return 'gemini-2.5-flash-image-preview';
   return m || 'gemini-3-pro-image-preview';
+}
+
+/** 满 eAPI 模型名映射（将 UI id 转为 API model 名） */
+function manxueT2iModel(modelName: string): string {
+  const m = (modelName || '').trim();
+  // GPT Image 2 系列
+  if (m === 'gpt-image-2-pro-manxue') return 'gpt-image-2-pro';
+  if (m === 'gpt-image-2-manxue') return 'gpt-image-2';
+  // Gemini 系列
+  if (m === 'gemini-3-pro-image-preview-2k-manxue') return 'gemini-3-pro-image-preview-2k';
+  if (m === 'gemini-3-pro-image-preview-4k-manxue') return 'gemini-3-pro-image-preview-4k';
+  if (m === 'gemini-3.1-flash-image-preview-2k-manxue') return 'gemini-3.1-flash-image-preview-2k';
+  if (m === 'gemini-3.1-flash-image-preview-4k-manxue') return 'gemini-3.1-flash-image-preview-4k';
+  return m;
+}
+
+/** 满 eAPI 分辨率映射 */
+function manxueResolution(nodeResolution?: string): '2K' | '4K' {
+  const r = (nodeResolution || '2k').toLowerCase().replace(/\s/g, '');
+  return r === '4k' ? '4K' : '2K';
+}
+
+/** 判断是否为满 eAPI Gemini 系列模型（需要 Vertex AI 风格接口） */
+function isManxueGeminiModel(modelName: string): boolean {
+  const m = (modelName || '').trim();
+  return (
+    m === 'gemini-3-pro-image-preview-2k-manxue' ||
+    m === 'gemini-3-pro-image-preview-4k-manxue' ||
+    m === 'gemini-3.1-flash-image-preview-2k-manxue' ||
+    m === 'gemini-3.1-flash-image-preview-4k-manxue'
+  );
+}
+
+/** 满 eAPI Gemini 系列文生图：使用 Vertex AI 风格 /v1beta/models/{model}:generateContent 接口 */
+async function manxueGeminiGenerateImage(
+  prompt: string,
+  aspectRatio: string,
+  numberOfImages: number,
+  modelName: string,
+  nodeResolution?: string,
+  signal?: AbortSignal
+): Promise<string[]> {
+  const model = manxueT2iModel(modelName);
+  const apiKey = getManxueSavedKey();
+  if (!apiKey) throw new Error('未配置满 eAPI Key。');
+  const key = apiKey.trim();
+  const base = 'https://manxueapi.com/v1beta/models';
+  const out: string[] = [];
+  const count = Math.min(Math.max(numberOfImages, 1), 8);
+
+  // 将画幅比例转为实际像素尺寸（Gemini Vertex API 需要）
+  const aspectToSize: Record<string, { width: number; height: number }> = {
+    '1:1': { width: 1024, height: 1024 },
+    '16:9': { width: 1344, height: 768 },
+    '9:16': { width: 768, height: 1344 },
+    '4:3': { width: 1024, height: 768 },
+    '3:4': { width: 768, height: 1024 },
+    '2:1': { width: 1344, height: 768 },
+    '1:2': { width: 768, height: 1344 },
+    '21:9': { width: 1536, height: 640 },
+    '9:21': { width: 640, height: 1536 },
+    '3:2': { width: 1216, height: 832 },
+    '2:3': { width: 832, height: 1216 },
+  };
+  const size = aspectToSize[aspectRatio] || aspectToSize['16:9'];
+
+  for (let i = 0; i < count; i++) {
+    assertNotAborted(signal);
+
+    // 构建 Vertex AI 风格的请求体
+    // prompt 中明确包含画幅比例要求，确保模型生成正确比例的图片
+    const body: Record<string, unknown> = {
+      contents: [
+        {
+          parts: [
+            {
+              text: `[图片比例 ${aspectRatio}] ${prompt}`,
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        responseModalities: ['IMAGE'],
+        imageConfig: {
+          aspectRatio: aspectRatio,
+          imageSize: manxueResolution(nodeResolution) === '4K' ? '4K' : '2K',
+        },
+      },
+    };
+
+    const url = `${base}/${encodeURIComponent(model)}:generateContent?key=${key}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`满 eAPI Gemini 生成失败 (${res.status}): ${text.slice(0, 800)}`);
+    }
+
+    const json = await res.json() as {
+      candidates?: Array<{
+        content?: {
+          parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }>;
+        };
+      }>;
+      error?: { message?: string };
+    };
+
+    if (json.error?.message) {
+      throw new Error(`满 eAPI Gemini: ${json.error.message}`);
+    }
+
+    const parts = json.candidates?.[0]?.content?.parts;
+    if (!parts || parts.length === 0) {
+      throw new Error('满 eAPI Gemini 响应中未找到图片数据');
+    }
+
+    for (const part of parts) {
+      if (part.inlineData?.data && part.inlineData.mimeType) {
+        const mime = part.inlineData.mimeType;
+        const raw = part.inlineData.data;
+        // 直接返回 base64 数据（不需要再转换）
+        out.push(raw);
+        break;
+      }
+    }
+
+    if (out.length <= i) {
+      throw new Error('满 eAPI Gemini 响应中未找到图片数据');
+    }
+  }
+
+  return out;
 }
 
 function toApisAspectSize(aspectRatio: string): string {
@@ -603,6 +758,194 @@ async function toApisPollTaskToBase64(taskId: string, signal?: AbortSignal): Pro
   throw new Error(
     `ToAPIs 任务超时（已等待超过 ${TOAPIS_TASK_MAX_WAIT_MS / 60_000} 分钟），请稍后重试。`
   );
+}
+
+/** 满 eAPI 提交图片生成任务 */
+async function manxueSubmitGeneration(
+  base: string,
+  apiKey: string,
+  body: Record<string, unknown>,
+  signal?: AbortSignal
+): Promise<{ id?: string; b64_json?: string; data?: unknown[] }> {
+  const res = await fetch(`${base}/images/generations`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`满 eAPI 提交任务失败 (${res.status}): ${text.slice(0, 800)}`);
+  }
+  const json = JSON.parse(text) as { id?: string; error?: { message?: string }; b64_json?: string; data?: unknown[] };
+  if (json.error?.message) throw new Error(`满 eAPI: ${json.error.message}`);
+  // 满 eAPI 可能直接返回图片（同步模式）或返回 id（异步模式）
+  return { id: json.id, b64_json: json.b64_json, data: json.data };
+}
+
+/** 满 eAPI 轮询任务直到完成 */
+async function manxuePollTaskToBase64(
+  base: string,
+  apiKey: string,
+  taskId: string,
+  signal?: AbortSignal
+): Promise<string> {
+  const deadline = Date.now() + MANXUE_TASK_MAX_WAIT_MS;
+  await sleepInterruptible(2000, signal);
+
+  while (Date.now() < deadline) {
+    assertNotAborted(signal);
+    const res = await fetch(`${base}/images/generations/${encodeURIComponent(taskId)}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal,
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(`满 eAPI 查询任务失败 (${res.status}): ${text.slice(0, 500)}`);
+    }
+    const data = JSON.parse(text) as {
+      status?: string;
+      url?: string;
+      result?: { data?: { url?: string }[] };
+      b64_json?: string;
+      error?: { message?: string };
+    };
+
+    if (data.status === 'completed') {
+      // 优先返回 b64_json
+      if (data.b64_json) return data.b64_json;
+      const url = data.url || data.result?.data?.[0]?.url;
+      if (!url) throw new Error('满 eAPI 任务完成但未返回图片。');
+      return fetchUrlAsBase64(url, signal, apiKey);
+    }
+    if (data.status === 'failed') {
+      throw new Error(`满 eAPI 生成失败: ${data.error?.message || JSON.stringify(data.error)}`);
+    }
+    await sleepInterruptible(3000, signal);
+  }
+  throw new Error(`满 eAPI 任务超时（已等待超过 ${MANXUE_TASK_MAX_WAIT_MS / 60_000} 分钟），请稍后重试。`);
+}
+
+/** 从满 eAPI SSE 流式响应中提取图片 URL */
+function extractImageUrlFromManxueSseAccumulated(acc: string): string | null {
+  // 匹配 Markdown 图片格式 ![alt](url)
+  const md = acc.match(/!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/);
+  if (md) return md[1];
+  // 匹配普通 URL
+  const ext = acc.match(/(https?:\/\/[^\s"'<>)]+\.(?:png|jpe?g|webp|gif)(?:\?[^\s"'<>)]*)?)/i);
+  return ext ? ext[1] : null;
+}
+
+/**
+ * 满 eAPI 文生图：使用 /v1/chat/completions + SSE 流式返回图片 URL
+ */
+async function manxueGenerateImageViaChat(
+  prompt: string,
+  model: string,
+  aspectRatio: string,
+  nodeResolution?: string,
+  quality?: string,
+  signal?: AbortSignal
+): Promise<string> {
+  const apiKey = getManxueSavedKey();
+  if (!apiKey) throw new Error('未配置满 eAPI Key。');
+  const base = normalizeBaseUrl(getManxueBaseUrl());
+  const key = apiKey.trim();
+
+  const resolution = manxueResolution(nodeResolution);
+  const size = toApisAspectSize(aspectRatio);
+
+  // 构建消息内容
+  const contentParts: string[] = [];
+  contentParts.push(`图片比例${aspectRatio}, ${resolution}分辨率`);
+  contentParts.push(prompt);
+
+  const body: Record<string, unknown> = {
+    model,
+    messages: [
+      {
+        role: 'user',
+        content: contentParts.join('，') + '。',
+      },
+    ],
+    stream: true,
+  };
+
+  // 添加图片生成参数
+  if (model.startsWith('gemini-')) {
+    body.resolution = resolution;
+  }
+  if (quality && (model === 'gpt-image-2' || model === 'gpt-image-2-pro')) {
+    body.quality = quality;
+  }
+
+  const fetchBase = normalizeBaseUrl(getManxueBaseUrl());
+  const res = await fetch(`${fetchBase}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${key}`,
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`满 eAPI 文生图 (${res.status}): ${t.slice(0, 800)}`);
+  }
+
+  if (!res.body) throw new Error('满 eAPI 响应不支持流式读取。');
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let lineBuf = '';
+  let acc = '';
+
+  try {
+    while (true) {
+      assertNotAborted(signal);
+      const { done, value } = await reader.read();
+      if (done) break;
+      lineBuf += decoder.decode(value, { stream: true });
+      const lines = lineBuf.split('\n');
+      lineBuf = lines.pop() ?? '';
+
+      for (const rawLine of lines) {
+        const s = rawLine.trim();
+        if (!s.startsWith('data:')) continue;
+        const data = s.slice(5).trim();
+        if (data === '[DONE]') {
+          const url = extractImageUrlFromManxueSseAccumulated(acc);
+          if (url) return fetchUrlAsBase64(url, signal, key);
+          continue;
+        }
+        try {
+          const chunk = JSON.parse(data) as {
+            error?: { message?: string };
+            choices?: Array<{ delta?: { content?: string } }>;
+          };
+          if (chunk.error?.message) throw new Error(`满 eAPI: ${chunk.error.message}`);
+          const content = chunk.choices?.[0]?.delta?.content;
+          if (typeof content === 'string' && content) {
+            acc += content;
+            const url = extractImageUrlFromManxueSseAccumulated(acc);
+            if (url) return fetchUrlAsBase64(url, signal, key);
+          }
+        } catch (e) {
+          if (e instanceof Error && e.message.startsWith('满 eAPI:')) throw e;
+        }
+      }
+    }
+    const url = extractImageUrlFromManxueSseAccumulated(acc);
+    if (url) return fetchUrlAsBase64(url, signal, key);
+    throw new Error(`满 eAPI 流式响应中未解析到图片 URL。文本片段：${acc.slice(0, 500)}`);
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 /** ToAPIs grok-video-3：`seconds` 合法值为 6、10、15、20 等；UI 选 5 秒时映射为 6 */
@@ -1268,6 +1611,176 @@ function resolveEditModel(modelName: string): string {
   return 'gpt-image-1';
 }
 
+/** 满 eAPI 尺寸格式：WIDTHxHEIGHT（如 1824x1024），而非宽高比 */
+function manxueAspectSize(aspectRatio: string): string {
+  const map: Record<string, string> = {
+    '1:1': '1024x1024',
+    '16:9': '1824x1024',
+    '9:16': '1024x1824',
+    '4:3': '1024x1024',
+    '3:4': '1024x1824',
+    '2:1': '1824x1024',
+    '1:2': '1024x1824',
+    '21:9': '1824x1024',
+    '9:21': '1024x1824',
+    '3:2': '1824x1024',
+    '2:3': '1024x1824',
+    '5:4': '1024x1024',
+    '4:5': '1024x1824',
+  };
+  return map[aspectRatio] || '1024x1024';
+}
+
+/** 满 eAPI 文生图：GPT Image 2 用 /v1/images/generations，Gemini 用 Vertex AI 风格接口 */
+async function manxueGenerateNewImage(
+  prompt: string,
+  aspectRatio: string,
+  numberOfImages: number,
+  modelName: string,
+  nodeResolution?: string,
+  quality?: string,
+  signal?: AbortSignal
+): Promise<string[]> {
+  // Gemini 系列使用 Vertex AI 风格接口
+  if (isManxueGeminiModel(modelName)) {
+    return manxueGeminiGenerateImage(prompt, aspectRatio, numberOfImages, modelName, nodeResolution, signal);
+  }
+
+  const model = manxueT2iModel(modelName);
+  const resolution = manxueResolution(nodeResolution);
+  const size = manxueAspectSize(aspectRatio);
+  const apiKey = getManxueSavedKey();
+  if (!apiKey) throw new Error('未配置满 eAPI Key。');
+  const base = normalizeBaseUrl(getManxueBaseUrl());
+  const out: string[] = [];
+  const count = Math.min(Math.max(numberOfImages, 1), 8);
+
+  for (let i = 0; i < count; i++) {
+    assertNotAborted(signal);
+    const body: Record<string, unknown> = {
+      model,
+      prompt: `${prompt}\n\n（画幅比例 ${aspectRatio}）`,
+      n: 1,
+      size,
+      response_format: 'b64_json',
+    };
+    // GPT Image 2 支持 quality 参数
+    if (quality && (model === 'gpt-image-2' || model === 'gpt-image-2-pro')) {
+      body.quality = quality;
+    }
+    const result = await manxueSubmitGeneration(base, apiKey, body, signal);
+    // 满 eAPI 可能同步返回图片（data[0].b64_json）或返回 id（需轮询）
+    let b64: string;
+    if (result.b64_json) {
+      b64 = result.b64_json;
+    } else if (result.data && Array.isArray(result.data) && result.data.length > 0) {
+      const first = result.data[0] as { b64_json?: string; url?: string };
+      if (first.b64_json) {
+        b64 = first.b64_json;
+      } else if (first.url) {
+        b64 = await fetchUrlAsBase64(first.url, signal, apiKey);
+      } else {
+        throw new Error('满 eAPI 响应中未找到图片数据');
+      }
+    } else if (result.id) {
+      b64 = await manxuePollTaskToBase64(base, apiKey, result.id, signal);
+    } else {
+      throw new Error('满 eAPI 未返回任务 id 也无图片数据');
+    }
+    out.push(b64);
+  }
+  return out;
+}
+
+/** 满 eAPI 图生图：使用 /v1/images/edits 接口 */
+async function manxueEditImage(
+  base64Images: string[],
+  prompt: string,
+  numberOfImages: number,
+  modelName: string,
+  aspectRatio: string,
+  nodeResolution?: string,
+  quality?: string,
+  signal?: AbortSignal
+): Promise<string[]> {
+  if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
+  const model = manxueT2iModel(modelName);
+  const resolution = manxueResolution(nodeResolution);
+  const size = manxueAspectSize(aspectRatio);
+  const apiKey = getManxueSavedKey();
+  if (!apiKey) throw new Error('未配置满 eAPI Key。');
+  const base = normalizeBaseUrl(getManxueBaseUrl());
+
+  // 将参考图转为 base64（不依赖上传接口）
+  const imageBase64s: string[] = [];
+  for (const img of base64Images.slice(0, 16)) {
+    const trimmed = img.trim();
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      // 远程 URL：直接使用 URL
+      imageBase64s.push(trimmed);
+    } else {
+      // 本地 base64 或 data URL：提取原始 base64
+      const { raw } = parseBase64ImageInput(img);
+      imageBase64s.push(raw);
+    }
+  }
+  if (!imageBase64s.length) throw new Error('参考图处理失败');
+
+  const out: string[] = [];
+  const count = Math.min(Math.max(numberOfImages, 1), 4);
+
+  for (let i = 0; i < count; i++) {
+    assertNotAborted(signal);
+    const body: Record<string, unknown> = {
+      model,
+      prompt: `${prompt}\n\n（画幅比例 ${aspectRatio}）`,
+      image_base64_list: imageBase64s,
+      n: 1,
+      size,
+      response_format: 'b64_json',
+    };
+    if (model.startsWith('gemini-')) {
+      body.resolution = resolution;
+    }
+    if (quality && (model === 'gpt-image-2' || model === 'gpt-image-2-pro')) {
+      body.quality = quality;
+    }
+    const result = await manxueSubmitGeneration(base, apiKey, body, signal);
+    let b64: string;
+    if (result.b64_json) {
+      b64 = result.b64_json;
+    } else if (result.data && Array.isArray(result.data) && result.data.length > 0) {
+      const first = result.data[0] as { b64_json?: string; url?: string };
+      if (first.b64_json) {
+        b64 = first.b64_json;
+      } else if (first.url) {
+        b64 = await fetchUrlAsBase64(first.url, signal, apiKey);
+      } else {
+        throw new Error('满 eAPI 图生图响应中未找到图片数据');
+      }
+    } else if (result.id) {
+      b64 = await manxuePollTaskToBase64(base, apiKey, result.id, signal);
+    } else {
+      throw new Error('满 eAPI 图生图未返回任务 id 也无图片数据');
+    }
+    out.push(b64);
+  }
+  return out;
+}
+
+/** 判断是否为满 eAPI 图像模型 */
+function isManxueImageModel(modelName: string): boolean {
+  const m = (modelName || '').trim();
+  return (
+    m === 'gpt-image-2-pro-manxue' ||
+    m === 'gpt-image-2-manxue' ||
+    m === 'gemini-3-pro-image-preview-2k-manxue' ||
+    m === 'gemini-3-pro-image-preview-4k-manxue' ||
+    m === 'gemini-3.1-flash-image-preview-2k-manxue' ||
+    m === 'gemini-3.1-flash-image-preview-4k-manxue'
+  );
+}
+
 function resolveChatModelForBase(baseNormalized: string, modelName: string): string {
   const m = (modelName || '').trim();
   /** 画布对话节点 id，上游 OpenAI 兼容 model 字段 */
@@ -1305,6 +1818,32 @@ function buildPromptWithDimensions(prompt: string, aspectRatio: string): string 
 }
 
 async function jpegBase64ToPngBlob(base64Input: string): Promise<Blob> {
+  // 检测是否为 URL（而非真正的 base64）
+  const trimmed = base64Input.trim();
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('blob:') || trimmed.startsWith('data:')) {
+    // 是 URL，直接用作 img src
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('无法创建画布上下文'));
+          return;
+        }
+        ctx.drawImage(img, 0, 0);
+        canvas.toBlob(
+          blob => (blob ? resolve(blob) : reject(new Error('PNG 编码失败'))),
+          'image/png'
+        );
+      };
+      img.onerror = () => reject(new Error('参考图解码失败'));
+      img.src = trimmed;
+    });
+  }
   const { raw, mime } = parseBase64ImageInput(base64Input);
   const src = `data:${mime || 'image/jpeg'};base64,${raw}`;
   return new Promise((resolve, reject) => {
@@ -1837,6 +2376,17 @@ export async function openAiGenerateNewImage(
     );
   }
 
+  // 满 eAPI 图像模型
+  if (isManxueImageModel(rawModel)) {
+    const mxKey = getManxueSavedKey().trim();
+    if (!mxKey) {
+      throw new Error(
+        '未配置满 eAPI（manxueapi.com）Key。请在「设置 → API」填写「满 e」API Key。'
+      );
+    }
+    return manxueGenerateNewImage(prompt, aspectRatio, numberOfImages, rawModel, nodeResolution, quality, signal);
+  }
+
   const base = normalizeBaseUrl(getOpenAiBaseUrl());
   if (isToApisHost(base)) {
     return toApisGenerateNewImage(prompt, aspectRatio, numberOfImages, modelName, nodeResolution, signal);
@@ -1913,6 +2463,17 @@ export async function openAiEditImage(
       quality,
       signal
     );
+  }
+
+  // 满 eAPI 图像模型图生图
+  if (isManxueImageModel(rawModel)) {
+    const mxKey = getManxueSavedKey().trim();
+    if (!mxKey) {
+      throw new Error(
+        '未配置满 eAPI（manxueapi.com）Key。请在「设置 → API」填写「满 e」API Key。'
+      );
+    }
+    return manxueEditImage(base64Images, prompt, numberOfImages, rawModel, aspectRatio, nodeResolution, quality, signal);
   }
 
   if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');

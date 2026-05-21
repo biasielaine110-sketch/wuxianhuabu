@@ -8,6 +8,7 @@ import {
   DEFAULT_DEEPSEEK_BASE_URL,
   DEFAULT_DEEPSEEK_CHAT_MODEL_ID,
   DEFAULT_JUNLAN_BASE_URL,
+  DEFAULT_MANXUE_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
   getAiSettingsSnapshot,
   normalizeDeepSeekChatModelId,
@@ -1209,9 +1210,19 @@ function defaultCanvasImageModel(): string {
   return 'gpt-image-2-codesonline';
 }
 
-/** GPT Image 2：君澜 / codesonline / ToAPIs 节点选择时默认 2K */
+/** GPT Image 2：君澜 / codesonline / ToAPIs / 满 e 节点选择时默认 2K */
 function isGptImage2CanvasModelId(id: string): boolean {
-  return id === 'gpt-image-2-junlan' || id === 'gpt-image-2-codesonline' || id === 'gpt-image-2';
+  return id === 'gpt-image-2-junlan' || id === 'gpt-image-2-codesonline' || id === 'gpt-image-2' || id === 'gpt-image-2-manxue';
+}
+
+/** 满 eAPI Gemini 图像模型 */
+function isManxueGeminiImageModel(id: string): boolean {
+  return id === 'gemini-3-pro-image-preview-2k-manxue' || id === 'gemini-3-pro-image-preview-4k-manxue' || id === 'gemini-3.1-flash-image-preview-2k-manxue' || id === 'gemini-3.1-flash-image-preview-4k-manxue';
+}
+
+/** 满 eAPI GPT Image 2 模型 */
+function isManxueGptImage2Model(id: string): boolean {
+  return id === 'gpt-image-2-pro-manxue' || id === 'gpt-image-2-manxue';
 }
 
 /** 画布主界面快捷键说明（与 window keydown / paste 逻辑一致） */
@@ -1573,7 +1584,10 @@ export default function App() {
       >
         <div className="flex justify-between items-start mb-1 gap-2">
           <span className="font-bold">{diagnosis.title}</span>
-          <button onPointerDown={(e) => { e.stopPropagation(); handleUpdateNode(node.id, { error: undefined }); }} className="text-red-300 hover:text-red-100"><XIcon size={12} /></button>
+          <div className="flex gap-1">
+            <button onPointerDown={(e) => { e.stopPropagation(); navigator.clipboard.writeText(node.error || ''); }} className="text-red-300 hover:text-red-100"><CopyIcon size={12} /></button>
+            <button onPointerDown={(e) => { e.stopPropagation(); handleUpdateNode(node.id, { error: undefined }); }} className="text-red-300 hover:text-red-100"><XIcon size={12} /></button>
+          </div>
         </div>
         <div className="text-red-100/90 mb-1">{diagnosis.reason}</div>
         <div className="text-red-300 mb-2">{node.error}</div>
@@ -1821,6 +1835,8 @@ export default function App() {
   const [junlanKeyInput, setJunlanKeyInput] = useState(() => getAiSettingsSnapshot().junlanKey);
   const [codesonlineBaseInput, setCodesonlineBaseInput] = useState(() => getAiSettingsSnapshot().codesonlineBaseUrl);
   const [codesonlineKeyInput, setCodesonlineKeyInput] = useState(() => getAiSettingsSnapshot().codesonlineKey);
+  const [manxueBaseInput, setManxueBaseInput] = useState(() => getAiSettingsSnapshot().manxueBaseUrl);
+  const [manxueKeyInput, setManxueKeyInput] = useState(() => getAiSettingsSnapshot().manxueKey);
 
   useEffect(() => {
     const s = getAiSettingsSnapshot();
@@ -1833,6 +1849,8 @@ export default function App() {
     setJunlanKeyInput(s.junlanKey);
     setCodesonlineBaseInput(s.codesonlineBaseUrl);
     setCodesonlineKeyInput(s.codesonlineKey);
+    setManxueBaseInput(s.manxueBaseUrl);
+    setManxueKeyInput(s.manxueKey);
   }, []);
 
   useEffect(() => {
@@ -6397,8 +6415,8 @@ export default function App() {
           </div>
           {(node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' || node.type === 'panorama') && (
             <>
-              <select className="nodemodel-select bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500 flex-1 min-w-[90px]" value={node.model || defaultCanvasImageModel()} onChange={(e) => { const m = e.target.value; const patch: Partial<CanvasNode> = { model: m }; if (isGptImage2CanvasModelId(m)) patch.resolution = '2k'; handleUpdateNode(node.id, patch); }} onPointerDown={e => e.stopPropagation()}>
-                {(node.type === 't2i' || node.type === 'panoramaT2i') ? (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="nano-banana-2">Nano-Banana 2（ToAPIs）</option><option value="imagen-4">Imagen 4</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option><optgroup label="即梦 (Dreamina)"><option value="jimeng-image-5.0">即梦 5.0</option><option value="jimeng-image-4.6">即梦 4.6</option><option value="jimeng-image-4.5">即梦 4.5</option><option value="jimeng-image-4.0">即梦 4.0</option></optgroup></>) : (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="nano-banana-2">Nano-Banana 2（ToAPIs）</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option><optgroup label="即梦 (Dreamina)"><option value="jimeng-image-5.0">即梦 5.0</option><option value="jimeng-image-4.6">即梦 4.6</option><option value="jimeng-image-4.5">即梦 4.5</option><option value="jimeng-image-4.0">即梦 4.0</option></optgroup></>)}
+              <select className="nodemodel-select bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500 flex-1 min-w-[90px]" value={node.model || defaultCanvasImageModel()} onChange={(e) => { const m = e.target.value; const patch: Partial<CanvasNode> = { model: m }; if (isGptImage2CanvasModelId(m) || isManxueGptImage2Model(m)) patch.resolution = '2k'; handleUpdateNode(node.id, patch); }} onPointerDown={e => e.stopPropagation()}>
+                {(node.type === 't2i' || node.type === 'panoramaT2i') ? (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><optgroup label="满 e（manxueapi.com）"><option value="gpt-image-2-manxue">GPT Image 2（满 e）</option><option value="gpt-image-2-pro-manxue">GPT Image 2 Pro（满 e）</option><option value="gemini-3.1-flash-image-preview-2k-manxue">Gemini 3.1 Flash Image 2K（满 e）</option><option value="gemini-3-pro-image-preview-2k-manxue">Gemini 3 Pro Image 2K（满 e）</option><option value="gemini-3-pro-image-preview-4k-manxue">Gemini 3 Pro Image 4K（满 e）</option><option value="gemini-3.1-flash-image-preview-4k-manxue">Gemini 3.1 Flash Image 4K（满 e）</option></optgroup><optgroup label="ToAPIs"><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="nano-banana-2">Nano-Banana 2（ToAPIs）</option><option value="imagen-4">Imagen 4</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option></optgroup><optgroup label="即梦 (Dreamina)"><option value="jimeng-image-5.0">即梦 5.0</option><option value="jimeng-image-4.6">即梦 4.6</option><option value="jimeng-image-4.5">即梦 4.5</option><option value="jimeng-image-4.0">即梦 4.0</option></optgroup></>) : (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><optgroup label="满 e（manxueapi.com）"><option value="gpt-image-2-manxue">GPT Image 2（满 e）</option><option value="gpt-image-2-pro-manxue">GPT Image 2 Pro（满 e）</option><option value="gemini-3.1-flash-image-preview-2k-manxue">Gemini 3.1 Flash Image 2K（满 e）</option><option value="gemini-3-pro-image-preview-2k-manxue">Gemini 3 Pro Image 2K（满 e）</option><option value="gemini-3-pro-image-preview-4k-manxue">Gemini 3 Pro Image 4K（满 e）</option><option value="gemini-3.1-flash-image-preview-4k-manxue">Gemini 3.1 Flash Image 4K（满 e）</option></optgroup><optgroup label="ToAPIs"><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="nano-banana-2">Nano-Banana 2（ToAPIs）</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option></optgroup><optgroup label="即梦 (Dreamina)"><option value="jimeng-image-5.0">即梦 5.0</option><option value="jimeng-image-4.6">即梦 4.6</option><option value="jimeng-image-4.5">即梦 4.5</option><option value="jimeng-image-4.0">即梦 4.0</option></optgroup></>)}
               </select>
               <div className="nodemeta-skip-scale flex items-center gap-0.5">
                 <select className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.aspectRatio || (node.type === 'panoramaT2i' ? '2:1' : '16:9')} onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })} onPointerDown={e => e.stopPropagation()}>
@@ -6406,7 +6424,7 @@ export default function App() {
                 </select>
                 <select className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.resolution || '2k'} onChange={(e) => handleUpdateNode(node.id, { resolution: e.target.value })} onPointerDown={e => e.stopPropagation()}><option value="4k">4K</option><option value="2k">2K</option><option value="1k">1K</option></select>
                 <select className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.imageCount || 1} onChange={(e) => handleUpdateNode(node.id, { imageCount: parseInt(e.target.value) })} onPointerDown={e => e.stopPropagation()}><option value={1}>1</option><option value={2}>2</option><option value={4}>4</option></select>
-                {isGptImage2CanvasModelId(node.model || defaultCanvasImageModel()) && (
+                {isGptImage2CanvasModelId(node.model || defaultCanvasImageModel()) || isManxueGptImage2Model(node.model || defaultCanvasImageModel()) && (
                   <select className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500" value={node.quality || 'high'} onChange={(e) => handleUpdateNode(node.id, { quality: e.target.value })} onPointerDown={e => e.stopPropagation()}>
                     <option value="low">low</option>
                     <option value="medium">medium</option>
@@ -8748,6 +8766,28 @@ export default function App() {
                     /></span>
                   </div>
 
+                  {/* ④ 满 eAPI */}
+                  <div className="mt-5 pt-4 border-t border-[#333]">
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">满 e（manxueapi.com）</h3>
+                    <span hidden>
+                    <label className="text-xs text-gray-500 block mb-1">Base URL</label>
+                    <input
+                      type="text"
+                      readOnly
+                      value={manxueBaseInput}
+                      placeholder={DEFAULT_MANXUE_BASE_URL}
+                      className="w-full mb-3 bg-[#252525] border border-[#333] rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
+                    /></span>
+                    <label className="text-xs text-gray-500 block mb-1">满 e API Key</label>
+                    <input
+                      type="password"
+                      value={manxueKeyInput}
+                      onChange={(e) => setManxueKeyInput(e.target.value)}
+                      placeholder="sk-..."
+                      className="w-full bg-[#222222] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-green-600 transition-colors text-sm"
+                    />
+                  </div>
+
                   {/* ⑤ ToAPIs */}
                   <div className="mt-5 pt-4 border-t border-[#333]">
                     <h3 className="text-sm font-semibold text-gray-200 mb-2">ToAPIs</h3>
@@ -8794,6 +8834,8 @@ export default function App() {
                                 codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
                                 deepSeekApiKey: deepSeekKeyInput.trim(),
                                 deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
+                                manxueApiKey: manxueKeyInput.trim(),
+                                manxueBaseUrl: manxueBaseInput.trim() || DEFAULT_MANXUE_BASE_URL,
                               });
                               initGeminiClientFromStorage();
                               setShowSettingsModal(false);
@@ -8822,6 +8864,8 @@ export default function App() {
                                 codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
                                 deepSeekApiKey: deepSeekKeyInput.trim(),
                                 deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
+                                manxueApiKey: manxueKeyInput.trim(),
+                                manxueBaseUrl: manxueBaseInput.trim() || DEFAULT_MANXUE_BASE_URL,
                               });
                               initGeminiClientFromStorage();
                               setShowSettingsModal(false);
@@ -8854,6 +8898,8 @@ export default function App() {
                           codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
                           deepSeekApiKey: deepSeekKeyInput.trim(),
                           deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
+                          manxueApiKey: manxueKeyInput.trim(),
+                          manxueBaseUrl: manxueBaseInput.trim() || DEFAULT_MANXUE_BASE_URL,
                         });
                         initGeminiClientFromStorage();
                           setShowSettingsModal(false);
@@ -14049,7 +14095,10 @@ function ChatNodeContent({
               style={{ fontSize: chatFontScaled }}
               onClick={() => onUpdate({ error: undefined })}
             >
-              <div className="font-bold mb-1">{chatErrorDiagnosis.title}</div>
+              <div className="flex justify-between items-start mb-1">
+                <div className="font-bold">{chatErrorDiagnosis.title}</div>
+                <button onPointerDown={(e) => { e.stopPropagation(); navigator.clipboard.writeText(node.error || ''); }} className="text-red-300 hover:text-red-100"><CopyIcon size={12} /></button>
+              </div>
               <div className="text-red-100/90 mb-1">{chatErrorDiagnosis.reason}</div>
               <div className="text-red-300 mb-2">{node.error}</div>
               <div className="flex flex-wrap gap-1">
