@@ -6,6 +6,8 @@ import {
   getGeminiSavedKey,
   getJunlanBaseUrl,
   getJunlanSavedKey,
+  getMiniMaxBaseUrl,
+  getMiniMaxSavedKey,
   getOpenAiBaseUrl,
   getOpenAiSavedKey,
   normalizeDeepSeekChatModelId,
@@ -28,6 +30,12 @@ function isDeepSeekChatModelId(modelName: string): boolean {
 function isJunlanChatModelId(modelName: string): boolean {
   const m = (modelName || '').trim();
   return m === 'gpt-5.5-junlan' || m === 'claude-sonnet-4-6';
+}
+
+/** MiniMax 对话模型 id */
+function isMiniMaxChatModelId(modelName: string): boolean {
+  const m = (modelName || '').trim();
+  return m === 'minimax-m2.7' || m.startsWith('minimax-');
 }
 
 /** Google GenAI 官方模型 id；ToAPIs 等网关可使用带 -official 的别名，直连时需映射 */
@@ -336,6 +344,26 @@ export const callGeminiChatWithHistory = async (
       return chatCompletionHistoryAtBase(
         getJunlanBaseUrl(),
         jlKey,
+        modelName,
+        slice.map((t) => ({
+          role: t.role,
+          content: t.content,
+          imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
+          imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
+        }))
+      );
+    }
+
+    if (isMiniMaxChatModelId(modelName)) {
+      const mxKey = getMiniMaxSavedKey().trim();
+      if (!mxKey) {
+        throw new Error(
+          '使用 MiniMax M2.7：请在「设置 → API」中填写「MiniMax API Key」，并确认 Base URL 为 https://api.minimax.io/v1。'
+        );
+      }
+      return chatCompletionHistoryAtBase(
+        getMiniMaxBaseUrl(),
+        mxKey,
         modelName,
         slice.map((t) => ({
           role: t.role,

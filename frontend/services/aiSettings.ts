@@ -15,6 +15,9 @@ const CODESONLINE_IMAGE_BASE_URL_STORAGE_KEY = 'codesonline-image-openai-base-ur
 /** 满 eAPI（manxueapi.com）OpenAI 兼容网关：画布「GPT Image 2（满 e）」与「Gemini 3 Pro Image」等 */
 const MANXUE_API_KEY_STORAGE_KEY = 'manxue-openai-compatible-api-key-v1';
 const MANXUE_BASE_URL_STORAGE_KEY = 'manxue-openai-compatible-base-url-v1';
+/** MiniMax OpenAI 兼容网关：AI 对话「MiniMax M2.7」等 */
+const MINIMAX_API_KEY_STORAGE_KEY = 'minimax-openai-compatible-api-key-v1';
+const MINIMAX_BASE_URL_STORAGE_KEY = 'minimax-openai-compatible-base-url-v1';
 
 export const DEFAULT_OPENAI_BASE_URL = 'https://toapis.com/v1';
 /** 文档：https://stsg17lkjz.apifox.cn/8682367m0 — Base URL 须含 /v1 */
@@ -26,6 +29,8 @@ export const DEFAULT_DEEPSEEK_CHAT_MODEL_ID = 'deepseek-v4-flash';
 
 /** 满 eAPI manxueapi.com OpenAI 兼容入口（Base URL 须含 /v1） */
 export const DEFAULT_MANXUE_BASE_URL = 'https://manxueapi.com/v1';
+/** MiniMax API MiniMax OpenAI 兼容入口（Base URL 须含 /v1） */
+export const DEFAULT_MINIMAX_BASE_URL = 'https://api.minimax.io/v1';
 
 /** 旧版存盘中的 model id → 当前官方命名（不在界面展示旧名） */
 export function normalizeDeepSeekChatModelId(modelId: string): string {
@@ -254,6 +259,43 @@ export function setManxueBaseUrl(url: string): void {
   }
 }
 
+export function getMiniMaxSavedKey(): string {
+  try {
+    return localStorage.getItem(MINIMAX_API_KEY_STORAGE_KEY)?.trim() || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setMiniMaxKey(apiKey: string): void {
+  const normalized = apiKey.trim();
+  try {
+    if (normalized) localStorage.setItem(MINIMAX_API_KEY_STORAGE_KEY, normalized);
+    else localStorage.removeItem(MINIMAX_API_KEY_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getMiniMaxBaseUrl(): string {
+  try {
+    const raw = localStorage.getItem(MINIMAX_BASE_URL_STORAGE_KEY)?.trim();
+    return raw || DEFAULT_MINIMAX_BASE_URL;
+  } catch {
+    return DEFAULT_MINIMAX_BASE_URL;
+  }
+}
+
+export function setMiniMaxBaseUrl(url: string): void {
+  const normalized = url.trim();
+  try {
+    if (normalized) localStorage.setItem(MINIMAX_BASE_URL_STORAGE_KEY, normalized);
+    else localStorage.removeItem(MINIMAX_BASE_URL_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function getDeepSeekSavedKey(): string {
   try {
     return localStorage.getItem(DEEPSEEK_API_KEY_STORAGE_KEY)?.trim() || '';
@@ -304,6 +346,8 @@ export type AiSettingsSnapshot = {
   deepSeekBaseUrl: string;
   manxueKey: string;
   manxueBaseUrl: string;
+  minimaxKey: string;
+  minimaxBaseUrl: string;
 };
 
 export function getAiSettingsSnapshot(): AiSettingsSnapshot {
@@ -320,6 +364,8 @@ export function getAiSettingsSnapshot(): AiSettingsSnapshot {
     deepSeekBaseUrl: getDeepSeekBaseUrl(),
     manxueKey: getManxueSavedKey(),
     manxueBaseUrl: getManxueBaseUrl(),
+    minimaxKey: getMiniMaxSavedKey(),
+    minimaxBaseUrl: getMiniMaxBaseUrl(),
   };
 }
 
@@ -342,6 +388,9 @@ export type PersistAiSettingsInput = {
   /** 满 eAPI（manxueapi.com）专用；不传则保留原值 */
   manxueApiKey?: string;
   manxueBaseUrl?: string;
+  /** MiniMax 对话专用；不传则保留原值 */
+  minimaxApiKey?: string;
+  minimaxBaseUrl?: string;
 };
 
 export function persistAiSettings(opts: PersistAiSettingsInput): void {
@@ -357,4 +406,6 @@ export function persistAiSettings(opts: PersistAiSettingsInput): void {
   if (opts.deepSeekBaseUrl !== undefined) setDeepSeekBaseUrl(opts.deepSeekBaseUrl);
   if (opts.manxueApiKey !== undefined) setManxueKey(opts.manxueApiKey);
   if (opts.manxueBaseUrl !== undefined) setManxueBaseUrl(opts.manxueBaseUrl);
+  if (opts.minimaxApiKey !== undefined) setMiniMaxKey(opts.minimaxApiKey);
+  if (opts.minimaxBaseUrl !== undefined) setMiniMaxBaseUrl(opts.minimaxBaseUrl);
 }

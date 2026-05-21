@@ -1,6 +1,7 @@
 import {
   DEFAULT_DEEPSEEK_CHAT_MODEL_ID,
   DEFAULT_MANXUE_BASE_URL,
+  DEFAULT_MINIMAX_BASE_URL,
   normalizeDeepSeekChatModelId,
   getAiProvider,
   getCodesonlineBaseUrl,
@@ -9,6 +10,8 @@ import {
   getJunlanSavedKey,
   getManxueBaseUrl,
   getManxueSavedKey,
+  getMiniMaxBaseUrl,
+  getMiniMaxSavedKey,
   getOpenAiBaseUrl,
   getOpenAiSavedKey,
 } from './aiSettings';
@@ -115,6 +118,16 @@ function isManxueHost(baseNormalized: string): boolean {
   try {
     const host = new URL(baseNormalized).hostname.toLowerCase();
     return host === 'manxueapi.com' || host.endsWith('.manxueapi.com');
+  } catch {
+    return false;
+  }
+}
+
+/** 判断是否为 MiniMax 域名（api.minimax.io） */
+function isMiniMaxHost(baseNormalized: string): boolean {
+  try {
+    const host = new URL(baseNormalized).hostname.toLowerCase();
+    return host === 'api.minimax.io' || host.endsWith('.minimax.io');
   } catch {
     return false;
   }
@@ -1998,8 +2011,13 @@ function resolveChatModelForBase(baseNormalized: string, modelName: string): str
     if (nm.startsWith('deepseek-v4-')) return nm;
     return DEFAULT_DEEPSEEK_CHAT_MODEL_ID;
   }
+  if (isMiniMaxHost(baseNormalized)) {
+    // MiniMax 原样透传 model id
+    return m || 'minimax-m2.7';
+  }
   if (m.startsWith('gpt-') || m.startsWith('o1') || m.startsWith('o3')) return m;
   if (m.startsWith('deepseek-')) return m;
+  if (m.startsWith('minimax-')) return m;
   // ToAPIs 等网关使用 Gemini 模型 id 透传；其它 OpenAI 兼容站若也支持该 id，同样原样发送
   if (m === 'gemini-2.0-flash-official' || m === 'gemini-3.1-flash-lite-preview-official') return m;
   const geminiToOpenAi: Record<string, string> = {
@@ -2780,4 +2798,15 @@ export async function openAiChatCompletion(
   const apiKey = getOpenAiSavedKey();
   if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key，请在设置中选择「OpenAI 兼容」并填写密钥。');
   return chatCompletionAtBase(getOpenAiBaseUrl(), apiKey, modelName, prompt, base64Image);
+}
+
+/** MiniMax 对话：使用 MiniMax 专用的 Base URL 与 API Key */
+export async function minimaxChatCompletion(
+  prompt: string,
+  base64Image?: string,
+  modelName: string = 'minimax-m2.7'
+): Promise<string> {
+  const apiKey = getMiniMaxSavedKey();
+  if (!apiKey) throw new Error('未配置 MiniMax API Key，请在设置中填写 MiniMax API Key。');
+  return chatCompletionAtBase(getMiniMaxBaseUrl(), apiKey, modelName, prompt, base64Image);
 }

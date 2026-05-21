@@ -9,6 +9,7 @@ import {
   DEFAULT_DEEPSEEK_CHAT_MODEL_ID,
   DEFAULT_JUNLAN_BASE_URL,
   DEFAULT_MANXUE_BASE_URL,
+  DEFAULT_MINIMAX_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
   getAiSettingsSnapshot,
   normalizeDeepSeekChatModelId,
@@ -1838,6 +1839,8 @@ export default function App() {
   const [codesonlineKeyInput, setCodesonlineKeyInput] = useState(() => getAiSettingsSnapshot().codesonlineKey);
   const [manxueBaseInput, setManxueBaseInput] = useState(() => getAiSettingsSnapshot().manxueBaseUrl);
   const [manxueKeyInput, setManxueKeyInput] = useState(() => getAiSettingsSnapshot().manxueKey);
+  const [minimaxBaseInput, setMiniMaxBaseInput] = useState(() => getAiSettingsSnapshot().minimaxBaseUrl);
+  const [minimaxKeyInput, setMiniMaxKeyInput] = useState(() => getAiSettingsSnapshot().minimaxKey);
 
   useEffect(() => {
     const s = getAiSettingsSnapshot();
@@ -1852,6 +1855,8 @@ export default function App() {
     setCodesonlineKeyInput(s.codesonlineKey);
     setManxueBaseInput(s.manxueBaseUrl);
     setManxueKeyInput(s.manxueKey);
+    setMiniMaxBaseInput(s.minimaxBaseUrl);
+    setMiniMaxKeyInput(s.minimaxKey);
   }, []);
 
   useEffect(() => {
@@ -8852,6 +8857,28 @@ export default function App() {
                     />
                   </div>
 
+                  {/* ④ MiniMax */}
+                  <div className="mt-5 pt-4 border-t border-[#333]">
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">MiniMax</h3>
+                    <span hidden>
+                    <label className="text-xs text-gray-500 block mb-1">Base URL</label>
+                    <input
+                      type="text"
+                      readOnly
+                      value={minimaxBaseInput}
+                      placeholder={DEFAULT_MINIMAX_BASE_URL}
+                      className="w-full mb-3 bg-[#252525] border border-[#333] rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
+                    /></span>
+                    <label className="text-xs text-gray-500 block mb-1">MiniMax API Key</label>
+                    <input
+                      type="password"
+                      value={minimaxKeyInput}
+                      onChange={(e) => setMiniMaxKeyInput(e.target.value)}
+                      placeholder="sk-..."
+                      className="w-full bg-[#222222] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-green-600 transition-colors text-sm"
+                    />
+                  </div>
+
                   {/* ⑤ ToAPIs */}
                   <div className="mt-5 pt-4 border-t border-[#333]">
                     <h3 className="text-sm font-semibold text-gray-200 mb-2">ToAPIs</h3>
@@ -8900,6 +8927,8 @@ export default function App() {
                                 deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
                                 manxueApiKey: manxueKeyInput.trim(),
                                 manxueBaseUrl: manxueBaseInput.trim() || DEFAULT_MANXUE_BASE_URL,
+                                minimaxApiKey: minimaxKeyInput.trim(),
+                                minimaxBaseUrl: minimaxBaseInput.trim() || DEFAULT_MINIMAX_BASE_URL,
                               });
                               initGeminiClientFromStorage();
                               setShowSettingsModal(false);
@@ -8930,6 +8959,8 @@ export default function App() {
                                 deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
                                 manxueApiKey: manxueKeyInput.trim(),
                                 manxueBaseUrl: manxueBaseInput.trim() || DEFAULT_MANXUE_BASE_URL,
+                                minimaxApiKey: minimaxKeyInput.trim(),
+                                minimaxBaseUrl: minimaxBaseInput.trim() || DEFAULT_MINIMAX_BASE_URL,
                               });
                               initGeminiClientFromStorage();
                               setShowSettingsModal(false);
@@ -8964,6 +8995,8 @@ export default function App() {
                           deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
                           manxueApiKey: manxueKeyInput.trim(),
                           manxueBaseUrl: manxueBaseInput.trim() || DEFAULT_MANXUE_BASE_URL,
+                          minimaxApiKey: minimaxKeyInput.trim(),
+                          minimaxBaseUrl: minimaxBaseInput.trim() || DEFAULT_MINIMAX_BASE_URL,
                         });
                         initGeminiClientFromStorage();
                           setShowSettingsModal(false);
@@ -13889,6 +13922,9 @@ function ChatNodeContent({
           <optgroup label="DeepSeek">
             <option value="deepseek-v4-flash">DeepSeek-V4-Flash</option>
             <option value="deepseek-v4-pro">DeepSeek-V4-Pro</option>
+          </optgroup>
+          <optgroup label="MiniMax">
+            <option value="minimax-m2.7">MiniMax M2.7</option>
           </optgroup>
           <optgroup label="君澜 AI">
             <option value="gpt-5.5-junlan">GPT-5.5（君澜）</option>
