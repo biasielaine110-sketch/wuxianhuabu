@@ -4965,6 +4965,86 @@ export default function App() {
     }
   };
 
+  // 优化提示词：优先使用 gpt-5.5（君澜），失败则使用 deepseek-v4-flash
+  const handleOptimizePrompt = async (nodeId: string, text: string) => {
+    const sourceNode = nodes.find(n => n.id === nodeId);
+    if (!sourceNode) return;
+
+    // 设置源节点为生成状态（用于显示加载动画）
+    generationStartedAtRef.current.set(nodeId, Date.now());
+    handleUpdateNode(nodeId, { isGenerating: true, error: undefined });
+
+    try {
+      const apiTurns = [
+        {
+          role: 'user' as const,
+          content: `请将以下文字内容优化成在 seedance 2.0 中进行生图和生视频的提示词。只输出优化后的提示词内容，不要解释。
+
+原文内容：
+${text}`,
+        },
+      ];
+
+      let result = '';
+      let usedFallback = false;
+
+      try {
+        result = await callGeminiChatWithHistory(apiTurns, 'gpt-5.5-junlan');
+      } catch (err: any) {
+        // GPT-5.5 失败，尝试 deepseek-v4-flash
+        usedFallback = true;
+        try {
+          result = await callGeminiChatWithHistory(apiTurns, 'deepseek-v4-flash');
+        } catch {
+          handleUpdateNode(nodeId, { isGenerating: false, error: '优化提示词失败，请检查 API 配置' });
+          return;
+        }
+      }
+
+      if (!result.trim()) {
+        handleUpdateNode(nodeId, { isGenerating: false, error: '未获取到优化后的提示词' });
+        return;
+      }
+
+      // 在当前文本节点右侧创建新的文本节点，填入优化后的提示词
+      const newId = `text-${Date.now()}`;
+      const defaultSize = { width: 420, height: 300 };
+      const newNode: CanvasNode = {
+        id: newId,
+        type: 'text',
+        x: (sourceNode?.x || 0) + defaultSize.width + 50,
+        y: sourceNode?.y || 0,
+        width: defaultSize.width,
+        height: defaultSize.height,
+        prompt: result.trim(),
+        images: [],
+        aspectRatio: '1:1',
+        resolution: '2k',
+        imageCount: 1,
+        model: defaultCanvasImageModel(),
+        viewMode: 'single',
+        currentImageIndex: 0,
+      };
+
+      // 结束源节点生成状态
+      handleUpdateNode(nodeId, { isGenerating: false });
+
+      setNodes((prev) => [...prev, newNode]);
+      setSelectedIds([newId]);
+
+      // 自动选中新节点进入编辑状态
+      setTimeout(() => {
+        setEditingTextNodeIds((prev) => {
+          const next = new Set(prev);
+          next.add(newId);
+          return next;
+        });
+      }, 50);
+    } catch (err: any) {
+      handleUpdateNode(nodeId, { isGenerating: false, error: err.message || '优化失败' });
+    }
+  };
+
   // 处理连线数据传递 - 当有连线连接到 panorama 或 annotation 节点时
   useEffect(() => {
     nodes.forEach(node => {
@@ -6506,13 +6586,30 @@ export default function App() {
           <div className="flex items-center gap-2">
             {headerIcon}
             {node.type === 'text' && (
-              <button
-                onPointerDown={(e) => { e.stopPropagation(); setEyedropperTargetNodeId(node.id); }}
-                className={`ml-1 px-1.5 py-0.5 rounded text-[10px] text-white ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
-                title={eyedropperTargetNodeId === node.id ? "取消吸取" : "吸取文本"}
-              >
-                <EyedropperIcon size={10} />
-              </button>
+              <>
+                <button
+                  onPointerDown={(e) => { e.stopPropagation(); setEyedropperTargetNodeId(node.id); }}
+                  className={`ml-1 px-1.5 py-0.5 rounded text-[10px] text-white ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
+                  title={eyedropperTargetNodeId === node.id ? "取消吸取" : "吸取文本"}
+                >
+                  <EyedropperIcon size={10} />
+                </button>
+                <button
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    const text = node.prompt?.trim();
+                    if (!text) {
+                      alert('请先在文本节点输入要优化的提示词内容');
+                      return;
+                    }
+                    handleOptimizePrompt(node.id, text);
+                  }}
+                  className="ml-1 px-1.5 py-0.5 rounded text-[10px] text-white bg-purple-600 hover:bg-purple-500"
+                  title="AI优化提示词（生成Seedance 2.0提示词）"
+                >
+                  优化提示词
+                </button>
+              </>
             )}
           </div>
           {(node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' || node.type === 'panorama') && (
@@ -7061,15 +7158,12 @@ export default function App() {
                 )}
                 {node.type === 'text' && !(isSelected && editingTextNodeIds.has(node.id)) ? (
                   <div
-                    className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] overflow-y-auto leading-relaxed whitespace-pre-wrap break-words text-node-content"
+                    className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] overflow-y-auto leading-relaxed whitespace-pre-wrap break-words text-node-content relative"
                     style={{ fontSize: '40px', minHeight: '120px' }}
                     onPointerDown={(e) => {
-                      // 吸管模式激活时，允许事件冒泡触发吸管连线
                       if (eyedropperTargetNodeId) {
                         return;
                       }
-                      // 允许事件冒泡，使节点可被拖拽移动
-                      // 滚动条区域也不阻止，由外层的 handleNodePointerDown 处理
                     }}
                     onDoubleClick={(e) => {
                       if (!isSelected) {
@@ -7079,6 +7173,22 @@ export default function App() {
                       }
                     }}
                   >
+                    {node.isGenerating ? (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#222222]/90 rounded-lg z-10">
+                        <div className="gen-progress-orb mb-3" style={{ transform: 'scale(3)' }}>
+                          <div className="gen-progress-orb-ring" />
+                          <div className="gen-progress-orb-core">
+                            <svg className="w-4 h-4 text-purple-400" viewBox="0 0 24 24" fill="none">
+                              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                            </svg>
+                          </div>
+                        </div>
+                        <span className="gen-text-glitch tabular-nums text-purple-400 mt-5" style={{ fontSize: '20px' }} data-text={genTimeMmSs}>
+                          {genTimeMmSs}
+                        </span>
+                        <span className="text-gray-500 mt-1" style={{ fontSize: '14px' }}>({genElapsedSec}s)</span>
+                      </div>
+                    ) : null}
                     {node.prompt || <span className="text-gray-500">双击编辑文本</span>}
                     <style>{`
                       .text-node-content::-webkit-scrollbar { width: 36px; }
