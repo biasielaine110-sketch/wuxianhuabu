@@ -5998,7 +5998,7 @@ export default function App() {
           )}
 
           {node.type === 'video' && (
-            <div className={`w-full h-[680px] shrink-0 relative border-b border-[#333] overflow-hidden group ${isSelected ? 'bg-[#2a2a2a]' : 'bg-[#1a1a1a]'}`}>
+            <div className={`w-full ${!isSelected && videoUrls.length > 0 ? 'flex-1 min-h-0' : 'h-[680px] shrink-0'} relative border-b border-[#333] overflow-hidden group ${isSelected ? 'bg-[#2a2a2a]' : 'bg-[#1a1a1a]'}`}>
               {videoUrls.length > 0 ? (
                 <>
                 <div className="relative w-full h-full">
@@ -6947,7 +6947,7 @@ export default function App() {
             ) : null;
           })()}
           {/* Text Area - panoramaT2i 使用内置提示词，不显示输入框；视频节点未选中且有视频时隐藏 */}
-          {(node.type === 't2i' || node.type === 'i2i' || node.type === 'text' || (node.type === 'video' && (isSelected || videoUrls.length === 0))) && (
+          {(node.type === 't2i' || node.type === 'i2i' || node.type === 'text' || (node.type === 'video' && isSelected)) && (
             <div
               className={`flex flex-col min-h-0 overflow-hidden ${
                 node.type === 't2i' || node.type === 'i2i' ? 'flex-[3] basis-0' : 'flex-1'
