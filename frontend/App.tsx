@@ -5194,9 +5194,13 @@ export default function App() {
             ? (['1080p', '4k'].includes(node.videoResolution || '') ? (node.videoResolution as '1080p' | '4k') : '1080p')
             : videoModel === 'sora-2-vvip'
               ? '720p'
-              : videoModel === 'doubao-seedance-1-5-pro' || videoModel === 'seedance-2' || videoModel === 'seedance-2-fast'
+              : videoModel === 'doubao-seedance-1-5-pro'
                 ? (['480p', '1080p'].includes(node.videoResolution || '') ? (node.videoResolution as '480p' | '1080p') : '720p')
-                : node.videoResolution === '480p'
+                : videoModel === 'seedance-2'
+                  ? (node.videoResolution === '1080p' ? '1080p' : '720p')
+                  : videoModel === 'seedance-2-fast'
+                    ? '720p'
+                    : node.videoResolution === '480p'
                   ? '480p'
                   : '720p';
 
@@ -6469,7 +6473,9 @@ export default function App() {
           const isSora = isVideoSoraStyleModel(vm);
           const isVeo = isVideoVeoStyleModel(vm);
           const isGroDur = isVideoGrokDurationStyleModel(vm);
-          const isDoubao = vm === 'doubao-seedance-1-5-pro' || vm === 'seedance-2' || vm === 'seedance-2-fast';
+          const isDoubao = vm === 'doubao-seedance-1-5-pro';
+          const isSeedance2 = vm === 'seedance-2';
+          const isSeedance2Fast = vm === 'seedance-2-fast';
           const isGemini = vm === 'gemini-omni';
           const vSlots = buildIncomingRefSlots(node.id, edges, nodes);
           const imageSlots = vSlots.filter((s) => s.kind === 'image');
@@ -6564,7 +6570,7 @@ export default function App() {
                   : isGroDur
                     ? ' · Grok：多档秒数与画幅'
                     : isDoubao
-                      ? ' · Seedance 2：5-10 秒；画幅 16:9/9:16/1:1；720p/1080p'
+                      ? ' · Seedance 2：5-10 秒；画幅 16:9/9:16/1:1'
                       : ''}
             </div>
             {!isSora && !isVeo && isGroDur && (
@@ -6600,13 +6606,16 @@ export default function App() {
                       node.videoResolution === '480p' || node.videoResolution === '1080p'
                         ? node.videoResolution
                         : '720p';
-                  } else if (m === 'seedance-2' || m === 'seedance-2-fast') {
+                  } else if (m === 'seedance-2') {
                     const d = node.videoDuration ?? 8;
                     updates.videoDuration = [5, 6, 8, 10].includes(d) ? d : 8;
-                    updates.videoResolution =
-                      node.videoResolution === '480p' || node.videoResolution === '1080p'
-                        ? node.videoResolution
-                        : '720p';
+                    updates.videoResolution = node.videoResolution === '1080p' ? '1080p' : '720p';
+                    const ar = node.aspectRatio || '16:9';
+                    if (!['16:9', '9:16', '1:1'].includes(ar)) updates.aspectRatio = '16:9';
+                  } else if (m === 'seedance-2-fast') {
+                    const d = node.videoDuration ?? 8;
+                    updates.videoDuration = [5, 6, 8, 10].includes(d) ? d : 8;
+                    updates.videoResolution = '720p';
                     const ar = node.aspectRatio || '16:9';
                     if (!['16:9', '9:16', '1:1'].includes(ar)) updates.aspectRatio = '16:9';
                   } else if (m === 'gemini-omni') {
@@ -6811,6 +6820,20 @@ export default function App() {
                   <option value="720p">720p (2.9毛/秒)</option>
                   <option value="1080p">1080p (7.5毛/秒)</option>
                 </select>
+              ) : isSeedance2 ? (
+                <select
+                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  value={node.videoResolution === '1080p' ? '1080p' : '720p'}
+                  onChange={(e) =>
+                    handleUpdateNode(node.id, { videoResolution: e.target.value as '720p' | '1080p' })
+                  }
+                  onPointerDown={e => e.stopPropagation()}
+                >
+                  <option value="720p">720p (1元/秒)</option>
+                  <option value="1080p">1080p (2.5元/秒)</option>
+                </select>
+              ) : isSeedance2Fast ? (
+                <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p (8毛/秒)</span>
               ) : isGemini ? (
                 <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p</span>
               ) : (
