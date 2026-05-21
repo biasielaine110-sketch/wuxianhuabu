@@ -6608,13 +6608,13 @@ export default function App() {
                         : '720p';
                   } else if (m === 'seedance-2') {
                     const d = node.videoDuration ?? 8;
-                    updates.videoDuration = [5, 6, 8, 10].includes(d) ? d : 8;
+                    updates.videoDuration = [4, 5, 8, 10, 12, 15].includes(d) ? d : 8;
                     updates.videoResolution = node.videoResolution === '1080p' ? '1080p' : '720p';
                     const ar = node.aspectRatio || '16:9';
                     if (!['16:9', '9:16', '1:1'].includes(ar)) updates.aspectRatio = '16:9';
                   } else if (m === 'seedance-2-fast') {
                     const d = node.videoDuration ?? 8;
-                    updates.videoDuration = [5, 6, 8, 10].includes(d) ? d : 8;
+                    updates.videoDuration = [4, 5, 8, 10, 12].includes(d) ? d : 8;
                     updates.videoResolution = '720p';
                     const ar = node.aspectRatio || '16:9';
                     if (!['16:9', '9:16', '1:1'].includes(ar)) updates.aspectRatio = '16:9';
@@ -6691,6 +6691,33 @@ export default function App() {
                   <option value={10}>10 秒</option>
                   <option value={12}>12 秒</option>
                   <option value={15}>15 秒</option>
+                </select>
+              ) : isSeedance2 ? (
+            <select
+                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  value={[4, 5, 8, 10, 12, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 8}
+                  onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
+                  onPointerDown={e => e.stopPropagation()}
+                >
+                  <option value={4}>4 秒</option>
+                  <option value={5}>5 秒</option>
+                  <option value={8}>8 秒</option>
+                  <option value={10}>10 秒</option>
+                  <option value={12}>12 秒</option>
+                  <option value={15}>15 秒</option>
+                </select>
+              ) : isSeedance2Fast ? (
+            <select
+                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  value={[4, 5, 8, 10, 12].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 8}
+                  onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
+                  onPointerDown={e => e.stopPropagation()}
+                >
+                  <option value={4}>4 秒</option>
+                  <option value={5}>5 秒</option>
+                  <option value={8}>8 秒</option>
+                  <option value={10}>10 秒</option>
+                  <option value={12}>12 秒</option>
                 </select>
               ) : isGemini ? (
                 <select
