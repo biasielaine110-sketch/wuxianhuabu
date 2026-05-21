@@ -3579,7 +3579,18 @@ export default function App() {
     setSelectedIds([newNode.id]);
   }, [transform]);
 
-  /** 缩放并平移视口，使当前选中节点的外接矩形尽量占满画布区域（无选中时不做） */
+  /** 重置视口到画布中心，缩放比例为 20% */
+  const resetViewportToCenter = useCallback(() => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect || rect.width < 8 || rect.height < 8) return;
+    const newScale = 0.2;
+    // 将画布中心 (0, 0) 移动到视口中心
+    const newX = rect.width / 2;
+    const newY = rect.height / 2;
+    setTransform({ x: newX, y: newY, scale: newScale });
+  }, []);
+
+  /** 缩放并平移视口，使当前选中节点的外接矩形尽量占满画布区域（无选中时重置到中心） */
   const fitViewportToSelectedNodes = useCallback(() => {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect || rect.width < 8 || rect.height < 8) return;
@@ -3587,9 +3598,16 @@ export default function App() {
     const availW = Math.max(40, rect.width - pad * 2);
     const availH = Math.max(40, rect.height - pad * 2);
     const selIds = selectedIdsRef.current;
-    if (selIds.length === 0) return;
+    if (selIds.length === 0) {
+      // 无选中时重置到画布中心，缩放 20%
+      resetViewportToCenter();
+      return;
+    }
     const list = nodesRef.current.filter((n) => selIds.includes(n.id));
-    if (list.length === 0) return;
+    if (list.length === 0) {
+      resetViewportToCenter();
+      return;
+    }
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
@@ -3600,18 +3618,14 @@ export default function App() {
       maxX = Math.max(maxX, n.x + n.width);
       maxY = Math.max(maxY, n.y + n.height);
     }
-    const bw = Math.max(1, maxX - minX);
-    const bh = Math.max(1, maxY - minY);
-    const scaleX = availW / bw;
-    const scaleY = availH / bh;
-    let newScale = Math.min(scaleX, scaleY, 5);
-    newScale = Math.max(0.1, newScale);
+    // 有选中时强制缩放 50%，以选中节点为中心
+    const newScale = 0.5;
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
     const newX = rect.width / 2 - cx * newScale;
     const newY = rect.height / 2 - cy * newScale;
     setTransform({ x: newX, y: newY, scale: newScale });
-  }, []);
+  }, [resetViewportToCenter]);
 
   // --- Keyboard Shortcuts ---
   useEffect(() => {
