@@ -1705,11 +1705,18 @@ async function manxueEditImage(
 ): Promise<string[]> {
   if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
   const model = manxueT2iModel(modelName);
-  const resolution = manxueResolution(nodeResolution);
-  const size = manxueAspectSize(aspectRatio);
   const apiKey = getManxueSavedKey();
   if (!apiKey) throw new Error('未配置满 eAPI Key。');
   const base = normalizeBaseUrl(getManxueBaseUrl());
+
+  // Gemini 模型使用 Vertex AI 风格的 API（包含参考图）
+  if (model.startsWith('gemini-')) {
+    return manxueGeminiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, nodeResolution, signal);
+  }
+
+  // GPT 模型使用 /images/generations 接口
+  const resolution = manxueResolution(nodeResolution);
+  const size = manxueAspectSize(aspectRatio);
 
   // 将参考图转为 base64（不依赖上传接口）
   const imageBase64s: string[] = [];
@@ -1739,9 +1746,6 @@ async function manxueEditImage(
       size,
       response_format: 'b64_json',
     };
-    if (model.startsWith('gemini-')) {
-      body.resolution = resolution;
-    }
     if (quality && (model === 'gpt-image-2' || model === 'gpt-image-2-pro')) {
       body.quality = quality;
     }
@@ -1765,6 +1769,129 @@ async function manxueEditImage(
     }
     out.push(b64);
   }
+  return out;
+}
+
+/** 满 eAPI Gemini 图生图：使用 Vertex AI 风格的 generateContent 接口 */
+async function manxueGeminiEditImage(
+  base64Images: string[],
+  prompt: string,
+  numberOfImages: number,
+  modelName: string,
+  aspectRatio: string,
+  nodeResolution?: string,
+  signal?: AbortSignal
+): Promise<string[]> {
+  const model = manxueT2iModel(modelName);
+  const apiKey = getManxueSavedKey();
+  if (!apiKey) throw new Error('未配置满 eAPI Key。');
+  const key = apiKey.trim();
+  const base = 'https://manxueapi.com/v1beta/models';
+  const out: string[] = [];
+  const count = Math.min(Math.max(numberOfImages, 1), 8);
+
+  // 将参考图转为 inlineData 格式
+  const imageParts: Array<{ inlineData: { data: string; mimeType: string } }> = [];
+  for (const img of base64Images.slice(0, 4)) {
+    const trimmed = img.trim();
+    let raw: string;
+    let mime = 'image/jpeg';
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      // 远程 URL：先下载
+      raw = await fetchUrlAsBase64(trimmed, signal, apiKey);
+    } else {
+      const parsed = parseBase64ImageInput(img);
+      raw = parsed.raw;
+      mime = parsed.mime || 'image/jpeg';
+    }
+    imageParts.push({ inlineData: { data: raw, mimeType: mime } });
+  }
+
+  // 将画幅比例转为实际像素尺寸
+  const aspectToSize: Record<string, { width: number; height: number }> = {
+    '1:1': { width: 1024, height: 1024 },
+    '16:9': { width: 1344, height: 768 },
+    '9:16': { width: 768, height: 1344 },
+    '4:3': { width: 1024, height: 768 },
+    '3:4': { width: 768, height: 1024 },
+    '2:1': { width: 1344, height: 768 },
+    '1:2': { width: 768, height: 1344 },
+    '21:9': { width: 1536, height: 640 },
+    '9:21': { width: 640, height: 1536 },
+    '3:2': { width: 1216, height: 832 },
+    '2:3': { width: 832, height: 1216 },
+  };
+  const size = aspectToSize[aspectRatio] || aspectToSize['16:9'];
+
+  for (let i = 0; i < count; i++) {
+    assertNotAborted(signal);
+
+    // 构建 Vertex AI 风格的请求体，包含参考图
+    const body: Record<string, unknown> = {
+      contents: [
+        {
+          parts: [
+            ...imageParts,
+            {
+              text: `[图片比例 ${aspectRatio}] ${prompt}`,
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        responseModalities: ['IMAGE'],
+        imageConfig: {
+          aspectRatio: aspectRatio,
+          imageSize: manxueResolution(nodeResolution) === '4K' ? '4K' : '2K',
+        },
+      },
+    };
+
+    const url = `${base}/${encodeURIComponent(model)}:generateContent?key=${key}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`满 eAPI Gemini 图生图失败 (${res.status}): ${text.slice(0, 800)}`);
+    }
+
+    const json = await res.json() as {
+      candidates?: Array<{
+        content?: {
+          parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }>;
+        };
+      }>;
+      error?: { message?: string };
+    };
+
+    if (json.error?.message) {
+      throw new Error(`满 eAPI Gemini: ${json.error.message}`);
+    }
+
+    const parts = json.candidates?.[0]?.content?.parts;
+    if (!parts || parts.length === 0) {
+      throw new Error('满 eAPI Gemini 图生图响应中未找到图片数据');
+    }
+
+    for (const part of parts) {
+      if (part.inlineData?.data && part.inlineData.mimeType) {
+        out.push(part.inlineData.data);
+        break;
+      }
+    }
+
+    if (out.length <= i) {
+      throw new Error('满 eAPI Gemini 图生图响应中未找到图片数据');
+    }
+  }
+
   return out;
 }
 
