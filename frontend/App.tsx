@@ -115,8 +115,10 @@ const SparklesIcon = ({ size = 16 }) => <svg xmlns="http://www.w3.org/2000/svg" 
 /** ToAPIs 等返回的 base64 可能是 PNG/WebP，一律按魔数识别后再喂给 Image/canvas */
 function sniffImageMimeFromBase64(raw: string): string {
   if (!raw || raw.length < 8) return 'image/png';
+  // 清理可能的前缀
+  const cleaned = raw.replace(/^data:[^;]+;base64,/, '');
   try {
-    const dec = atob(raw.slice(0, 48));
+    const dec = atob(cleaned.slice(0, 48));
     const a = dec.charCodeAt(0);
     const b = dec.charCodeAt(1);
     if (a === 0xff && b === 0xd8) return 'image/jpeg';
@@ -6005,10 +6007,13 @@ export default function App() {
                   <video
                     key={videoUrls[currentVideoIdx] || 'v'}
                     src={videoUrls[currentVideoIdx]}
-                    controls={true}
+                    controls={false}
                     autoPlay={false}
                     preload="metadata"
                     crossOrigin="anonymous"
+                    ref={(el) => {
+                      if (el) (el as any).videoRef = el;
+                    }}
                     onError={(e) => {
                       console.error('视频加载错误:', e);
                       console.log('视频URL:', videoUrls[currentVideoIdx]);
@@ -6064,10 +6069,10 @@ export default function App() {
                             const next = (currentVideoIdx - 1 + videoUrls.length) % videoUrls.length;
                             handleUpdateNode(node.id, { currentVideoIndex: next });
                           }}
-                          className="p-1.5 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
+                          className="p-2 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
                           title="上一条"
                         >
-                          <ChevronLeftIcon size={14} />
+                          <ChevronLeftIcon size={20} />
                         </button>
                         <button
                           type="button"
@@ -6077,10 +6082,10 @@ export default function App() {
                             const next = (currentVideoIdx + 1) % videoUrls.length;
                             handleUpdateNode(node.id, { currentVideoIndex: next });
                           }}
-                          className="p-1.5 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
+                          className="p-2 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
                           title="下一条"
                         >
-                          <ChevronRightIcon size={14} />
+                          <ChevronRightIcon size={20} />
                         </button>
                       </>
                     )}
@@ -6092,14 +6097,81 @@ export default function App() {
                         const u = videoUrls[currentVideoIdx];
                         if (u) downloadVideoFromUrl(u);
                       }}
-                      className="p-1.5 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
+                      className="p-2 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
                       title="下载当前视频"
                     >
-                      <DownloadIcon size={14} />
+                      <DownloadIcon size={20} />
                     </button>
                   </div>
                   <div className="absolute bottom-2 left-2 text-[10px] text-gray-400 bg-black/50 px-2 py-0.5 rounded">
                     {currentVideoIdx + 1} / {videoUrls.length}
+                  </div>
+                  {/* 自定义视频控制按钮 */}
+                  <div className="absolute bottom-2 right-2 z-10 flex gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      type="button"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const videoEl = e.currentTarget.closest('.relative')?.querySelector('video') as HTMLVideoElement;
+                        if (videoEl) {
+                          if (videoEl.paused) {
+                            videoEl.play();
+                          } else {
+                            videoEl.pause();
+                          }
+                        }
+                      }}
+                      className="p-4 bg-black/70 hover:bg-black/90 rounded-xl text-white backdrop-blur-sm shadow-lg"
+                      title="播放/暂停"
+                    >
+                      <VideoIcon size={40} />
+                    </button>
+                    <button
+                      type="button"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const videoEl = e.currentTarget.closest('.relative')?.querySelector('video') as HTMLVideoElement;
+                        if (videoEl) {
+                          if (videoEl.requestFullscreen) {
+                            videoEl.requestFullscreen();
+                          }
+                        }
+                      }}
+                      className="p-4 bg-black/70 hover:bg-black/90 rounded-xl text-white backdrop-blur-sm shadow-lg"
+                      title="最大化"
+                    >
+                      <MaximizeIcon size={40} />
+                    </button>
+                    <button
+                      type="button"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const videoEl = e.currentTarget.closest('.relative')?.querySelector('video') as HTMLVideoElement;
+                        if (videoEl) {
+                          videoEl.muted = !videoEl.muted;
+                        }
+                      }}
+                      className="p-4 bg-black/70 hover:bg-black/90 rounded-xl text-white backdrop-blur-sm shadow-lg"
+                      title="静音/取消静音"
+                    >
+                      <AudioIcon size={40} />
+                    </button>
+                    <button
+                      type="button"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const u = videoUrls[currentVideoIdx];
+                        if (u) downloadVideoFromUrl(u);
+                      }}
+                      className="p-4 bg-black/70 hover:bg-black/90 rounded-xl text-white backdrop-blur-sm shadow-lg"
+                      title="下载当前视频"
+                    >
+                      <DownloadIcon size={40} />
+                    </button>
                   </div>
                 </>
               ) : (

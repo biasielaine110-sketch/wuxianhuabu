@@ -422,8 +422,10 @@ async function fetchUrlAsBase64(imageUrl: string, signal?: AbortSignal, bearerTo
 
 function sniffMimeFromBase64(raw: string): string {
   if (!raw || raw.length < 8) return 'image/jpeg';
+  // 清理可能的前缀
+  const cleaned = raw.replace(/^data:[^;]+;base64,/, '').replace(/\s/g, '');
   try {
-    const dec = atob(raw.slice(0, 48));
+    const dec = atob(cleaned.slice(0, 48));
     const a = dec.charCodeAt(0);
     const b = dec.charCodeAt(1);
     if (a === 0xff && b === 0xd8) return 'image/jpeg';
@@ -445,7 +447,9 @@ function parseBase64ImageInput(input: string): { raw: string; mime: string } {
 }
 
 function base64ToBlob(raw: string, mime: string): Blob {
-  const binary = atob(raw);
+  // 清理可能的前缀
+  const cleaned = raw.replace(/^data:[^;]+;base64,/, '').replace(/\s/g, '');
+  const binary = atob(cleaned);
   const len = binary.length;
   const bytes = new Uint8Array(len);
   for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);

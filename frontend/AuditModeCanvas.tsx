@@ -4,8 +4,10 @@ import { AuditImage, Transform } from './types';
 /** 根据 base64 魔数字节识别真实的图片 MIME 类型 */
 function sniffImageMimeFromBase64(raw: string): string {
   if (!raw || raw.length < 8) return 'image/png';
+  // 清理可能的前缀
+  const cleaned = raw.replace(/^data:[^;]+;base64,/, '');
   try {
-    const dec = atob(raw.slice(0, 48));
+    const dec = atob(cleaned.slice(0, 48));
     const a = dec.charCodeAt(0);
     const b = dec.charCodeAt(1);
     if (a === 0xff && b === 0xd8) return 'image/jpeg';
@@ -20,7 +22,8 @@ function sniffImageMimeFromBase64(raw: string): string {
 
 /** 将纯 base64 转换为带正确 MIME 类型的 data URL */
 function base64ToImageDataUrl(raw: string): string {
-  return `data:${sniffImageMimeFromBase64(raw)};base64,${raw}`;
+  const cleaned = raw.replace(/^data:[^;]+;base64,/, '');
+  return `data:${sniffImageMimeFromBase64(cleaned)};base64,${cleaned}`;
 }
 
 const colors = ['#ffffff', '#000000', '#ff6b6b', '#feca57', '#48dbfb', '#1dd1a1', '#ff9ff3', '#54a0ff'];
