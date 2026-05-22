@@ -117,6 +117,10 @@
     font-size: 40px !important;
   }
 
+  .canvas-node-font-195 button {
+    font-size: 30px !important;
+  }
+
   /** AI 对话节点悬浮标题 */
   .canvas-node-root--chat .canvas-node-window-title {
     font-size: 50px !important;
@@ -342,18 +346,18 @@
     font-size: 30px !important;
   }
 
-  /** AI 对话节点：参考区/工具栏/功能栏字体 20px */
+  /** AI 对话节点：参考区/工具栏/功能栏字体 30px */
   .canvas-node-root--chat select {
-    font-size: 20px !important;
+    font-size: 30px !important;
     line-height: 1.1 !important;
     min-width: 100px !important;
   }
   .canvas-node-root--chat select option {
-    font-size: 12px !important;
+    font-size: 15px !important;
     line-height: 1.35 !important;
   }
   .canvas-node-root--chat select.chat-fontsize-select {
-    font-size: 45px !important;
+    font-size: 30px !important;
   }
   .canvas-node-root--chat button {
     font-size: 30px !important;
@@ -374,12 +378,12 @@
   .canvas-node-font-195 .nodemeta-skip-scale,
   .canvas-node-font-195 .nodemeta-skip-scale select,
   .canvas-node-font-195 .nodemeta-skip-scale span {
-    font-size: 25px !important;
+    font-size: 35px !important;
     line-height: 1.1 !important;
   }
   .canvas-node-font-195 .nodemeta-skip-scale option,
   .canvas-node-font-195 .nodemeta-skip-scale optgroup {
-    font-size: 12px !important;
+    font-size: 15px !important;
     line-height: 1.35 !important;
   }
 
@@ -387,13 +391,13 @@
    * 「模型」主下拉：闭合框文字 ×1.5；展开列表 option/optgroup 相对原 17px 基准 ÷1.5（原生列表在部分系统上仍可能不完全跟 CSS）
    */
   .canvas-node-font-195 select.nodemodel-select {
-    font-size: 25px !important;
+    font-size: 35px !important;
     line-height: 1.1 !important;
     font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
   }
   .canvas-node-font-195 select.nodemodel-select option,
   .canvas-node-font-195 select.nodemodel-select optgroup {
-    font-size: 12px !important;
+    font-size: 15px !important;
     line-height: 1.35 !important;
     font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
   }
@@ -407,7 +411,7 @@
   }
   .canvas-node-root--chat select.nodemodel-select option,
   .canvas-node-root--chat select.nodemodel-select optgroup {
-    font-size: 10px !important;
+    font-size: 15px !important;
     line-height: 1.35 !important;
     font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
   }
@@ -416,30 +420,30 @@
   }
 
   /**
-   * 图生图：分类 / 预设下拉 — 统一 20px
+   * 图生图：分类 / 预设下拉 — 统一 30px
    */
-  .canvas-node-font-195 select.i2i-preset-select,
-  .canvas-node-font-195 select.i2i-preset-select option,
-  .canvas-node-font-195 select.i2i-preset-select optgroup {
-    font-size: 20px !important;
-  }
   .canvas-node-font-195 select.i2i-preset-select {
+    font-size: 30px !important;
     line-height: 1.1 !important;
   }
   .canvas-node-font-195 select.i2i-preset-select option,
   .canvas-node-font-195 select.i2i-preset-select optgroup {
+    font-size: 20px !important;
     line-height: 1.35 !important;
     font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
   }
 
   /**
-   * 文生图：分类 / 预设下拉 — 统一 20px
+   * 文生图：分类 / 预设下拉 — 统一 30px
    */
-  .canvas-node-font-195 select.t2i-preset-select,
+  .canvas-node-font-195 select.t2i-preset-select {
+    font-size: 30px !important;
+    line-height: 1.1 !important;
+  }
   .canvas-node-font-195 select.t2i-preset-select option,
   .canvas-node-font-195 select.t2i-preset-select optgroup {
     font-size: 20px !important;
-    line-height: 1.1 !important;
+    line-height: 1.35 !important;
     font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
   }
 
