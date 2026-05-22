@@ -617,6 +617,7 @@ const I2I_PRESETS_BY_CATEGORY: Record<I2iPresetCategoryId, { key: string; label:
     { key: '角色无头视图', label: '角色无头视图' },
     { key: '角色细节图', label: '角色细节图' },
     { key: '角色身高比例图', label: '角色身高比例图' },
+    { key: '角色刷光', label: '角色刷光' },
   ],
   scene: [
     { key: '场景四视图', label: '场景四视图' },
@@ -6614,7 +6615,7 @@ ${text}`,
               </>
             )}
           </div>
-          {(node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' || node.type === 'panorama') && (
+          {isSelected && (node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' || node.type === 'panorama') && (
             <>
               <select className="nodemodel-select bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500 flex-1 min-w-[90px]" value={node.model || defaultCanvasImageModel()} onChange={(e) => { const m = e.target.value; const patch: Partial<CanvasNode> = { model: m }; if (isGptImage2CanvasModelId(m) || isManxueGptImage2Model(m)) patch.resolution = '2k'; handleUpdateNode(node.id, patch); }} onPointerDown={e => e.stopPropagation()}>
                 {(node.type === 't2i' || node.type === 'panoramaT2i') ? (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><optgroup label="满 e（manxueapi.com）"><option value="gemini-3.1-flash-image-preview-2k-manxue">Gemini 3.1 Flash Image 2K（满 e）</option><option value="gemini-3-pro-image-preview-2k-manxue">Gemini 3 Pro Image 2K（满 e）</option><option value="gpt-image-2-manxue">GPT Image 2（满 e）</option><option value="gpt-image-2-pro-manxue">GPT Image 2 Pro（满 e）</option><option value="gemini-3-pro-image-preview-4k-manxue">Gemini 3 Pro Image 4K（满 e）</option><option value="gemini-3.1-flash-image-preview-4k-manxue">Gemini 3.1 Flash Image 4K（满 e）</option></optgroup><optgroup label="ToAPIs"><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="nano-banana-2">Nano-Banana 2（ToAPIs）</option><option value="imagen-4">Imagen 4</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option></optgroup><optgroup label="即梦 (Dreamina)"><option value="jimeng-image-5.0">即梦 5.0</option><option value="jimeng-image-4.6">即梦 4.6</option><option value="jimeng-image-4.5">即梦 4.5</option><option value="jimeng-image-4.0">即梦 4.0</option></optgroup></>) : (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><optgroup label="满 e（manxueapi.com）"><option value="gemini-3.1-flash-image-preview-2k-manxue">Gemini 3.1 Flash Image 2K（满 e）</option><option value="gemini-3-pro-image-preview-2k-manxue">Gemini 3 Pro Image 2K（满 e）</option><option value="gpt-image-2-manxue">GPT Image 2（满 e）</option><option value="gpt-image-2-pro-manxue">GPT Image 2 Pro（满 e）</option><option value="gemini-3-pro-image-preview-4k-manxue">Gemini 3 Pro Image 4K（满 e）</option><option value="gemini-3.1-flash-image-preview-4k-manxue">Gemini 3.1 Flash Image 4K（满 e）</option></optgroup><optgroup label="ToAPIs"><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="nano-banana-2">Nano-Banana 2（ToAPIs）</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option></optgroup><optgroup label="即梦 (Dreamina)"><option value="jimeng-image-5.0">即梦 5.0</option><option value="jimeng-image-4.6">即梦 4.6</option><option value="jimeng-image-4.5">即梦 4.5</option><option value="jimeng-image-4.0">即梦 4.0</option></optgroup></>)}
@@ -13807,9 +13808,9 @@ const CHAT_FEATURE_BUTTON_SPECS: ChatFeatureButtonSpec[] = [
     id: 'ddd-15s-timeline',
     presetKey: 'DDD_15秒剧本时间轴',
     label: 'DDD_15秒剧本时间轴',
-    icon: 'wand',
+    icon: 'message',
     title:
-      'DDD_15秒剧本时间轴：将剧情转换为即梦 Seedance 2.0 的15秒导演讲戏分镜时间轴提示词，1700字以内，可直接复制使用。',
+      'DDD_15秒剧本时间轴：即梦 Seedance 2.0 · 导演讲戏分镜时间轴模板。发送前请填入剧本正文。',
   },
 ];
 
