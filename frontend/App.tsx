@@ -1669,8 +1669,8 @@ export default function App() {
     't2i': { width: 900, height: 1200 },
     /** 图生图：高:宽 ≈ 1.4:1（较 2:3 略矮，贴近参考界面） */
     'i2i': { width: 900, height: 1260 },
-    'panorama': { width: 840, height: 630 },
-    'panoramaT2i': { width: 880, height: 960 },
+    'panorama': { width: 1300, height: 1000 },
+    'panoramaT2i': { width: 1300, height: 1000 },
     /** 图片标注：近方形略竖长，宽:高 = 4:5（介于 4:5～5:6） */
     'annotation': { width: 960, height: 1000 },
     'director3d': { width: 900, height: 780 },
@@ -6606,7 +6606,7 @@ ${text}`,
                     }
                     handleOptimizePrompt(node.id, text);
                   }}
-                  className="ml-1 px-1.5 py-0.5 rounded text-[10px] text-white bg-purple-600 hover:bg-purple-500"
+                  className="ml-1 px-1.5 py-0.5 rounded text-[30px] text-white bg-purple-600 hover:bg-purple-500"
                   title="AI优化提示词（生成Seedance 2.0提示词）"
                 >
                   优化提示词

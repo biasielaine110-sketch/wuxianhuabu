@@ -118,7 +118,7 @@
   }
 
   .canvas-node-font-195 button {
-    font-size: 30px !important;
+    font-size: 40px !important;
   }
 
   /** AI 对话节点悬浮标题 */
@@ -360,7 +360,7 @@
     font-size: 30px !important;
   }
   .canvas-node-root--chat button {
-    font-size: 30px !important;
+    font-size: 35px !important;
   }
   .canvas-node-root--chat [class*="text-[10px]"],
   .canvas-node-root--chat [class*="text-[11px]"],
@@ -428,7 +428,7 @@
   }
   .canvas-node-font-195 select.i2i-preset-select option,
   .canvas-node-font-195 select.i2i-preset-select optgroup {
-    font-size: 20px !important;
+    font-size: 15px !important;
     line-height: 1.35 !important;
     font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
   }
@@ -442,7 +442,7 @@
   }
   .canvas-node-font-195 select.t2i-preset-select option,
   .canvas-node-font-195 select.t2i-preset-select optgroup {
-    font-size: 20px !important;
+    font-size: 15px !important;
     line-height: 1.35 !important;
     font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
   }
