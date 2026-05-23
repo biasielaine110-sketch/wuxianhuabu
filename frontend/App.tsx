@@ -3787,10 +3787,12 @@ export default function App() {
         if (sel.length === 0) return;
         sel.forEach((id) => handleDeleteNode(id));
       } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC' && !isInput) {
-        // 节点内 textarea 选中文本时，交给浏览器默认复制（不拦截）
+        // 节点内 textarea 或消息气泡内选中文本时，交给浏览器默认复制
         const sel = window.getSelection();
         const activeTextarea = document.activeElement?.closest?.('textarea');
-        if (activeTextarea && sel && sel.toString().length > 0) return;
+        // 消息气泡内（chat-bubble-wrap）选中文字时允许浏览器默认复制
+        const activeChatBubble = document.activeElement?.closest?.('.chat-bubble-wrap');
+        if ((activeTextarea || activeChatBubble) && sel && sel.toString().length > 0) return;
         // 阻止浏览器默认复制行为（如复制选中文本）
         e.preventDefault();
         // 画布模式下复制选中节点
