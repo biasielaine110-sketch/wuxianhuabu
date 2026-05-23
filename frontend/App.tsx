@@ -3791,7 +3791,8 @@ export default function App() {
         const sel = window.getSelection();
         const activeTextarea = document.activeElement?.closest?.('textarea');
         // 消息气泡内（chat-bubble-wrap）选中文字时允许浏览器默认复制
-        const activeChatBubble = document.activeElement?.closest?.('.chat-bubble-wrap');
+        const selAnchor = sel?.anchorNode;
+        const activeChatBubble = selAnchor ? !!selAnchor.parentElement?.closest?.('.chat-bubble-wrap') : false;
         if ((activeTextarea || activeChatBubble) && sel && sel.toString().length > 0) return;
         // 阻止浏览器默认复制行为（如复制选中文本）
         e.preventDefault();
