@@ -236,7 +236,58 @@ const upscaleImage = (base64Str: string, targetRes: string): Promise<string> => 
 };
 
 const thumbnailCache = new Map<string, string>();
-const THUMB_MAX_CACHE = 120;
+const THUMB_MAX_CACHE = 60; // 降低上限，减少内存占用（原 120）
+/** 预览区缩略图分辨率比例（10/20/50/70/100%） */
+const thumbResolutionRef = { v: 10 };
+
+/**
+ * Blob URL 注册表：管理 node.images 中 blob URL 的生命周期
+ * key = nodeId, value = Set<blobUrl>
+ * 节点删除时统一 revoke，防止内存泄漏
+ */
+const blobUrlRegistry = new Map<string, Set<string>>();
+const blobUrlIdCounter = { v: 0 };
+
+/** 将 base64 转为 Blob URL 并注册到 registry */
+function base64ToBlobUrl(base64: string, nodeId: string, fieldIndex: number): string {
+  // http(s) URL 或已是以 blob: 开头的不处理
+  if (base64.startsWith('http://') || base64.startsWith('https://') || base64.startsWith('blob:')) {
+    return base64;
+  }
+  // 提取 mime type（默认 png）
+  const mime = base64.startsWith('data:') ? base64.split(';')[0].split('/')[1] || 'png' : 'png';
+  const clean = base64.includes(',') ? base64.split(',')[1] : base64;
+  let blob: Blob;
+  try {
+    const binaryStr = atob(clean);
+    const bytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+    blob = new Blob([bytes], { type: `image/${mime}` });
+  } catch {
+    return base64; // 解析失败回退
+  }
+  const url = URL.createObjectURL(blob);
+  // 注册到表
+  if (!blobUrlRegistry.has(nodeId)) blobUrlRegistry.set(nodeId, new Set());
+  blobUrlRegistry.get(nodeId)!.add(url);
+  return url;
+}
+
+/** 节点删除时调用，回收该节点所有 blob URL */
+function revokeNodeBlobUrls(nodeId: string): void {
+  const urls = blobUrlRegistry.get(nodeId);
+  if (!urls) return;
+  urls.forEach(url => URL.revokeObjectURL(url));
+  blobUrlRegistry.delete(nodeId);
+}
+
+/** 全局清理：关闭页面时释放所有 blob URL */
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => {
+    blobUrlRegistry.forEach(urls => urls.forEach(url => URL.revokeObjectURL(url)));
+    blobUrlRegistry.clear();
+  });
+}
 
 /** 单份画布 base64 总字符量超过此值时不再压入撤销栈（避免 structuredClone 直接 OOM） */
 const CANVAS_HISTORY_SKIP_PAYLOAD_CHARS = 22_000_000;
@@ -319,32 +370,10 @@ function OptimizedImage({
   const maxSideRef = useRef(maxSide);
   maxSideRef.current = maxSide;
 
-  // 响应式缩放：根据容器尺寸动态计算 maxSide
+  // 同步 maxSide prop 变化到 dynamicMaxSide（响应式计算在 OptimizedImage 处已由外层控制）
   useEffect(() => {
-    if (!containerRef?.current) {
-      setDynamicMaxSide(maxSideRef.current);
-      return;
-    }
-
-    const updateMaxSide = () => {
-      const container = containerRef.current;
-      if (!container) return;
-      const rect = container.getBoundingClientRect();
-      const containerMax = Math.max(rect.width, rect.height);
-      // 容器尺寸至少为 100px 才启用响应式
-      if (containerMax >= 100) {
-        setDynamicMaxSide(Math.round(containerMax));
-      }
-    };
-
-    updateMaxSide();
-    const observer = new ResizeObserver(() => {
-      requestAnimationFrame(updateMaxSide);
-    });
-    observer.observe(containerRef.current);
-
-    return () => observer.disconnect();
-  }, [containerRef]);
+    setDynamicMaxSide(maxSide);
+  }, [maxSide]);
 
   useEffect(() => {
     if (!base64) {
@@ -352,28 +381,19 @@ function OptimizedImage({
       return;
     }
     const currentMaxSide = dynamicMaxSide;
-
-    // 如果是 HTTP(S) URL，直接使用（不做缩略图缓存，避免跨域问题）
-    if (base64.startsWith('http://') || base64.startsWith('https://')) {
-      setSrc(base64);
-      return;
-    }
-
-    const cacheKey = `${base64.slice(0, 48)}|${base64.slice(-48)}|${base64.length}|${currentMaxSide}|${quality}`;
-    const cached = thumbnailCache.get(cacheKey);
+    const cachedKey = `${base64.slice(0, 48)}|${base64.slice(-48)}|${base64.length}|${currentMaxSide}|${quality}`;
+    const cached = thumbnailCache.get(cachedKey);
     if (cached) {
       setSrc(cached);
       return;
     }
-
-    const originalSrc = base64ToImageDataUrl(base64);
     setSrc('');
-
+    const originalSrc = base64ToImageDataUrl(base64);
     const img = new Image();
     img.onload = () => {
       const maxEdge = Math.max(img.width, img.height);
       if (maxEdge <= currentMaxSide) {
-        thumbnailCache.set(cacheKey, originalSrc);
+        thumbnailCache.set(cachedKey, originalSrc);
         setSrc(originalSrc);
         return;
       }
@@ -389,7 +409,7 @@ function OptimizedImage({
       ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(img, 0, 0, targetW, targetH);
       const thumbSrc = canvas.toDataURL('image/jpeg', quality);
-      thumbnailCache.set(cacheKey, thumbSrc);
+      thumbnailCache.set(cachedKey, thumbSrc);
       if (thumbnailCache.size > THUMB_MAX_CACHE) {
         const firstKey = thumbnailCache.keys().next().value;
         if (firstKey) thumbnailCache.delete(firstKey);
@@ -401,7 +421,7 @@ function OptimizedImage({
   }, [base64, dynamicMaxSide, quality]);
 
   if (!src) return null;
-  return <img src={src} className={className} alt={alt} onClick={onClick} onDoubleClick={onDoubleClick} draggable={draggable} />;
+  return <img src={src} className={className} alt={alt} onClick={onClick} onDoubleClick={onDoubleClick} draggable={draggable} loading="lazy" />;
 }
 
 /** 响应式图片预览组件：根据容器尺寸自动缩放图片 */
@@ -1377,6 +1397,31 @@ export default function App() {
     nodesRef.current = nodes;
   }, [nodes]);
   useEffect(() => { edgesRef.current = edges; }, [edges]);
+
+  // 同步视口信息（transform + 容器尺寸）到 ref，供离屏节点过滤使用
+  useLayoutEffect(() => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    canvasViewportRef.current = {
+      x: transform.x,
+      y: transform.y,
+      width: rect.width,
+      height: rect.height,
+      scale: transform.scale,
+    };
+  }, [transform]);
+
+  // 容器尺寸变化时也更新视口 ref
+  useEffect(() => {
+    const obs = new ResizeObserver(() => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      canvasViewportRef.current.width = rect.width;
+      canvasViewportRef.current.height = rect.height;
+    });
+    if (containerRef.current) obs.observe(containerRef.current);
+    return () => obs.disconnect();
+  }, []);
 
   useEffect(() => {
     draftDiskModalRef.current = draftDiskModal;
@@ -3001,6 +3046,9 @@ export default function App() {
   const nodeDragAccumRef = useRef<{ nodeIds: string[], deltaX: number, deltaY: number } | null>(null);
   const rafIdRef = useRef<number | null>(null);
 
+  // 视口信息 ref（用于离屏节点虚拟化）
+  const canvasViewportRef = useRef({ x: 0, y: 0, width: 0, height: 0, scale: 1 });
+
   /** Alt + 拖拽：超过阈值后复制选中节点；与复制集相连的边（含外部入边/出边）一并映射到新节点 */
   const altDupPendingRef = useRef(false);
   const altDupDoneRef = useRef(false);
@@ -3113,6 +3161,44 @@ export default function App() {
     });
   }, []);
 
+  /** 剥离节点中所有图片 base64 数据（用于撤销栈存储，防止 OOM） */
+function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
+  return nodes.map(n => {
+    const n2 = { ...n } as CanvasNode;
+    if (n2.images?.length) {
+      (n2 as any).images = n2.images.map(() => '');
+    }
+    const pn = n as PanoramaNode;
+    if (pn.panoramaImage) (n2 as any).panoramaImage = '';
+    const dn = n as Director3DNode;
+    if (dn.backgroundImage) (n2 as any).backgroundImage = '';
+    const an = n as AnnotationNode;
+    if (an.sourceImage) (n2 as any).sourceImage = '';
+    const gsn = n as GridSplitNode;
+    if (gsn.inputImage) (n2 as any).inputImage = '';
+    if (gsn.outputImages?.length) (n2 as any).outputImages = gsn.outputImages.map(() => '');
+    const gmn = n as GridMergeNode;
+    if (gmn.inputImages?.length) (n2 as any).inputImages = gmn.inputImages.map(() => '');
+    if (gmn.outputImage) (n2 as any).outputImage = '';
+    const ptn = n as PanoramaT2iNode;
+    if (ptn.panoramaImage) (n2 as any).panoramaImage = '';
+    if (n.type === 'chat') {
+      const cn = n as ChatNode;
+      if (cn.messages?.length) {
+        (n2 as any).messages = cn.messages.map(m => ({
+          ...m,
+          image: m.image ? '' : undefined,
+          images: m.images?.length ? m.images.map(() => '') : undefined,
+        }));
+      }
+    }
+    if (dn.figures?.length) {
+      (n2 as any).figures = dn.figures.map(f => ({ ...f, image: '' }));
+    }
+    return n2;
+  });
+}
+
   const pushCanvasHistorySnapshot = useCallback((snapshot: CanvasHistoryEntry) => {
     const signature = buildCanvasHistorySignature(snapshot);
     if (signature === lastCanvasHistorySignatureRef.current) return;
@@ -3134,17 +3220,17 @@ export default function App() {
     try {
       cloned = structuredClone(snapshot);
     } catch (e) {
-      console.warn('[canvas] 撤销快照克隆失败，释放旧历史后重试', e);
-      canvasHistoryRef.current = canvasHistoryRef.current.slice(-2);
-      canvasHistoryIndexRef.current = canvasHistoryRef.current.length - 1;
-      historyBefore = canvasHistoryRef.current.slice(0, canvasHistoryIndexRef.current + 1);
-      if (historyBefore.length > maxSteps - 1) {
-        historyBefore = historyBefore.slice(historyBefore.length - (maxSteps - 1));
-      }
+      console.warn('[canvas] 撤销快照克隆失败，尝试剥离图片数据后重试', e);
+      // 剥离所有图片 base64 后重试，大幅降低内存占用
+      const strippedSnapshot: CanvasHistoryEntry = {
+        nodes: stripImagesFromNodes(snapshot.nodes),
+        edges: snapshot.edges,
+        selectedIds: snapshot.selectedIds,
+      };
       try {
-        cloned = structuredClone(snapshot);
+        cloned = structuredClone(strippedSnapshot);
       } catch (e2) {
-        console.warn('[canvas] 已跳过本次撤销记录', e2);
+        console.warn('[canvas] 剥离图片后仍失败，已跳过本次撤销记录', e2);
         lastCanvasHistorySignatureRef.current = signature;
         return;
       }
@@ -4610,6 +4696,12 @@ export default function App() {
           }
         : {}),
     };
+    const MAX_CANVAS_NODES = 150;
+    const currentCount = nodesRef.current.length;
+    if (currentCount >= MAX_CANVAS_NODES) {
+      alert(`节点数已达 ${MAX_CANVAS_NODES} 个上限，建议清理不需要的节点或新建项目，以保持画布流畅运行。`);
+      return;
+    }
     setNodes((prev) => [...prev, newNode]);
     setSelectedIds([newId]);
 
@@ -4684,6 +4776,7 @@ export default function App() {
   };
 
   const handleDeleteNode = (id: string) => {
+    revokeNodeBlobUrls(id);
     setNodes(prev => prev.filter(n => n.id !== id));
     setEdges(prev => prev.filter(e => e.sourceId !== id && e.targetId !== id));
     setSelectedIds(prev => prev.filter(sid => sid !== id));
@@ -4900,19 +4993,24 @@ export default function App() {
     );
 
     generationStartedAtRef.current.set(nodeId, Date.now());
-    setNodes((prev) =>
-      prev.map((n) =>
-        n.id === nodeId
-          ? ({
-              ...n,
-              messages: [...baseMessages, userMessage],
-              prompt: '',
-              isGenerating: true,
-              error: undefined,
-            } as CanvasNode)
-          : n
-      )
-    );
+    const MAX_CHAT_MESSAGES = 50;
+          const newMessages = [...baseMessages, userMessage];
+          const trimmedMessages = newMessages.length > MAX_CHAT_MESSAGES
+            ? newMessages.slice(-MAX_CHAT_MESSAGES)
+            : newMessages;
+          setNodes((prev) =>
+            prev.map((n) =>
+              n.id === nodeId
+                ? ({
+                    ...n,
+                    messages: trimmedMessages,
+                    prompt: '',
+                    isGenerating: true,
+                    error: undefined,
+                  } as CanvasNode)
+                : n
+            )
+          );
 
     try {
       const apiTurns = [
@@ -4950,8 +5048,11 @@ export default function App() {
         prev.map((n) => {
           if (n.id !== nodeId) return n;
           const ch = n as ChatNode;
-          const msgs = ch.messages || [];
-          return { ...ch, messages: [...msgs, assistantMessage], isGenerating: false } as CanvasNode;
+          const MAX_CHAT_MESSAGES = 50;
+          const existingMsgs = (ch.messages || []) as ChatMessage[];
+          const afterUser = [...existingMsgs, userMessage];
+          const trimmedAfterUser = afterUser.length > MAX_CHAT_MESSAGES ? afterUser.slice(-MAX_CHAT_MESSAGES) : afterUser;
+          return { ...ch, messages: [...trimmedAfterUser, assistantMessage], isGenerating: false } as CanvasNode;
         })
       );
       generationStartedAtRef.current.delete(nodeId);
@@ -7416,7 +7517,7 @@ ${text}`,
                         <div key={idx} className="relative shrink-0 w-14 h-14 rounded overflow-hidden border border-[#444]">
                           <OptimizedImage
                             base64={img}
-                            maxSide={160}
+                            maxSide={Math.round(160 * thumbResolutionRef.v / 100)}
                             quality={0.72}
                             alt={`图${idx + 1}`}
                             className="w-full h-full object-cover"
@@ -10108,6 +10209,31 @@ ${text}`,
           title="重置为 100%"
         >1:1</button>
       </div>
+
+      {/* 预览图分辨率调节（右下角） */}
+      <div
+        className={`absolute bottom-6 right-6 z-30 flex items-center gap-1 bg-[#1e1e1e]/90 backdrop-blur-md rounded-xl border border-[#333] px-2 py-1.5 shadow-lg ${canvasMode === 'audit' ? 'hidden' : ''}`}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <span className="text-[10px] text-gray-400 select-none">预览</span>
+        <select
+          value={thumbResolutionRef.v}
+          onChange={(e) => {
+            thumbResolutionRef.v = Number(e.target.value);
+            thumbnailCache.clear();
+            // 强制刷新所有节点的 images 属性（创建新对象触发重渲染）
+            setNodes(prev => prev.map(n => ({ ...n, _thumbTick: Date.now() })));
+          }}
+          className="rounded border border-[#444] bg-[#333] px-1 py-0.5 text-[10px] text-gray-200 outline-none cursor-pointer"
+          title="预览图分辨率（影响所有缩略图质量）"
+        >
+          <option value="10">10%</option>
+          <option value="20">20%</option>
+          <option value="50">50%</option>
+          <option value="70">70%</option>
+          <option value="100">100%</option>
+        </select>
+      </div>
       {canvasMode !== 'audit' && bigEditorPortal}
 
     </div>
@@ -10402,7 +10528,17 @@ function PanoramaNodeContent({
         document.removeEventListener('visibilitychange', syncAnimState);
         stopAnim();
         controlsRef.current?.dispose();
+        // 完整清理 GPU 资源，防止内存泄漏
+        if (textureRef.current) { textureRef.current.dispose(); textureRef.current = null; }
+        if (materialRef.current) { materialRef.current.dispose(); materialRef.current = null; }
+        if (sphereRef.current) {
+          const geom = sphereRef.current.geometry;
+          if (geom) geom.dispose();
+          sphereRef.current = null;
+        }
+        if (sceneRef.current) { sceneRef.current.clear(); }
         renderer.dispose();
+        renderer.forceContextLoss();
         if (container.contains(renderer.domElement)) {
           container.removeChild(renderer.domElement);
         }
@@ -11705,7 +11841,19 @@ function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onEyedropp
           groundMaterialRef.current.dispose();
           groundMaterialRef.current = null;
         }
+        if (sphereRef.current) {
+          const geom = sphereRef.current.geometry;
+          if (geom) geom.dispose();
+          sphereRef.current = null;
+        }
+        if (groundRef.current) {
+          const g = groundRef.current.geometry;
+          if (g) g.dispose();
+          groundRef.current = null;
+        }
+        if (sceneRef.current) { sceneRef.current.clear(); }
         renderer.dispose();
+        renderer.forceContextLoss();
         if (container.contains(renderer.domElement)) {
           container.removeChild(renderer.domElement);
         }
