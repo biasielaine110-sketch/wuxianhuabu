@@ -16545,6 +16545,7 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
           <option value="25">25%</option>
           <option value="10">10%</option>
           <option value="5">5%</option>
+          <option value="2">2%</option>
         </select>
       </div>
 
