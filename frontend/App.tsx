@@ -14771,6 +14771,7 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
   const containerRef = useRef<HTMLDivElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentTool, setCurrentTool] = useState<'rect' | 'circle' | 'arrow' | 'pen' | 'text' | 'fillRect' | 'fillCircle' | 'crop'>('rect');
+  const [exportScale, setExportScale] = useState(100);
   const [currentColor, setCurrentColor] = useState('#ff6b6b');
   const [fillOpacity, setFillOpacity] = useState(0.45);
   const fillOpacityRef = useRef(0.45);
@@ -15065,7 +15066,7 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
 
   // 绘制箭头
   const drawArrow = (ctx: CanvasRenderingContext2D, fromX: number, fromY: number, toX: number, toY: number, color: string) => {
-    const headLen = 12;
+    const headLen = 12 * scaleRatio;
     const angle = Math.atan2(toY - fromY, toX - fromX);
 
     ctx.strokeStyle = color;
@@ -15883,7 +15884,7 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
         tempCanvas.height = img.height;
         const outCtx = tempCanvas.getContext('2d');
         if (!outCtx) return;
-        outCtx.drawImage(img, 0, 0);
+        outCtx.drawImage(img, 0, 0, img.width, img.height, 0, 0, outW, outH);
         // 全屏坐标 → 原始图片坐标的换算系数
         const fsScaleX = fs.w / img.width;
         const fsScaleY = fs.h / img.height;
@@ -16145,8 +16146,12 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
   // 确认标注并创建图片节点
   const confirmAnnotations = () => {
     const currentAnnots = annotationsRef.current;
-    if (!sourceImage || currentAnnots.length === 0) {
-      alert('请先导入图片并添加标注');
+    if (!sourceImage) {
+      alert('请先导入图片');
+      return;
+    }
+    if (exportScale === 100 && currentAnnots.length === 0) {
+      alert('请先添加标注');
       return;
     }
 
@@ -16155,16 +16160,19 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
 
     const img = new Image();
     img.onload = () => {
+      const scaleRatio = exportScale / 100;
+      const outW = Math.round(img.width * scaleRatio);
+      const outH = Math.round(img.height * scaleRatio);
       const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = img.width;
-      tempCanvas.height = img.height;
+      tempCanvas.width = outW;
+      tempCanvas.height = outH;
       const outCtx = tempCanvas.getContext('2d');
       if (!outCtx) return;
 
-      // 先绘制原图
-      outCtx.drawImage(img, 0, 0);
+      // 先绘制原图（缩放后）
+      outCtx.drawImage(img, 0, 0, img.width, img.height, 0, 0, outW, outH);
 
-      // 使用实际的 canvas 尺寸计算图片显示位置
+      // 如果有标注，才转换并绘制标注
       const cssWidth = canvas.width;
       const cssHeight = canvas.height;
 
@@ -16177,8 +16185,8 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
 
       // 将标注从 canvas 逻辑坐标转换到原图坐标的辅助函数
       const toImageCoords = (annX: number, annY: number) => ({
-        x: (annX - displayX) / displayScale,
-        y: (annY - displayY) / displayScale
+        x: ((annX - displayX) / displayScale) * scaleRatio,
+        y: ((annY - displayY) / displayScale) * scaleRatio
       });
 
       const boxTypes = ['rect', 'circle', 'fillRect', 'fillCircle'];
@@ -16195,7 +16203,7 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
             y: start.y,
             endX: end.x,
             endY: end.y,
-            strokeWidth: Math.max(1, (ann.strokeWidth || 2) / displayScale),
+            strokeWidth: Math.max(1, (ann.strokeWidth || 2) * scaleRatio),
           };
         } else if (ann.type === 'text') {
           const p = toImageCoords(ann.x, ann.y);
@@ -16203,7 +16211,7 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
             ...ann,
             x: p.x,
             y: p.y,
-            strokeWidth: Math.max(1, (ann.strokeWidth || 16) / displayScale),
+            strokeWidth: Math.max(1, (ann.strokeWidth || 16) * scaleRatio),
           };
         } else if (ann.type === 'pen' && ann.points && ann.points.length > 0) {
           const scaledPoints = ann.points.map((pt) => toImageCoords(pt.x, pt.y));
@@ -16212,7 +16220,7 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
           points: scaledPoints,
             x: scaledPoints[0].x,
             y: scaledPoints[0].y,
-            strokeWidth: Math.max(1, (ann.strokeWidth || 3) / displayScale),
+            strokeWidth: Math.max(1, (ann.strokeWidth || 3) * scaleRatio),
           };
         } else if (boxTypes.includes(ann.type)) {
           const ip = toImageCoords(ann.x, ann.y);
@@ -16227,8 +16235,8 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
             sw = Math.abs(ep.x - ip.x);
             sh = Math.abs(ep.y - ip.y);
           } else {
-            sw = (ann.width ?? 0) / displayScale;
-            sh = (ann.height ?? 0) / displayScale;
+            sw = ((ann.width ?? 0) / displayScale) * scaleRatio;
+            sh = ((ann.height ?? 0) / displayScale) * scaleRatio;
           }
           scaledAnn = {
             ...ann,
@@ -16236,7 +16244,7 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
             y: oy,
             width: sw,
             height: sh,
-            strokeWidth: Math.max(1, (ann.strokeWidth || 2) / displayScale),
+            strokeWidth: Math.max(1, (ann.strokeWidth || 2) * scaleRatio),
           };
         } else {
           const p = toImageCoords(ann.x, ann.y);
@@ -16522,6 +16530,21 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
         ))}
       </div>
 
+      {/* 缩放按钮 */}
+      <div className="flex items-center gap-1 shrink-0">
+        <span className="text-[10px] text-gray-400">缩放:</span>
+        <select
+          value={exportScale}
+          onPointerDown={(e) => e.stopPropagation()}
+          onChange={(e) => setExportScale(Number(e.target.value))}
+          className="rounded border border-[#444] bg-[#333] px-1 py-0.5 text-[10px] text-gray-200 outline-none cursor-pointer"
+        >
+          <option value="100">100%</option>
+          <option value="50">50%</option>
+          <option value="25">25%</option>
+        </select>
+      </div>
+
       {/* 颜色和字体大小 */}
       <div className="flex items-center gap-2 shrink-0 flex-wrap" style={{ order: 2 }}>
         {/* 颜色选择 */}
@@ -16655,7 +16678,7 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
       <button
         onPointerDown={(e) => e.stopPropagation()}
         onClick={confirmAnnotations}
-        disabled={!sourceImage || annotations.length === 0}
+        disabled={!sourceImage || (exportScale === 100 && annotations.length === 0)}
         className="w-full py-1 px-2 rounded text-[10px] bg-green-700 hover:bg-green-600 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1 shrink-0"
       >
         确认标注 ({annotations.length})
@@ -16984,7 +17007,7 @@ function drawAllAnnotationsExport(
 
 // 绘制箭头
 function drawArrowExport(ctx: CanvasRenderingContext2D, fromX: number, fromY: number, toX: number, toY: number) {
-  const headLen = 12;
+  const headLen = 12 * scaleRatio;
   const angle = Math.atan2(toY - fromY, toX - fromX);
 
   ctx.beginPath();
