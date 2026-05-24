@@ -16540,8 +16540,11 @@ function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onE
           className="rounded border border-[#444] bg-[#333] px-1 py-0.5 text-[10px] text-gray-200 outline-none cursor-pointer"
         >
           <option value="100">100%</option>
+          <option value="70">70%</option>
           <option value="50">50%</option>
           <option value="25">25%</option>
+          <option value="10">10%</option>
+          <option value="5">5%</option>
         </select>
       </div>
 
