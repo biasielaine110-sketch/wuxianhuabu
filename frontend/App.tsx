@@ -10551,7 +10551,7 @@ ${text}`,
           </button>
           <button
             onPointerDown={(e) => { e.stopPropagation(); downloadImage(fullscreenImage); }}
-            className="absolute bottom-8 right-8 px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl text-white font-bold shadow-lg shadow-blue-900/50 flex items-center gap-2 transition-all"
+            className="absolute bottom-8 left-8 px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl text-white font-bold shadow-lg shadow-blue-900/50 flex items-center gap-2 transition-all"
             title="下载图片"
           >
             <DownloadIcon size={20} /> 下载图片
