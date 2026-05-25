@@ -237,8 +237,8 @@ const upscaleImage = (base64Str: string, targetRes: string): Promise<string> => 
 
 const thumbnailCache = new Map<string, string>();
 const THUMB_MAX_CACHE = 60; // 降低上限，减少内存占用（原 120）
-/** 预览区缩略图分辨率比例（10/20/50/70/100%） */
-const thumbResolutionRef = { v: 10 };
+/** 预览区缩略图分辨率比例（5/10/20/50/70/100%）默认5%最低档大幅减少内存占用 */
+const thumbResolutionRef = { v: 5 };
 
 /**
  * Blob URL 注册表：管理 node.images 中 blob URL 的生命周期
@@ -424,6 +424,164 @@ function OptimizedImage({
   return <img src={src} className={className} alt={alt} onClick={onClick} onDoubleClick={onDoubleClick} draggable={draggable} loading="lazy" />;
 }
 
+// --- Lazy Loading Hook & Component ---
+// 使用 IntersectionObserver 在图片进入视口时才加载，离开后释放内存
+
+/** 判断节点是否在视口内（考虑画布缩放和偏移） */
+function isNodeInViewport(
+  nodeX: number,
+  nodeY: number,
+  nodeWidth: number,
+  nodeHeight: number,
+  transform: Transform,
+  viewportWidth: number,
+  viewportHeight: number,
+  margin = 200 // 额外边距，提前加载
+): boolean {
+  // 将节点坐标转换到屏幕坐标
+  const screenLeft = nodeX * transform.scale + transform.x;
+  const screenTop = nodeY * transform.scale + transform.y;
+  const screenRight = screenLeft + nodeWidth * transform.scale;
+  const screenBottom = screenTop + nodeHeight * transform.scale;
+
+  return !(
+    screenRight < -margin ||
+    screenLeft > viewportWidth + margin ||
+    screenBottom < -margin ||
+    screenTop > viewportHeight + margin
+  );
+}
+
+/** 懒加载 hook：监听元素是否进入视口 */
+function useIntersectionObserver(
+  containerRef: React.RefObject<HTMLDivElement | null>,
+  rootMargin = 200 // 额外边距，提前加载
+): [boolean] {
+  const [isIntersecting, setIsIntersecting] = useState(false);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          setIsIntersecting(entry.isIntersecting);
+        });
+      },
+      {
+        root: null, // 视口
+        rootMargin: `${rootMargin}px`,
+        threshold: 0,
+      }
+    );
+
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [containerRef, rootMargin]);
+
+  return [isIntersecting];
+}
+
+/** 懒加载版 OptimizedImage：进入视口才加载原图，离开释放 */
+function LazyOptimizedImage({
+  base64,
+  className,
+  alt,
+  maxSide = 640,
+  quality = 0.62,
+  onClick,
+  onDoubleClick,
+  draggable = false,
+  isInViewport = true, // 默认在视口内
+}: {
+  base64: string;
+  className?: string;
+  alt?: string;
+  maxSide?: number;
+  quality?: number;
+  onClick?: React.MouseEventHandler<HTMLImageElement>;
+  onDoubleClick?: React.MouseEventHandler<HTMLImageElement>;
+  draggable?: boolean;
+  isInViewport?: boolean;
+}) {
+  const [src, setSrc] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const maxSideRef = useRef(maxSide);
+  maxSideRef.current = maxSide;
+
+  // 仅当在视口内且有 base64 时才加载
+  useEffect(() => {
+    if (!base64) {
+      setSrc('');
+      setLoaded(false);
+      return;
+    }
+
+    // 不在视口内则显示空白占位
+    if (!isInViewport) {
+      setSrc('');
+      setLoaded(false);
+      return;
+    }
+
+    // 检查缓存（仅缓存小图或缩略图）
+    const cachedKey = `${base64.slice(0, 48)}|${base64.slice(-48)}|${base64.length}|${maxSideRef.current}|${quality}`;
+    const cached = thumbnailCache.get(cachedKey);
+    if (cached) {
+      setSrc(cached);
+      setLoaded(true);
+      return;
+    }
+
+    setSrc('');
+    const originalSrc = base64ToImageDataUrl(base64);
+    const img = new Image();
+    img.onload = () => {
+      const maxEdge = Math.max(img.width, img.height);
+      if (maxEdge <= maxSideRef.current) {
+        thumbnailCache.set(cachedKey, originalSrc);
+        setSrc(originalSrc);
+        setLoaded(true);
+        return;
+      }
+      const scale = maxSideRef.current / maxEdge;
+      const targetW = Math.max(1, Math.round(img.width * scale));
+      const targetH = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = targetW;
+      canvas.height = targetH;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, targetW, targetH);
+      const thumbSrc = canvas.toDataURL('image/jpeg', quality);
+      thumbnailCache.set(cachedKey, thumbSrc);
+      if (thumbnailCache.size > THUMB_MAX_CACHE) {
+        const firstKey = thumbnailCache.keys().next().value;
+        if (firstKey) thumbnailCache.delete(firstKey);
+      }
+      setSrc(thumbSrc);
+      setLoaded(true);
+    };
+    img.onerror = () => setSrc(originalSrc);
+    img.src = originalSrc;
+  }, [base64, isInViewport, quality]);
+
+  if (!loaded || !src) {
+    // 未加载时显示占位背景
+    return (
+      <div
+        className={`bg-[#2a2a2a] ${className || ''}`}
+        style={{ minHeight: 50 }}
+      />
+    );
+  }
+
+  return <img src={src} className={className} alt={alt} onClick={onClick} onDoubleClick={onDoubleClick} draggable={draggable} />;
+}
+
 /** 响应式图片预览组件：根据容器尺寸自动缩放图片 */
 function ResponsiveImagePreview({
   base64,
@@ -434,6 +592,7 @@ function ResponsiveImagePreview({
   onDoubleClick,
   draggable = false,
   fill = 'contain',
+  isInViewport = true,
 }: {
   base64: string;
   className?: string;
@@ -444,6 +603,8 @@ function ResponsiveImagePreview({
   draggable?: boolean;
   /** 图片填充方式：'contain' | 'cover' */
   fill?: 'contain' | 'cover';
+  /** 懒加载优化：是否在视口内，不在视口内时显示占位符 */
+  isInViewport?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
@@ -466,6 +627,16 @@ function ResponsiveImagePreview({
   }, []);
 
   const maxSide = Math.max(dimensions.width, dimensions.height, 100);
+
+  // 懒加载优化：不在视口内时显示占位背景，不加载图片
+  if (!isInViewport) {
+    return (
+      <div
+        ref={containerRef}
+        className={`w-full h-full bg-[#2a2a2a] ${className || ''}`}
+      />
+    );
+  }
 
   return (
     <div ref={containerRef} className={`w-full h-full ${className || ''}`}>
@@ -656,6 +827,7 @@ const I2I_PRESETS_BY_CATEGORY: Record<I2iPresetCategoryId, { key: string; label:
     { key: '故事板_A', label: '故事板_A' },
     { key: '故事板_B', label: '故事板_B' },
     { key: '故事板_CCC', label: '故事板_CCC' },
+    { key: 'CCCC_故事板简化版', label: 'CCCC_故事板简化版' },
   ],
   other: [
     { key: '故事九宫格', label: '故事九宫格' },
@@ -673,6 +845,7 @@ const T2I_PRESETS_BY_CATEGORY: Record<T2iPresetCategoryId, { key: string; label:
     { key: '故事板_A', label: '故事板_A' },
     { key: '故事板_B', label: '故事板_B' },
     { key: '故事板_CCC', label: '故事板_CCC' },
+    { key: 'CCCC_故事板简化版', label: 'CCCC_故事板简化版' },
   ],
 };
 
@@ -840,6 +1013,24 @@ const INITIAL_I2I_PROMPT_PRESETS: Record<string, string> = {
   '故事板_B':
     '一张AI视频生成指导图，整体采用真实影视前期提案板风格，画面像电影导演组内部使用的专业视觉开发文件，而不是普通拼贴海报。整个版面为高端中文电影UI排版包含角色设定、环境设计、摄影机位图、分镜故事板、情绪关键词、灯光设计、音频设计、摄影笔记、色调建议、节奏建议等多个模块，整体统一为超写实电影摄影风格，8K，高细节，真实胶片质感，具有强烈的电影工业化氛围。整张故事板必须以我的场景参考图为主，严格参考场景中的建筑结构、空间布局、地面材质，光影方向、环境氛围、远景层次、游客尺度与真实空间关系，确保所有分镜中的场景保持一致性和连续性。场景整体具有真实空间纵深，拥有电影级体积光、空气透视、漂浮灰尘、湿润反光、真实天气氛围与环境色温变化，整体风格统一，不能出现空间穿帮与建筑错位。环境氛围需要根据剧情自动匹配，例如压抑、宿命感、神性、史诗感、悬疑感、肃杀感、废墟感或超现实感。人物部分严格参考我的人物三视图进行统一生成，角色外观、发型、服装、盔甲、配饰、体型、颜色、材质、面部特征必须保持完全一致，不能在不同分镜中出现人物变形、服装变化、盔甲错误、脸部漂移或比例错误。人物需要生成标准角色设定区域，包括正面、背面、侧面、面部特写、情绪表情、站姿或坐姿参考，以及武器和装备细节参考。角色整体采用真实电影角色设计风格，而不是动漫设定图，人物皮肤、布料、金属、战损、灰尘、汗水与光影细节必须真实可信。故事板主体区域根据我的文字分镜脚本自动生成完整的电影分镜结构。每一个镜头都需要自动分析脚本中的人物动作、镜头运动、情绪变化、空间关系与叙事节奏，并生成对应的分镜画面。每格分镜必须包含时间码、景别、镜头角度、摄影机运动、人物动作、对白、音效与情绪描述。例如角色缓慢抬头时自动使用Slow Dolly-in，情绪爆发时自动使用Crash Zoom，战斗冲击时自动使用Dynamic Follow Shot，人物离场时自动使用Whip Pan或Handheld Tracking。所有镜头之间必须遵守180度轴线原则与30度有效分镜原则，确保角色站位、视线方向与镜头方向保持统一，形成真实电影剪辑逻辑，而不是随机拼接。镜头风格必须是真实电影摄影语言，包含低角度仰拍、过肩镜头、俯拍、长焦压缩、手持跟拍、浅景深、动态模糊、运动残影、镜头拉背、航拍推近等专业电影镜头设计。系统自动根据剧情判断镜头节奏，例如压抑对话采用稳定慢推镜头，紧张情绪采用手持微晃，史诗场景采用航拍大远景，人物心理震动采用焦点转移与背景虚化。所有镜头之间具有明确情绪递进，形成完整的观察→压迫→冲突→爆发→余韵的电影节奏。故事板底部自动生成情绪与风格关键词区域，根据剧情与场景自动提取风格标签，例如：超写实、电影感、宿命感、压抑、史诗感、神性、金属反光、潮湿空气、能量冲击，逆光尘埃、冷暖对比、烟雾氛围、胶片颗粒、真实光影、木质旧化、战损细节等，用于统一整部短片的视觉方向。同时自动生成音频与声场设计区域，根据分镜动作生成环境音、动作音效与BGM氛围。例如风声、脚步声、游客惊呼、火焰燃烧、金属摩擦、水能量轰鸣、低频震动、压迫鼓点，空旷回声、烟灰掉落声等，并自动匹配整体声场风格，例如贴近、压迫、低频，空旷、留白感或震撼感。故事板最后生成电影摄影笔记区域，自动分析整组镜头所需的镜头焦段、灯光逻辑与后期调色方向。例如35mm、50mm、85mm电影镜头组合，暖金高光与冷蓝阴影对比，真实皮肤纹理，胶片颗粒，HDR高动态范围，电影级动态模糊，真实镜头呼吸感，低饱和电影调色，摄影机慢推、手持跟随、镜头甩动、镜头摇移等电影语言。画面信息量巨大，一定要我的文字信息进行分析，分析故事内容和剧情走向等等，具有专业中文UI排版、真实摄影逻辑、真实故事板结构、真实镜头分析与真实电影工业化气质。',
   '故事板_CCC': '生成一张导演故事板分镜图，要求如下。\n【最终图片排版与文字标注要求（3:4画幅）】\n在一张比例为3:4的画幅中进行结构排版。\n\n🎬 模块一：分镜板（主模块） \n- 位置：画面中央靠上，宫格图顺序排列，占据主要画面。\n- 内容：根据剧情逻辑推演4个纯视觉分镜图。\n示例：\n列表展示\n第一列：时间轴：[例如：Cut 1  00:00 - 00:03，持续3秒]：\n第二列：分镜图\n第三列：运镜流程示意图及景别、运镜文字说明（图示表达镜头运动方式）\n第四列："\n主体：[主体描述，如角色、物体、环境元素]\n动作：[主体动作或行为描述，主体的具体行为、肢体动作或物理动态变化]\n描述：[画面构图]\n台词：[人物对白及说话语气，若无则填"无"]\n音效：[环境、动作音效]\n\n\n模块二：场景图、风格、光影与物品参考\n（横向铺展于画面底部，提供全方位的设定支撑材料与参数）\n1. 空间与环境设定\n人物站位图（必含）：[提供俯视视角的简图或详尽描述，清晰标明主要角色在场景中的空间位置、相对距离、视线方向以及摄影机（机位）的摆放位置]\n场景参考图：\n场景 1（宏观）：[大环境、建筑布局、地形地貌或大范围气候特征]\n场景 2（微观）：[局部环境、内部空间结构或特定角落的陈设]\n2. 道具与物件设定\n其他物品参考图：[画面中出现的关键道具、载具、武器或核心物件的特写参考与质感描述]\n3. 光影与色彩设定 (Lighting & Mood)\n光影布局：\n主光源：[类型、颜色、强度、照射方向]\n辅助光：[类型、颜色、强度、补光位置]\n环境光：[类型、颜色、强度、整体笼罩氛围]\n色彩板：\n主色/辅色/点缀色：[明确画面占据最大面积的核心颜色、平衡画面的辅助色以及用于视觉焦点的对比色]\n整体风格：[明确具体的艺术风格（如赛博朋克、写实电影感等）、渲染质感及最终的情绪基调]\n',
+  'CCCC_故事板简化版': `根据如上剧本生成一张导演故事板分镜图，要求如下。
+【最终图片排版与文字标注要求（3:4画幅）】
+在一张比例为3:4的画幅中进行结构排版。在画面上通过不一样的颜色箭头描述出人物运动方向和镜头轨迹。
+
+模块一：分镜板（主模块）
+- 位置：画面中央靠上，宫格图顺序排列，占据主要画面。
+- 内容：根据剧情逻辑推演4个纯视觉分镜图。
+示例：
+列表展示
+第一列：时间轴：[例如：Cut 1  00:00 - 00:03，持续3秒]：
+第二列：分镜图
+第三列：运镜流程示意图及景别、运镜文字说明（图示表达镜头运动方式）
+第四列："
+主体：[主体描述，如角色、物体、环境元素]
+动作：[主体动作或行为描述，主体的具体行为、肢体动作或物理动态变化]
+描述：[画面构图]
+台词：[人物对白及说话语气，若无则填"无"]
+音效：[环境、动作音效]`,
 };
 
 /** 文生图预设内容 */
@@ -849,6 +1040,24 @@ const INITIAL_T2I_PROMPT_PRESETS: Record<string, string> = {
   '故事板_B':
     '一张AI视频生成指导图，整体采用真实影视前期提案板风格，画面像电影导演组内部使用的专业视觉开发文件，而不是普通拼贴海报。整个版面为高端中文电影UI排版包含角色设定、环境设计、摄影机位图、分镜故事板、情绪关键词、灯光设计、音频设计、摄影笔记、色调建议、节奏建议等多个模块，整体统一为超写实电影摄影风格，8K，高细节，真实胶片质感，具有强烈的电影工业化氛围。整张故事板必须以我的场景参考图为主，严格参考场景中的建筑结构、空间布局、地面材质，光影方向、环境氛围、远景层次、游客尺度与真实空间关系，确保所有分镜中的场景保持一致性和连续性。场景整体具有真实空间纵深，拥有电影级体积光、空气透视、漂浮灰尘、湿润反光、真实天气氛围与环境色温变化，整体风格统一，不能出现空间穿帮与建筑错位。环境氛围需要根据剧情自动匹配，例如压抑、宿命感、神性、史诗感、悬疑感、肃杀感、废墟感或超现实感。人物部分严格参考我的人物三视图进行统一生成，角色外观、发型、服装、盔甲、配饰、体型、颜色、材质、面部特征必须保持完全一致，不能在不同分镜中出现人物变形、服装变化、盔甲错误、脸部漂移或比例错误。人物需要生成标准角色设定区域，包括正面、背面、侧面、面部特写、情绪表情、站姿或坐姿参考，以及武器和装备细节参考。角色整体采用真实电影角色设计风格，而不是动漫设定图，人物皮肤、布料、金属、战损、灰尘、汗水与光影细节必须真实可信。故事板主体区域根据我的文字分镜脚本自动生成完整的电影分镜结构。每一个镜头都需要自动分析脚本中的人物动作、镜头运动、情绪变化、空间关系与叙事节奏，并生成对应的分镜画面。每格分镜必须包含时间码、景别、镜头角度、摄影机运动、人物动作、对白、音效与情绪描述。例如角色缓慢抬头时自动使用Slow Dolly-in，情绪爆发时自动使用Crash Zoom，战斗冲击时自动使用Dynamic Follow Shot，人物离场时自动使用Whip Pan或Handheld Tracking。所有镜头之间必须遵守180度轴线原则与30度有效分镜原则，确保角色站位、视线方向与镜头方向保持统一，形成真实电影剪辑逻辑，而不是随机拼接。镜头风格必须是真实电影摄影语言，包含低角度仰拍、过肩镜头、俯拍、长焦压缩、手持跟拍、浅景深、动态模糊、运动残影、镜头拉背、航拍推近等专业电影镜头设计。系统自动根据剧情判断镜头节奏，例如压抑对话采用稳定慢推镜头，紧张情绪采用手持微晃，史诗场景采用航拍大远景，人物心理震动采用焦点转移与背景虚化。所有镜头之间具有明确情绪递进，形成完整的观察→压迫→冲突→爆发→余韵的电影节奏。故事板底部自动生成情绪与风格关键词区域，根据剧情与场景自动提取风格标签，例如：超写实、电影感、宿命感、压抑、史诗感、神性、金属反光、潮湿空气、能量冲击，逆光尘埃、冷暖对比、烟雾氛围、胶片颗粒、真实光影、木质旧化、战损细节等，用于统一整部短片的视觉方向。同时自动生成音频与声场设计区域，根据分镜动作生成环境音、动作音效与BGM氛围。例如风声、脚步声、游客惊呼、火焰燃烧、金属摩擦、水能量轰鸣、低频震动、压迫鼓点，空旷回声、烟灰掉落声等，并自动匹配整体声场风格，例如贴近、压迫、低频，空旷、留白感或震撼感。故事板最后生成电影摄影笔记区域，自动分析整组镜头所需的镜头焦段、灯光逻辑与后期调色方向。例如35mm、50mm、85mm电影镜头组合，暖金高光与冷蓝阴影对比，真实皮肤纹理，胶片颗粒，HDR高动态范围，电影级动态模糊，真实镜头呼吸感，低饱和电影调色，摄影机慢推、手持跟随、镜头甩动、镜头摇移等电影语言。画面信息量巨大，一定要我的文字信息进行分析，分析故事内容和剧情走向等等，具有专业中文UI排版、真实摄影逻辑、真实故事板结构、真实镜头分析与真实电影工业化气质。',
   '故事板_CCC': '生成一张导演故事板分镜图，要求如下。\n【最终图片排版与文字标注要求（3:4画幅）】\n在一张比例为3:4的画幅中进行结构排版。\n\n🎬 模块一：分镜板（主模块） \n- 位置：画面中央靠上，宫格图顺序排列，占据主要画面。\n- 内容：根据剧情逻辑推演4个纯视觉分镜图。\n示例：\n列表展示\n第一列：时间轴：[例如：Cut 1  00:00 - 00:03，持续3秒]：\n第二列：分镜图\n第三列：运镜流程示意图及景别、运镜文字说明（图示表达镜头运动方式）\n第四列："\n主体：[主体描述，如角色、物体、环境元素]\n动作：[主体动作或行为描述，主体的具体行为、肢体动作或物理动态变化]\n描述：[画面构图]\n台词：[人物对白及说话语气，若无则填"无"]\n音效：[环境、动作音效]\n\n\n模块二：场景图、风格、光影与物品参考\n（横向铺展于画面底部，提供全方位的设定支撑材料与参数）\n1. 空间与环境设定\n人物站位图（必含）：[提供俯视视角的简图或详尽描述，清晰标明主要角色在场景中的空间位置、相对距离、视线方向以及摄影机（机位）的摆放位置]\n场景参考图：\n场景 1（宏观）：[大环境、建筑布局、地形地貌或大范围气候特征]\n场景 2（微观）：[局部环境、内部空间结构或特定角落的陈设]\n2. 道具与物件设定\n其他物品参考图：[画面中出现的关键道具、载具、武器或核心物件的特写参考与质感描述]\n3. 光影与色彩设定 (Lighting & Mood)\n光影布局：\n主光源：[类型、颜色、强度、照射方向]\n辅助光：[类型、颜色、强度、补光位置]\n环境光：[类型、颜色、强度、整体笼罩氛围]\n色彩板：\n主色/辅色/点缀色：[明确画面占据最大面积的核心颜色、平衡画面的辅助色以及用于视觉焦点的对比色]\n整体风格：[明确具体的艺术风格（如赛博朋克、写实电影感等）、渲染质感及最终的情绪基调]\n',
+  'CCCC_故事板简化版': `根据如上剧本生成一张导演故事板分镜图，要求如下。
+【最终图片排版与文字标注要求（3:4画幅）】
+在一张比例为3:4的画幅中进行结构排版。在画面上通过不一样的颜色箭头描述出人物运动方向和镜头轨迹。
+
+模块一：分镜板（主模块）
+- 位置：画面中央靠上，宫格图顺序排列，占据主要画面。
+- 内容：根据剧情逻辑推演4个纯视觉分镜图。
+示例：
+列表展示
+第一列：时间轴：[例如：Cut 1  00:00 - 00:03，持续3秒]：
+第二列：分镜图
+第三列：运镜流程示意图及景别、运镜文字说明（图示表达镜头运动方式）
+第四列："
+主体：[主体描述，如角色、物体、环境元素]
+动作：[主体动作或行为描述，主体的具体行为、肢体动作或物理动态变化]
+描述：[画面构图]
+台词：[人物对白及说话语气，若无则填"无"]
+音效：[环境、动作音效]`,
   '通用模板':
     '16:9横屏，专业摄影，高清8K，电影级质感，写实风格，自然光影',
   '真人写实':
@@ -1282,6 +1491,17 @@ export default function App() {
   const [nodes, setNodes] = useState<CanvasNode[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: 0.4 });
+  // 懒加载优化：跟踪视口尺寸和画布容器引用
+  const viewportRef = useRef({ width: typeof window !== 'undefined' ? window.innerWidth : 1920, height: typeof window !== 'undefined' ? window.innerHeight : 1080 });
+  const canvasContainerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const updateViewport = () => {
+      viewportRef.current = { width: window.innerWidth, height: window.innerHeight };
+    };
+    updateViewport();
+    window.addEventListener('resize', updateViewport);
+    return () => window.removeEventListener('resize', updateViewport);
+  }, []);
   const { ensureJimengReady, openLogin, authInfo, logout } = useJimengAuth();
   const openLoginRef = useRef(openLogin);
   useEffect(() => { openLoginRef.current = openLogin; }, [openLogin]);
@@ -1462,6 +1682,13 @@ export default function App() {
     setFullscreenNodeId(nodeId);
     setFullscreenImage(img);
     setFullscreenImageIdx(idx);
+    setFsTransform({ scale: 1, x: 0, y: 0 });
+  };
+  /** 通用全屏查看（不需要 nodeId，用于对话消息中的图片） */
+  const openFullscreenFromBase64 = (base64: string) => {
+    setFullscreenNodeId(null);
+    setFullscreenImage(base64);
+    setFullscreenImageIdx(0);
     setFsTransform({ scale: 1, x: 0, y: 0 });
   };
   const fsNavigate = (dir: 1 | -1) => {
@@ -4947,6 +5174,10 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
     const inputText = (opts?.promptText ?? node.prompt)?.trim();
     if (!inputText) return;
 
+    // 检测是否为生图模式（以 [生图] 开头）
+    const isImageGenMode = inputText.startsWith('[生图]');
+    const imageGenPrompt = isImageGenMode ? inputText.replace(/^\[生图\]\s*/, '').trim() : '';
+
     const incomingEdges = edges.filter(e => e.targetId === nodeId);
     const inputNodes = incomingEdges.map(e => nodes.find(n => n.id === e.sourceId)).filter(Boolean) as CanvasNode[];
     const textInputs = inputNodes.map(n => n.prompt).filter(Boolean);
@@ -5013,6 +5244,43 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
           );
 
     try {
+      // 生图模式：直接调用图片生成服务
+      if (isImageGenMode && imageGenPrompt) {
+        const defaultModel = defaultCanvasImageModel();
+        const aspectRatio = (node as ChatNode).imageAspectRatio || '1:1';
+        const resolution = (node as ChatNode).imageResolution || '1k';
+        const imageCount = 1;
+
+        const generatedImages = await generateNewImage(
+          imageGenPrompt,
+          aspectRatio,
+          imageCount,
+          defaultModel,
+          resolution
+        );
+
+        const assistantMessage: ChatMessage = {
+          id: `msg-${Date.now()}-assistant`,
+          role: 'assistant',
+          content: `已根据您的描述生成 ${generatedImages.length} 张图片：`,
+          images: generatedImages,
+        };
+
+        setNodes((prev) =>
+          prev.map((n) => {
+            if (n.id !== nodeId) return n;
+            const ch = n as ChatNode;
+            const existingMsgs = (ch.messages || []) as ChatMessage[];
+            const afterUser = [...existingMsgs, userMessage];
+            const trimmedAfterUser = afterUser.length > MAX_CHAT_MESSAGES ? afterUser.slice(-MAX_CHAT_MESSAGES) : afterUser;
+            return { ...ch, messages: [...trimmedAfterUser, assistantMessage], isGenerating: false } as CanvasNode;
+          })
+        );
+        generationStartedAtRef.current.delete(nodeId);
+        return;
+      }
+
+      // 普通对话模式
       const apiTurns = [
         ...historyForApi.map((m) => {
           const imgs = m.role === 'user' && m.images?.length ? m.images : undefined;
@@ -5471,6 +5739,18 @@ ${text}`,
         ? Math.max(0, Math.floor((Date.now() - genStart) / 1000))
         : 0;
     const genTimeMmSs = `${String(Math.floor(genElapsedSec / 60)).padStart(2, '0')}:${String(genElapsedSec % 60).padStart(2, '0')}`;
+
+    // 懒加载优化：预计算节点是否在视口内
+    const nodeInViewport = (() => {
+      const vp = viewportRef.current;
+      const t = transform;
+      const screenLeft = node.x * t.scale + t.x;
+      const screenTop = node.y * t.scale + t.y;
+      const screenRight = screenLeft + node.width * t.scale;
+      const screenBottom = screenTop + node.height * t.scale;
+      const margin = 300;
+      return !(screenRight < -margin || screenLeft > vp.width + margin || screenBottom < -margin || screenTop > vp.height + margin);
+    })();
 
     const isSelected = selectedIds.includes(node.id);
     const hasInputPort = canReceiveConnection(node);
@@ -5988,6 +6268,7 @@ ${text}`,
                             quality={0.58}
                             fill="contain"
                             className="bg-[#3A3A3A] rounded transition-opacity"
+                            isInViewport={nodeInViewport}
                             onClick={(e) => {
                               e.stopPropagation();
                               if (eyedropperTargetNodeId) {
@@ -6016,6 +6297,7 @@ ${text}`,
                         quality={0.6}
                         fill="contain"
                         className={eyedropperTargetNodeId ? 'cursor-cyan-400' : ''}
+                        isInViewport={nodeInViewport}
                         onClick={(e) => {
                           e.stopPropagation();
                           if (eyedropperTargetNodeId) {
@@ -6685,6 +6967,23 @@ ${text}`,
               generationSeconds={node.isGenerating ? genElapsedSec : undefined}
               onOpenBigEditor={openBigEditor}
               onActivate={() => setSelectedIds([node.id])}
+              onCreateImageNode={(images, x, y) => {
+                const newNode: CanvasNode = {
+                  id: `image-${Date.now()}`,
+                  type: 'image',
+                  x,
+                  y,
+                  width: 480,
+                  height: 528,
+                  prompt: '',
+                  images,
+                  viewMode: 'single',
+                  currentImageIndex: 0
+                };
+                setNodes(prev => [...prev, newNode]);
+                setSelectedIds([newNode.id]);
+              }}
+              onOpenFullscreen={(base64) => void openFullscreenFromBase64(base64)}
             />
           )}
 
@@ -13170,6 +13469,26 @@ const CHAT_PROMPT_JIMENG_CCC_ASSETS = `【角色定位】
 4. 原剧本中标注的特效、镜头要求、核心剧情节点，必须在对应镜头、片段中重复标注，确保AI生成时精准触发
 5. 最终输出内容必须100%还原原剧本，不得擅自修改、增减任何剧情、台词、人设、时长节点，哪怕原剧本描述简略，也需在不改动核心内容的前提下，仅补全AI生成所需的画面细节。`;
 
+/** 故事板_CCC简化版 - 3:4画幅分镜图 */
+const CHAT_PROMPT_CCC_STORYBOARD_SIMPLIFIED = `根据如上剧本生成一张导演故事板分镜图，要求如下。
+【最终图片排版与文字标注要求（3:4画幅）】
+在一张比例为3:4的画幅中进行结构排版。在画面上通过不一样的颜色箭头描述出人物运动方向和镜头轨迹。
+
+模块一：分镜板（主模块）
+- 位置：画面中央靠上，宫格图顺序排列，占据主要画面。
+- 内容：根据剧情逻辑推演4个纯视觉分镜图。
+示例：
+列表展示
+第一列：时间轴：[例如：Cut 1  00:00 - 00:03，持续3秒]：
+第二列：分镜图
+第三列：运镜流程示意图及景别、运镜文字说明（图示表达镜头运动方式）
+第四列："
+主体：[主体描述，如角色、物体、环境元素]
+动作：[主体动作或行为描述，主体的具体行为、肢体动作或物理动态变化]
+描述：[画面构图]
+台词：[人物对白及说话语气，若无则填"无"]
+音效：[环境、动作音效]`;
+
 /** 即梦 Seedance 2.0 · CCC 单镜视频提示词模板（对话节点一键填入） */
 const CHAT_PROMPT_JIMENG_CCC_VIDEO_SEEDANCE = `【角色定位】
 即梦 Seedance 2.0 横屏短剧·标准化分镜生成提示词模板
@@ -13895,6 +14214,7 @@ const INITIAL_CHAT_PROMPT_PRESETS: Record<string, string> = {
   'EEEE_备选万能资产': CHAT_PROMPT_EEEE_ALT_UNIVERSAL_ASSET,
   'CCC即梦分镜': CHAT_PROMPT_JIMENG_CCC_ASSETS,
   'CCC即梦视频': CHAT_PROMPT_JIMENG_CCC_VIDEO_SEEDANCE,
+  'CCCC_故事板简化版': CHAT_PROMPT_CCC_STORYBOARD_SIMPLIFIED,
   'DDD_15秒剧本时间轴': CHAT_PROMPT_DDD_15S_TIMELINE,
   'DDD_15秒九宫格定调板': CHAT_PROMPT_DDD_9GRID_BEATBOARD,
   'FFFF_全能提示词': CHAT_PROMPT_FFFF_UNIVERSAL,
@@ -13964,6 +14284,14 @@ const CHAT_FEATURE_BUTTON_SPECS: ChatFeatureButtonSpec[] = [
       'CCC_视频提示词_即梦（Seedance 2.0）：单镜标准化提示词工程模板。发送前请连接或粘贴分镜工程文件要点，并在参考区绑定角色/场景参考图。',
   },
   {
+    id: 'cccc-storyboard-simplified',
+    presetKey: 'CCCC_故事板简化版',
+    label: 'CCCC_故事板简化版',
+    icon: 'wand',
+    title:
+      'CCCC_故事板简化版：根据剧本生成3:4画幅的分镜图，包含4个分镜、运镜说明、主体/动作/描述/台词/音效标注。发送前请填入剧本正文。',
+  },
+  {
     id: 'ddd-15s-timeline',
     presetKey: 'DDD_15秒剧本时间轴',
     label: 'DDD_15秒剧本时间轴',
@@ -14009,6 +14337,10 @@ interface ChatNodeContentProps {
   onOpenBigEditor?: (current: string, onSave: (v: string) => void) => void;
   /** 双击窗口内部任意区域时激活选中 */
   onActivate: () => void;
+  /** 创建图片节点回调 */
+  onCreateImageNode?: (images: string[], nodeX: number, nodeY: number) => void;
+  /** 全屏查看图片回调（用于对话消息中的图片） */
+  onOpenFullscreen?: (base64: string) => void;
 }
 
 function ChatNodeContent({
@@ -14028,6 +14360,8 @@ function ChatNodeContent({
   generationSeconds,
   onOpenBigEditor,
   onActivate,
+  onCreateImageNode,
+  onOpenFullscreen,
 }: ChatNodeContentProps) {
   const [showAllRefs, setShowAllRefs] = useState(false);
   const chatPromptRef = useRef<HTMLTextAreaElement>(null);
@@ -14446,14 +14780,83 @@ function ChatNodeContent({
               onPointerDown={(e) => e.stopPropagation()}
             >
               {(msg.images?.length ? msg.images : msg.image ? [msg.image] : []).map((im, ii) => (
-                <OptimizedImage
-                  key={`${msg.id}-img-${ii}`}
-                  base64={im}
-                  maxSide={210}
-                  quality={0.56}
-                  alt="用户参考图"
-                  className={`${ii ? 'mt-1 ' : ''}mb-2 h-24 w-24 rounded object-cover`}
-                />
+                <div key={`${msg.id}-img-${ii}`} className={`relative group/image ${ii ? 'mt-1 ' : ''}mb-2`}>
+                  <OptimizedImage
+                    base64={im}
+                    maxSide={840}
+                    quality={0.85}
+                    alt="AI生成的图片"
+                    className="rounded object-contain max-w-full cursor-pointer hover:opacity-90 transition-opacity"
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      // 双击图片最大化
+                      const win = window.open('', '_blank');
+                      if (win) {
+                        const img = new Image();
+                        img.onload = () => {
+                          const dataUrl = `data:${sniffImageMimeFromBase64(im)};base64,${im}`;
+                          win.document.write(`<html><body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh"><img src="${dataUrl}" style="max-width:95vw;max-height:95vh;object-fit:contain"/></body></html>`);
+                          win.document.close();
+                        };
+                        img.src = `data:${sniffImageMimeFromBase64(im)};base64,${im}`;
+                      }
+                    }}
+                  />
+                  {/* 复制图片按钮 */}
+                  <button
+                    type="button"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const dataUrl = `data:${sniffImageMimeFromBase64(im)};base64,${im}`;
+                      fetch(dataUrl)
+                        .then(r => r.blob())
+                        .then(blob => {
+                          navigator.clipboard.write([
+                            new ClipboardItem({ 'image/png': blob })
+                          ]);
+                        })
+                        .catch(() => {
+                          // 降级：复制 base64 字符串
+                          navigator.clipboard.writeText(im);
+                        });
+                    }}
+                    className="absolute top-1 left-1 opacity-0 group-hover/image:opacity-100 transition-opacity bg-black/70 hover:bg-black/90 rounded p-1"
+                    title="复制图片"
+                  >
+                    <CopyIcon size={12} />
+                  </button>
+                  {/* 最大化按钮 */}
+                  <button
+                    type="button"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onOpenFullscreen) {
+                        onOpenFullscreen(im);
+                      }
+                    }}
+                    className="absolute top-1 right-7 opacity-0 group-hover/image:opacity-100 transition-opacity bg-black/70 hover:bg-black/90 rounded p-1"
+                    title="最大化"
+                  >
+                    <MaximizeIcon size={12} />
+                  </button>
+                  {/* 存储为节点按钮 */}
+                  {onCreateImageNode && (
+                    <button
+                      type="button"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onCreateImageNode([im], node.x + node.width + 50, node.y);
+                      }}
+                      className="absolute top-1 left-1 opacity-0 group-hover/image:opacity-100 transition-opacity bg-purple-600/80 hover:bg-purple-600 rounded p-1"
+                      title="存储为图片节点"
+                    >
+                      <ImageIcon size={12} />
+                    </button>
+                  )}
+                </div>
               ))}
                 {editingThis ? (
                   <>
@@ -14656,6 +15059,36 @@ function ChatNodeContent({
             );
           })}
         </div>
+        {/* 生图比例和分辨率选择器 */}
+        <div className="mb-2 flex items-center gap-2 flex-wrap">
+          <span className="text-gray-400 shrink-0" style={{ fontSize: fs(10) }}>比例:</span>
+          <select
+            className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-purple-500"
+            style={{ fontSize: fs(10) }}
+            value={node.imageAspectRatio || '1:1'}
+            onChange={(e) => onUpdate({ imageAspectRatio: e.target.value })}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <option value="1:1">1:1</option>
+            <option value="16:9">16:9</option>
+            <option value="9:16">9:16</option>
+            <option value="4:3">4:3</option>
+            <option value="3:4">3:4</option>
+            <option value="21:9">21:9</option>
+          </select>
+          <span className="text-gray-400 shrink-0" style={{ fontSize: fs(10) }}>分辨率:</span>
+          <select
+            className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-purple-500"
+            style={{ fontSize: fs(10) }}
+            value={node.imageResolution || '1k'}
+            onChange={(e) => onUpdate({ imageResolution: e.target.value })}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <option value="1k">1K</option>
+            <option value="2k">2K</option>
+            <option value="4k">4K</option>
+          </select>
+        </div>
         <RefPickBar
           slots={refSlots}
           disabled={node.isGenerating}
@@ -14738,6 +15171,22 @@ function ChatNodeContent({
             className="px-[52px] rounded bg-rose-600 hover:bg-rose-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white flex items-center justify-center"
           >
             <SendIcon size={fs(14)} />
+          </button>
+          <button
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              // 触发图片生成模式：在 prompt 前面加上生图指令前缀
+              const currentPrompt = node.prompt || '';
+              // 检查是否已经有生图前缀
+              if (!currentPrompt.startsWith('[生图]')) {
+                onUpdate({ prompt: '[生图] ' + currentPrompt });
+              }
+            }}
+            disabled={node.isGenerating}
+            className="rounded bg-purple-600 hover:bg-purple-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white flex items-center justify-center px-3"
+            title="AI生图"
+          >
+            <ImageIcon size={fs(14)} />
           </button>
         </div>
       </div>
