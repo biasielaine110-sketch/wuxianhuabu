@@ -343,6 +343,118 @@ function clearCanvasThumbnailCache(): void {
   thumbnailCache.clear();
 }
 
+// 图片懒加载 Hook
+function useLazyImageLoad(base64: string, maxSide: number, quality: number) {
+  const [src, setSrc] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const [shouldLoad, setShouldLoad] = useState(false);
+  const imgRef = useRef<HTMLDivElement>(null);
+
+  // IntersectionObserver：只当图片进入视口时才加载
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setShouldLoad(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.1, rootMargin: '100px' }
+    );
+
+    if (imgRef.current) {
+      observer.observe(imgRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!shouldLoad || !base64) {
+      setSrc('');
+      return;
+    }
+
+    const cachedKey = `${base64.slice(0, 48)}|${base64.slice(-48)}|${base64.length}|${maxSide}|${quality}`;
+    const cached = thumbnailCache.get(cachedKey);
+    if (cached) {
+      setSrc(cached);
+      setLoaded(true);
+      return;
+    }
+
+    setSrc('');
+    const originalSrc = base64ToImageDataUrl(base64);
+    const img = new Image();
+    img.onload = () => {
+      const maxEdge = Math.max(img.width, img.height);
+      if (maxEdge <= maxSide) {
+        thumbnailCache.set(cachedKey, originalSrc);
+        setSrc(originalSrc);
+        setLoaded(true);
+        return;
+      }
+      const scale = maxSide / maxEdge;
+      const targetW = Math.max(1, Math.round(img.width * scale));
+      const targetH = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = targetW;
+      canvas.height = targetH;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, targetW, targetH);
+      const thumbSrc = canvas.toDataURL('image/jpeg', quality);
+      thumbnailCache.set(cachedKey, thumbSrc);
+      if (thumbnailCache.size > THUMB_MAX_CACHE) {
+        const firstKey = thumbnailCache.keys().next().value;
+        if (firstKey) thumbnailCache.delete(firstKey);
+      }
+      setSrc(thumbSrc);
+      setLoaded(true);
+    };
+    img.onerror = () => {
+      setSrc(originalSrc);
+      setLoaded(true);
+    };
+    img.src = originalSrc;
+  }, [base64, maxSide, quality, shouldLoad]);
+
+  return { src, loaded, imgRef };
+}
+
+// 懒加载图片组件（用于消息列表中的图片）
+function LazyMessageImage({
+  base64,
+  maxSide = 840,
+  quality = 0.85,
+}: {
+  base64: string;
+  maxSide?: number;
+  quality?: number;
+}) {
+  const { src, loaded, imgRef } = useLazyImageLoad(base64, maxSide, quality);
+
+  return (
+    <div ref={imgRef} className="relative w-full min-h-[100px] bg-[#333] rounded overflow-hidden">
+      {!loaded && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      )}
+      {src && (
+        <img
+          src={src}
+          alt="AI生成的图片"
+          className="w-full object-contain"
+          loading="lazy"
+        />
+      )}
+    </div>
+  );
+}
+
 function OptimizedImage({
   base64,
   className,
@@ -14385,6 +14497,8 @@ function ChatNodeContent({
   const [showBigInput, setShowBigInput] = useState(false);
   const [bigInputDraft, setBigInputDraft] = useState('');
   const [chatFontPx, setChatFontPx] = useState(readStoredChatFontPx);
+  // 限制渲染的消息数量，防止图片太多导致崩溃
+  const MAX_VISIBLE_MESSAGES = 30;
   const persistChatFontPx = useCallback((px: number) => {
     const v = clampChatFontPx(px);
     setChatFontPx(v);
@@ -14777,7 +14891,13 @@ function ChatNodeContent({
             )}
           </div>
         )}
-        {messages.map((msg) => {
+        {/* 限制显示最近的消息数量，防止图片过多导致崩溃 */}
+        {messages.length > MAX_VISIBLE_MESSAGES && (
+          <div className="text-center text-gray-500 py-2 text-xs">
+            共 {messages.length} 条消息，显示最近 {MAX_VISIBLE_MESSAGES} 条
+          </div>
+        )}
+        {messages.slice(-MAX_VISIBLE_MESSAGES).map((msg) => {
           const editingThis = msg.role === 'user' && editingUserMessageId === msg.id;
           const isUser = msg.role === 'user';
           return (
