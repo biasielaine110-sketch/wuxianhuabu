@@ -83,6 +83,12 @@ const toapisFileCdnProxy = {
     secure: true,
     rewrite: (p: string) => p.replace(/^\/codesonline-image-api/, ''),
   },
+  '/codesonline-chat-api': {
+    target: 'https://ai.codesonline.dev',
+    changeOrigin: true,
+    secure: true,
+    rewrite: (p: string) => p.replace(/^\/codesonline-chat-api/, ''),
+  },
   '/api/jimeng': {
     target: 'http://localhost:3107',
     changeOrigin: true,

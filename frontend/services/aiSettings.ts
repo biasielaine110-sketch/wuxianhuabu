@@ -12,6 +12,9 @@ const JUNLAN_BASE_URL_STORAGE_KEY = 'junlan-openai-compatible-base-url-v1';
 /** [codesonline 控制台](https://image.codesonline.dev/personal/docs) OpenAI 兼容图像网关；画布模型 id 为 `gpt-image-2-codesonline`，与 ToAPIs/君澜的 gpt-image-2 分流 */
 const CODESONLINE_IMAGE_API_KEY_STORAGE_KEY = 'codesonline-image-openai-api-key-v1';
 const CODESONLINE_IMAGE_BASE_URL_STORAGE_KEY = 'codesonline-image-openai-base-url-v1';
+/** codesonline GPT-5.5 对话专用 */
+const CODESONLINE_CHAT_API_KEY_STORAGE_KEY = 'codesonline-chat-openai-api-key-v1';
+const CODESONLINE_CHAT_BASE_URL_STORAGE_KEY = 'codesonline-chat-openai-base-url-v1';
 /** 满 eAPI（manxueapi.com）OpenAI 兼容网关：画布「GPT Image 2（满 e）」与「Gemini 3 Pro Image」等 */
 const MANXUE_API_KEY_STORAGE_KEY = 'manxue-openai-compatible-api-key-v1';
 const MANXUE_BASE_URL_STORAGE_KEY = 'manxue-openai-compatible-base-url-v1';
@@ -26,6 +29,9 @@ export const DEFAULT_JUNLAN_BASE_URL = 'https://www.junlanai.com/v1';
 export const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1';
 /** 画布「AI 对话」默认 DeepSeek 模型（与 {@link DEFAULT_DEEPSEEK_BASE_URL} 配合；官方 ID：deepseek-v4-flash / deepseek-v4-pro） */
 export const DEFAULT_DEEPSEEK_CHAT_MODEL_ID = 'deepseek-v4-flash';
+
+/** codesonline GPT-5.5 对话专用 Base URL */
+export const DEFAULT_CODESONLINE_CHAT_BASE_URL = 'https://ai.codesonline.dev/v1';
 
 /** 满 eAPI manxueapi.com OpenAI 兼容入口（Base URL 须含 /v1） */
 export const DEFAULT_MANXUE_BASE_URL = 'https://manxueapi.com/v1';
@@ -217,6 +223,44 @@ export function setCodesonlineBaseUrl(url: string): void {
   try {
     if (normalized) localStorage.setItem(CODESONLINE_IMAGE_BASE_URL_STORAGE_KEY, normalized);
     else localStorage.removeItem(CODESONLINE_IMAGE_BASE_URL_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** codesonline GPT-5.5 对话 API Key */
+export function getCodesonlineChatSavedKey(): string {
+  try {
+    return localStorage.getItem(CODESONLINE_CHAT_API_KEY_STORAGE_KEY)?.trim() || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setCodesonlineChatKey(apiKey: string): void {
+  const normalized = apiKey.trim();
+  try {
+    if (normalized) localStorage.setItem(CODESONLINE_CHAT_API_KEY_STORAGE_KEY, normalized);
+    else localStorage.removeItem(CODESONLINE_CHAT_API_KEY_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getCodesonlineChatBaseUrl(): string {
+  try {
+    const raw = localStorage.getItem(CODESONLINE_CHAT_BASE_URL_STORAGE_KEY)?.trim();
+    return raw || DEFAULT_CODESONLINE_CHAT_BASE_URL;
+  } catch {
+    return DEFAULT_CODESONLINE_CHAT_BASE_URL;
+  }
+}
+
+export function setCodesonlineChatBaseUrl(url: string): void {
+  const normalized = url.trim();
+  try {
+    if (normalized) localStorage.setItem(CODESONLINE_CHAT_BASE_URL_STORAGE_KEY, normalized);
+    else localStorage.removeItem(CODESONLINE_CHAT_BASE_URL_STORAGE_KEY);
   } catch {
     /* ignore */
   }

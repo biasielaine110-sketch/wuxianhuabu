@@ -12,6 +12,8 @@ import {
   getOpenAiSavedKey,
   normalizeDeepSeekChatModelId,
   setGeminiKey,
+  getCodesonlineChatSavedKey,
+  getCodesonlineChatBaseUrl,
 } from './aiSettings';
 import {
   chatCompletionHistoryAtBase,
@@ -379,6 +381,31 @@ export const callGeminiChatWithHistory = async (
         getMiniMaxBaseUrl(),
         mxKey,
         modelName,
+        slice.map((t) => ({
+          role: t.role,
+          content: t.content,
+          imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
+          imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
+        }))
+      );
+    }
+
+    // codesonline GPT-5.5 对话
+    if (modelName === 'gpt-5.5-codesonline') {
+      const coKey = getCodesonlineChatSavedKey().trim();
+      if (!coKey) {
+        throw new Error(
+          '使用 GPT-5.5（codesonline）：请在「设置 → API」中填写「codesonline API Key (GPT-5.5)」。'
+        );
+      }
+      // 开发环境用同源代理，生产环境直连
+      const baseUrl = import.meta.env.DEV
+        ? '/codesonline-chat-api'
+        : getCodesonlineChatBaseUrl();
+      return chatCompletionHistoryAtBase(
+        baseUrl,
+        coKey,
+        'gpt-5.5',
         slice.map((t) => ({
           role: t.role,
           content: t.content,

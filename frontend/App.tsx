@@ -4,6 +4,7 @@ import { CanvasNode, Edge, Transform, Tool, NodeType, Annotation, AnnotationNode
 import AuditModeCanvas from './AuditModeCanvas';
 import type { AiProvider } from './services/aiSettings';
 import {
+  DEFAULT_CODESONLINE_CHAT_BASE_URL,
   DEFAULT_CODESONLINE_IMAGE_BASE_URL,
   DEFAULT_DEEPSEEK_BASE_URL,
   DEFAULT_DEEPSEEK_CHAT_MODEL_ID,
@@ -14,6 +15,8 @@ import {
   getAiSettingsSnapshot,
   normalizeDeepSeekChatModelId,
   getCodesonlineSavedKey,
+  getCodesonlineChatSavedKey,
+  setCodesonlineChatKey,
   getJunlanSavedKey,
   migrateAiSettingsIfLegacy,
   persistAiSettings,
@@ -2284,6 +2287,7 @@ export default function App() {
   const [junlanKeyInput, setJunlanKeyInput] = useState(() => getAiSettingsSnapshot().junlanKey);
   const [codesonlineBaseInput, setCodesonlineBaseInput] = useState(() => getAiSettingsSnapshot().codesonlineBaseUrl);
   const [codesonlineKeyInput, setCodesonlineKeyInput] = useState(() => getAiSettingsSnapshot().codesonlineKey);
+  const [codesonlineChatKeyInput, setCodesonlineChatKeyInput] = useState(() => getCodesonlineChatSavedKey());
   const [manxueBaseInput, setManxueBaseInput] = useState(() => getAiSettingsSnapshot().manxueBaseUrl);
   const [manxueKeyInput, setManxueKeyInput] = useState(() => getAiSettingsSnapshot().manxueKey);
   const [minimaxBaseInput, setMiniMaxBaseInput] = useState(() => getAiSettingsSnapshot().minimaxBaseUrl);
@@ -2300,6 +2304,7 @@ export default function App() {
     setJunlanKeyInput(s.junlanKey);
     setCodesonlineBaseInput(s.codesonlineBaseUrl);
     setCodesonlineKeyInput(s.codesonlineKey);
+    setCodesonlineChatKeyInput(getCodesonlineChatSavedKey());
     setManxueBaseInput(s.manxueBaseUrl);
     setManxueKeyInput(s.manxueKey);
     setMiniMaxBaseInput(s.minimaxBaseUrl);
@@ -5395,24 +5400,19 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
     );
 
     generationStartedAtRef.current.set(nodeId, Date.now());
-    const MAX_CHAT_MESSAGES = 50;
-          const newMessages = [...baseMessages, userMessage];
-          const trimmedMessages = newMessages.length > MAX_CHAT_MESSAGES
-            ? newMessages.slice(-MAX_CHAT_MESSAGES)
-            : newMessages;
-          setNodes((prev) =>
-            prev.map((n) =>
-              n.id === nodeId
-                ? ({
-                    ...n,
-                    messages: trimmedMessages,
-                    prompt: '',
-                    isGenerating: true,
-                    error: undefined,
-                  } as CanvasNode)
-                : n
-            )
-          );
+
+    // 立即显示用户消息并设置加载状态
+    setNodes((prev) =>
+      prev.map((n) => {
+        if (n.id !== nodeId) return n;
+        const ch = n as ChatNode;
+        const existingMsgs = (ch.messages || []) as ChatMessage[];
+        const MAX_CHAT_MESSAGES = 50;
+        const afterUser = [...existingMsgs, userMessage];
+        const trimmedAfterUser = afterUser.length > MAX_CHAT_MESSAGES ? afterUser.slice(-MAX_CHAT_MESSAGES) : afterUser;
+        return { ...ch, messages: trimmedAfterUser, isGenerating: true, error: undefined, prompt: '' } as CanvasNode;
+      })
+    );
 
     try {
       // 生图模式：直接调用图片生成服务
@@ -5442,9 +5442,10 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
             if (n.id !== nodeId) return n;
             const ch = n as ChatNode;
             const existingMsgs = (ch.messages || []) as ChatMessage[];
+            const MAX_CHAT_MESSAGES = 50;
             const afterUser = [...existingMsgs, userMessage];
             const trimmedAfterUser = afterUser.length > MAX_CHAT_MESSAGES ? afterUser.slice(-MAX_CHAT_MESSAGES) : afterUser;
-            return { ...ch, messages: [...trimmedAfterUser, assistantMessage], isGenerating: false } as CanvasNode;
+            return { ...ch, messages: [...trimmedAfterUser, assistantMessage], isGenerating: false, prompt: '' } as CanvasNode;
           })
         );
         generationStartedAtRef.current.delete(nodeId);
@@ -5491,7 +5492,7 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
           const existingMsgs = (ch.messages || []) as ChatMessage[];
           const afterUser = [...existingMsgs, userMessage];
           const trimmedAfterUser = afterUser.length > MAX_CHAT_MESSAGES ? afterUser.slice(-MAX_CHAT_MESSAGES) : afterUser;
-          return { ...ch, messages: [...trimmedAfterUser, assistantMessage], isGenerating: false } as CanvasNode;
+          return { ...ch, messages: [...trimmedAfterUser, assistantMessage], isGenerating: false, prompt: '' } as CanvasNode;
         })
       );
       generationStartedAtRef.current.delete(nodeId);
@@ -9619,6 +9620,27 @@ ${text}`,
                     />
                   </div>
 
+                  {/* codesonline GPT-5.5 对话 */}
+                  <div className="mt-5 pt-4 border-t border-[#333]">
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">codesonline (GPT-5.5 对话)</h3>
+                    <label className="text-xs text-gray-500 block mb-1">Base URL</label>
+                    <input
+                      type="text"
+                      readOnly
+                      value={DEFAULT_CODESONLINE_CHAT_BASE_URL}
+                      placeholder={DEFAULT_CODESONLINE_CHAT_BASE_URL}
+                      className="w-full mb-3 bg-[#252525] border border-[#333] rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
+                    />
+                    <label className="text-xs text-gray-500 block mb-1">codesonline API Key (GPT-5.5)</label>
+                    <input
+                      type="password"
+                      value={codesonlineChatKeyInput}
+                      onChange={(e) => setCodesonlineChatKeyInput(e.target.value)}
+                      placeholder="sk-..."
+                      className="w-full bg-[#222222] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-sky-600 transition-colors text-sm"
+                    />
+                  </div>
+
                   {/* ③ DeepSeek */}
                   <div className="mt-5 pt-4 border-t border-[#333]">
                     <h3 className="text-sm font-semibold text-gray-200 mb-2">DeepSeek</h3>
@@ -9735,6 +9757,7 @@ ${text}`,
                                 minimaxApiKey: minimaxKeyInput.trim(),
                                 minimaxBaseUrl: minimaxBaseInput.trim() || DEFAULT_MINIMAX_BASE_URL,
                               });
+                              setCodesonlineChatKey(codesonlineChatKeyInput.trim());
                               initGeminiClientFromStorage();
                               setShowSettingsModal(false);
                             }
@@ -9767,6 +9790,7 @@ ${text}`,
                                 minimaxApiKey: minimaxKeyInput.trim(),
                                 minimaxBaseUrl: minimaxBaseInput.trim() || DEFAULT_MINIMAX_BASE_URL,
                               });
+                              setCodesonlineChatKey(codesonlineChatKeyInput.trim());
                               initGeminiClientFromStorage();
                               setShowSettingsModal(false);
                             }
@@ -9803,6 +9827,7 @@ ${text}`,
                           minimaxApiKey: minimaxKeyInput.trim(),
                           minimaxBaseUrl: minimaxBaseInput.trim() || DEFAULT_MINIMAX_BASE_URL,
                         });
+                        setCodesonlineChatKey(codesonlineChatKeyInput.trim());
                         initGeminiClientFromStorage();
                           setShowSettingsModal(false);
                       }}
@@ -14866,6 +14891,9 @@ function ChatNodeContent({
             <option value="deepseek-v4-flash">DeepSeek-V4-Flash</option>
             <option value="deepseek-v4-pro">DeepSeek-V4-Pro</option>
           </optgroup>
+          <optgroup label="codesonline">
+            <option value="gpt-5.5-codesonline">GPT-5.5（codesonline）</option>
+          </optgroup>
           <optgroup label="MiniMax">
             <option value="minimax-m2.7">MiniMax M2.7</option>
           </optgroup>
@@ -15180,6 +15208,20 @@ function ChatNodeContent({
                         title="将此条消息内容作为参考添加到输入框"
                       >
                         作为参考
+                      </button>
+                      <button
+                        type="button"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const newMessages = (node.messages || []).filter((m: ChatMessage) => m.id !== msg.id);
+                          onUpdate({ messages: newMessages });
+                        }}
+                        className="rounded border border-white/25 px-2 py-0.5 opacity-70 hover:opacity-100 hover:bg-red-500/50"
+                        style={{ fontSize: fs(Math.max(10, chatFontPx - 2)) }}
+                        title="删除本条消息"
+                      >
+                        删除
                       </button>
                     </div>
                   </>
