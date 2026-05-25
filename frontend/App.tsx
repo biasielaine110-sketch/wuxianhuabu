@@ -138,7 +138,7 @@ function videoNodeModelToToApis(m?: string): ToApisVideoModelId {
   if (isVeo31FastVideoModel(vm)) return 'veo3.1-fast';
   if (vm === 'doubao-seedance-1-5-pro') return 'doubao-seedance-1-5-pro';
   if (vm === 'seedance-2' || vm === 'seedance-2-fast') return vm as ToApisVideoModelId;
-  if (vm === 'gemini-omni') return 'gemini-omni';
+  if (vm === 'gemini-omni-flash') return 'gemini-omni-flash';
   if (vm === 'jimeng-video-v3' || vm === 'jimeng-image-to-video') return vm as ToApisVideoModelId;
   return 'grok-video-3';
 }
@@ -5864,7 +5864,7 @@ ${text}`,
             (videoModel === 'sora-2-vvip' || videoModel === 'veo3.1-fast' ? 8 : 10),
           aspectRatio: node.aspectRatio || '16:9',
           resolution,
-          referenceImagesBase64: (videoModel === 'doubao-seedance-1-5-pro' || videoModel === 'gemini-omni' || videoModel === 'seedance-2' || videoModel === 'seedance-2-fast') ? imageInputs.slice(0, 2) : imageInputs.slice(0, 3),
+          referenceImagesBase64: (videoModel === 'doubao-seedance-1-5-pro' || videoModel === 'gemini-omni-flash' || videoModel === 'seedance-2' || videoModel === 'seedance-2-fast') ? imageInputs.slice(0, 2) : imageInputs.slice(0, 3),
           referenceAudioBase64: audioBase64,
           signal: ac.signal,
         });
@@ -7266,7 +7266,7 @@ ${text}`,
           const isDoubao = vm === 'doubao-seedance-1-5-pro';
           const isSeedance2 = vm === 'seedance-2';
           const isSeedance2Fast = vm === 'seedance-2-fast';
-          const isGemini = vm === 'gemini-omni';
+          const isGemini = vm === 'gemini-omni-flash';
           const vSlots = buildIncomingRefSlots(node.id, edges, nodes);
           const imageSlots = vSlots.filter((s) => s.kind === 'image');
           const videoSlots = vSlots.filter((s) => s.kind === 'video');
@@ -7408,7 +7408,7 @@ ${text}`,
                     updates.videoResolution = '720p';
                     const ar = node.aspectRatio || '16:9';
                     if (!['16:9', '9:16', '1:1'].includes(ar)) updates.aspectRatio = '16:9';
-                  } else if (m === 'gemini-omni') {
+                  } else if (m === 'gemini-omni-flash') {
                     const d = node.videoDuration ?? 6;
                     updates.videoDuration = [6, 10].includes(d) ? d : 6;
                     updates.videoResolution = '720p';
@@ -7430,7 +7430,7 @@ ${text}`,
                   <option value="doubao-seedance-1-5-pro">Doubao SeeDance 1.5 Pro</option>
                   <option value="seedance-2">Seedance 2</option>
                   <option value="seedance-2-fast">Seedance 2 Fast</option>
-                  <option value="gemini-omni">Gemini Omni</option>
+                  <option value="gemini-omni-flash">Gemini Omni Flash</option>
                 </optgroup>
                 <optgroup label="即梦 (Dreamina)">
                   <option value="jimeng-seedance2.0fast">即梦 Seedance 2.0 (Fast)</option>
