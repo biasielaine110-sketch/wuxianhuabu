@@ -1554,6 +1554,63 @@ function T2iPresetCategorySelect({
   );
 }
 
+interface FsImageInfoPanelProps {
+  base64: string;
+  onClose: () => void;
+}
+
+function FsImageInfoPanel({ base64, onClose }: FsImageInfoPanelProps) {
+  const [imgSize, setImgSize] = useState<{ width: number; height: number } | null>(null);
+  const [fileSize, setFileSize] = useState<number>(0);
+
+  useEffect(() => {
+    const clean = base64.replace(/^data:image\/\w+;base64,/, '');
+    const byteSize = Math.ceil(clean.length * 3 / 4);
+    setFileSize(byteSize);
+
+    const img = new Image();
+    img.onload = () => setImgSize({ width: img.naturalWidth, height: img.naturalHeight });
+    img.src = `data:image/jpeg;base64,${clean}`;
+  }, [base64]);
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  };
+
+  const aspectRatio = imgSize ? (imgSize.width / imgSize.height).toFixed(2) : '-';
+  const megapixels = imgSize ? ((imgSize.width * imgSize.height) / 1000000).toFixed(2) : '-';
+
+  return (
+    <div className="absolute right-0 top-0 bottom-0 w-64 bg-[#1a1a1a]/95 backdrop-blur-md border-l border-[#333] flex flex-col z-10">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-[#333]">
+        <span className="text-white font-bold text-sm">图片信息</span>
+        <button onClick={onClose} className="text-gray-400 hover:text-white">
+          <XIcon size={18} />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <InfoItem label="分辨率" value={imgSize ? `${imgSize.width} × ${imgSize.height}` : '加载中...'} />
+        <InfoItem label="宽高比" value={aspectRatio} />
+        <InfoItem label="像素" value={megapixels + ' MP'} />
+        <InfoItem label="文件大小" value={formatFileSize(fileSize)} />
+        <InfoItem label="格式" value="JPEG" />
+        <InfoItem label="颜色空间" value="sRGB" />
+      </div>
+    </div>
+  );
+}
+
+function InfoItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="space-y-1">
+      <div className="text-xs text-gray-500 uppercase tracking-wider">{label}</div>
+      <div className="text-sm text-white font-mono">{value}</div>
+    </div>
+  );
+}
+
 function defaultCanvasImageModel(): string {
   return 'gpt-image-2-codesonline';
 }
@@ -5023,6 +5080,8 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
             model: DEFAULT_DEEPSEEK_CHAT_MODEL_ID,
             isGenerating: false,
             chatInputHeight: Math.round((304 * CHAT_NODE_DEFAULT_PIXEL_HEIGHT) / 1800 * CHAT_PANEL_FONT_SCALE),
+            imageAspectRatio: '16:9',
+            imageResolution: '2k',
           }
         : {}),
       ...(type === 'video'
@@ -5359,8 +5418,8 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
       // 生图模式：直接调用图片生成服务
       if (isImageGenMode && imageGenPrompt) {
         const defaultModel = defaultCanvasImageModel();
-        const aspectRatio = (node as ChatNode).imageAspectRatio || '1:1';
-        const resolution = (node as ChatNode).imageResolution || '1k';
+        const aspectRatio = (node as ChatNode).imageAspectRatio || '16:9';
+        const resolution = (node as ChatNode).imageResolution || '2k';
         const imageCount = 1;
 
         const generatedImages = await generateNewImage(
@@ -8132,6 +8191,8 @@ ${text}`,
       id: chatNodeId, type: 'chat', x: 200, y: 200, width: 1560, height: 2760,
       prompt: q, model: DEFAULT_DEEPSEEK_CHAT_MODEL_ID,
       messages: [userMsg],
+      imageAspectRatio: '16:9',
+      imageResolution: '2k',
     };
     const newProject: CanvasProject = {
       id: newId, name: q.substring(0, 20) || 'AI 对话', updatedAt: Date.now(),
@@ -10435,8 +10496,8 @@ ${text}`,
 
       {/* Fullscreen Image Modal */}
       {fullscreenImage && canvasMode !== 'audit' && (
-        <div 
-          className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center overflow-hidden backdrop-blur-sm" 
+        <div
+          className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center overflow-hidden backdrop-blur-sm"
           onPointerDown={() => { setFullscreenImage(null); setFsContextMenu(null); }}
           onContextMenu={(e) => { e.preventDefault(); setFsContextMenu(null); }}
           onWheel={handleFsWheel}
@@ -10447,7 +10508,7 @@ ${text}`,
           >
             <img
               src={fullscreenImage.startsWith('http://') || fullscreenImage.startsWith('https://') ? fullscreenImage : `data:image/jpeg;base64,${fullscreenImage}`}
-              className="max-w-[95vw] max-h-[90vh] object-contain shadow-2xl"
+              className="max-w-[75vw] max-h-[90vh] object-contain shadow-2xl"
               style={{
                 transform: `translate(${fsTransform.x}px, ${fsTransform.y}px) scale(${fsTransform.scale})`,
                 cursor: activePointerTypeRef.current === 'fullscreen' ? 'grabbing' : 'grab',
@@ -10458,6 +10519,8 @@ ${text}`,
               onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setFsContextMenu({ x: e.clientX, y: e.clientY }); }}
             />
           </div>
+          {/* 右侧图片信息栏 */}
+          <FsImageInfoPanel base64={fullscreenImage} onClose={() => { setFullscreenImage(null); setFsContextMenu(null); }} />
           {/* 翻页按钮 */}
           {fullscreenNodeId && (() => {
             const fsNode = nodesRef.current.find(n => n.id === fullscreenNodeId);
