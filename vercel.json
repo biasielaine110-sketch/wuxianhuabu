@@ -29,6 +29,10 @@
       "destination": "/api/yunzhi-proxy/$1"
     },
     {
+      "source": "/codesonline-chat-api/(.*)",
+      "destination": "https://ai.codesonline.dev/$1"
+    },
+    {
       "source": "/cdn-files-toapis/:path*",
       "destination": "https://files.toapis.com/:path*"
     },

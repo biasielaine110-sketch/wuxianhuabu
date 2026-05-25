@@ -398,10 +398,10 @@ export const callGeminiChatWithHistory = async (
           '使用 GPT-5.5（codesonline）：请在「设置 → API」中填写「codesonline API Key (GPT-5.5)」。'
         );
       }
-      // 开发环境用同源代理，生产环境用 Vercel API 代理避免 CORS
+      // 开发环境用 Vite 代理，生产环境用 vercel.json rewrite 代理
       const baseUrl = import.meta.env.DEV
         ? '/codesonline-chat-api'
-        : '/api/codesonline-chat-proxy';
+        : '/codesonline-chat-api';
       return chatCompletionHistoryAtBase(
         baseUrl,
         coKey,
