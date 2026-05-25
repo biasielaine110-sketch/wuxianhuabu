@@ -946,7 +946,7 @@ function i2iPresetListForCategory(
 }
 
 /** 预设是否属于「故事板」分类（故事板预设可同时出现在文生图和图生图窗口） */
-const STORYBOARD_PRESET_KEYS = new Set(['故事板_A', '故事板_B', '故事板_CCC']);
+const STORYBOARD_PRESET_KEYS = new Set(['故事板_A', '故事板_B', '故事板_CCC', 'CCCC_故事板简化版']);
 function isStoryboardPreset(name: string): boolean {
   return STORYBOARD_PRESET_KEYS.has(name);
 }
@@ -7015,6 +7015,17 @@ ${text}`,
                 >
                   优化提示词
                 </button>
+                <select
+                  className="ml-2 bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-[30px] text-gray-200 outline-none focus:border-blue-500"
+                  value={textNodeFontSize}
+                  onChange={(e) => setTextNodeFontSize(Number(e.target.value))}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  title="文本节点字号"
+                >
+                  {[11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 26, 28, 30, 32, 36, 40, 44, 48, 50].map((px) => (
+                    <option key={px} value={px}>{px}px</option>
+                  ))}
+                </select>
               </>
             )}
           </div>
@@ -7565,7 +7576,7 @@ ${text}`,
                 {node.type === 'text' && !(isSelected && editingTextNodeIds.has(node.id)) ? (
                   <div
                     className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] overflow-y-auto leading-relaxed whitespace-pre-wrap break-words text-node-content relative"
-                    style={{ fontSize: '40px', minHeight: '120px' }}
+                    style={{ fontSize: textNodeFontSize + 'px', minHeight: '120px' }}
                     onPointerDown={(e) => {
                       if (eyedropperTargetNodeId) {
                         return;
@@ -7605,7 +7616,7 @@ ${text}`,
                   </div>
                 ) : (
                 <textarea
-                  className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] focus:outline-none focus:border-blue-500 transition-colors resize-none leading-relaxed" style={{ fontSize: '100px', minHeight: node.type === 'i2i' ? '80px' : '120px' }}
+                  className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] focus:outline-none focus:border-blue-500 transition-colors resize-none leading-relaxed" style={{ fontSize: textNodeFontSize + 'px', minHeight: node.type === 'i2i' ? '80px' : '120px' }}
                   value={node.prompt}
                   onChange={(e) => handleUpdateNode(node.id, { prompt: e.target.value })}
                   placeholder=""
@@ -7994,6 +8005,7 @@ ${text}`,
   const [showAllProjectsModal, setShowAllProjectsModal] = useState(false);
   const [allProjectsList, setAllProjectsList] = useState<CanvasProjectSnapshot[]>([]);
   const [editingTextNodeIds, setEditingTextNodeIds] = useState<Set<string>>(new Set());
+  const [textNodeFontSize, setTextNodeFontSize] = useState(40);
   const [renameTarget, setRenameTarget] = useState<CanvasProjectSnapshot | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<CanvasProjectSnapshot | null>(null);
@@ -15065,7 +15077,7 @@ function ChatNodeContent({
           <select
             className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-purple-500"
             style={{ fontSize: fs(10) }}
-            value={node.imageAspectRatio || '1:1'}
+            value={node.imageAspectRatio || '16:9'}
             onChange={(e) => onUpdate({ imageAspectRatio: e.target.value })}
             onPointerDown={(e) => e.stopPropagation()}
           >
@@ -15080,7 +15092,7 @@ function ChatNodeContent({
           <select
             className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-purple-500"
             style={{ fontSize: fs(10) }}
-            value={node.imageResolution || '1k'}
+            value={node.imageResolution || '2k'}
             onChange={(e) => onUpdate({ imageResolution: e.target.value })}
             onPointerDown={(e) => e.stopPropagation()}
           >
@@ -15088,6 +15100,24 @@ function ChatNodeContent({
             <option value="2k">2K</option>
             <option value="4k">4K</option>
           </select>
+          <button
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              // 触发图片生成模式：在 prompt 前面加上生图指令前缀
+              const currentPrompt = node.prompt || '';
+              // 检查是否已经有生图前缀
+              if (!currentPrompt.startsWith('[生图]')) {
+                onUpdate({ prompt: '[生图] ' + currentPrompt });
+              }
+            }}
+            disabled={node.isGenerating}
+            className="rounded bg-purple-600 hover:bg-purple-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white flex items-center justify-center px-3 py-0.5"
+            style={{ width: 300, fontSize: fs(10) }}
+            title="AI生图"
+          >
+            <ImageIcon size={fs(12)} />
+            <span className="ml-1">AI生图</span>
+          </button>
         </div>
         <RefPickBar
           slots={refSlots}
@@ -15168,25 +15198,11 @@ function ChatNodeContent({
               onSendMessage();
             }}
             disabled={node.isGenerating || !node.prompt?.trim()}
-            className="px-[52px] rounded bg-rose-600 hover:bg-rose-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white flex items-center justify-center"
+            className="rounded bg-rose-600 hover:bg-rose-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white flex items-center justify-center px-3"
+            style={{ width: 200, height: 600 }}
           >
             <SendIcon size={fs(14)} />
-          </button>
-          <button
-            onPointerDown={(e) => {
-              e.stopPropagation();
-              // 触发图片生成模式：在 prompt 前面加上生图指令前缀
-              const currentPrompt = node.prompt || '';
-              // 检查是否已经有生图前缀
-              if (!currentPrompt.startsWith('[生图]')) {
-                onUpdate({ prompt: '[生图] ' + currentPrompt });
-              }
-            }}
-            disabled={node.isGenerating}
-            className="rounded bg-purple-600 hover:bg-purple-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white flex items-center justify-center px-3"
-            title="AI生图"
-          >
-            <ImageIcon size={fs(14)} />
+            <span className="ml-2">发送</span>
           </button>
         </div>
       </div>
