@@ -51,9 +51,19 @@ function resolveNativeGeminiChatModelId(modelName: string): string {
 const DEFAULT_API_KEY = 'AIzaSyBGQmDxkl2VyA092adnINkaMIKHXh6jeiw';
 
 /**
- * 将比例字符串转换为像素尺寸
+ * 将比例字符串转换为像素尺寸（支持分辨率档位）
+ * resolution: '0.5k' | '1k' | '2k' | '4k'，默认 '1k'
  */
-const aspectRatioToDimensions = (aspectRatio: string): { width: number; height: number } => {
+const aspectRatioToDimensions = (aspectRatio: string, resolution?: string): { width: number; height: number } => {
+  // 根据分辨率档位计算缩放因子（1k 为基准）
+  const scaleFactor: Record<string, number> = {
+    '0.5k': 0.5,
+    '1k': 1,
+    '2k': 2,
+    '4k': 4,
+  };
+  const scale = scaleFactor[(resolution || '1k').toLowerCase().trim()] || 1;
+
   const ratioMap: Record<string, { width: number; height: number }> = {
     '1:1': { width: 1024, height: 1024 },
     '16:9': { width: 1344, height: 756 },
@@ -65,14 +75,18 @@ const aspectRatioToDimensions = (aspectRatio: string): { width: number; height: 
     '3:2': { width: 1536, height: 1024 },
     '2:3': { width: 1024, height: 1536 },
   };
-  return ratioMap[(aspectRatio || '1:1').trim()] || ratioMap['1:1'];
+  const base = ratioMap[(aspectRatio || '1:1').trim()] || ratioMap['1:1'];
+  return {
+    width: Math.round(base.width * scale),
+    height: Math.round(base.height * scale),
+  };
 };
 
 /**
  * 生成包含比例和尺寸要求的提示词
  */
-const buildPromptWithDimensions = (prompt: string, aspectRatio: string): string => {
-  const dimensions = aspectRatioToDimensions(aspectRatio);
+const buildPromptWithDimensions = (prompt: string, aspectRatio: string, resolution?: string): string => {
+  const dimensions = aspectRatioToDimensions(aspectRatio, resolution);
   const dimensionHint = `IMPORTANT: Generate this image with exactly ${aspectRatio} aspect ratio (${dimensions.width}x${dimensions.height} pixels). The composition must strictly follow this aspect ratio.`;
   return `${dimensionHint}\n\n${prompt}`;
 };
@@ -139,7 +153,7 @@ export const generateNewImage = async (
       );
     }
     // 构建包含比例和尺寸要求的提示词
-    const enhancedPrompt = buildPromptWithDimensions(prompt, aspectRatio);
+    const enhancedPrompt = buildPromptWithDimensions(prompt, aspectRatio, outputResolution);
 
     // Imagen 模型使用 generateImages API
     if (model === 'imagen-4' || model === 'imagen-4.0-generate-001') {
@@ -160,7 +174,7 @@ export const generateNewImage = async (
     }
 
     // Gemini 模型使用 generateContent API（引导生成）
-    const dimensions = aspectRatioToDimensions(aspectRatio);
+    const dimensions = aspectRatioToDimensions(aspectRatio, outputResolution);
     const stylePrompt = `${enhancedPrompt}\n\nPlease generate an image with exactly ${aspectRatio} aspect ratio (${dimensions.width}x${dimensions.height} pixels). Output ONLY the image without any text explanation.`;
 
     const results: string[] = [];
@@ -230,7 +244,7 @@ export const editExistingImage = async (
       );
     }
     // 构建包含比例和尺寸要求的提示词
-    const enhancedPrompt = buildPromptWithDimensions(prompt, aspectRatio);
+    const enhancedPrompt = buildPromptWithDimensions(prompt, aspectRatio, outputResolution);
 
     for (let i = 0; i < numberOfImages; i++) {
       const imageParts = base64Images.map(base64 => ({

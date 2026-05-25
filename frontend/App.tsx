@@ -4838,7 +4838,7 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
     /** 节点内表单控件：不应触发整块节点拖拽（否则调整下拉/输入时窗口会跟着「飞」） */
     const isInteractiveSurface =
       !!targetEl?.closest(
-        'input, textarea, select, button, a, [role="button"], [role="slider"], [role="listbox"], [contenteditable="true"]'
+        'input, textarea, select, button, a, [role="button"], [role="slider"], [role="listbox"], [contenteditable="true"], [data-resize-handle], .text-node-content::-webkit-scrollbar'
       );
 
     /** 吸管模式：点击节点窗口任意非表单区域即可与「吸取目标」节点连线（与预览区点击行为一致） */
@@ -6070,25 +6070,29 @@ ${text}`,
           <>
             {/* 四个角的缩放手柄 */}
             <div
-              className="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 w-3 h-3 cursor-nw-resize z-40 group/resize"
+              className="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 w-4 h-4 cursor-nw-resize z-40 group/resize"
+              data-resize-handle
               onPointerDown={(e) => beginNodeResize(e, node.id, 'nw')}
             >
               <div className="w-full h-full rounded-full bg-gray-600 group-hover/resize:bg-gray-400 transition-colors" />
             </div>
             <div
-              className="absolute top-0 right-0 translate-x-1/2 -translate-y-1/2 w-3 h-3 cursor-ne-resize z-40 group/resize"
+              className="absolute top-0 right-0 translate-x-1/2 -translate-y-1/2 w-4 h-4 cursor-ne-resize z-40 group/resize"
+              data-resize-handle
               onPointerDown={(e) => beginNodeResize(e, node.id, 'ne')}
             >
               <div className="w-full h-full rounded-full bg-gray-600 group-hover/resize:bg-gray-400 transition-colors" />
             </div>
             <div
-              className="absolute bottom-0 left-0 -translate-x-1/2 translate-y-1/2 w-3 h-3 cursor-sw-resize z-40 group/resize"
+              className="absolute bottom-0 left-0 -translate-x-1/2 translate-y-1/2 w-4 h-4 cursor-sw-resize z-40 group/resize"
+              data-resize-handle
               onPointerDown={(e) => beginNodeResize(e, node.id, 'sw')}
             >
               <div className="w-full h-full rounded-full bg-gray-600 group-hover/resize:bg-gray-400 transition-colors" />
             </div>
             <div
-              className="absolute bottom-0 right-0 translate-x-1/2 translate-y-1/2 w-3 h-3 cursor-se-resize z-40 group/resize"
+              className="absolute bottom-0 right-0 translate-x-1/2 translate-y-1/2 w-4 h-4 cursor-se-resize z-40 group/resize"
+              data-resize-handle
               onPointerDown={(e) => beginNodeResize(e, node.id, 'se')}
             >
               <div className="w-full h-full rounded-full bg-gray-600 group-hover/resize:bg-gray-400 transition-colors" />
@@ -6096,25 +6100,29 @@ ${text}`,
 
             {/* 四条边的缩放手柄 */}
             <div
-              className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-2 cursor-n-resize z-40 group/resize"
+              className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 w-6 h-3 cursor-n-resize z-40 group/resize"
+              data-resize-handle
               onPointerDown={(e) => beginNodeResize(e, node.id, 'n')}
             >
               <div className="w-full h-full rounded-full bg-gray-600 group-hover/resize:bg-gray-400 transition-colors" />
             </div>
             <div
-              className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2 w-4 h-2 cursor-s-resize z-40 group/resize"
+              className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2 w-6 h-3 cursor-s-resize z-40 group/resize"
+              data-resize-handle
               onPointerDown={(e) => beginNodeResize(e, node.id, 's')}
             >
               <div className="w-full h-full rounded-full bg-gray-600 group-hover/resize:bg-gray-400 transition-colors" />
             </div>
             <div
-              className="absolute left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-4 cursor-w-resize z-40 group/resize"
+              className="absolute left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-6 cursor-w-resize z-40 group/resize"
+              data-resize-handle
               onPointerDown={(e) => beginNodeResize(e, node.id, 'w')}
             >
               <div className="w-full h-full rounded-full bg-gray-600 group-hover/resize:bg-gray-400 transition-colors" />
             </div>
             <div
-              className="absolute right-0 top-1/2 translate-x-1/2 -translate-y-1/2 w-2 h-4 cursor-e-resize z-40 group/resize"
+              className="absolute right-0 top-1/2 translate-x-1/2 -translate-y-1/2 w-3 h-6 cursor-e-resize z-40 group/resize"
+              data-resize-handle
               onPointerDown={(e) => beginNodeResize(e, node.id, 'e')}
             >
               <div className="w-full h-full rounded-full bg-gray-600 group-hover/resize:bg-gray-400 transition-colors" />
@@ -7752,6 +7760,7 @@ ${text}`,
                       if (eyedropperTargetNodeId) {
                         return;
                       }
+                      e.stopPropagation();
                     }}
                     onDoubleClick={(e) => {
                       if (!isSelected) {
@@ -7779,15 +7788,19 @@ ${text}`,
                     ) : null}
                     {node.prompt || <span className="text-gray-500">双击编辑文本</span>}
                     <style>{`
-                      .text-node-content::-webkit-scrollbar { width: 36px; }
+                      .text-node-content::-webkit-scrollbar { width: 72px; }
                       .text-node-content::-webkit-scrollbar-track { background: #2a2a2a; border-radius: 4px; }
                       .text-node-content::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; border: 4px solid transparent; background-clip: content-box; }
                       .text-node-content::-webkit-scrollbar-thumb:hover { background: #666; border: 4px solid transparent; background-clip: content-box; }
+                      .text-node-textarea::-webkit-scrollbar { width: 72px; }
+                      .text-node-textarea::-webkit-scrollbar-track { background: #2a2a2a; border-radius: 4px; }
+                      .text-node-textarea::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; border: 4px solid transparent; background-clip: content-box; }
+                      .text-node-textarea::-webkit-scrollbar-thumb:hover { background: #666; border: 4px solid transparent; background-clip: content-box; }
                     `}</style>
                   </div>
                 ) : (
                 <textarea
-                  className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] focus:outline-none focus:border-blue-500 transition-colors resize-none leading-relaxed" style={{ fontSize: textNodeFontSize + 'px', minHeight: node.type === 'i2i' ? '80px' : '120px' }}
+                  className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] focus:outline-none focus:border-blue-500 transition-colors resize-none leading-relaxed text-node-textarea" style={{ fontSize: textNodeFontSize + 'px', minHeight: node.type === 'i2i' ? '80px' : '120px' }}
                   value={node.prompt}
                   onChange={(e) => handleUpdateNode(node.id, { prompt: e.target.value })}
                   placeholder=""
@@ -15279,6 +15292,7 @@ function ChatNodeContent({
             onChange={(e) => onUpdate({ imageResolution: e.target.value })}
             onPointerDown={(e) => e.stopPropagation()}
           >
+            <option value="0.5k">0.5K</option>
             <option value="1k">1K</option>
             <option value="2k">2K</option>
             <option value="4k">4K</option>
