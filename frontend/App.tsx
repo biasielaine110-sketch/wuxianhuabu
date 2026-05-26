@@ -5373,19 +5373,29 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
 
     // 从历史消息中提取图片（@M 引用）
     const msgImages: string[] = [];
+    const msgRefDescs: string[] = [];
     if (msgPickIndices && msgPickIndices.length > 0) {
       const allMsgImages: { index: number; images: string[] }[] = [];
+      let assistantCount = 0;
       for (let i = 0; i < (node.messages || []).length; i++) {
         const msg = (node.messages || [])[i];
-        if (msg.role === 'assistant' && msg.images?.length) {
-          allMsgImages.push({ index: i + 1, images: msg.images });
+        if (msg.role === 'assistant' && (msg.images?.length || msg.image)) {
+          assistantCount++;
+          allMsgImages.push({ index: assistantCount, images: msg.images || (msg.image ? [msg.image] : []) });
         }
       }
+      console.log('[DEBUG @M] allMsgImages count:', allMsgImages.length, 'requested indices:', msgPickIndices);
       for (const idx of msgPickIndices) {
         const found = allMsgImages.find(m => m.index === idx);
-        if (found) msgImages.push(...found.images);
+        if (found) {
+          msgImages.push(...found.images);
+          msgRefDescs.push(`@M${idx}`);
+        } else {
+          console.warn('[DEBUG @M] index', idx, 'not found in allMsgImages, available indices:', allMsgImages.map(m => m.index));
+        }
       }
     }
+    console.log('[DEBUG @M] final msgImages count:', msgImages.length, 'msgRefDescs:', msgRefDescs);
 
     const strippedQuestion = stripRefMarkers(inputText) || inputText;
 
@@ -5404,7 +5414,7 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
         contextParts.push(`用户通过参考区提供了 ${refImages.length} 张视觉参考（见附图，顺序与 @R 序号一致）。`);
       }
       if (msgImages.length > 0) {
-        contextParts.push(`用户提供了 ${msgImages.length} 张历史消息图片参考（见附图，顺序与 @M 序号一致）。`);
+        contextParts.push(`用户提供了 ${msgImages.length} 张历史消息图片参考（见附图，顺序与 @M 序号一致）：${msgRefDescs.join(', ')}。请根据这些图片理解用户所指的具体内容。`);
       }
       const fallbackVideos = slots.filter(
         (s) => s.kind === 'video' && s.videoUrl && missing.includes(s.n)
@@ -5481,6 +5491,17 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
       }
 
       // 普通对话模式
+      console.log('[DEBUG @M refs]', {
+        msgPickIndices,
+        msgImages: msgImages.length,
+        msgRefDescs,
+        fullPrompt: fullPrompt.slice(0, 300),
+        apiTurnsLast: {
+          role: 'user',
+          imageBase64: ([...refImages, ...msgImages].length) === 1 ? '[one img]' : ([...refImages, ...msgImages].length > 1 ? '[multi img]' : 'none'),
+          imageBase64s: ([...refImages, ...msgImages].length) > 1 ? [...refImages, ...msgImages].length + ' imgs' : undefined,
+        }
+      });
       const apiTurns = [
         ...historyForApi.map((m) => {
           const imgs = m.role === 'user' && m.images?.length ? m.images : undefined;
@@ -5496,8 +5517,8 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
         {
           role: 'user' as const,
           content: fullPrompt,
-          imageBase64: refImages.length === 1 ? refImages[0] : undefined,
-          imageBase64s: refImages.length > 1 ? refImages : undefined,
+          imageBase64: ([...refImages, ...msgImages].length) === 1 ? [...refImages, ...msgImages][0] : undefined,
+          imageBase64s: ([...refImages, ...msgImages].length) > 1 ? [...refImages, ...msgImages] : undefined,
         },
       ];
 
@@ -15472,8 +15493,7 @@ function ChatNodeContent({
                   const cursorHeight = mirror.offsetHeight;
                   document.body.removeChild(mirror);
                   const rect = el.getBoundingClientRect();
-                  const scrollTop = el.scrollTop;
-                  const top = rect.top - scrollTop + cursorHeight;
+                  const top = rect.top + cursorHeight;
                   setAtPickerPos({ top: top + 4, left: rect.left });
                 }
                 setShowAtPicker(true);
@@ -15536,14 +15556,15 @@ function ChatNodeContent({
                 <>
                   <div className="px-3 py-1 text-xs text-cyan-400">连线参考</div>
                   {refSlots.map((s) => (
-                    <button
+<button
                       key={`at-r${s.n}`}
                       onClick={() => {
-                        onUpdate({ prompt: (node.prompt || '') + `R${s.n} ` });
+                        console.log('[DEBUG picker] inserting @R', s.n, 'current prompt:', node.prompt);
+                        onUpdate({ prompt: (node.prompt || '') + `@R${s.n} ` });
                         setShowAtPicker(false);
                       }}
                       className="w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-[#333]"
-                    >
+                      >
                       <span className="text-cyan-400">@R{s.n}</span> {s.label}
                     </button>
                   ))}
@@ -15563,13 +15584,14 @@ function ChatNodeContent({
                   <>
                     <div className="px-3 py-1 text-xs text-purple-400">消息图片</div>
                     {aiReplies.map((r) => (
-                      <button
-                        key={`at-m${r.num}`}
-                        onClick={() => {
-                          onUpdate({ prompt: (node.prompt || '') + `M${r.num} ` });
-                          setShowAtPicker(false);
-                        }}
-                        className="w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-[#333]"
+<button
+                      key={`at-m${r.num}`}
+                      onClick={() => {
+                        console.log('[DEBUG picker] inserting @M', r.num, 'current prompt:', node.prompt);
+                        onUpdate({ prompt: (node.prompt || '') + `@M${r.num} ` });
+                        setShowAtPicker(false);
+                      }}
+                      className="w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-[#333]"
                       >
                         <span className="text-purple-400">@M{r.num}</span> AI回复({r.images.length}张图)
                       </button>
