@@ -15029,9 +15029,18 @@ function ChatNodeContent({
             共 {messages.length} 条消息，显示最近 {MAX_VISIBLE_MESSAGES} 条
           </div>
         )}
-        {messages.slice(-MAX_VISIBLE_MESSAGES).map((msg) => {
+        {messages.slice(-MAX_VISIBLE_MESSAGES).map((msg, msgIdx) => {
           const editingThis = msg.role === 'user' && editingUserMessageId === msg.id;
           const isUser = msg.role === 'user';
+          // 计算这是第几个AI回复（用于@M引用标记）
+          const visibleMsgs = messages.slice(-MAX_VISIBLE_MESSAGES);
+          const absoluteStartIdx = messages.length - MAX_VISIBLE_MESSAGES;
+          let aiReplyCount = 0;
+          for (let i = 0; i < msgIdx; i++) {
+            if (visibleMsgs[i].role === 'assistant') aiReplyCount++;
+          }
+          const isAssistantMsgWithImg = !isUser && (msg.images?.length || msg.image);
+          const msgRefLabel = isAssistantMsgWithImg ? `@M${aiReplyCount + 1}` : '';
           return (
           <div
             key={msg.id}
@@ -15043,6 +15052,11 @@ function ChatNodeContent({
                 style={{ fontSize: isUser ? fs(Math.max(13, chatFontPx + 1)) : chatFontScaled }}
               onPointerDown={(e) => e.stopPropagation()}
             >
+              {isAssistantMsgWithImg && msgRefLabel && (
+                <div className="mb-1 text-xs text-cyan-400 bg-[#1a1a2a] rounded px-1.5 py-0.5 inline-block">
+                  {msgRefLabel}
+                </div>
+              )}
               {(msg.images?.length ? msg.images : msg.image ? [msg.image] : []).map((im, ii) => (
                 <div key={`${msg.id}-img-${ii}`} className={`relative group/image ${ii ? 'mt-1 ' : ''}mb-2`}>
                   <OptimizedImage
