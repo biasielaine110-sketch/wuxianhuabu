@@ -7779,6 +7779,9 @@ ${text}`,
                     onInsert={(tok) =>
                       handleUpdateNode(node.id, { prompt: (node.prompt || '') + tok })
                     }
+                    showAtPickerFor="i2i"
+                    nodeMessages={node.type === 'i2i' ? (node as any).messages : undefined}
+                    nodeId={node.id}
                   />
                 )}
                 {node.type === 'text' && !(isSelected && editingTextNodeIds.has(node.id)) ? (
@@ -13625,17 +13628,45 @@ function RefPickBar({
   disabled,
   onInsert,
   uiScale = 1,
+  showAtPickerFor,
+  nodeMessages,
+  nodeId,
 }: {
   slots: IncomingRefSlot[];
   disabled?: boolean;
   onInsert: (token: string) => void;
   /** 仅 AI 对话节点传 CHAT_PANEL_FONT_SCALE；其它节点默认 1 */
   uiScale?: number;
+  /** 非空时为 i2i/video 等节点启用 @ 自动完成 */
+  showAtPickerFor?: string;
+  nodeMessages?: any[];
+  nodeId?: string;
 }) {
-  if (!slots.length) return null;
-  const sp = (px: number) => Math.round(px * uiScale);
+  const [showPicker, setShowPicker] = useState(false);
+  const [pickerPos, setPickerPos] = useState({ top: 0, left: 0 });
+  const barRef = useRef<HTMLDivElement>(null);
+
+  // 收集 AI 回复图片
+  const aiReplies: { num: number; images: string[] }[] = [];
+  if (nodeMessages) {
+    for (let i = 0; i < (nodeMessages || []).length; i++) {
+      const msg = nodeMessages[i];
+      if (msg.role === 'assistant' && (msg.images?.length || msg.image)) {
+        aiReplies.push({ num: aiReplies.length + 1, images: msg.images || (msg.image ? [msg.image] : []) });
+      }
+    }
+  }
+
+  const handleShowPicker = () => {
+    if (!barRef.current) return;
+    const rect = barRef.current.getBoundingClientRect();
+    setPickerPos({ top: rect.bottom + 4, left: rect.left });
+    setShowPicker(true);
+  };
+
   return (
-    <div className="flex flex-wrap items-center gap-2 px-1 pt-1.5 pb-1" style={{ fontSize: sp(11) }}>
+    <>
+    <div ref={barRef} className="flex flex-wrap items-center gap-2 px-1 pt-1.5 pb-1" style={{ fontSize: uiScale ? Math.round(11 * uiScale) : 11 }}>
       <span className="text-gray-500 shrink-0 font-medium">引用参考:</span>
       {slots.map((s) => (
         <button
@@ -13653,7 +13684,64 @@ function RefPickBar({
           @R{s.n}
         </button>
       ))}
+      {showAtPickerFor && (
+        <button
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => handleShowPicker()}
+          className="rounded border border-dashed border-gray-600 px-1.5 py-0.5 text-xs text-gray-400 hover:text-white hover:border-gray-400"
+          title="点击选择更多引用"
+        >
+          + @引用
+        </button>
+      )}
       <span className="text-gray-600 leading-snug">点击插入 / 键盘输入 @R</span>
+      {showPicker && (
+        <div
+          className="absolute z-50 bg-[#1e1e1e] border border-[#444] rounded-lg shadow-xl overflow-hidden"
+          style={{ top: pickerPos.top, left: pickerPos.left, minWidth: 180 }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <div className="px-3 py-2 text-xs text-gray-400 border-b border-[#333]">选择引用</div>
+          {slots.length > 0 && (
+            <>
+              <div className="px-3 py-1 text-xs text-cyan-400">连线参考</div>
+              {slots.map((s) => (
+                <button
+                  key={`pick-r${s.n}`}
+                  onClick={() => { onInsert(`@R${s.n}`); setShowPicker(false); }}
+                  className="w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-[#333]"
+                >
+                  <span className="text-cyan-400">@R{s.n}</span> {s.label}
+                </button>
+              ))}
+            </>
+          )}
+          {aiReplies.length > 0 && (
+            <>
+              <div className="px-3 py-1 text-xs text-purple-400">历史图片</div>
+              {aiReplies.map((r) => (
+                <button
+                  key={`pick-m${r.num}`}
+                  onClick={() => { onInsert(`@M${r.num}`); setShowPicker(false); }}
+                  className="w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-[#333]"
+                >
+                  <span className="text-purple-400">@M{r.num}</span> AI回复({r.images.length}张图)
+                </button>
+              ))}
+            </>
+          )}
+          <button
+            onClick={() => setShowPicker(false)}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-[#333] border-t border-[#333]"
+          >
+            取消
+          </button>
+        </div>
+      )}
+    </div>
+    </>
+  );
+}
     </div>
   );
 }
