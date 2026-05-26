@@ -15447,17 +15447,34 @@ function ChatNodeContent({
               if (textBefore.endsWith('@') || textBefore.endsWith('@R') || textBefore.endsWith('@M')) {
                 const el = chatPromptRef.current;
                 if (el) {
-                  const rect = el.getBoundingClientRect();
-                  // 计算光标位置（近似）
+                  // 使用 mirror div 精确测量光标位置
+                  const mirror = document.createElement('div');
                   const style = window.getComputedStyle(el);
-                  const lineHeight = parseInt(style.lineHeight) || 24;
-                  const paddingTop = parseInt(style.paddingTop) || 8;
-                  // 计算光标大概在第几行
-                  const pos = el.selectionStart ?? 0;
-                  const textUpToPos = val.slice(0, pos);
-                  const lines = textUpToPos.split('\n').length - 1;
-                  const top = rect.top + paddingTop + lines * lineHeight + lineHeight;
-                  setAtPickerPos({ top: Math.min(top, rect.bottom + 4), left: rect.left });
+                  mirror.style.cssText = `
+                    position: absolute;
+                    top: -9999px;
+                    left: -9999px;
+                    visibility: hidden;
+                    white-space: pre-wrap;
+                    word-wrap: break-word;
+                    width: ${el.offsetWidth}px;
+                    font-size: ${style.fontSize};
+                    font-family: ${style.fontFamily};
+                    line-height: ${style.lineHeight};
+                    padding: ${style.padding};
+                    border: ${style.border};
+                    box-sizing: border-box;
+                    overflow: hidden;
+                  `;
+                  const textUpToCursor = val.slice(0, el.selectionStart || 0);
+                  mirror.textContent = textUpToCursor;
+                  document.body.appendChild(mirror);
+                  const cursorHeight = mirror.offsetHeight;
+                  document.body.removeChild(mirror);
+                  const rect = el.getBoundingClientRect();
+                  const scrollTop = el.scrollTop;
+                  const top = rect.top - scrollTop + cursorHeight;
+                  setAtPickerPos({ top: top + 4, left: rect.left });
                 }
                 setShowAtPicker(true);
               } else if (textBefore.match(/@[RM]\d+$/)) {
