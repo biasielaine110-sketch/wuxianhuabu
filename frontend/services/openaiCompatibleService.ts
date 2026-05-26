@@ -58,6 +58,11 @@ function rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNormalized: string): st
       if (!pathname) pathname = '/v1';
       next = `${window.location.origin}${yunzhiSameOriginProxyPathPrefix()}${pathname}`;
     }
+    // 代理 codesonline-chat-api 到同源，避免 CORS
+    if (hostname === 'ai.codesonline.dev') {
+      const pathname = u.pathname.replace(/\/+$/, '') || '/v1';
+      next = `${window.location.origin}/codesonline-chat-api${pathname}`;
+    }
   } catch {
     /* keep next */
   }
