@@ -114,6 +114,8 @@ const SendIcon = ({ size = 16 }) => <svg xmlns="http://www.w3.org/2000/svg" widt
 // 语音/音频图标
 const AudioIcon = ({ size = 16 }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>;
 const SparklesIcon = ({ size = 16 }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M19 17v4"/><path d="M3 5h4"/><path d="M17 19h4"/></svg>;
+// 停止图标
+const StopIcon = ({ size = 16 }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>;
 
 /** ToAPIs 等返回的 base64 可能是 PNG/WebP，一律按魔数识别后再喂给 Image/canvas */
 function sniffImageMimeFromBase64(raw: string): string {
@@ -5349,6 +5351,11 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
 
     const inputText = (opts?.promptText ?? node.prompt)?.trim();
     if (!inputText) return;
+
+    // 设置取消控制器
+    generationAbortControllersRef.current.get(nodeId)?.abort();
+    const ac = new AbortController();
+    generationAbortControllersRef.current.set(nodeId, ac);
 
     // 检测是否为生图模式（以 [生图] 开头）
     const isImageGenMode = inputText.startsWith('[生图]');
@@ -15443,6 +15450,22 @@ function ChatNodeContent({
             <SendIcon size={fs(14)} />
             <span className="ml-2">发送</span>
           </button>
+          {node.isGenerating && (
+            <button
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                // 调用取消生成 - 需要通过 props 传递或全局处理
+                const ac = generationAbortControllersRef.current?.get(node.id);
+                if (ac) ac.abort();
+              }}
+              className="rounded bg-orange-600 hover:bg-orange-500 text-white flex items-center justify-center px-3 ml-2"
+              style={{ width: 100, height: 600 }}
+              title="取消生成"
+            >
+              <StopIcon size={fs(14)} />
+              <span className="ml-1">取消</span>
+            </button>
+          )}
         </div>
       </div>
       </div>
