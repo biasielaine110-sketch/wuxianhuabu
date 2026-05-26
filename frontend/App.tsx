@@ -14626,6 +14626,10 @@ function ChatNodeContent({
   const [showBigInput, setShowBigInput] = useState(false);
   const [bigInputDraft, setBigInputDraft] = useState('');
   const [chatFontPx, setChatFontPx] = useState(readStoredChatFontPx);
+  // @ 引用自动完成
+  const [showAtPicker, setShowAtPicker] = useState(false);
+  const [atPickerPos, setAtPickerPos] = useState({ top: 0, left: 0 });
+  const atPickerRef = useRef<HTMLDivElement>(null);
   // 限制渲染的消息数量，防止图片太多导致崩溃
   const MAX_VISIBLE_MESSAGES = 30;
   const persistChatFontPx = useCallback((px: number) => {
@@ -15433,7 +15437,26 @@ function ChatNodeContent({
               overflowY: 'auto',
             }}
             value={node.prompt || ''}
-            onChange={(e) => onUpdate({ prompt: e.target.value })}
+            onChange={(e) => {
+              const val = e.target.value;
+              onUpdate({ prompt: val });
+              // 检测 @ 触发自动完成
+              const sel = chatPromptRef.current?.selectionStart ?? val.length;
+              const textBefore = val.slice(0, sel);
+              // @R 或 @M 开头时显示选择器
+              if (textBefore.endsWith('@') || textBefore.endsWith('@R') || textBefore.endsWith('@M')) {
+                const rect = chatPromptRef.current?.getBoundingClientRect();
+                if (rect) {
+                  setAtPickerPos({ top: rect.bottom + 4, left: rect.left });
+                }
+                setShowAtPicker(true);
+              } else if (textBefore.match(/@[RM]\d+$/)) {
+                // 输入了完整编号时不显示
+                setShowAtPicker(false);
+              } else {
+                setShowAtPicker(false);
+              }
+            }}
             onKeyDown={handleKeyDown}
             placeholder=""
             onPointerDown={(e) => {
@@ -15473,6 +15496,68 @@ function ChatNodeContent({
               }
             }}
           />
+          {showAtPicker && (
+            <div
+              ref={atPickerRef}
+              className="absolute z-50 bg-[#1e1e1e] border border-[#444] rounded-lg shadow-xl overflow-hidden"
+              style={{ top: atPickerPos.top, left: atPickerPos.left, minWidth: 180 }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <div className="px-3 py-2 text-xs text-gray-400 border-b border-[#333]">选择引用</div>
+              {/* 参考区图片 */}
+              {refSlots.length > 0 && (
+                <>
+                  <div className="px-3 py-1 text-xs text-cyan-400">连线参考</div>
+                  {refSlots.map((s) => (
+                    <button
+                      key={`at-r${s.n}`}
+                      onClick={() => {
+                        onUpdate({ prompt: (node.prompt || '') + `R${s.n} ` });
+                        setShowAtPicker(false);
+                      }}
+                      className="w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-[#333]"
+                    >
+                      <span className="text-cyan-400">@R{s.n}</span> {s.label}
+                    </button>
+                  ))}
+                </>
+              )}
+              {/* 历史消息图片 */}
+              {(() => {
+                const aiReplies: { num: number; images: string[] }[] = [];
+                for (let i = 0; i < (node.messages || []).length; i++) {
+                  const msg = (node.messages || [])[i];
+                  if (msg.role === 'assistant' && (msg.images?.length || msg.image)) {
+                    aiReplies.push({ num: aiReplies.length + 1, images: msg.images || (msg.image ? [msg.image] : []) });
+                  }
+                }
+                if (aiReplies.length === 0) return null;
+                return (
+                  <>
+                    <div className="px-3 py-1 text-xs text-purple-400">消息图片</div>
+                    {aiReplies.map((r) => (
+                      <button
+                        key={`at-m${r.num}`}
+                        onClick={() => {
+                          onUpdate({ prompt: (node.prompt || '') + `M${r.num} ` });
+                          setShowAtPicker(false);
+                        }}
+                        className="w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-[#333]"
+                      >
+                        <span className="text-purple-400">@M{r.num}</span> AI回复({r.images.length}张图)
+                      </button>
+                    ))}
+                  </>
+                );
+              })()}
+              <button
+                onClick={() => setShowAtPicker(false)}
+                className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-[#333] border-t border-[#333]"
+              >
+                取消
+              </button>
+            </div>
+          )}
           <button
             onPointerDown={(e) => {
               e.stopPropagation();
