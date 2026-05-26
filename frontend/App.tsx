@@ -15445,9 +15445,19 @@ function ChatNodeContent({
               const textBefore = val.slice(0, sel);
               // @R 或 @M 开头时显示选择器
               if (textBefore.endsWith('@') || textBefore.endsWith('@R') || textBefore.endsWith('@M')) {
-                const rect = chatPromptRef.current?.getBoundingClientRect();
-                if (rect) {
-                  setAtPickerPos({ top: rect.bottom + 4, left: rect.left });
+                const el = chatPromptRef.current;
+                if (el) {
+                  const rect = el.getBoundingClientRect();
+                  // 计算光标位置（近似）
+                  const style = window.getComputedStyle(el);
+                  const lineHeight = parseInt(style.lineHeight) || 24;
+                  const paddingTop = parseInt(style.paddingTop) || 8;
+                  // 计算光标大概在第几行
+                  const pos = el.selectionStart ?? 0;
+                  const textUpToPos = val.slice(0, pos);
+                  const lines = textUpToPos.split('\n').length - 1;
+                  const top = rect.top + paddingTop + lines * lineHeight + lineHeight;
+                  setAtPickerPos({ top: Math.min(top, rect.bottom + 4), left: rect.left });
                 }
                 setShowAtPicker(true);
               } else if (textBefore.match(/@[RM]\d+$/)) {
