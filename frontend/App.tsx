@@ -13739,10 +13739,6 @@ function RefPickBar({
         </div>
       )}
     </div>
-    </>
-  );
-}
-    </div>
   );
 }
 
