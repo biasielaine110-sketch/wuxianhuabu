@@ -113,8 +113,21 @@ export function parseRefPickIndices(prompt: string): number[] | null {
   return [...new Set(found)].sort((a, b) => a - b);
 }
 
+/** 有 @M 数字则返回所引用消息图片序号（去重）；无 @M 则返回 null */
+export function parseMsgPickIndices(prompt: string): number[] | null {
+  const re = /@M(\d+)/gi;
+  const found: number[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(prompt)) !== null) {
+    const v = parseInt(m[1], 10);
+    if (Number.isFinite(v) && v > 0) found.push(v);
+  }
+  if (found.length === 0) return null;
+  return [...new Set(found)].sort((a, b) => a - b);
+}
+
 export function stripRefMarkers(prompt: string): string {
-  return prompt.replace(/@R\d+/gi, '').replace(/\s+/g, ' ').trim();
+  return prompt.replace(/@[RM]\d+/gi, '').replace(/\s+/g, ' ').trim();
 }
 
 /** 从视频 URL（含 blob:）截取一帧为 JPEG base64（无 data: 前缀）；失败返回 null（常见于跨域外链） */

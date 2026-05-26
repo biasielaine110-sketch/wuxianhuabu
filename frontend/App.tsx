@@ -49,6 +49,7 @@ import {
 import {
   buildIncomingRefSlots,
   parseRefPickIndices,
+  parseMsgPickIndices,
   stripRefMarkers,
   resolveSlotImagesForIndices,
   resolveSlotAudios,
@@ -5367,7 +5368,24 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
 
     const slots = buildIncomingRefSlots(nodeId, edges, nodes);
     const pickIndices = parseRefPickIndices(inputText);
+    const msgPickIndices = parseMsgPickIndices(inputText);
     const { base64s: refImages, missing } = await resolveSlotImagesForIndices(slots, pickIndices);
+
+    // 从历史消息中提取图片（@M 引用）
+    const msgImages: string[] = [];
+    if (msgPickIndices && msgPickIndices.length > 0) {
+      const allMsgImages: { index: number; images: string[] }[] = [];
+      for (let i = 0; i < (node.messages || []).length; i++) {
+        const msg = (node.messages || [])[i];
+        if (msg.role === 'assistant' && msg.images?.length) {
+          allMsgImages.push({ index: i + 1, images: msg.images });
+        }
+      }
+      for (const idx of msgPickIndices) {
+        const found = allMsgImages.find(m => m.index === idx);
+        if (found) msgImages.push(...found.images);
+      }
+    }
 
     const strippedQuestion = stripRefMarkers(inputText) || inputText;
 
@@ -5377,13 +5395,16 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
       id: `msg-${Date.now()}-user`,
       role: 'user',
       content: inputText,
-      image: refImages.length >= 1 ? refImages[0] : undefined,
-      images: refImages.length > 1 ? refImages : undefined,
+      image: [...refImages, ...msgImages].length >= 1 ? [...refImages, ...msgImages][0] : undefined,
+      images: [...refImages, ...msgImages].length > 1 ? [...refImages, ...msgImages] : undefined,
     };
 
       const contextParts: string[] = [];
       if (refImages.length > 0) {
         contextParts.push(`用户通过参考区提供了 ${refImages.length} 张视觉参考（见附图，顺序与 @R 序号一致）。`);
+      }
+      if (msgImages.length > 0) {
+        contextParts.push(`用户提供了 ${msgImages.length} 张历史消息图片参考（见附图，顺序与 @M 序号一致）。`);
       }
       const fallbackVideos = slots.filter(
         (s) => s.kind === 'video' && s.videoUrl && missing.includes(s.n)
