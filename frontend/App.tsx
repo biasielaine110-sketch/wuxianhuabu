@@ -5493,11 +5493,13 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
 
     generationStartedAtRef.current.set(nodeId, Date.now());
 
-    // 构建用户消息对象
+    // 构建用户消息对象（保留@R标记用于显示，同时附加引用的图片）
     const userMsg: ChatMessage = {
       id: nextMsgId('user'),
       role: 'user',
-      content: strippedQuestion,
+      content: inputText, // 显示原始输入，保留 @R 引用标记
+      image: allImages.length === 1 ? allImages[0] : undefined,
+      images: allImages.length > 1 ? allImages : undefined,
     };
 
     // 立即显示用户消息并设置加载状态
