@@ -5494,12 +5494,13 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
     generationStartedAtRef.current.set(nodeId, Date.now());
 
     // 构建用户消息对象（保留@R标记用于显示，同时附加引用的图片）
+    const genImages = [...refImages, ...msgImages];
     const userMsg: ChatMessage = {
       id: nextMsgId('user'),
       role: 'user',
       content: inputText, // 显示原始输入，保留 @R 引用标记
-      image: allImages.length === 1 ? allImages[0] : undefined,
-      images: allImages.length > 1 ? allImages : undefined,
+      image: genImages.length === 1 ? genImages[0] : undefined,
+      images: genImages.length > 1 ? genImages : undefined,
     };
 
     // 立即显示用户消息并设置加载状态
@@ -5522,13 +5523,12 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
         const aspectRatio = (node as ChatNode).imageAspectRatio || '16:9';
         const resolution = (node as ChatNode).imageResolution || '2k';
         const imageCount = 1;
-        const allImages = [...refImages, ...msgImages];
 
-        // 构建带上下文的生图提示词（传递最近3轮对话摘要）
-        const recentMessages = (node.messages || []).slice(-6); // 最近6条消息（含AI回复）
+        // 构建带上下文的生图提示词（传递最近10轮对话摘要）
+        const recentMessages = (node.messages || []).slice(-20); // 最近20条消息（约10轮对话）
         let contextSummary = '';
         if (recentMessages.length > 0) {
-          const userMsgs = recentMessages.filter(m => m.role === 'user').slice(-3);
+          const userMsgs = recentMessages.filter(m => m.role === 'user').slice(-10);
           if (userMsgs.length > 0) {
             contextSummary = `【对话上下文参考】最近对话内容：${userMsgs.map(m => m.content).join(' → ')}。`;
           }
@@ -5536,10 +5536,10 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
         const fullImagePrompt = contextSummary ? `${contextSummary}\n\n【本次生图要求】${imageGenPrompt}` : imageGenPrompt;
 
         let generatedImages: string[];
-        if (allImages.length > 0) {
+        if (genImages.length > 0) {
           // 有参考图时，使用图生图（editExistingImage）而非纯文生图
           generatedImages = await editExistingImage(
-            allImages,
+            genImages,
             fullImagePrompt,
             imageCount,
             imageModel,
