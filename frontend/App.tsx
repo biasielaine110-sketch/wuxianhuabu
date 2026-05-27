@@ -5505,14 +5505,30 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
         const aspectRatio = (node as ChatNode).imageAspectRatio || '16:9';
         const resolution = (node as ChatNode).imageResolution || '2k';
         const imageCount = 1;
+        const allImages = [...refImages, ...msgImages];
 
-        const generatedImages = await generateNewImage(
-          imageGenPrompt,
-          aspectRatio,
-          imageCount,
-          defaultModel,
-          resolution
-        );
+        let generatedImages: string[];
+        if (allImages.length > 0) {
+          // 有参考图时，使用图生图（editExistingImage）而非纯文生图
+          generatedImages = await editExistingImage(
+            allImages,
+            imageGenPrompt,
+            imageCount,
+            defaultModel,
+            aspectRatio,
+            resolution,
+            undefined, // quality
+          );
+        } else {
+          // 无参考图时，使用纯文生图
+          generatedImages = await generateNewImage(
+            imageGenPrompt,
+            aspectRatio,
+            imageCount,
+            defaultModel,
+            resolution
+          );
+        }
 
         const assistantMessage: ChatMessage = {
           id: nextMsgId('assistant'),
