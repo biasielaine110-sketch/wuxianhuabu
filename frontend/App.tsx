@@ -5522,12 +5522,23 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
         const imageCount = 1;
         const allImages = [...refImages, ...msgImages];
 
+        // 构建带上下文的生图提示词（传递最近3轮对话摘要）
+        const recentMessages = (node.messages || []).slice(-6); // 最近6条消息（含AI回复）
+        let contextSummary = '';
+        if (recentMessages.length > 0) {
+          const userMsgs = recentMessages.filter(m => m.role === 'user').slice(-3);
+          if (userMsgs.length > 0) {
+            contextSummary = `【对话上下文参考】最近对话内容：${userMsgs.map(m => m.content).join(' → ')}。`;
+          }
+        }
+        const fullImagePrompt = contextSummary ? `${contextSummary}\n\n【本次生图要求】${imageGenPrompt}` : imageGenPrompt;
+
         let generatedImages: string[];
         if (allImages.length > 0) {
           // 有参考图时，使用图生图（editExistingImage）而非纯文生图
           generatedImages = await editExistingImage(
             allImages,
-            imageGenPrompt,
+            fullImagePrompt,
             imageCount,
             imageModel,
             aspectRatio,
@@ -5537,7 +5548,7 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
         } else {
           // 无参考图时，使用纯文生图
           generatedImages = await generateNewImage(
-            imageGenPrompt,
+            fullImagePrompt,
             aspectRatio,
             imageCount,
             imageModel,
