@@ -12,6 +12,7 @@ import {
   DEFAULT_MANXUE_BASE_URL,
   DEFAULT_MINIMAX_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
+  DEFAULT_AIID_BASE_URL,
   getAiSettingsSnapshot,
   normalizeDeepSeekChatModelId,
   getCodesonlineSavedKey,
@@ -20,6 +21,8 @@ import {
   getJunlanSavedKey,
   migrateAiSettingsIfLegacy,
   persistAiSettings,
+  getAiidBaseUrl,
+  getAiidSavedKey,
 } from './services/aiSettings';
 import {
   loadProjectLibrary,
@@ -118,6 +121,17 @@ const SparklesIcon = ({ size = 16 }) => <svg xmlns="http://www.w3.org/2000/svg" 
 // 停止图标
 const StopIcon = ({ size = 16 }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>;
 
+// --- Unique message ID counter ---
+let _msgCounter = 0;
+function nextMsgId(role: 'user' | 'assistant') {
+  // 直接使用 crypto.randomUUID() 保证全局唯一性，每次调用都生成新 UUID
+  const timestamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const uuidPart = typeof globalThis.crypto !== 'undefined' && globalThis.crypto.randomUUID
+    ? globalThis.crypto.randomUUID()
+    : `fallback-${timestamp}-${_msgCounter++}`;
+  return `msg-${uuidPart}`;
+}
+
 /** ToAPIs 等返回的 base64 可能是 PNG/WebP，一律按魔数识别后再喂给 Image/canvas */
 function sniffImageMimeFromBase64(raw: string): string {
   if (!raw || raw.length < 8) return 'image/png';
@@ -143,6 +157,7 @@ function videoNodeModelToToApis(m?: string): ToApisVideoModelId {
   if (vm === 'sora-2-vvip') return 'sora-2-vvip';
   if (isVeo31FastVideoModel(vm)) return 'veo3.1-fast';
   if (vm === 'doubao-seedance-1-5-pro') return 'doubao-seedance-1-5-pro';
+  if (vm === 'doubao-seedance-2-0-260128' || vm === 'doubao-seedance-2-0-fast-260128') return vm as ToApisVideoModelId;
   if (vm === 'seedance-2' || vm === 'seedance-2-fast') return vm as ToApisVideoModelId;
   if (vm === 'gemini-omni-flash') return 'gemini-omni-flash';
   if (vm === 'jimeng-video-v3' || vm === 'jimeng-image-to-video') return vm as ToApisVideoModelId;
@@ -205,6 +220,10 @@ function isVideoGrokDurationStyleModel(m?: string): boolean {
 }
 
 function base64ToImageDataUrl(raw: string): string {
+  // 如果已经是完整的 URL（http/https/data URL），直接返回
+  if (raw.startsWith('http://') || raw.startsWith('https://') || raw.startsWith('data:')) {
+    return raw;
+  }
   return `data:${sniffImageMimeFromBase64(raw)};base64,${raw}`;
 }
 
@@ -508,6 +527,8 @@ function OptimizedImage({
     setSrc('');
     const originalSrc = base64ToImageDataUrl(base64);
     const img = new Image();
+    // For localhost URLs, set crossOrigin to allow canvas operations
+    img.crossOrigin = 'anonymous';
     img.onload = () => {
       const maxEdge = Math.max(img.width, img.height);
       if (maxEdge <= currentMaxSide) {
@@ -525,14 +546,19 @@ function OptimizedImage({
       if (!ctx) return;
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(img, 0, 0, targetW, targetH);
-      const thumbSrc = canvas.toDataURL('image/jpeg', quality);
-      thumbnailCache.set(cachedKey, thumbSrc);
-      if (thumbnailCache.size > THUMB_MAX_CACHE) {
-        const firstKey = thumbnailCache.keys().next().value;
-        if (firstKey) thumbnailCache.delete(firstKey);
+      try {
+        ctx.drawImage(img, 0, 0, targetW, targetH);
+        const thumbSrc = canvas.toDataURL('image/jpeg', quality);
+        thumbnailCache.set(cachedKey, thumbSrc);
+        if (thumbnailCache.size > THUMB_MAX_CACHE) {
+          const firstKey = thumbnailCache.keys().next().value;
+          if (firstKey) thumbnailCache.delete(firstKey);
+        }
+        setSrc(thumbSrc);
+      } catch {
+        // Canvas is tainted (cross-origin image), fall back to original source
+        setSrc(originalSrc);
       }
-      setSrc(thumbSrc);
     };
     img.onerror = () => setSrc(originalSrc);
     img.src = originalSrc;
@@ -2295,6 +2321,8 @@ export default function App() {
   const [manxueKeyInput, setManxueKeyInput] = useState(() => getAiSettingsSnapshot().manxueKey);
   const [minimaxBaseInput, setMiniMaxBaseInput] = useState(() => getAiSettingsSnapshot().minimaxBaseUrl);
   const [minimaxKeyInput, setMiniMaxKeyInput] = useState(() => getAiSettingsSnapshot().minimaxKey);
+  const [aiidBaseInput, setAiidBaseInput] = useState(() => getAiidBaseUrl());
+  const [aiidKeyInput, setAiidKeyInput] = useState(() => getAiidSavedKey());
 
   useEffect(() => {
     const s = getAiSettingsSnapshot();
@@ -3476,7 +3504,14 @@ export default function App() {
     const snapNodes = nodesRef.current;
     const snapEdges = edgesRef.current;
     let n = 0;
-    const genId = (prefix: string) => `${prefix}-${Date.now()}-${n++}-${Math.floor(Math.random() * 10000)}`;
+    const genId = (prefix: string) => {
+      // 直接使用 crypto.randomUUID() 保证全局唯一性，每次调用都生成新 UUID
+      const timestamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      const uuidPart = typeof globalThis.crypto !== 'undefined' && globalThis.crypto.randomUUID
+        ? globalThis.crypto.randomUUID()
+        : `fallback-${timestamp}-${n++}`;
+      return `${prefix}-${uuidPart}`;
+    };
     const idMap = new Map<string, string>();
     for (const oid of ids) {
       const srcNode = snapNodes.find((x) => x.id === oid);
@@ -5401,14 +5436,6 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
 
     const baseMessages = opts?.baseMessages ?? (node.messages || []);
 
-    const userMessage: ChatMessage = {
-      id: `msg-${Date.now()}-user`,
-      role: 'user',
-      content: inputText,
-      image: [...refImages, ...msgImages].length >= 1 ? [...refImages, ...msgImages][0] : undefined,
-      images: [...refImages, ...msgImages].length > 1 ? [...refImages, ...msgImages] : undefined,
-    };
-
       const contextParts: string[] = [];
       if (refImages.length > 0) {
         contextParts.push(`用户通过参考区提供了 ${refImages.length} 张视觉参考（见附图，顺序与 @R 序号一致）。`);
@@ -5439,6 +5466,13 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
 
     generationStartedAtRef.current.set(nodeId, Date.now());
 
+    // 构建用户消息对象
+    const userMsg: ChatMessage = {
+      id: nextMsgId('user'),
+      role: 'user',
+      content: strippedQuestion,
+    };
+
     // 立即显示用户消息并设置加载状态
     setNodes((prev) =>
       prev.map((n) => {
@@ -5446,7 +5480,7 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
         const ch = n as ChatNode;
         const existingMsgs = (ch.messages || []) as ChatMessage[];
         const MAX_CHAT_MESSAGES = 50;
-        const afterUser = [...existingMsgs, userMessage];
+        const afterUser = [...existingMsgs, userMsg];
         const trimmedAfterUser = afterUser.length > MAX_CHAT_MESSAGES ? afterUser.slice(-MAX_CHAT_MESSAGES) : afterUser;
         return { ...ch, messages: trimmedAfterUser, isGenerating: true, error: undefined, prompt: '' } as CanvasNode;
       })
@@ -5469,7 +5503,7 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
         );
 
         const assistantMessage: ChatMessage = {
-          id: `msg-${Date.now()}-assistant`,
+          id: nextMsgId('assistant'),
           role: 'assistant',
           content: `已根据您的描述生成 ${generatedImages.length} 张图片：`,
           images: generatedImages,
@@ -5481,8 +5515,7 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
             const ch = n as ChatNode;
             const existingMsgs = (ch.messages || []) as ChatMessage[];
             const MAX_CHAT_MESSAGES = 50;
-            const afterUser = [...existingMsgs, userMessage];
-            const trimmedAfterUser = afterUser.length > MAX_CHAT_MESSAGES ? afterUser.slice(-MAX_CHAT_MESSAGES) : afterUser;
+            const trimmedAfterUser = existingMsgs.length > MAX_CHAT_MESSAGES ? existingMsgs.slice(-MAX_CHAT_MESSAGES) : existingMsgs;
             return { ...ch, messages: [...trimmedAfterUser, assistantMessage], isGenerating: false, prompt: '' } as CanvasNode;
           })
         );
@@ -5528,7 +5561,7 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
       );
 
       const assistantMessage: ChatMessage = {
-        id: `msg-${Date.now()}-assistant`,
+        id: nextMsgId('assistant'),
         role: 'assistant',
         content: response,
       };
@@ -5539,9 +5572,8 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
           const ch = n as ChatNode;
           const MAX_CHAT_MESSAGES = 50;
           const existingMsgs = (ch.messages || []) as ChatMessage[];
-          const afterUser = [...existingMsgs, userMessage];
-          const trimmedAfterUser = afterUser.length > MAX_CHAT_MESSAGES ? afterUser.slice(-MAX_CHAT_MESSAGES) : afterUser;
-          return { ...ch, messages: [...trimmedAfterUser, assistantMessage], isGenerating: false, prompt: '' } as CanvasNode;
+          const trimmedMsgs = existingMsgs.length > MAX_CHAT_MESSAGES ? existingMsgs.slice(-MAX_CHAT_MESSAGES) : existingMsgs;
+          return { ...ch, messages: [...trimmedMsgs, assistantMessage], isGenerating: false, prompt: '' } as CanvasNode;
         })
       );
       generationStartedAtRef.current.delete(nodeId);
@@ -5903,7 +5935,9 @@ ${text}`,
                   ? (node.videoResolution === '1080p' ? '1080p' : '720p')
                   : videoModel === 'seedance-2-fast'
                     ? '720p'
-                    : node.videoResolution === '480p'
+                    : videoModel === 'doubao-seedance-2-0-260128' || videoModel === 'doubao-seedance-2-0-fast-260128'
+                      ? (['480p', '1080p'].includes(node.videoResolution || '') ? (node.videoResolution as '480p' | '1080p') : '720p')
+                      : node.videoResolution === '480p'
                   ? '480p'
                   : '720p';
 
@@ -5914,7 +5948,7 @@ ${text}`,
             (videoModel === 'sora-2-vvip' || videoModel === 'veo3.1-fast' ? 8 : 10),
           aspectRatio: node.aspectRatio || '16:9',
           resolution,
-          referenceImagesBase64: (videoModel === 'doubao-seedance-1-5-pro' || videoModel === 'gemini-omni-flash' || videoModel === 'seedance-2' || videoModel === 'seedance-2-fast') ? imageInputs.slice(0, 2) : imageInputs.slice(0, 3),
+          referenceImagesBase64: (videoModel === 'doubao-seedance-1-5-pro' || videoModel === 'gemini-omni-flash' || videoModel === 'seedance-2' || videoModel === 'seedance-2-fast' || videoModel === 'doubao-seedance-2-0-260128' || videoModel === 'doubao-seedance-2-0-fast-260128') ? imageInputs.slice(0, 2) : imageInputs.slice(0, 3),
           referenceAudioBase64: audioBase64,
           signal: ac.signal,
         });
@@ -7313,10 +7347,11 @@ ${text}`,
           const isSora = isVideoSoraStyleModel(vm);
           const isVeo = isVideoVeoStyleModel(vm);
           const isGroDur = isVideoGrokDurationStyleModel(vm);
-          const isDoubao = vm === 'doubao-seedance-1-5-pro';
+          const isDoubao = vm === 'doubao-seedance-1-5-pro' || vm === 'doubao-seedance-2-0-260128' || vm === 'doubao-seedance-2-0-fast-260128';
           const isSeedance2 = vm === 'seedance-2';
           const isSeedance2Fast = vm === 'seedance-2-fast';
           const isGemini = vm === 'gemini-omni-flash';
+          const isDoubaoSeedance2 = vm === 'doubao-seedance-2-0-260128' || vm === 'doubao-seedance-2-0-fast-260128';
           const vSlots = buildIncomingRefSlots(node.id, edges, nodes);
           const imageSlots = vSlots.filter((s) => s.kind === 'image');
           const videoSlots = vSlots.filter((s) => s.kind === 'video');
@@ -7462,6 +7497,15 @@ ${text}`,
                     const d = node.videoDuration ?? 6;
                     updates.videoDuration = [6, 10].includes(d) ? d : 6;
                     updates.videoResolution = '720p';
+                  } else if (m === 'doubao-seedance-2-0-260128' || m === 'doubao-seedance-2-0-fast-260128') {
+                    const d = node.videoDuration ?? 8;
+                    updates.videoDuration = [4, 6, 8, 10, 12, 15].includes(d) ? d : 8;
+                    updates.videoResolution =
+                      node.videoResolution === '480p' || node.videoResolution === '1080p'
+                        ? node.videoResolution
+                        : '720p';
+                    const ar = node.aspectRatio || '16:9';
+                    if (!['16:9', '9:16', '1:1', '4:3', '3:4'].includes(ar)) updates.aspectRatio = '16:9';
                   } else {
                     const d = node.videoDuration ?? 8;
                     if (d === 4 || d === 8 || d === 12) updates.videoDuration = 10;
@@ -7481,6 +7525,10 @@ ${text}`,
                   <option value="seedance-2">Seedance 2</option>
                   <option value="seedance-2-fast">Seedance 2 Fast</option>
                   <option value="gemini-omni-flash">Gemini Omni Flash</option>
+                </optgroup>
+                <optgroup label="AIID (豆包Seedance2.0)">
+                  <option value="doubao-seedance-2-0-260128">Doubao Seedance 2.0</option>
+                  <option value="doubao-seedance-2-0-fast-260128">Doubao Seedance 2.0 Fast</option>
                 </optgroup>
                 <optgroup label="即梦 (Dreamina)">
                   <option value="jimeng-seedance2.0fast">即梦 Seedance 2.0 (Fast)</option>
@@ -7527,6 +7575,20 @@ ${text}`,
                 >
                   <option value={4}>4 秒</option>
                   <option value={5}>5 秒</option>
+                  <option value={8}>8 秒</option>
+                  <option value={10}>10 秒</option>
+                  <option value={12}>12 秒</option>
+                  <option value={15}>15 秒</option>
+                </select>
+              ) : isDoubaoSeedance2 ? (
+            <select
+                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+                  value={[4, 6, 8, 10, 12, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 8}
+                  onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
+                  onPointerDown={e => e.stopPropagation()}
+                >
+                  <option value={4}>4 秒</option>
+                  <option value={6}>6 秒</option>
                   <option value={8}>8 秒</option>
                   <option value={10}>10 秒</option>
                   <option value={12}>12 秒</option>
@@ -7797,9 +7859,26 @@ ${text}`,
                   <RefPickBar
                     slots={buildIncomingRefSlots(node.id, edges, nodes)}
                     disabled={node.isGenerating}
-                    onInsert={(tok) =>
-                      handleUpdateNode(node.id, { prompt: (node.prompt || '') + tok })
-                    }
+                    onInsert={(tok) => {
+                      // 获取当前 prompt 和光标位置
+                      const curPrompt = node.prompt || '';
+                      const inputEl = document.querySelector(`[data-node-prompt="${node.id}"]`) as HTMLTextAreaElement | null;
+                      let insertPos = curPrompt.length;
+                      if (inputEl) {
+                        const sel = inputEl.selectionStart;
+                        if (sel !== null) {
+                          insertPos = sel;
+                        }
+                      }
+                      const next = curPrompt.slice(0, insertPos) + tok + curPrompt.slice(insertPos);
+                      handleUpdateNode(node.id, { prompt: next });
+                      requestAnimationFrame(() => {
+                        if (inputEl) {
+                          inputEl.focus();
+                          inputEl.selectionStart = inputEl.selectionEnd = insertPos + tok.length;
+                        }
+                      });
+                    }}
                   />
                 )}
                 {node.type === 'text' && !(isSelected && editingTextNodeIds.has(node.id)) ? (
@@ -7850,6 +7929,7 @@ ${text}`,
                   </div>
                 ) : (
                 <textarea
+                  data-node-prompt={node.id}
                   className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] focus:outline-none focus:border-blue-500 transition-colors resize-none leading-relaxed text-node-textarea" style={{ fontSize: textNodeFontSize + 'px', minHeight: node.type === 'i2i' ? '80px' : '120px' }}
                   value={node.prompt}
                   onChange={(e) => handleUpdateNode(node.id, { prompt: e.target.value })}
@@ -8249,7 +8329,7 @@ ${text}`,
     // 无论 API 是否成功，都创建项目跳转画布
     const newId = `project-${Date.now()}`;
     const chatNodeId = `chat-${Date.now()}`;
-    const userMsg = { id: `msg-${Date.now()}-user`, role: 'user' as const, content: q };
+    const userMsg = { id: nextMsgId('user'), role: 'user' as const, content: q };
     const chatNode: CanvasNode = {
       id: chatNodeId, type: 'chat', x: 200, y: 200, width: 1560, height: 2760,
       prompt: q, model: DEFAULT_DEEPSEEK_CHAT_MODEL_ID,
@@ -9805,6 +9885,8 @@ ${text}`,
                                 manxueBaseUrl: manxueBaseInput.trim() || DEFAULT_MANXUE_BASE_URL,
                                 minimaxApiKey: minimaxKeyInput.trim(),
                                 minimaxBaseUrl: minimaxBaseInput.trim() || DEFAULT_MINIMAX_BASE_URL,
+                                aiidApiKey: aiidKeyInput.trim(),
+                                aiidBaseUrl: aiidBaseInput.trim() || DEFAULT_AIID_BASE_URL,
                               });
                               setCodesonlineChatKey(codesonlineChatKeyInput.trim());
                               initGeminiClientFromStorage();
@@ -9838,6 +9920,8 @@ ${text}`,
                                 manxueBaseUrl: manxueBaseInput.trim() || DEFAULT_MANXUE_BASE_URL,
                                 minimaxApiKey: minimaxKeyInput.trim(),
                                 minimaxBaseUrl: minimaxBaseInput.trim() || DEFAULT_MINIMAX_BASE_URL,
+                                aiidApiKey: aiidKeyInput.trim(),
+                                aiidBaseUrl: aiidBaseInput.trim() || DEFAULT_AIID_BASE_URL,
                               });
                               setCodesonlineChatKey(codesonlineChatKeyInput.trim());
                               initGeminiClientFromStorage();
@@ -9849,6 +9933,51 @@ ${text}`,
                         />
                       </>
                     )}
+                  </div>
+
+                  {/* ⑥ AIID (豆包Seedance2.0) */}
+                  <div className="mt-5 pt-4 border-t border-[#333]">
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">AIID (豆包Seedance2.0)</h3>
+                    <label className="text-xs text-gray-500 block mb-1">Base URL</label>
+                    <input
+                      type="text"
+                      readOnly
+                      value={aiidBaseInput}
+                      placeholder={DEFAULT_AIID_BASE_URL}
+                      className="w-full mb-3 bg-[#252525] border border-[#333] rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
+                    />
+                    <label className="text-xs text-gray-500 block mb-1">AIID API Key</label>
+                    <input
+                      type="password"
+                      value={aiidKeyInput}
+                      onChange={(e) => setAiidKeyInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          persistAiSettings({
+                            provider: aiProvider,
+                            openAiApiKey: aiProvider === 'openai-compatible' ? apiKeyInput.trim() : undefined,
+                            openAiBaseUrl: (openAiBaseInput.trim() || DEFAULT_OPENAI_BASE_URL),
+                            junlanApiKey: junlanKeyInput.trim(),
+                            junlanBaseUrl: junlanBaseInput.trim() || DEFAULT_JUNLAN_BASE_URL,
+                            codesonlineApiKey: codesonlineKeyInput.trim(),
+                            codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
+                            deepSeekApiKey: deepSeekKeyInput.trim(),
+                            deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
+                            manxueApiKey: manxueKeyInput.trim(),
+                            manxueBaseUrl: manxueBaseInput.trim() || DEFAULT_MANXUE_BASE_URL,
+                            minimaxApiKey: minimaxKeyInput.trim(),
+                            minimaxBaseUrl: minimaxBaseInput.trim() || DEFAULT_MINIMAX_BASE_URL,
+                            aiidApiKey: aiidKeyInput.trim(),
+                            aiidBaseUrl: aiidBaseInput.trim() || DEFAULT_AIID_BASE_URL,
+                          });
+                          setCodesonlineChatKey(codesonlineChatKeyInput.trim());
+                          initGeminiClientFromStorage();
+                          setShowSettingsModal(false);
+                        }
+                      }}
+                      placeholder="sk-..."
+                      className="w-full bg-[#222222] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-orange-500 transition-colors text-sm"
+                    />
                   </div>
 
                   <div className="flex gap-3 mt-4">
@@ -9875,6 +10004,8 @@ ${text}`,
                           manxueBaseUrl: manxueBaseInput.trim() || DEFAULT_MANXUE_BASE_URL,
                           minimaxApiKey: minimaxKeyInput.trim(),
                           minimaxBaseUrl: minimaxBaseInput.trim() || DEFAULT_MINIMAX_BASE_URL,
+                          aiidApiKey: aiidKeyInput.trim(),
+                          aiidBaseUrl: aiidBaseInput.trim() || DEFAULT_AIID_BASE_URL,
                         });
                         setCodesonlineChatKey(codesonlineChatKeyInput.trim());
                         initGeminiClientFromStorage();
@@ -14650,6 +14781,8 @@ function ChatNodeContent({
   // @ 引用自动完成
   const [showAtPicker, setShowAtPicker] = useState(false);
   const [atPickerPos, setAtPickerPos] = useState({ top: 0, left: 0 });
+  // 保存显示 picker 时的光标位置
+  const [savedCursorPos, setSavedCursorPos] = useState({ start: 0, end: 0 });
   const atPickerRef = useRef<HTMLDivElement>(null);
   // 限制渲染的消息数量，防止图片太多导致崩溃
   const MAX_VISIBLE_MESSAGES = 30;
@@ -15068,7 +15201,7 @@ function ChatNodeContent({
           const msgRefLabel = isAssistantMsgWithImg ? `@M${aiReplyCount + 1}` : '';
           return (
           <div
-            key={msg.id}
+            key={`${msg.id}-${msgIdx}`}
             className={`chat-bubble-wrap flex ${isUser ? 'justify-end' : 'justify-start'}`}
             onPointerDown={(e) => e.stopPropagation()}
           >
@@ -15268,7 +15401,23 @@ function ChatNodeContent({
                         onPointerDown={(e) => e.stopPropagation()}
                         onClick={(e) => {
                           e.stopPropagation();
-                          onUpdate({ prompt: (node.prompt || '') + '\n' + msg.content });
+                          const el = chatPromptRef.current;
+                          const cur = node.prompt || '';
+                          const content = msg.content;
+                          // 点击时先获取光标位置
+                          let insertPos = 0;
+                          if (el) {
+                            const sel = el.selectionStart;
+                            insertPos = sel ?? cur.length;
+                          }
+                          const next = cur.slice(0, insertPos) + content + cur.slice(insertPos);
+                          onUpdate({ prompt: next });
+                          requestAnimationFrame(() => {
+                            if (el) {
+                              el.focus();
+                              el.selectionStart = el.selectionEnd = insertPos + content.length;
+                            }
+                          });
                         }}
                         className="rounded border border-white/25 px-2 py-0.5 opacity-70 hover:opacity-100 hover:bg-white/10"
                         style={{ fontSize: fs(Math.max(10, chatFontPx - 2)) }}
@@ -15432,19 +15581,22 @@ function ChatNodeContent({
           onInsert={(tok) => {
             const el = chatPromptRef.current;
             const cur = node.prompt || '';
-            if (el && document.activeElement === el) {
-              const s = el.selectionStart ?? cur.length;
-              const e = el.selectionEnd ?? cur.length;
-              const next = cur.slice(0, s) + tok + cur.slice(e);
-              onUpdate({ prompt: next });
-              requestAnimationFrame(() => {
-                const p = s + tok.length;
-                el.selectionStart = el.selectionEnd = p;
-                el.focus();
-              });
-            } else {
-              onUpdate({ prompt: cur + tok });
+            // 点击按钮时尝试直接获取光标位置
+            let insertPos = savedCursorPos.start;
+            if (el) {
+              const sel = el.selectionStart;
+              if (sel !== null) {
+                insertPos = sel;
+              }
             }
+            const next = cur.slice(0, insertPos) + tok + cur.slice(insertPos);
+            onUpdate({ prompt: next });
+            requestAnimationFrame(() => {
+              if (el) {
+                el.focus();
+                el.selectionStart = el.selectionEnd = insertPos + tok.length;
+              }
+            });
           }}
         />
         <div className="flex gap-2">
@@ -15495,6 +15647,7 @@ function ChatNodeContent({
                   const rect = el.getBoundingClientRect();
                   const top = rect.top + cursorHeight;
                   setAtPickerPos({ top: top + 4, left: rect.left });
+                  setSavedCursorPos({ start: sel, end: sel });
                 }
                 setShowAtPicker(true);
               } else if (textBefore.match(/@[RM]\d+$/)) {
@@ -15555,16 +15708,35 @@ function ChatNodeContent({
               {refSlots.length > 0 && (
                 <>
                   <div className="px-3 py-1 text-xs text-cyan-400">连线参考</div>
-                  {refSlots.map((s) => (
-<button
+{refSlots.map((s) => (
+                    <button
                       key={`at-r${s.n}`}
                       onClick={() => {
-                        console.log('[DEBUG picker] inserting @R', s.n, 'current prompt:', node.prompt);
-                        onUpdate({ prompt: (node.prompt || '') + `@R${s.n} ` });
+                        const el = chatPromptRef.current;
+                        const cur = node.prompt || '';
+                        const tok = `@R${s.n} `;
+                        // 点击时先获取光标位置
+                        let insertPos = savedCursorPos.start;
+                        if (el) {
+                          // 尝试直接获取当前选择位置
+                          const sel = el.selectionStart;
+                          if (sel !== null) {
+                            insertPos = sel;
+                          }
+                        }
+                        const next = cur.slice(0, insertPos) + tok + cur.slice(insertPos);
+                        onUpdate({ prompt: next });
                         setShowAtPicker(false);
+                        // 恢复焦点并定位光标到插入内容之后
+                        requestAnimationFrame(() => {
+                          if (el) {
+                            el.focus();
+                            el.selectionStart = el.selectionEnd = insertPos + tok.length;
+                          }
+                        });
                       }}
                       className="w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-[#333]"
-                      >
+                    >
                       <span className="text-cyan-400">@R{s.n}</span> {s.label}
                     </button>
                   ))}
@@ -15583,15 +15755,33 @@ function ChatNodeContent({
                 return (
                   <>
                     <div className="px-3 py-1 text-xs text-purple-400">消息图片</div>
-                    {aiReplies.map((r) => (
-<button
-                      key={`at-m${r.num}`}
-                      onClick={() => {
-                        console.log('[DEBUG picker] inserting @M', r.num, 'current prompt:', node.prompt);
-                        onUpdate({ prompt: (node.prompt || '') + `@M${r.num} ` });
-                        setShowAtPicker(false);
-                      }}
-                      className="w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-[#333]"
+{aiReplies.map((r) => (
+                      <button
+                        key={`at-m${r.num}`}
+                        onClick={() => {
+                          const el = chatPromptRef.current;
+                          const cur = node.prompt || '';
+                          const tok = `@M${r.num} `;
+                          // 点击时先获取光标位置
+                          let insertPos = savedCursorPos.start;
+                          if (el) {
+                            const sel = el.selectionStart;
+                            if (sel !== null) {
+                              insertPos = sel;
+                            }
+                          }
+                          const next = cur.slice(0, insertPos) + tok + cur.slice(insertPos);
+                          onUpdate({ prompt: next });
+                          setShowAtPicker(false);
+                          // 恢复焦点并定位光标
+                          requestAnimationFrame(() => {
+                            if (el) {
+                              el.focus();
+                              el.selectionStart = el.selectionEnd = insertPos + tok.length;
+                            }
+                          });
+                        }}
+                        className="w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-[#333]"
                       >
                         <span className="text-purple-400">@M{r.num}</span> AI回复({r.images.length}张图)
                       </button>

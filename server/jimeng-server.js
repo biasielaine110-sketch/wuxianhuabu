@@ -490,6 +490,7 @@ app.post("/api/jimeng/image/upscale", async (req, res) => {
       const resolutionType = resolutionMap[scale] || "2k";
       const args = ["image_upscale", `--image=${wslPath}`, `--resolution_type=${resolutionType}`, "--poll", "120"];
       const result = await execJimeng(args, { timeout: 300000 });
+    console.log('[jimeng-video] execJimeng completed');
 
       // 娓呯悊涓存椂鏂囦欢
       try { await fs.unlink(imageFilePath); } catch {}
@@ -691,6 +692,16 @@ app.post("/api/jimeng/video/generate", async (req, res) => {
         if (imgUrl.startsWith('data:')) {
           const base64Data = imgUrl.replace(/^data:image\/\w+;base64,/, '');
           tempImageBuffer = Buffer.from(base64Data, 'base64');
+        } else if (imgUrl.startsWith('blob:')) {
+          // 支持 blob URL（来自 Canvas 等）
+          try {
+            const resp = await fetch(imgUrl);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            tempImageBuffer = Buffer.from(await resp.arrayBuffer());
+          } catch (blobErr) {
+            console.error(`[jimeng-video] blob 图片下载失败: ${blobErr.message}`);
+            continue;
+          }
         } else if (imgUrl.startsWith('http://') || imgUrl.startsWith('https://')) {
           console.log(`[jimeng-video] 涓嬭浇鍙傝€冨浘鐗? ${imgUrl.substring(0, 80)}...`);
           const resp = await fetch(imgUrl, {
@@ -728,6 +739,16 @@ app.post("/api/jimeng/video/generate", async (req, res) => {
       if (params.imageUrl.startsWith('data:')) {
         const base64Data = params.imageUrl.replace(/^data:image\/\w+;base64,/, '');
         tempImageBuffer = Buffer.from(base64Data, 'base64');
+  // 涓嶆敮鎵?blob URL锛岀洿鎺ヤ娇鐢≒eferer涓嬭浇
+      } else if (params.imageUrl.startsWith('blob:')) {
+        // 支持 blob URL（来自 Canvas 等）
+        try {
+          const resp = await fetch(params.imageUrl);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          tempImageBuffer = Buffer.from(await resp.arrayBuffer());
+        } catch (blobErr) {
+          return res.status(400).json({ ok: false, message: "无法读取 blob 图片: " + (blobErr.message || "未知错误") });
+        }
       } else if (params.imageUrl.startsWith('http://') || params.imageUrl.startsWith('https://')) {
         console.log(`[jimeng-video] 涓嬭浇鍙傝€冨浘鐗? ${params.imageUrl.substring(0, 80)}...`);
         const resp = await fetch(params.imageUrl, {
@@ -785,6 +806,7 @@ app.post("/api/jimeng/video/generate", async (req, res) => {
     console.log('[jimeng-video-generate] 鏋勫缓鐨勫懡浠よ鍙傛暟:', args);
 
     const result = await execJimeng(args, { timeout: 300000 });
+    console.log('[jimeng-video] execJimeng completed');
 
     // 娓呯悊鎵€鏈変复鏃舵枃浠?
     const allTempFiles = [imageFilePath, ...imageFilePaths];
@@ -797,11 +819,25 @@ app.post("/api/jimeng/video/generate", async (req, res) => {
       }
     }
 
-    const payload = JSON.parse(result.stdout);
+    let payload;
+    try {
+      payload = JSON.parse(result.stdout);
+    } catch (parseErr) {
+      console.error('[jimeng-video] CLI stdout length:', result.stdout?.length || 0);
+      console.error('[jimeng-video] CLI stdout preview:', result.stdout?.substring(0, 500));
+      console.error('[jimeng-video] CLI stderr:', result.stderr?.substring(0, 500));
+      return res.status(500).json({
+        ok: false,
+        message: "CLI返回格式错误",
+        detail: result.stdout.substring(0, 300) + (result.stdout.length > 300 ? "..." : ""),
+        stderr: result.stderr || "",
+      });
+    }
     return handleJimengResult(res, payload, OUTPUT_DIR, PORT, "video");
   } catch (error) {
-    const stderr = error.stderr || "";
-    const loginRequired = isDreaminaLoginError(error);
+      const stderr = error.stderr || "";
+      console.error('[jimeng-video] catch error:', error.message, 'stderr:', stderr.substring(0, 300));
+      const loginRequired = isDreaminaLoginError(error);
     if (loginRequired) {
       return sendDreaminaLoginRequired(res, {
         detail: error.shortMessage || error.message,
@@ -862,7 +898,17 @@ app.post("/api/jimeng/query", async (req, res) => {
           
           if (resp.ok) {
             const buf = Buffer.from(await resp.arrayBuffer());
-            await fs.writeFile(localPath, buf);
+            // Detect real image format from magic bytes
+      const magic = buf.slice(0, 12);
+      let realExt = '.png';
+      if (magic[0] === 0xFF && magic[1] === 0xD8) { realExt = '.jpg'; }
+      else if (magic[0] === 0x89 && magic[1] === 0x50) { realExt = '.png'; }
+      else if (magic[0] === 0x47 && magic[1] === 0x49) { realExt = '.gif'; }
+      else if (magic[0] === 0x52 && magic[1] === 0x49 && magic[2] === 0x46 && magic[3] === 0x46) { realExt = '.webp'; }
+
+      filename = `jimeng_${mediaType}_${Date.now()}${realExt}`;
+      localPath = path.join(outputDir, filename);
+      await fs.writeFile(localPath, buf);
             const localVideoUrl = `http://localhost:${PORT}/outputs/${encodeURIComponent(filename)}`;
             console.log(`[jimeng-query] 瑙嗛涓嬭浇鎴愬姛: ${localVideoUrl}`);
             
@@ -945,7 +991,17 @@ async function handleJimengResult(res, payload, outputDir, port, mediaType) {
         });
         if (resp.ok) {
           const buf = Buffer.from(await resp.arrayBuffer());
-          await fs.writeFile(localPath, buf);
+          // Detect real image format from magic bytes
+      const magic = buf.slice(0, 12);
+      let realExt = '.png';
+      if (magic[0] === 0xFF && magic[1] === 0xD8) { realExt = '.jpg'; }
+      else if (magic[0] === 0x89 && magic[1] === 0x50) { realExt = '.png'; }
+      else if (magic[0] === 0x47 && magic[1] === 0x49) { realExt = '.gif'; }
+      else if (magic[0] === 0x52 && magic[1] === 0x49 && magic[2] === 0x46 && magic[3] === 0x46) { realExt = '.webp'; }
+
+      filename = `jimeng_${mediaType}_${Date.now()}${realExt}`;
+      localPath = path.join(outputDir, filename);
+      await fs.writeFile(localPath, buf);
           const localUrl = `http://localhost:${port}/outputs/${encodeURIComponent(filename)}`;
           downloadedUrls.push(localUrl);
           console.log(`[jimeng] 澶氬浘涓嬭浇鎴愬姛 ${i + 1}/${allImageUrls.length}: ${localUrl}`);
@@ -979,9 +1035,8 @@ async function handleJimengResult(res, payload, outputDir, port, mediaType) {
   }
 
   if (mediaUrl) {
-    const ext = mediaType === "video" ? ".mp4" : ".png";
-    const filename = `jimeng_${mediaType}_${Date.now()}${ext}`;
-    const localPath = path.join(outputDir, filename);
+    let filename = `jimeng_${mediaType}_${Date.now()}.png`;
+    let localPath = path.join(outputDir, filename);
     let downloadedSuccessfully = false;
     let localMediaUrl = mediaUrl;
     
@@ -993,6 +1048,16 @@ async function handleJimengResult(res, payload, outputDir, port, mediaType) {
       }
       const buf = Buffer.from(await resp.arrayBuffer());
       console.log(`[jimeng] 涓嬭浇瀹屾垚锛屽ぇ灏? ${buf.length} bytes`);
+      // Detect real image format from magic bytes
+      const magic = buf.slice(0, 12);
+      let realExt = '.png';
+      if (magic[0] === 0xFF && magic[1] === 0xD8) { realExt = '.jpg'; }
+      else if (magic[0] === 0x89 && magic[1] === 0x50) { realExt = '.png'; }
+      else if (magic[0] === 0x47 && magic[1] === 0x49) { realExt = '.gif'; }
+      else if (magic[0] === 0x52 && magic[1] === 0x49 && magic[2] === 0x46 && magic[3] === 0x46) { realExt = '.webp'; }
+
+      filename = `jimeng_${mediaType}_${Date.now()}${realExt}`;
+      localPath = path.join(outputDir, filename);
       await fs.writeFile(localPath, buf);
       localMediaUrl = `http://localhost:${port}/outputs/${encodeURIComponent(filename)}`;
       downloadedSuccessfully = true;
@@ -1012,6 +1077,16 @@ async function handleJimengResult(res, payload, outputDir, port, mediaType) {
         });
         if (resp.ok) {
           const buf = Buffer.from(await resp.arrayBuffer());
+          // Detect real image format from magic bytes
+          const magic = buf.slice(0, 12);
+          let realExt = '.png';
+          if (magic[0] === 0xFF && magic[1] === 0xD8) { realExt = '.jpg'; }
+          else if (magic[0] === 0x89 && magic[1] === 0x50) { realExt = '.png'; }
+          else if (magic[0] === 0x47 && magic[1] === 0x49) { realExt = '.gif'; }
+          else if (magic[0] === 0x52 && magic[1] === 0x49 && magic[2] === 0x46 && magic[3] === 0x46) { realExt = '.webp'; }
+
+          filename = `jimeng_${mediaType}_${Date.now()}${realExt}`;
+          localPath = path.join(outputDir, filename);
           await fs.writeFile(localPath, buf);
           localMediaUrl = `http://localhost:${port}/outputs/${encodeURIComponent(filename)}`;
           downloadedSuccessfully = true;
@@ -1076,7 +1151,17 @@ async function handleOpencliImageResult(res, result, outputDir, port, returnAsVi
   try {
     const resp = await fetch(imageUrl);
     const buf = Buffer.from(await resp.arrayBuffer());
-    await fs.writeFile(localPath, buf);
+    // Detect real image format from magic bytes
+      const magic = buf.slice(0, 12);
+      let realExt = '.png';
+      if (magic[0] === 0xFF && magic[1] === 0xD8) { realExt = '.jpg'; }
+      else if (magic[0] === 0x89 && magic[1] === 0x50) { realExt = '.png'; }
+      else if (magic[0] === 0x47 && magic[1] === 0x49) { realExt = '.gif'; }
+      else if (magic[0] === 0x52 && magic[1] === 0x49 && magic[2] === 0x46 && magic[3] === 0x46) { realExt = '.webp'; }
+
+      filename = `jimeng_${mediaType}_${Date.now()}${realExt}`;
+      localPath = path.join(outputDir, filename);
+      await fs.writeFile(localPath, buf);
     imageUrl = `http://localhost:${port}/outputs/${encodeURIComponent(filename)}`;
   } catch { /* 鍥為€€ */ }
 

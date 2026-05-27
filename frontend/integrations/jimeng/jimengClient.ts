@@ -48,16 +48,64 @@ export async function setupWSL() {
 }
 
 export async function upscaleJimengImage(imageUrl: string, scale: number = 2) {
+  // 将 blob URL 转换为 base64 data URL
+  const convertedImageUrl = imageUrl.startsWith('blob:') ? await blobToBase64(imageUrl) : imageUrl;
+
   const res = await fetch(`${JIMENG_SERVER}/image/upscale`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ imageUrl, scale })
+    body: JSON.stringify({ imageUrl: convertedImageUrl, scale })
   });
   const data = await res.json();
   if (!data.ok) {
     throw new Error(data.message || "智能超清失败");
   }
   return data as { ok: true; imageUrl: string; filename: string };
+}
+
+/** 将 blob URL 转换为 base64 data URL（前端专用，因为 blob 只能在浏览器内访问） */
+async function blobToBase64(blobUrl: string): Promise<string> {
+  if (!blobUrl.startsWith('blob:')) return blobUrl;
+  try {
+    const resp = await fetch(blobUrl);
+    const blob = await resp.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return blobUrl; // 转换失败时返回原始 URL
+  }
+}
+
+/** 递归转换对象中所有 blob URLs 为 base64 */
+async function convertBlobUrls(obj: any): Promise<any> {
+  if (!obj) return obj;
+  if (Array.isArray(obj)) {
+    return Promise.all(obj.map(item => convertBlobUrls(item)));
+  }
+  if (typeof obj === 'object') {
+    const result: any = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (key === 'imageUrl' && typeof value === 'string' && value.startsWith('blob:')) {
+        result[key] = await blobToBase64(value);
+      } else if (key === 'images' && Array.isArray(value)) {
+        result[key] = await Promise.all(value.map((v: string) =>
+          v.startsWith('blob:') ? blobToBase64(v) : Promise.resolve(v)
+        ));
+      } else if (typeof value === 'string' && value.startsWith('blob:')) {
+        result[key] = await blobToBase64(value);
+      } else if (typeof value === 'object') {
+        result[key] = await convertBlobUrls(value);
+      } else {
+        result[key] = value;
+      }
+    }
+    return result;
+  }
+  return obj;
 }
 
 export async function generateJimengVideo(params: {
@@ -70,12 +118,15 @@ export async function generateJimengVideo(params: {
   ratio?: string;
   nodeId?: string;
 }) {
+  // 将所有 blob URLs 转换为 base64 data URLs（blob 只能在浏览器内访问，服务器无法 fetch）
+  const convertedParams = await convertBlobUrls(params);
+
   const res = await fetch(`${JIMENG_SERVER}/video/generate`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(params)
+    body: JSON.stringify(convertedParams)
   });
 
   const data = await res.json();
@@ -128,12 +179,15 @@ export async function generateJimengImage(params: {
   height?: number;
   nodeId?: string;
 }) {
+  // 将所有 blob URLs 转换为 base64 data URLs
+  const convertedParams = await convertBlobUrls(params);
+
   const res = await fetch(`${JIMENG_SERVER}/image/generate`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(params)
+    body: JSON.stringify(convertedParams)
   });
 
   const data = await res.json();

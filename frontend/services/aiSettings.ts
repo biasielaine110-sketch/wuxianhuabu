@@ -21,8 +21,13 @@ const MANXUE_BASE_URL_STORAGE_KEY = 'manxue-openai-compatible-base-url-v1';
 /** MiniMax OpenAI 兼容网关：AI 对话「MiniMax M2.7」等 */
 const MINIMAX_API_KEY_STORAGE_KEY = 'minimax-openai-compatible-api-key-v1';
 const MINIMAX_BASE_URL_STORAGE_KEY = 'minimax-openai-compatible-base-url-v1';
+/** AIID (api.aiid.edu.kg) 豆包Seedance2.0 视频生成专用 */
+const AIID_API_KEY_STORAGE_KEY = 'aiid-openai-compatible-api-key-v1';
+const AIID_BASE_URL_STORAGE_KEY = 'aiid-openai-compatible-base-url-v1';
 
 export const DEFAULT_OPENAI_BASE_URL = 'https://toapis.com/v1';
+/** AIID 豆包Seedance2.0 视频生成 Base URL */
+export const DEFAULT_AIID_BASE_URL = 'https://api.aiid.edu.kg';
 /** 文档：https://stsg17lkjz.apifox.cn/8682367m0 — Base URL 须含 /v1 */
 export const DEFAULT_JUNLAN_BASE_URL = 'https://www.junlanai.com/v1';
 /** DeepSeek 官方 OpenAI 兼容入口 */
@@ -340,6 +345,43 @@ export function setMiniMaxBaseUrl(url: string): void {
   }
 }
 
+export function getAiidSavedKey(): string {
+  try {
+    return localStorage.getItem(AIID_API_KEY_STORAGE_KEY)?.trim() || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setAiidKey(apiKey: string): void {
+  const normalized = apiKey.trim();
+  try {
+    if (normalized) localStorage.setItem(AIID_API_KEY_STORAGE_KEY, normalized);
+    else localStorage.removeItem(AIID_API_KEY_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getAiidBaseUrl(): string {
+  try {
+    const raw = localStorage.getItem(AIID_BASE_URL_STORAGE_KEY)?.trim();
+    return raw || DEFAULT_AIID_BASE_URL;
+  } catch {
+    return DEFAULT_AIID_BASE_URL;
+  }
+}
+
+export function setAiidBaseUrl(url: string): void {
+  const normalized = url.trim();
+  try {
+    if (normalized) localStorage.setItem(AIID_BASE_URL_STORAGE_KEY, normalized);
+    else localStorage.removeItem(AIID_BASE_URL_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function getDeepSeekSavedKey(): string {
   try {
     return localStorage.getItem(DEEPSEEK_API_KEY_STORAGE_KEY)?.trim() || '';
@@ -410,6 +452,8 @@ export function getAiSettingsSnapshot(): AiSettingsSnapshot {
     manxueBaseUrl: getManxueBaseUrl(),
     minimaxKey: getMiniMaxSavedKey(),
     minimaxBaseUrl: getMiniMaxBaseUrl(),
+    aiidKey: getAiidSavedKey(),
+    aiidBaseUrl: getAiidBaseUrl(),
   };
 }
 
@@ -435,6 +479,9 @@ export type PersistAiSettingsInput = {
   /** MiniMax 对话专用；不传则保留原值 */
   minimaxApiKey?: string;
   minimaxBaseUrl?: string;
+  /** AIID 豆包Seedance2.0 视频专用；不传则保留原值 */
+  aiidApiKey?: string;
+  aiidBaseUrl?: string;
 };
 
 export function persistAiSettings(opts: PersistAiSettingsInput): void {
@@ -452,4 +499,6 @@ export function persistAiSettings(opts: PersistAiSettingsInput): void {
   if (opts.manxueBaseUrl !== undefined) setManxueBaseUrl(opts.manxueBaseUrl);
   if (opts.minimaxApiKey !== undefined) setMiniMaxKey(opts.minimaxApiKey);
   if (opts.minimaxBaseUrl !== undefined) setMiniMaxBaseUrl(opts.minimaxBaseUrl);
+  if (opts.aiidApiKey !== undefined) setAiidKey(opts.aiidApiKey);
+  if (opts.aiidBaseUrl !== undefined) setAiidBaseUrl(opts.aiidBaseUrl);
 }

@@ -14,6 +14,8 @@ import {
   getMiniMaxSavedKey,
   getOpenAiBaseUrl,
   getOpenAiSavedKey,
+  getAiidBaseUrl,
+  getAiidSavedKey,
 } from './aiSettings';
 
 function normalizeBaseUrl(url: string): string {
@@ -1013,7 +1015,7 @@ async function toApisUploadVideoReferenceImageUrls(
   return imageUrls;
 }
 
-export type ToApisVideoModelId = 'grok-video-3' | 'sora-2-vvip' | 'veo3.1-fast' | 'doubao-seedance-1-5-pro' | 'jimeng-video-v3' | 'jimeng-image-to-video' | 'gemini-omni-flash' | 'seedance-2' | 'seedance-2-fast';
+export type ToApisVideoModelId = 'grok-video-3' | 'sora-2-vvip' | 'veo3.1-fast' | 'doubao-seedance-1-5-pro' | 'jimeng-video-v3' | 'jimeng-image-to-video' | 'gemini-omni-flash' | 'seedance-2' | 'seedance-2-fast' | 'doubao-seedance-2-0-260128' | 'doubao-seedance-2-0-fast-260128';
 
 function isHttpUrlString(v: unknown): v is string {
   if (typeof v !== 'string') return false;
@@ -1471,28 +1473,120 @@ async function toApisGeminiOmniVideoGenerate(params: {
     params.signal
   );
 
-  // 构建 image_with_roles：最多 2 张，第一张为首帧，第二张为尾帧
-  const imageWithRoles: { url: string; role: string }[] = [];
-  if (imageUrls.length >= 1) {
-    imageWithRoles.push({ url: imageUrls[0], role: 'first_frame' });
-  }
-  if (imageUrls.length >= 2) {
-    imageWithRoles.push({ url: imageUrls[1], role: 'last_frame' });
-  }
+  // 构建 image_urls：最多 3 张（0张文生视频，1张单图生视频，3张融合）
+  const validDuration = [4, 6, 10].includes(params.durationSeconds) ? params.durationSeconds : 6;
 
   const body: Record<string, unknown> = {
-    model: 'gemini-omni-flash',
+    model: 'gemini_omni_flash',
     prompt: params.prompt,
-    duration: params.durationSeconds,
+    duration: validDuration,
     aspect_ratio: params.aspectRatio,
-    metadata: {
-      resolution: params.resolution,
-    },
+    resolution: params.resolution === '1080p' ? '1080p' : '720P',
   };
-  if (imageWithRoles.length > 0) body.image_with_roles = imageWithRoles;
+  if (imageUrls.length > 0) body.image_urls = imageUrls.slice(0, 3);
 
   const { id } = await toApisSubmitVideoGeneration(body, params.signal);
   return toApisPollVideoTaskToPlayableUrl(id, params.signal);
+}
+
+/**
+ * AIID (api.aiid.edu.kg)：`doubao-seedance-2-0-260128` / `doubao-seedance-2-0-fast-260128`（豆包Seedance2.0 视频生成）。
+ * - `duration`：5-10 秒
+ * - `aspect_ratio`：16:9 / 9:16 / 1:1 / 4:3 / 3:4
+ * - `metadata.resolution`：480p / 720p / 1080p
+ * - 参考图：通过 `image_with_roles` 传入（首帧/尾帧）
+ */
+async function toApisDoubaoSeedance2VideoGenerate(params: {
+  prompt: string;
+  durationSeconds: number;
+  aspectRatio: string;
+  resolution: '480p' | '720p' | '1080p';
+  referenceImagesBase64?: string[];
+  videoModel: 'doubao-seedance-2-0-260128' | 'doubao-seedance-2-0-fast-260128';
+  signal?: AbortSignal;
+}): Promise<string> {
+  const apiKey = getAiidSavedKey();
+  if (!apiKey) {
+    throw new Error('AIID 视频生成：未配置 API Key，请在「设置 → API → AIID」中填写。');
+  }
+  const base = getAiidBaseUrl().replace(/\/v1$/, '').replace(/\/+$/, '');
+
+  // 构建 content 数组（AIID 专用格式）
+  // AIID 的 image_url 可以直接接收 data URI（base64），无需预先上传
+  const content: Array<{ type: string; text?: string; image_url?: { url: string }; role?: string }> = [
+    { type: 'text', text: params.prompt },
+  ];
+  const refs = (params.referenceImagesBase64 || []).slice(0, 2);
+  for (let i = 0; i < refs.length; i++) {
+    const { raw, mime } = parseBase64ImageInput(refs[i]);
+    const dataUri = `data:${mime};base64,${raw}`;
+    content.push({ type: 'image_url', image_url: { url: dataUri }, role: i === 0 ? 'first_frame' : 'last_frame' });
+  }
+
+  const validDuration = [4, 6, 8, 10, 12, 15].includes(params.durationSeconds) ? params.durationSeconds : 8;
+  const ratioMap: Record<string, string> = {
+    '16:9': '16:9', '9:16': '9:16', '1:1': '1:1', '4:3': '4:3', '3:4': '3:4',
+  };
+  const ratio = ratioMap[params.aspectRatio] || '16:9';
+
+  const body: Record<string, unknown> = {
+    model: params.videoModel,
+    mode: 'reference_material',
+    content,
+    duration: validDuration,
+    size: params.resolution === '1080p' ? '1920x1080' : params.resolution === '480p' ? '854x480' : '1280x720',
+    aspect_ratio: ratio,
+  };
+
+  // 提交任务到 AIID /api/v3/contents/generations/tasks
+  const taskRes = await fetch(`${base}/api/v3/contents/generations/tasks`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey.trim()}`,
+    },
+    body: JSON.stringify(body),
+    signal: params.signal,
+  });
+  if (!taskRes.ok) {
+    const t = await taskRes.text();
+    throw new Error(`AIID 视频任务提交失败 (${taskRes.status}): ${t.slice(0, 800)}`);
+  }
+  let taskJson: unknown;
+  try { taskJson = JSON.parse(await taskRes.text()); } catch { throw new Error(`AIID 提交响应无效: ${await taskRes.text().slice(0, 200)}`); }
+  const taskData = taskJson as Record<string, unknown>;
+  const taskId = taskData.id as string;
+  if (!taskId) throw new Error(`AIID 未返回任务 id：${await taskRes.text().slice(0, 400)}`);
+
+  // 轮询结果
+  const deadline = Date.now() + TOAPIS_VIDEO_TASK_MAX_WAIT_MS;
+  await sleepInterruptible(5000, params.signal);
+  while (Date.now() < deadline) {
+    assertNotAborted(params.signal);
+    const pollRes = await fetch(`${base}/api/v3/contents/generations/tasks/${encodeURIComponent(taskId)}`, {
+      headers: { Authorization: `Bearer ${apiKey.trim()}` },
+      signal: params.signal,
+    });
+    const pollText = await pollRes.text();
+    if (!pollRes.ok) throw new Error(`AIID 查询任务失败 (${pollRes.status}): ${pollText.slice(0, 500)}`);
+    let pollJson: unknown;
+    try { pollJson = JSON.parse(pollText); } catch { throw new Error(`AIID 轮询响应无效: ${pollText.slice(0, 200)}`); }
+    const pollData = pollJson as Record<string, unknown>;
+    const items = Array.isArray(pollData.items) ? pollData.items : [];
+    const item = (items[0] as Record<string, unknown>) || {};
+    const status = String(item.status || '').toLowerCase();
+    if (status === 'succeeded' || status === 'completed' || status === 'done') {
+      const videoUrl = (item.content as Record<string, unknown>)?.video_url as string || item.video_url as string;
+      if (!videoUrl) throw new Error(`AIID 任务完成但未返回视频 URL`);
+      return videoUrl;
+    }
+    if (status === 'failed' || status === 'error') {
+      const errMsg = (item.error as string) || JSON.stringify(item.error) || pollText.slice(0, 400);
+      throw new Error(`AIID 视频任务失败: ${errMsg}`);
+    }
+    await sleepInterruptible(5000, params.signal);
+  }
+  throw new Error('AIID 视频任务超时');
 }
 
 /**
@@ -1627,6 +1721,21 @@ export async function toApisCanvasVideoGenerate(params: {
       aspectRatio: params.aspectRatio,
       resolution: params.resolution === '480p' ? '480p' : '720p',
       referenceImagesBase64: params.referenceImagesBase64,
+      signal: params.signal,
+    });
+  }
+  if (params.videoModel === 'doubao-seedance-2-0-260128' || params.videoModel === 'doubao-seedance-2-0-fast-260128') {
+    const res =
+      params.resolution === '1080p' || params.resolution === '480p'
+        ? params.resolution
+        : '720p';
+    return toApisDoubaoSeedance2VideoGenerate({
+      prompt: params.prompt,
+      durationSeconds: params.durationSeconds,
+      aspectRatio: params.aspectRatio,
+      resolution: res,
+      referenceImagesBase64: params.referenceImagesBase64,
+      videoModel: params.videoModel as 'doubao-seedance-2-0-260128' | 'doubao-seedance-2-0-fast-260128',
       signal: params.signal,
     });
   }
