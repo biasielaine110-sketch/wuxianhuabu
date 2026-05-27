@@ -3393,7 +3393,7 @@ export default function App() {
       ? current.filter(k => k !== presetKey)
       : [...current, presetKey];
 
-    // 选择特定预设时自动设置默认比例，取消时改回 16:9
+    // 选择特定预设时自动设置默认比例和分辨率，取消时改回 16:9 和 2K
     const patch: Partial<CanvasNode> = { activePresets: next };
     if (!current.includes(presetKey)) {
       if (presetKey === '故事板_CCC') {
@@ -3401,9 +3401,17 @@ export default function App() {
       } else if (presetKey === '角色4视图' || presetKey === '角色无头视图') {
         patch.aspectRatio = '9:16';
       }
+      // 故事板预设默认使用 1K 分辨率
+      if (isStoryboardPreset(presetKey)) {
+        patch.resolution = '1k';
+      }
     } else {
       if (presetKey === '故事板_CCC' || presetKey === '角色4视图' || presetKey === '角色无头视图') {
         patch.aspectRatio = '16:9';
+      }
+      // 清除故事板预设时恢复默认分辨率
+      if (isStoryboardPreset(presetKey)) {
+        patch.resolution = '2k';
       }
     }
     handleUpdateNode(nodeId, patch);
@@ -3415,9 +3423,13 @@ export default function App() {
     if (!node) return;
     const clearedPresets = node.activePresets ?? [];
     handleUpdateNode(nodeId, { activePresets: undefined });
-    // 如果有特殊预设被清除，比例也改回 16:9
+    // 如果有特殊预设被清除，比例和分辨率都改回默认值
     if (clearedPresets.some(k => k === '故事板_CCC' || k === '角色4视图' || k === '角色无头视图')) {
       handleUpdateNode(nodeId, { aspectRatio: '16:9' });
+    }
+    // 如果清除的是故事板预设，恢复默认分辨率 2k
+    if (clearedPresets.some(k => isStoryboardPreset(k))) {
+      handleUpdateNode(nodeId, { resolution: '2k' });
     }
   }, [handleUpdateNode, nodes]);
 
