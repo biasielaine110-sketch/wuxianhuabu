@@ -7259,6 +7259,7 @@ ${text}`,
                 setSelectedIds([newNode.id]);
               }}
               onOpenFullscreen={(base64) => void openFullscreenFromBase64(base64)}
+              onCancelGeneration={handleCancelGeneration}
             />
           )}
 
@@ -14758,6 +14759,8 @@ interface ChatNodeContentProps {
   onCreateImageNode?: (images: string[], nodeX: number, nodeY: number) => void;
   /** 全屏查看图片回调（用于对话消息中的图片） */
   onOpenFullscreen?: (base64: string) => void;
+  /** 取消生成回调 */
+  onCancelGeneration?: (nodeId: string) => void;
 }
 
 function ChatNodeContent({
@@ -14779,6 +14782,7 @@ function ChatNodeContent({
   onActivate,
   onCreateImageNode,
   onOpenFullscreen,
+  onCancelGeneration,
 }: ChatNodeContentProps) {
   const [showAllRefs, setShowAllRefs] = useState(false);
   const chatPromptRef = useRef<HTMLTextAreaElement>(null);
@@ -15825,9 +15829,9 @@ function ChatNodeContent({
             <button
               onPointerDown={(e) => {
                 e.stopPropagation();
-                // 调用取消生成 - 需要通过 props 传递或全局处理
-                const ac = generationAbortControllersRef.current?.get(node.id);
-                if (ac) ac.abort();
+                if (onCancelGeneration) {
+                  onCancelGeneration(node.id);
+                }
               }}
               className="rounded bg-orange-600 hover:bg-orange-500 text-white flex items-center justify-center px-3 ml-2"
               style={{ width: 100, height: 600 }}
