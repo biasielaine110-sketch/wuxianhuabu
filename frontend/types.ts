@@ -176,6 +176,8 @@ export interface ChatNode extends CanvasNode {
   imageAspectRatio?: string;
   /** 对话内生图模式时的图片分辨率 */
   imageResolution?: string;
+  /** 对话内生图模式使用的图片模型 */
+  imageModel?: string;
 }
 
 export interface ChatMessage {

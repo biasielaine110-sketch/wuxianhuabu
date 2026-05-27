@@ -5501,7 +5501,7 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
     try {
       // 生图模式：直接调用图片生成服务
       if (isImageGenMode && imageGenPrompt) {
-        const defaultModel = defaultCanvasImageModel();
+        const imageModel = (node as ChatNode).imageModel || 'gpt-image-2-codesonline';
         const aspectRatio = (node as ChatNode).imageAspectRatio || '16:9';
         const resolution = (node as ChatNode).imageResolution || '2k';
         const imageCount = 1;
@@ -5514,7 +5514,7 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
             allImages,
             imageGenPrompt,
             imageCount,
-            defaultModel,
+            imageModel,
             aspectRatio,
             resolution,
             undefined, // quality
@@ -5525,7 +5525,7 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
             imageGenPrompt,
             aspectRatio,
             imageCount,
-            defaultModel,
+            imageModel,
             resolution
           );
         }
@@ -15586,6 +15586,22 @@ function ChatNodeContent({
             <option value="1k">1K</option>
             <option value="2k">2K</option>
             <option value="4k">4K</option>
+          </select>
+          <span className="text-gray-400 shrink-0" style={{ fontSize: fs(10) }}>模型:</span>
+          <select
+            className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-purple-500"
+            style={{ fontSize: fs(10) }}
+            value={node.imageModel || 'gpt-image-2-codesonline'}
+            onChange={(e) => onUpdate({ imageModel: e.target.value })}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option>
+            <option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option>
+            <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
+            <option value="gpt-image-2-manxue">GPT Image 2（满 e）</option>
+            <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option>
+            <option value="gemini-3.1-flash-image-preview-2k-manxue">Gemini 3.1 Flash Image 2K（满 e）</option>
+            <option value="gemini-3-pro-image-preview-2k-manxue">Gemini 3 Pro Image 2K（满 e）</option>
           </select>
           <button
             onPointerDown={(e) => {
