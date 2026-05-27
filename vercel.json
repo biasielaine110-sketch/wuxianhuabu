@@ -45,6 +45,10 @@
       "destination": "https://image.codesonline.dev/:path*"
     },
     {
+      "source": "/api/aiid/(.*)",
+      "destination": "https://api.aiid.edu.kg/$1"
+    },
+    {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }

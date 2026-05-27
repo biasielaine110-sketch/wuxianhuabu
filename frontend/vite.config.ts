@@ -95,6 +95,19 @@ const toapisFileCdnProxy = {
     secure: false,
     rewrite: (p: string) => p.replace(/^\/api\/jimeng/, '/api/jimeng'),
   },
+  /** AIID (api.aiid.edu.kg) 视频生成 API 代理，解决 CORS 跨域问题 */
+  '/api/aiid': {
+    target: 'https://api.aiid.edu.kg',
+    changeOrigin: true,
+    secure: true,
+    timeout: 600_000,
+    proxyTimeout: 600_000,
+    rewrite: (p: string) => {
+      const path = p.startsWith('/') ? p : `/${p}`;
+      const stripped = path.replace(/^\/api\/aiid(?=\/|$)/, '');
+      return stripped.length ? stripped : '/';
+    },
+  },
 } as const;
 
 export default defineConfig(({ mode }) => {

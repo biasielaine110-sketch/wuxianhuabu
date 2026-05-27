@@ -359,8 +359,10 @@ function buildToApisImageGenerationBody(params: {
 
   if (isToApisGemini31FlashImageModel(model)) {
     body.metadata = { resolution: toApisGeminiFlashMetadataResolution(nodeResolution) };
-  } else {
-    body.resolution = '2K';
+  } else if (nodeResolution) {
+    // ToAPIs GPT Image 2 支持 1K, 2K, 4K 分辨率
+    const r = (nodeResolution || '2k').toLowerCase().replace(/\s/g, '');
+    body.resolution = r === '4k' ? '4K' : r === '1k' ? '1K' : '2K';
   }
   return body;
 }
@@ -1509,7 +1511,13 @@ async function toApisDoubaoSeedance2VideoGenerate(params: {
   if (!apiKey) {
     throw new Error('AIID 视频生成：未配置 API Key，请在「设置 → API → AIID」中填写。');
   }
-  const base = getAiidBaseUrl().replace(/\/v1$/, '').replace(/\/+$/, '');
+  // 使用同源代理路径避免 CORS 问题（开发环境 Vite proxy / 生产环境 vercel.json rewrite）
+  const base = (() => {
+    const saved = getAiidBaseUrl();
+    if (saved && saved !== DEFAULT_AIID_BASE_URL) return saved.replace(/\/v1$/, '').replace(/\/+$/, '');
+    // 指向同源代理路径
+    return '/api/aiid';
+  })();
 
   // 构建 content 数组（AIID 专用格式）
   // AIID 的 image_url 可以直接接收 data URI（base64），无需预先上传
