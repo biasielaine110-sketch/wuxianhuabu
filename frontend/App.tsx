@@ -5525,15 +5525,20 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
         const imageCount = 1;
 
         // 构建带上下文的生图提示词（传递最近10轮对话摘要）
-        const recentMessages = (node.messages || []).slice(-20); // 最近20条消息（约10轮对话）
+        const allCurrentMessages = (node.messages || []) as ChatMessage[];
+        const recentMessages = allCurrentMessages.slice(-20); // 最近20条消息（约10轮对话）
+        console.log('[DEBUG 生图上下文] 总消息数:', allCurrentMessages.length, '最近消息数:', recentMessages.length);
         let contextSummary = '';
         if (recentMessages.length > 0) {
           const userMsgs = recentMessages.filter(m => m.role === 'user').slice(-10);
+          console.log('[DEBUG 生图上下文] 筛选出的用户消息数:', userMsgs.length);
           if (userMsgs.length > 0) {
             contextSummary = `【对话上下文参考】最近对话内容：${userMsgs.map(m => m.content).join(' → ')}。`;
+            console.log('[DEBUG 生图上下文] contextSummary:', contextSummary.slice(0, 200));
           }
         }
         const fullImagePrompt = contextSummary ? `${contextSummary}\n\n【本次生图要求】${imageGenPrompt}` : imageGenPrompt;
+        console.log('[DEBUG 生图上下文] fullImagePrompt:', fullImagePrompt.slice(0, 300));
 
         let generatedImages: string[];
         if (genImages.length > 0) {
