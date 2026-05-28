@@ -55,6 +55,7 @@ import {
   parseMsgPickIndices,
   stripRefMarkers,
   resolveSlotImagesForIndices,
+  resolveSlotImagesForIndicesWithCompression,
   resolveSlotAudios,
   type IncomingRefSlot,
 } from './referenceSlots';
@@ -5289,7 +5290,7 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
         if (isI2i) {
           const slots = buildIncomingRefSlots(nodeId, edges, nodes);
           const pickIndices = parseRefPickIndices(combined);
-          const { base64s: imageInputs } = await resolveSlotImagesForIndices(slots, pickIndices);
+          const { base64s: imageInputs } = await resolveSlotImagesForIndicesWithCompression(slots, pickIndices, 2048);
           if (imageInputs.length > 0) imageUrl = imageInputs[0];
         }
 
@@ -5355,7 +5356,7 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
       } else if (node.type === 'i2i' || node.type === 'panoramaT2i') {
         const slots = buildIncomingRefSlots(nodeId, edges, nodes);
         const pickIndices = parseRefPickIndices(finalPrompt2);
-        const { base64s: imageInputs } = await resolveSlotImagesForIndices(slots, pickIndices);
+        const { base64s: imageInputs } = await resolveSlotImagesForIndicesWithCompression(slots, pickIndices, 2048);
         const promptForModel = stripRefMarkers(finalPrompt2) || finalPrompt2;
         if (imageInputs.length === 0) throw new Error("请连接参考图片或视频节点，或使用 @R 引用有效参考槽位");
         if (!promptForModel) throw new Error("请输入编辑指令或连接文本节点");
@@ -5431,7 +5432,7 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
     const slots = buildIncomingRefSlots(nodeId, edges, nodes);
     const pickIndices = parseRefPickIndices(inputText);
     const msgPickIndices = parseMsgPickIndices(inputText);
-    const { base64s: refImages, missing } = await resolveSlotImagesForIndices(slots, pickIndices);
+    const { base64s: refImages, missing } = await resolveSlotImagesForIndicesWithCompression(slots, pickIndices, 2048);
 
     // 从历史消息中提取图片（@M 引用）
     const msgImages: string[] = [];
@@ -5446,7 +5447,6 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
           allMsgImages.push({ index: assistantCount, images: msg.images || (msg.image ? [msg.image] : []) });
         }
       }
-      console.log('[DEBUG @M] allMsgImages count:', allMsgImages.length, 'requested indices:', msgPickIndices);
       for (const idx of msgPickIndices) {
         const found = allMsgImages.find(m => m.index === idx);
         if (found) {
@@ -5457,7 +5457,6 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
         }
       }
     }
-    console.log('[DEBUG @M] final msgImages count:', msgImages.length, 'msgRefDescs:', msgRefDescs);
 
     const strippedQuestion = stripRefMarkers(inputText) || inputText;
 
@@ -5591,7 +5590,6 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
       }
 
       // 普通对话模式
-      console.log('[DEBUG @M refs]', {
         msgPickIndices,
         msgImages: msgImages.length,
         msgRefDescs,
@@ -5896,7 +5894,7 @@ ${text}`,
         const slots = buildIncomingRefSlots(nodeId, edges, nodes);
         const pickIndices = parseRefPickIndices(combinedRaw);
         const combinedPrompt = stripRefMarkers(combinedRaw) || combinedRaw;
-        const { base64s: imageInputs } = await resolveSlotImagesForIndices(slots, pickIndices);
+        const { base64s: imageInputs } = await resolveSlotImagesForIndicesWithCompression(slots, pickIndices, 2048);
 
         // 即梦路径：先确保登录
         await ensureJimengReady();
@@ -5980,7 +5978,7 @@ ${text}`,
       const slots = buildIncomingRefSlots(nodeId, edges, nodes);
       const pickIndices = parseRefPickIndices(combinedRaw);
       const combinedPrompt = stripRefMarkers(combinedRaw) || combinedRaw;
-      const { base64s: imageInputs } = await resolveSlotImagesForIndices(slots, pickIndices);
+      const { base64s: imageInputs } = await resolveSlotImagesForIndicesWithCompression(slots, pickIndices, 2048);
 
       // 解析语音参考
       const audioRefs = resolveSlotAudios(slots);

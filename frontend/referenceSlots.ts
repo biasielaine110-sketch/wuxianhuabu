@@ -1,5 +1,50 @@
 import type { CanvasNode, Edge } from './types';
 
+/** 图片压缩：限制最长边为 maxSize，生成 JPEG（压缩率 85%） */
+export async function compressImageBase64(base64: string, maxSize = 2048): Promise<string> {
+  return new Promise((resolve) => {
+    const raw = base64.includes(',') ? base64.split(',')[1] : base64;
+    const mime = base64.match(/^data:([^;]+);/)?.[1] || 'image/jpeg';
+    const img = new Image();
+    img.onload = () => {
+      let { width, height } = img;
+      // 限制最长边
+      if (width > maxSize || height > maxSize) {
+        if (width > height) {
+          height = Math.round((height / width) * maxSize);
+          width = maxSize;
+        } else {
+          width = Math.round((width / height) * maxSize);
+          height = maxSize;
+        }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', 0.85).replace(/^data:image\/jpeg;base64,/, ''));
+    };
+    img.onerror = () => resolve(raw); // 失败时返回原图
+    img.src = `data:${mime};base64,${raw}`;
+  });
+}
+
+/** 批量压缩图片（带并行限制） */
+export async function compressImageBase64s(
+  base64s: string[],
+  maxSize = 2048,
+  maxConcurrency = 4
+): Promise<string[]> {
+  const results: string[] = [];
+  for (let i = 0; i < base64s.length; i += maxConcurrency) {
+    const batch = base64s.slice(i, i + maxConcurrency);
+    const compressed = await Promise.all(batch.map(b => compressImageBase64(b, maxSize)));
+    results.push(...compressed);
+  }
+  return results;
+}
+
 /** 汇入某一节点的参考槽（图 / 视频 / 语音 / 文本），编号 @R1、@R2… 与连线顺序一致 */
 export type IncomingRefSlot = {
   n: number;
@@ -231,6 +276,46 @@ export async function resolveSlotImagesForIndices(
       const b = await videoUrlToJpegBase64(s.videoUrl);
       if (b) base64s.push(b);
       else missing.push(num);
+      continue;
+    }
+    missing.push(num);
+  }
+  return { base64s, missing };
+}
+
+/** 解析并压缩图片（限制2048px） */
+export async function resolveSlotImagesForIndicesWithCompression(
+  slots: IncomingRefSlot[],
+  indices: number[] | null,
+  maxSize = 2048
+): Promise<{ base64s: string[]; missing: number[] }> {
+  const want = indices === null ? slots.map((s) => s.n) : indices;
+  const base64s: string[] = [];
+  const missing: number[] = [];
+  for (const num of want) {
+    const s = slots.find((x) => x.n === num);
+    if (!s) {
+      missing.push(num);
+      continue;
+    }
+    if (s.kind === 'image') {
+      if (s.imageBase64s && s.imageBase64s.length > 0) {
+        const compressed = await compressImageBase64s(s.imageBase64s, maxSize);
+        base64s.push(...compressed);
+      } else if (s.imageBase64) {
+        const compressed = await compressImageBase64(s.imageBase64, maxSize);
+        base64s.push(compressed);
+      } else {
+        missing.push(num);
+      }
+      continue;
+    }
+    if (s.kind === 'video' && s.videoUrl) {
+      const b = await videoUrlToJpegBase64(s.videoUrl);
+      if (b) {
+        const compressed = await compressImageBase64(b, maxSize);
+        base64s.push(compressed);
+      } else missing.push(num);
       continue;
     }
     missing.push(num);
