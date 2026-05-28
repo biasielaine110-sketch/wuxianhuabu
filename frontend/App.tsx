@@ -2020,33 +2020,33 @@ export default function App() {
   // --- Error Classification & Quick Fix ---
   const classifyError = useCallback((rawError: string, node: CanvasNode) => {
     const msg = (rawError || '').toLowerCase();
-    if (msg.includes('quota') || msg.includes('rate') || msg.includes('429') || msg.includes('too many requests') || msg.includes('resource exhausted')) {
+    if (msg.includes('quota') || msg.includes('rate') || msg.includes('429') || msg.includes('too many requests') || msg.includes('resource exhausted') || msg.includes('insufficient_user_quota')) {
       return {
-        title: '限流',
-        reason: '请求频率过高或配额已达上限。',
+        title: '⚠️ 额度不足',
+        reason: 'AI 服务额度已用完，请前往充值后重试。',
         fixes: [
-          { label: '切换轻量模型', action: () => handleUpdateNode(node.id, { model: node.type === 'chat' ? 'gemini-2.5-flash' : 'gemini-3.1-flash-image-preview', error: undefined }) },
-          { label: '降低生成负载', action: () => handleUpdateNode(node.id, { imageCount: 1, resolution: '1k', error: undefined }) },
+          { label: '💰 充值额度', action: () => { window.open('https://manxueapi.com/recharge', '_blank'); handleUpdateNode(node.id, { error: undefined }); } },
+          { label: '切换免费模型', action: () => handleUpdateNode(node.id, { model: node.type === 'chat' ? 'gemini-2.5-flash' : 'gemini-3.1-flash-image-preview', error: undefined }) },
         ]
       };
     }
     if (msg.includes('timeout') || msg.includes('timed out') || msg.includes('deadline') || msg.includes('network') || msg.includes('fetch failed')) {
       return {
-        title: '超时',
-        reason: '网络或模型响应超时。',
+        title: '⏱️ 请求超时',
+        reason: '网络或模型响应超时，可尝试降低画质或切换网络。',
         fixes: [
-          { label: '降低任务复杂度', action: () => handleUpdateNode(node.id, { imageCount: 1, resolution: '1k', error: undefined }) },
-          { label: '清除错误重试', action: () => handleUpdateNode(node.id, { error: undefined }) },
+          { label: '🔄 重试一次', action: () => handleUpdateNode(node.id, { error: undefined }) },
+          { label: '📉 降低画质', action: () => handleUpdateNode(node.id, { imageCount: 1, resolution: '1k', error: undefined }) },
         ]
       };
     }
     if (msg.includes('invalid') || msg.includes('unsupported') || msg.includes('bad request') || msg.includes('400') || msg.includes('参数')) {
       return {
-        title: '参数无效',
+        title: '⚙️ 参数无效',
         reason: '当前参数组合或输入内容不符合接口要求。',
         fixes: [
           {
-            label: '恢复推荐参数',
+            label: '🔄 恢复默认',
             action: () =>
               handleUpdateNode(node.id, {
                 aspectRatio: node.type === 'panoramaT2i' ? '2:1' : '16:9',
@@ -2056,16 +2056,16 @@ export default function App() {
                 error: undefined,
               }),
           },
-          { label: '清空本次报错', action: () => handleUpdateNode(node.id, { error: undefined }) },
+          { label: '❌ 关闭提示', action: () => handleUpdateNode(node.id, { error: undefined }) },
         ]
       };
     }
     return {
-      title: 'API 错误',
-      reason: '接口鉴权、服务状态或返回格式异常。',
+      title: '❌ API 错误',
+      reason: '接口鉴权失败、服务不可用或返回格式异常。',
       fixes: [
-        { label: '检查 API Key', action: () => { setSettingsTab('api'); setShowSettingsModal(true); handleUpdateNode(node.id, { error: undefined }); } },
-        { label: '切换备用模型', action: () => handleUpdateNode(node.id, { model: node.type === 'chat' ? 'gemini-2.5-flash' : 'gemini-3.1-flash-image-preview', error: undefined }) },
+        { label: '⚙️ 检查 API Key', action: () => { setSettingsTab('api'); setShowSettingsModal(true); handleUpdateNode(node.id, { error: undefined }); } },
+        { label: '🔄 切换模型', action: () => handleUpdateNode(node.id, { model: node.type === 'chat' ? 'gemini-2.5-flash' : 'gemini-3.1-flash-image-preview', error: undefined }) },
       ]
     };
   }, [handleUpdateNode]);
@@ -5524,25 +5524,27 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
         const resolution = (node as ChatNode).imageResolution || '2k';
         const imageCount = 1;
 
-        // 构建带上下文的生图提示词（传递最近10轮对话摘要）
+        // 构建带上下文的生图提示词（传递最近10轮对话摘要，最多2000字符）
         const allCurrentMessages = (node.messages || []) as ChatMessage[];
         const recentMessages = allCurrentMessages.slice(-20); // 最近20条消息（约10轮对话）
-        console.log('[DEBUG 生图上下文] 总消息数:', allCurrentMessages.length, '最近消息数:', recentMessages.length);
         let contextSummary = '';
+        const MAX_CONTEXT_CHARS = 2000; // 限制上下文总字符数
         if (recentMessages.length > 0) {
           const userMsgs = recentMessages.filter(m => m.role === 'user').slice(-10);
-          console.log('[DEBUG 生图上下文] 筛选出的用户消息数:', userMsgs.length);
           if (userMsgs.length > 0) {
-            contextSummary = `【对话上下文参考】最近对话内容：${userMsgs.map(m => m.content).join(' → ')}。`;
-            console.log('[DEBUG 生图上下文] contextSummary:', contextSummary.slice(0, 200));
+            // 限制每个用户消息的显示长度
+            const truncatedMsgs = userMsgs.map(m => {
+              const content = typeof m.content === 'string' ? m.content : String(m.content);
+              return content.length > 300 ? content.slice(0, 300) + '...' : content;
+            });
+            contextSummary = `【对话上下文参考】最近对话：${truncatedMsgs.join(' → ')}`;
+            // 如果超出限制，截断
+            if (contextSummary.length > MAX_CONTEXT_CHARS) {
+              contextSummary = contextSummary.slice(0, MAX_CONTEXT_CHARS - 3) + '...';
+            }
           }
         }
         const fullImagePrompt = contextSummary ? `${contextSummary}\n\n【本次生图要求】${imageGenPrompt}` : imageGenPrompt;
-        console.log('[DEBUG 生图] imageModel:', imageModel, 'genImages数量:', genImages.length, 'aspectRatio:', aspectRatio, 'resolution:', resolution);
-        console.log('[DEBUG 生图] fullImagePrompt:', fullImagePrompt.slice(0, 300));
-        if (genImages.length > 0) {
-          console.log('[DEBUG 生图] 参考图base64前100字符:', genImages[0].slice(0, 100));
-        }
 
         let generatedImages: string[];
         if (genImages.length > 0) {
@@ -14928,45 +14930,42 @@ function ChatNodeContent({
         ],
       };
     }
-    if (msg.includes('quota') || msg.includes('rate') || msg.includes('429') || msg.includes('too many requests') || msg.includes('resource exhausted')) {
+    if (msg.includes('quota') || msg.includes('rate') || msg.includes('429') || msg.includes('too many requests') || msg.includes('resource exhausted') || msg.includes('insufficient_user_quota')) {
       return {
-        title: '限流',
-        reason: '请求过多或配额已达上限。',
+        title: '⚠️ 额度不足',
+        reason: 'AI 服务额度已用完，请前往充值后重试。',
         fixes: [
-          { label: '切换到 Gemini 2.5 Flash', action: () => onUpdate({ model: 'gemini-2.5-flash', error: undefined }) },
-          { label: '清除报错重试', action: () => onUpdate({ error: undefined }) },
+          { label: '💰 充值额度', action: () => { window.open('https://manxueapi.com/recharge', '_blank'); onUpdate({ error: undefined }); } },
+          { label: '🔄 切换免费模型', action: () => onUpdate({ model: 'gemini-2.5-flash', error: undefined }) },
         ]
       };
     }
     if (msg.includes('timeout') || msg.includes('timed out') || msg.includes('deadline') || msg.includes('network') || msg.includes('fetch failed')) {
       return {
-        title: '超时',
-        reason: '网络或模型响应超时。',
+        title: '⏱️ 请求超时',
+        reason: '网络或模型响应超时，请检查网络后重试。',
         fixes: [
-          { label: '清除报错重试', action: () => onUpdate({ error: undefined }) },
+          { label: '🔄 重试一次', action: () => onUpdate({ error: undefined }) },
         ]
       };
     }
     if (msg.includes('invalid') || msg.includes('unsupported') || msg.includes('400') || msg.includes('参数')) {
       return {
-        title: '参数无效',
+        title: '⚙️ 参数无效',
         reason: '输入内容或参数配置不符合接口要求。',
         fixes: [
-          { label: '清空输入框', action: () => onUpdate({ prompt: '', error: undefined }) },
-          { label: '切换到 Gemini 3 Pro', action: () => onUpdate({ model: 'gemini-3-pro-preview', error: undefined }) },
+          { label: '🔄 重置输入', action: () => onUpdate({ prompt: '', error: undefined }) },
+          { label: '🤖 切换模型', action: () => onUpdate({ model: 'gemini-2.5-flash', error: undefined }) },
         ]
       };
     }
     return {
-      title: 'API 错误',
-      reason: '接口鉴权、服务状态或响应格式异常。',
+      title: '❌ API 错误',
+      reason: '接口鉴权失败或服务暂时不可用。',
       fixes: [
-        { label: '切换到 DeepSeek-V4-Flash', action: () => onUpdate({ model: DEFAULT_DEEPSEEK_CHAT_MODEL_ID, error: undefined }) },
-        { label: '切换到 GPT-5.5（君澜）', action: () => onUpdate({ model: 'gpt-5.5-junlan', error: undefined }) },
-        { label: '切换到 Claude Sonnet 4-6（君澜）', action: () => onUpdate({ model: 'claude-sonnet-4-6', error: undefined }) },
-        { label: '切换到 Gemini 2.5 Flash', action: () => onUpdate({ model: 'gemini-2.5-flash', error: undefined }) },
-        { label: '打开 API 设置', action: () => onOpenApiSettings() },
-        { label: '清除报错', action: () => onUpdate({ error: undefined }) },
+        { label: '🤖 切换 Gemini', action: () => onUpdate({ model: 'gemini-2.5-flash', error: undefined }) },
+        { label: '🔄 重试一次', action: () => onUpdate({ error: undefined }) },
+        { label: '⚙️ API 设置', action: () => onOpenApiSettings() },
       ],
     };
   })();
