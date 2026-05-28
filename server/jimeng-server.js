@@ -199,6 +199,86 @@ app.use(express.json({ limit: "20mb" }));
 app.use("/outputs", express.static(OUTPUT_DIR));
 
 // ============================================================
+//  Codesonline Image API 代理
+// ============================================================
+app.use("/codesonline-image-api", async (req, res) => {
+  const targetBase = "https://image.codesonline.dev";
+  const pathname = req.originalUrl.replace(/^\/codesonline-image-api/, "") || "/";
+  const targetUrl = `${targetBase}${pathname}`;
+
+  console.log(`[codesonline-image-proxy] ${req.method} ${targetUrl}`);
+
+  try {
+    const options = {
+      method: req.method,
+      headers: {
+        "Content-Type": req.get("Content-Type") || "application/json",
+        "Authorization": req.get("Authorization") || "",
+        "Accept": req.get("Accept") || "application/json",
+      },
+    };
+
+    if (["POST", "PUT", "PATCH"].includes(req.method) && req.body) {
+      options.body = JSON.stringify(req.body);
+    }
+
+    const response = await fetch(targetUrl, options);
+    const contentType = response.headers.get("content-type") || "";
+
+    if (contentType.includes("application/json")) {
+      const data = await response.json();
+      res.status(response.status).json(data);
+    } else {
+      const text = await response.text();
+      res.status(response.status).send(text);
+    }
+  } catch (err) {
+    console.error("[codesonline-image-proxy] 错误:", err.message);
+    res.status(502).json({ ok: false, message: "代理错误: " + err.message });
+  }
+});
+
+// ============================================================
+//  Codesonline Chat API 代理
+// ============================================================
+app.use("/codesonline-chat-api", async (req, res) => {
+  const targetBase = "https://ai.codesonline.dev";
+  const pathname = req.originalUrl.replace(/^\/codesonline-chat-api/, "") || "/";
+  const targetUrl = `${targetBase}${pathname}`;
+
+  console.log(`[codesonline-chat-proxy] ${req.method} ${targetUrl}`);
+
+  try {
+    const options = {
+      method: req.method,
+      headers: {
+        "Content-Type": req.get("Content-Type") || "application/json",
+        "Authorization": req.get("Authorization") || "",
+        "Accept": req.get("Accept") || "application/json",
+      },
+    };
+
+    if (["POST", "PUT", "PATCH"].includes(req.method) && req.body) {
+      options.body = JSON.stringify(req.body);
+    }
+
+    const response = await fetch(targetUrl, options);
+    const contentType = response.headers.get("content-type") || "";
+
+    if (contentType.includes("application/json")) {
+      const data = await response.json();
+      res.status(response.status).json(data);
+    } else {
+      const text = await response.text();
+      res.status(response.status).send(text);
+    }
+  } catch (err) {
+    console.error("[codesonline-chat-proxy] 错误:", err.message);
+    res.status(502).json({ ok: false, message: "代理错误: " + err.message });
+  }
+});
+
+// ============================================================
 //  Health
 // ============================================================
 app.get("/api/jimeng/health", async (_req, res) => {
