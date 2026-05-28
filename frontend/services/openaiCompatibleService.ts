@@ -1953,6 +1953,14 @@ async function manxueEditImage(
 
   for (let i = 0; i < count; i++) {
     assertNotAborted(signal);
+    console.log('[DEBUG manxueEditImage] 发送请求:', {
+      base,
+      model,
+      prompt: prompt.slice(0, 100),
+      imageCount: imageBase64s.length,
+      imageBase64Length: imageBase64s[0]?.length || 0,
+      size,
+    });
     const body: Record<string, unknown> = {
       model,
       prompt: `${prompt}\n\n（画幅比例 ${aspectRatio}）`,
@@ -1965,6 +1973,7 @@ async function manxueEditImage(
       body.quality = quality;
     }
     const result = await manxueSubmitGeneration(base, apiKey, body, signal);
+    console.log('[DEBUG manxueEditImage] 响应:', JSON.stringify(result).slice(0, 500));
     let b64: string;
     if (result.b64_json) {
       b64 = result.b64_json;
@@ -2643,6 +2652,13 @@ async function editImagesAtOpenAiCompatibleBase(
     }
 
     const requestUrl = `${rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm)}/images/edits`;
+    console.log('[DEBUG 编辑请求]', {
+      url: requestUrl,
+      model: resolvedEditModel,
+      prompt: enhancedPrompt.slice(0, 200),
+      imageCount: imageBlobs.length,
+      imageSize: size,
+    });
 
     const res = await fetch(requestUrl, {
       method: 'POST',
@@ -2650,6 +2666,7 @@ async function editImagesAtOpenAiCompatibleBase(
       body: form,
     });
     const text = await res.text();
+    console.log('[DEBUG 编辑响应]', res.status, text.slice(0, 500));
     if (!res.ok) {
       throw new Error(
         `图生图接口错误 (${res.status})${openAiCompatFailureHint(res.status, 'image-edit')}: ${text.slice(0, 800)}`
@@ -2801,6 +2818,7 @@ export async function openAiEditImage(
       );
     }
     const coBase = normalizeBaseUrl(getCodesonlineBaseUrl());
+    console.log('[DEBUG codesonline编辑] base:', coBase, 'key长度:', coKey.length, '参考图数量:', base64Images.length, 'prompt前100:', prompt.slice(0, 100));
     return editImagesAtOpenAiCompatibleBase(
       coBase,
       coKey,
