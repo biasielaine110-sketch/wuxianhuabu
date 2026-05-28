@@ -5538,7 +5538,11 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
           }
         }
         const fullImagePrompt = contextSummary ? `${contextSummary}\n\n【本次生图要求】${imageGenPrompt}` : imageGenPrompt;
-        console.log('[DEBUG 生图上下文] fullImagePrompt:', fullImagePrompt.slice(0, 300));
+        console.log('[DEBUG 生图] imageModel:', imageModel, 'genImages数量:', genImages.length, 'aspectRatio:', aspectRatio, 'resolution:', resolution);
+        console.log('[DEBUG 生图] fullImagePrompt:', fullImagePrompt.slice(0, 300));
+        if (genImages.length > 0) {
+          console.log('[DEBUG 生图] 参考图base64前100字符:', genImages[0].slice(0, 100));
+        }
 
         let generatedImages: string[];
         if (genImages.length > 0) {
