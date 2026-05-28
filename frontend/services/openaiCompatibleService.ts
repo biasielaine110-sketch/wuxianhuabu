@@ -1953,6 +1953,14 @@ async function manxueEditImage(
 
   for (let i = 0; i < count; i++) {
     assertNotAborted(signal);
+    console.log('[DEBUG manxueEditImage] 发送请求:', {
+      base,
+      model,
+      prompt: prompt.slice(0, 100),
+      imageCount: imageBase64s.length,
+      imageBase64Length: imageBase64s[0]?.length || 0,
+      size,
+    });
     const body: Record<string, unknown> = {
       model,
       prompt: `${prompt}\n\n（画幅比例 ${aspectRatio}）`,
@@ -1965,6 +1973,7 @@ async function manxueEditImage(
       body.quality = quality;
     }
     const result = await manxueSubmitGeneration(base, apiKey, body, signal);
+    console.log('[DEBUG manxueEditImage] 响应:', JSON.stringify(result).slice(0, 500));
     let b64: string;
     if (result.b64_json) {
       b64 = result.b64_json;
