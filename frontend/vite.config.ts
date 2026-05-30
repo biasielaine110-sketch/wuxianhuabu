@@ -108,6 +108,14 @@ const toapisFileCdnProxy = {
       return stripped.length ? stripped : '/';
     },
   },
+  /** GCP Vertex：开发时同源 /api-proxy → 本地 Node backend（无需设 VITE_BACKEND_ORIGIN） */
+  '/api-proxy': {
+    target: 'http://127.0.0.1:5000',
+    changeOrigin: true,
+    secure: false,
+    timeout: 600_000,
+    proxyTimeout: 600_000,
+  },
 } as const;
 
 export default defineConfig(({ mode }) => {
@@ -152,8 +160,7 @@ export default defineConfig(({ mode }) => {
         'import.meta.env.VITE_SITE_PASSWORD': JSON.stringify(sitePassword),
       },
       server: {
-        // 纯前端开发：仅 CDN 反代。若需 Vertex，另开终端 `npm run dev-backend` 并设 frontend/.env.development：
-        //   VITE_BACKEND_ORIGIN=http://127.0.0.1:5000
+        // 纯前端开发：CDN 反代 + /api-proxy → 本地 backend。Vertex 需另开 `npm run dev-backend`。
         proxy: { ...toapisFileCdnProxy },
       },
       preview: {

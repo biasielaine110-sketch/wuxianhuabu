@@ -12,7 +12,9 @@
     import.meta.env &&
     import.meta.env.VITE_BACKEND_ORIGIN
       ? String(import.meta.env.VITE_BACKEND_ORIGIN).replace(/\/$/, '')
-      : '';
+      : typeof location !== 'undefined' && location.origin
+        ? location.origin
+        : '';
 
   /** 须与 Node 后端环境变量 PROXY_HEADER 完全一致；生产请在 Vercel 设置 VITE_PROXY_HEADER */
   const PROXY_HEADER_VALUE =

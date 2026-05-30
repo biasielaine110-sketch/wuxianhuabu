@@ -6,13 +6,17 @@ const DEFAULT_VERTEX_LOCATION = 'us-central1';
 const DEFAULT_PROXY_HEADER = 'Ea4-HmKSQpKIWcUwr400DRi9oZ2yr7Cy';
 
 function getBackendOrigin(): string {
-  const origin = import.meta.env.VITE_BACKEND_ORIGIN;
-  if (!origin || !String(origin).trim()) {
-    throw new Error(
-      '使用 GCP Vertex（赠金）模型：请在 frontend/.env.local 设置 VITE_BACKEND_ORIGIN（如 http://127.0.0.1:5000），并启动 Node 后端（npm run dev-backend）；后端需配置 GOOGLE_APPLICATION_CREDENTIALS 指向服务账号 JSON。'
-    );
+  const fromEnv = import.meta.env.VITE_BACKEND_ORIGIN;
+  if (fromEnv && String(fromEnv).trim()) {
+    return String(fromEnv).replace(/\/$/, '');
   }
-  return String(origin).replace(/\/$/, '');
+  // 生产/Vercel：同源 /api-proxy（Serverless）；开发：Vite 代理至本地 backend
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin;
+  }
+  throw new Error(
+    'GCP Vertex 代理不可用：请在浏览器中打开应用，或设置 VITE_BACKEND_ORIGIN 指向 Node 后端。'
+  );
 }
 
 function getProxyHeader(): string {
@@ -101,9 +105,11 @@ async function vertexGenerateContent(
       msg.includes('PERMISSION_DENIED') ||
       msg.includes('Permission');
     if (res.status === 503 || msg.includes('oauth2.googleapis.com') || msg.includes('ETIMEDOUT')) {
-      throw new Error(
-        `GCP Vertex 网络不可达：请确认 backend/.env.local 已设 HTTPS_PROXY=http://127.0.0.1:7897 且代理在运行，然后重启 npm run dev-backend。详情：${msg.slice(0, 200)}`
-      );
+      const hint =
+        typeof window !== 'undefined' && !window.location.hostname.includes('localhost')
+          ? '请确认 Vercel 已配置 GOOGLE_SERVICE_ACCOUNT_JSON 并完成 Redeploy。'
+          : '请确认 backend/.env.local 已设 HTTPS_PROXY 且代理在运行，然后重启 npm run dev-backend。';
+      throw new Error(`GCP Vertex 网络不可达：${hint} 详情：${msg.slice(0, 200)}`);
     }
     if (isPermission) {
       throw new Error(
