@@ -9,6 +9,7 @@ import cors from 'cors';
 import express from 'express';
 import { GoogleAuth } from 'google-auth-library';
 import fetch from 'node-fetch';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 import rateLimit from 'express-rate-limit';
 import { WebSocketServer, WebSocket } from 'ws';
 
@@ -172,16 +173,35 @@ async function getAccessToken(res) {
   } catch (error) {
     console.error('[Node Proxy] Authentication error:', error);
     if (!res) return null;
-    if (error.code === 'ERR_GCLOUD_NOT_LOGGED_IN' || (error.message && error.message.includes('Could not load the default credentials'))) {
+    const msg = error?.message || String(error);
+    const isTimeout =
+      error?.code === 'ETIMEDOUT' ||
+      msg.includes('ETIMEDOUT') ||
+      msg.includes('oauth2.googleapis.com');
+    if (error.code === 'ERR_GCLOUD_NOT_LOGGED_IN' || msg.includes('Could not load the default credentials')) {
       res.status(401).json({
         error: 'Authentication Required',
         message: 'Google Cloud Application Default Credentials not found or invalid. Please run "gcloud auth application-default login" and try again.',
       });
+    } else if (isTimeout) {
+      res.status(503).json({
+        error: 'Google OAuth unreachable',
+        message:
+          'Node 后端无法连接 oauth2.googleapis.com 换取访问令牌（网络超时）。请开启可访问 Google 的 VPN/代理，并在启动后端前设置 HTTPS_PROXY，例如：$env:HTTPS_PROXY="http://127.0.0.1:7890"',
+        details: msg,
+      });
     } else {
-      res.status(500).json({ error: `Authentication failed: ${error.message}` });
+      res.status(500).json({ error: `Authentication failed: ${msg}` });
     }
     return null;
   }
+}
+
+function withOptionalProxy(fetchOptions = {}) {
+  const proxyUrl = process?.env?.HTTPS_PROXY || process?.env?.HTTP_PROXY;
+  if (!proxyUrl) return fetchOptions;
+  const agent = new HttpsProxyAgent(proxyUrl);
+  return { ...fetchOptions, agent };
 }
 
 function getRequestHeaders(accessToken) {
@@ -239,7 +259,7 @@ app.post('/api-proxy', async (req, res) => {
     };
 
     // 5. Make the call to the API
-    const apiResponse = await fetch(apiUrl, apiFetchOptions);
+    const apiResponse = await fetch(apiUrl, withOptionalProxy(apiFetchOptions));
 
     // 6. Respond to the client based on stream type
     if (apiClient.isStreaming) {
@@ -304,19 +324,38 @@ app.post('/api-proxy', async (req, res) => {
       });
     } else {
       // Non-streaming response handling
-      console.log(`[Node Proxy] Sending JSON response for ${apiClient.name}`);
-      const data = await apiResponse.json();
+      console.log(`[Node Proxy] Sending JSON response for ${apiClient.name} (HTTP ${apiResponse.status})`);
+      const rawText = await apiResponse.text();
+      let data;
+      try {
+        data = rawText ? JSON.parse(rawText) : {};
+      } catch {
+        data = { error: { message: rawText.slice(0, 800) } };
+      }
       res.status(apiResponse.status).json(data);
     }
   } catch (error) {
-    console.error(`[Node Proxy] Error proxying request for ${apiClient.name}`);
-    console.error(error)
-    res.status(500).json({ error: error });
+    console.error(`[Node Proxy] Error proxying request for ${apiClient?.name || 'unknown'}`);
+    console.error(error);
+    const msg = error?.message || String(error);
+    const isTimeout = error?.code === 'ETIMEDOUT' || msg.includes('ETIMEDOUT');
+    if (isTimeout) {
+      return res.status(503).json({
+        error: {
+          message:
+            '连接 Google / Vertex API 超时。请在 backend/.env.local 配置 HTTPS_PROXY（如 http://127.0.0.1:7897）并重启 npm run dev-backend。',
+          details: msg,
+        },
+      });
+    }
+    res.status(500).json({ error: { message: msg || 'Proxy internal error' } });
   }
 });
 
 const server = app.listen(PORT, API_BACKEND_HOST, () => {
+  const proxy = process?.env?.HTTPS_PROXY || process?.env?.HTTP_PROXY || '(none)';
   console.log(`Vertex AI Backend listening at http://${API_BACKEND_HOST}:${PORT}`);
+  console.log(`[Node Proxy] GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT} location=${GOOGLE_CLOUD_LOCATION} HTTPS_PROXY=${proxy}`);
 });
 
 

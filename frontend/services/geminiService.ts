@@ -22,6 +22,17 @@ import {
   toApisCanvasVideoGenerate,
   type ToApisVideoModelId,
 } from './openaiCompatibleService';
+import { isVertexGeminiImageModel } from './vertexGeminiModelUtils';
+import {
+  vertexChatWithHistory,
+  vertexEditExistingImage,
+  vertexGenerateNewImage,
+} from './vertexGeminiService';
+import type { ChatCompletionOptions, ChatCompletionResult, ChatCompletionTurn } from './chatCompletionTypes';
+
+export type { ChatCompletionOptions, ChatCompletionResult, ChatCompletionTurn } from './chatCompletionTypes';
+
+const MAX_CHAT_HISTORY_TURNS = 48;
 
 function isDeepSeekChatModelId(modelName: string): boolean {
   const m = normalizeDeepSeekChatModelId(modelName).trim();
@@ -138,6 +149,10 @@ export const generateNewImage = async (
   signal?: AbortSignal
 ): Promise<string[]> => {
   try {
+    if (isVertexGeminiImageModel(modelName)) {
+      return vertexGenerateNewImage(prompt, aspectRatio, numberOfImages, modelName, outputResolution, signal);
+    }
+
     if (getAiProvider() === 'openai-compatible') {
       return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, modelName, outputResolution, quality, signal);
     }
@@ -228,6 +243,18 @@ export const editExistingImage = async (
   signal?: AbortSignal
 ): Promise<string[]> => {
   try {
+    if (isVertexGeminiImageModel(modelName)) {
+      return vertexEditExistingImage(
+        base64Images,
+        prompt,
+        numberOfImages,
+        modelName,
+        aspectRatio,
+        outputResolution,
+        signal
+      );
+    }
+
     if (getAiProvider() === 'openai-compatible') {
       return openAiEditImage(base64Images, prompt, numberOfImages, modelName, aspectRatio, outputResolution, quality, signal);
     }
@@ -292,26 +319,13 @@ export const editExistingImage = async (
 };
 
 /**
- * 多轮对话单轮结构（供画布对话节点串联历史）
- */
-export type ChatCompletionTurn = {
-  role: 'user' | 'assistant';
-  content: string;
-  /** 仅 user：可选单张参考图（与 imageBase64s 并存时合并为多张） */
-  imageBase64?: string;
-  /** 仅 user：多张参考图 */
-  imageBase64s?: string[];
-};
-
-const MAX_CHAT_HISTORY_TURNS = 48;
-
-/**
  * 多轮对话：整段 history 提交给模型（DeepSeek / OpenAI 兼容 / Gemini 直连）
  */
 export const callGeminiChatWithHistory = async (
   turns: ChatCompletionTurn[],
-  modelName: string = 'gemini-2.5-flash'
-): Promise<string> => {
+  modelName: string = 'gemini-2.5-flash',
+  opts?: ChatCompletionOptions
+): Promise<ChatCompletionResult> => {
   if (!turns.length) throw new Error('对话内容为空');
   let slice = turns;
   if (slice.length > MAX_CHAT_HISTORY_TURNS) {
@@ -322,6 +336,10 @@ export const callGeminiChatWithHistory = async (
   }
 
   try {
+    if (isVertexGeminiImageModel(modelName)) {
+      return vertexChatWithHistory(slice, modelName, opts);
+    }
+
     if (isDeepSeekChatModelId(modelName)) {
       let key = getDeepSeekSavedKey();
       let base = getDeepSeekBaseUrl();
@@ -337,7 +355,7 @@ export const callGeminiChatWithHistory = async (
           '使用 DeepSeek 对话：请在「设置 → API」填写「DeepSeek API Key」；或将接口类型设为「OpenAI 兼容」并把 Base URL 设为 https://api.deepseek.com/v1 后填写同一密钥。'
         );
       }
-      return chatCompletionHistoryAtBase(
+      return { text: await chatCompletionHistoryAtBase(
         base,
         key,
         normalizeDeepSeekChatModelId(modelName).trim(),
@@ -347,7 +365,7 @@ export const callGeminiChatWithHistory = async (
           imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
           imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
         }))
-      );
+      ) };
     }
 
     if (isJunlanChatModelId(modelName)) {
@@ -357,7 +375,7 @@ export const callGeminiChatWithHistory = async (
           '使用 GPT-5.5 / Claude Sonnet 4-6（君澜）：请在「设置 → API」中填写「君澜 API Key」，并确认君澜 Base URL 为 https://www.junlanai.com/v1（与 ToAPIs 主通道密钥分开）。'
         );
       }
-      return chatCompletionHistoryAtBase(
+      return { text: await chatCompletionHistoryAtBase(
         getJunlanBaseUrl(),
         jlKey,
         modelName,
@@ -367,7 +385,7 @@ export const callGeminiChatWithHistory = async (
           imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
           imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
         }))
-      );
+      ) };
     }
 
     if (isMiniMaxChatModelId(modelName)) {
@@ -377,7 +395,7 @@ export const callGeminiChatWithHistory = async (
           '使用 MiniMax M2.7：请在「设置 → API」中填写「MiniMax API Key」，并确认 Base URL 为 https://api.minimax.io/v1。'
         );
       }
-      return chatCompletionHistoryAtBase(
+      return { text: await chatCompletionHistoryAtBase(
         getMiniMaxBaseUrl(),
         mxKey,
         modelName,
@@ -387,7 +405,7 @@ export const callGeminiChatWithHistory = async (
           imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
           imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
         }))
-      );
+      ) };
     }
 
     // codesonline GPT-5.5 对话
@@ -402,7 +420,7 @@ export const callGeminiChatWithHistory = async (
       const baseUrl = import.meta.env.DEV
         ? '/codesonline-chat-api'
         : '/codesonline-chat-api';
-      return chatCompletionHistoryAtBase(
+      return { text: await chatCompletionHistoryAtBase(
         baseUrl,
         coKey,
         'gpt-5.5',
@@ -412,18 +430,18 @@ export const callGeminiChatWithHistory = async (
           imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
           imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
         }))
-      );
+      ) };
     }
 
     if (getAiProvider() === 'openai-compatible') {
       const apiKey = getOpenAiSavedKey();
       if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key，请在设置中选择「OpenAI 兼容」并填写密钥。');
-      return chatCompletionHistoryAtBase(getOpenAiBaseUrl(), apiKey, modelName, slice.map((t) => ({
+      return { text: await chatCompletionHistoryAtBase(getOpenAiBaseUrl(), apiKey, modelName, slice.map((t) => ({
         role: t.role,
         content: t.content,
         imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
         imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
-      })));
+      }))) };
     }
 
     const contents = slice.map((t) => {
@@ -458,7 +476,7 @@ export const callGeminiChatWithHistory = async (
       throw new Error('模型未返回有效响应');
     }
 
-    return responseText;
+    return { text: responseText };
   } catch (error) {
     console.error('对话请求出错:', error);
     throw error;
@@ -471,7 +489,8 @@ export const callGeminiChatWithHistory = async (
  * - OpenAI 兼容（含 ToAPIs https://toapis.com/v1）：上述带 -official 的 id 原样作为 model 提交
  */
 export const callGeminiChat = async (prompt: string, base64Image?: string, modelName: string = 'gemini-2.5-flash'): Promise<string> => {
-  return callGeminiChatWithHistory([{ role: 'user', content: prompt, imageBase64: base64Image }], modelName);
+  const result = await callGeminiChatWithHistory([{ role: 'user', content: prompt, imageBase64: base64Image }], modelName);
+  return result.text;
 };
 
 /** 供设置页等读取 OpenAI 兼容 Base URL（历史导入名兼容） */

@@ -15,6 +15,7 @@ import {
   readStoredChatFontPx,
 } from './chatNodeUtils';
 import { resolveCanvasImageSource } from '../services/canvasAssetResolver';
+import { VERTEX_GEMINI_CHAT_SELECT_OPTIONS, VERTEX_GEMINI_IMAGE_SELECT_OPTIONS } from '../services/vertexGeminiModelOptions';
 
 const LoaderIcon = ({ size = 16 }: { size?: number }) => (
   <svg className="animate-spin" xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
@@ -537,6 +538,7 @@ export function ChatNodeContent({
             <option value="gemini-2.0-flash-official">Gemini 2.0 Flash（ToAPIs）</option>
             <option value="gemini-3.1-flash-lite-preview-official">Gemini 3.1 Flash Lite（ToAPIs）</option>
           </optgroup>
+          {VERTEX_GEMINI_CHAT_SELECT_OPTIONS}
         </select>
         <label className="flex items-center gap-1 shrink-0 text-gray-500" style={{ fontSize: 45 }}>
           <span className="whitespace-nowrap">字号</span>
@@ -1018,6 +1020,7 @@ export function ChatNodeContent({
             <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option>
             <option value="gemini-3.1-flash-image-preview-2k-manxue">Gemini 3.1 Flash Image 2K（满 e）</option>
             <option value="gemini-3-pro-image-preview-2k-manxue">Gemini 3 Pro Image 2K（满 e）</option>
+            {VERTEX_GEMINI_IMAGE_SELECT_OPTIONS}
           </select>
           <button
             onPointerDown={(e) => {
