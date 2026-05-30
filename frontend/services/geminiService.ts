@@ -22,7 +22,7 @@ import {
   toApisCanvasVideoGenerate,
   type ToApisVideoModelId,
 } from './openaiCompatibleService';
-import { isVertexGeminiImageModel } from './vertexGeminiModelUtils';
+import { isVertexGeminiImageModel, normalizeGcpVertexModelWhenDisabled } from './vertexGeminiModelUtils';
 import {
   vertexChatWithHistory,
   vertexEditExistingImage,
@@ -149,6 +149,7 @@ export const generateNewImage = async (
   signal?: AbortSignal
 ): Promise<string[]> => {
   try {
+    modelName = normalizeGcpVertexModelWhenDisabled(modelName);
     if (isVertexGeminiImageModel(modelName)) {
       return vertexGenerateNewImage(prompt, aspectRatio, numberOfImages, modelName, outputResolution, signal);
     }
@@ -243,6 +244,7 @@ export const editExistingImage = async (
   signal?: AbortSignal
 ): Promise<string[]> => {
   try {
+    modelName = normalizeGcpVertexModelWhenDisabled(modelName);
     if (isVertexGeminiImageModel(modelName)) {
       return vertexEditExistingImage(
         base64Images,
@@ -336,6 +338,7 @@ export const callGeminiChatWithHistory = async (
   }
 
   try {
+    modelName = normalizeGcpVertexModelWhenDisabled(modelName);
     if (isVertexGeminiImageModel(modelName)) {
       return vertexChatWithHistory(slice, modelName, opts);
     }

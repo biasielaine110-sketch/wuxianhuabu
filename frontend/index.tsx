@@ -1,4 +1,6 @@
-import './vertex-ai-proxy-interceptor.js';
+if (import.meta.env.VITE_ENABLE_GCP_VERTEX === 'true') {
+  void import('./vertex-ai-proxy-interceptor.js');
+}
 import './index.css';
 import './styles/jimeng.css';
 import React from 'react';
