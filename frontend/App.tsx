@@ -1,7 +1,64 @@
-import React, { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
+﻿import React, { lazy, Suspense, useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { CanvasNode, Edge, Transform, Tool, NodeType, Annotation, AnnotationNode, PanoramaNode, GridSplitNode, GridMergeNode, PanoramaT2iNode, Director3DNode, Figure3D, ChatNode, ChatMessage, CanvasMode, AuditImage, AuditModeData } from './types';
-import AuditModeCanvas from './AuditModeCanvas';
+import { GridSplitNodeContent } from './canvas/GridSplitNodeContent';
+import { GridMergeNodeContent } from './canvas/GridMergeNodeContent';
+import { HeavyNodeFallback } from './canvas/HeavyNodeFallback';
+
+const AuditModeCanvas = lazy(() => import('./AuditModeCanvas'));
+const PanoramaNodeContent = lazy(() =>
+  import('./canvas/PanoramaNodeContent').then((m) => ({ default: m.PanoramaNodeContent }))
+);
+const Director3DNodeContent = lazy(() =>
+  import('./canvas/Director3DNodeContent').then((m) => ({ default: m.Director3DNodeContent }))
+);
+const AnnotationNodeContent = lazy(() =>
+  import('./canvas/AnnotationNodeContent').then((m) => ({ default: m.AnnotationNodeContent }))
+);
+import { OptimizedImage } from './canvas/OptimizedImage';
+import { clearCanvasThumbnailCache, thumbnailCache, THUMB_MAX_CACHE } from './canvas/thumbnailCache';
+import { EyedropperIcon, FullscreenIcon } from './canvas/canvasIcons';
+import { defaultCanvasImageModel } from './canvas/canvasModelUtils';
+import { ChatNodeContent } from './canvas/ChatNodeContent';
+import { RefPickBar } from './canvas/RefPickBar';
+import { EdgePath } from './canvas/EdgePath';
+import { CHAT_NODE_DEFAULT_PIXEL_HEIGHT, CHAT_PANEL_FONT_SCALE } from './canvas/chatNodeUtils';
+import { INITIAL_CHAT_PROMPT_PRESETS } from './canvas/chatPromptTemplates';
+import { computeEdgeBridges, nodeLayoutKey } from './canvas/edgeUtils';
+import {
+  buildStructuralHistoryKey,
+  buildPromptHistoryKey,
+  HISTORY_DEBOUNCE_STRUCTURAL_MS,
+  HISTORY_DEBOUNCE_PROMPT_MS,
+} from './canvas/canvasHistoryPolicy';
+import { CanvasMinimap } from './canvas/CanvasMinimap';
+import { ThreeEngineGate } from './canvas/ThreeEngineGate';
+import { computeVisibleNodeIds } from './canvas/viewportUtils';
+import { MemoizedNodePlaceholder } from './canvas/MemoizedNodePlaceholder';
+import { MemoNodeCard } from './canvas/MemoNodeCard';
+import { GenerationTimer } from './canvas/GenerationTimer';
+import { buildSpacedImageNodes, buildSpacedImageNodesFromLists, buildStackedImageNodesFromLists, collectImageFilesFromClipboardData, collectImageFilesFromDataTransfer, readBlobsAsBase64, readFilesAsBase64, SPAWNED_IMAGE_NODE_HEIGHT, SPAWNED_IMAGE_NODE_WIDTH } from './canvas/spawnImageNodes';
+import {
+  stripImagesFromNodes,
+  mergeHistoryNodesWithCurrentImages,
+  type CanvasHistoryEntry,
+} from './canvas/canvasHistoryUtils';
+import { buildNodeMediaOffloadPatch, nodeNeedsMediaOffload } from './services/canvasAssetSync';
+import { revokeNodeCanvasAssets } from './services/canvasAssetCleanup';
+import {
+  cloneImageSlotForNewNode,
+  countNodeImageSlots,
+  hasCanvasImagePayload,
+  imageSrcToRawBase64,
+  probeImageDisplayMetadata,
+  resolveCanvasImageSource,
+} from './services/canvasAssetResolver';
+import {
+  buildMoveNodesCommand,
+  reverseCanvasCommand,
+  CANVAS_COMMAND_STACK_MAX,
+  type CanvasCommand,
+} from './canvas/canvasCommands';
 import type { AiProvider } from './services/aiSettings';
 import {
   DEFAULT_CODESONLINE_CHAT_BASE_URL,
@@ -56,6 +113,10 @@ import {
   stripRefMarkers,
   resolveSlotImagesForIndices,
   resolveSlotAudios,
+  getNodePrimaryImageRef,
+  imageRefToSingleImageFields,
+  resolveImageProviderNodes,
+  singleImageFieldsMatch,
   type IncomingRefSlot,
 } from './referenceSlots';
 import type { DownloadPathPersisted } from './services/downloadPathSettings';
@@ -77,8 +138,6 @@ import {
   newCreditPricingRow,
   saveCreditPricingRows,
 } from './services/creditPricingSettings';
-import * as THREE from 'three';
-import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 
 // --- Icons ---
 const MousePointerIcon = ({ size = 20 }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/></svg>;
@@ -260,13 +319,7 @@ const upscaleImage = (base64Str: string, targetRes: string): Promise<string> => 
   });
 };
 
-const thumbnailCache = new Map<string, string>();
-const THUMB_MAX_CACHE = 60; // 降低上限，减少内存占用（原 120）
-/** 预览区缩略图分辨率比例（5/10/20/50/70/100%）默认5%最低档大幅减少内存占用 */
-const thumbResolutionRef = { v: 5 };
-
-/**
- * Blob URL 注册表：管理 node.images 中 blob URL 的生命周期
+/** Blob URL 注册表：管理 node.images 中 blob URL 的生命周期
  * key = nodeId, value = Set<blobUrl>
  * 节点删除时统一 revoke，防止内存泄漏
  */
@@ -363,12 +416,9 @@ function canvasHistoryMaxSteps(payloadChars: number): number {
   return 10;
 }
 
-/** 清理节点预览用的缩略图内存缓存（不涉及项目本地存档） */
-function clearCanvasThumbnailCache(): void {
-  thumbnailCache.clear();
-}
+/** 预览区缩略图分辨率比例（5/10/20/50/70/100%）默认5%最低档大幅减少内存占用 */
+const thumbResolutionRef = { v: 5 };
 
-// 图片懒加载 Hook
 function useLazyImageLoad(base64: string, maxSide: number, quality: number) {
   const [src, setSrc] = useState('');
   const [loaded, setLoaded] = useState(false);
@@ -478,94 +528,6 @@ function LazyMessageImage({
       )}
     </div>
   );
-}
-
-function OptimizedImage({
-  base64,
-  className,
-  alt,
-  maxSide = 640,
-  quality = 0.62,
-  onClick,
-  onDoubleClick,
-  draggable = false,
-  containerRef,
-}: {
-  base64: string;
-  className?: string;
-  alt?: string;
-  maxSide?: number;
-  quality?: number;
-  onClick?: React.MouseEventHandler<HTMLImageElement>;
-  onDoubleClick?: React.MouseEventHandler<HTMLImageElement>;
-  draggable?: boolean;
-  /** 传入容器 ref 以实现响应式缩放：容器尺寸变化时自动重新计算缩略图 */
-  containerRef?: React.RefObject<HTMLDivElement | null>;
-}) {
-  const [src, setSrc] = useState('');
-  const [dynamicMaxSide, setDynamicMaxSide] = useState(maxSide);
-  const maxSideRef = useRef(maxSide);
-  maxSideRef.current = maxSide;
-
-  // 同步 maxSide prop 变化到 dynamicMaxSide（响应式计算在 OptimizedImage 处已由外层控制）
-  useEffect(() => {
-    setDynamicMaxSide(maxSide);
-  }, [maxSide]);
-
-  useEffect(() => {
-    if (!base64) {
-      setSrc('');
-      return;
-    }
-    const currentMaxSide = dynamicMaxSide;
-    const cachedKey = `${base64.slice(0, 48)}|${base64.slice(-48)}|${base64.length}|${currentMaxSide}|${quality}`;
-    const cached = thumbnailCache.get(cachedKey);
-    if (cached) {
-      setSrc(cached);
-      return;
-    }
-    setSrc('');
-    const originalSrc = base64ToImageDataUrl(base64);
-    const img = new Image();
-    // For localhost URLs, set crossOrigin to allow canvas operations
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const maxEdge = Math.max(img.width, img.height);
-      if (maxEdge <= currentMaxSide) {
-        thumbnailCache.set(cachedKey, originalSrc);
-        setSrc(originalSrc);
-        return;
-      }
-      const scale = currentMaxSide / maxEdge;
-      const targetW = Math.max(1, Math.round(img.width * scale));
-      const targetH = Math.max(1, Math.round(img.height * scale));
-      const canvas = document.createElement('canvas');
-      canvas.width = targetW;
-      canvas.height = targetH;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-      try {
-        ctx.drawImage(img, 0, 0, targetW, targetH);
-        const thumbSrc = canvas.toDataURL('image/jpeg', quality);
-        thumbnailCache.set(cachedKey, thumbSrc);
-        if (thumbnailCache.size > THUMB_MAX_CACHE) {
-          const firstKey = thumbnailCache.keys().next().value;
-          if (firstKey) thumbnailCache.delete(firstKey);
-        }
-        setSrc(thumbSrc);
-      } catch {
-        // Canvas is tainted (cross-origin image), fall back to original source
-        setSrc(originalSrc);
-      }
-    };
-    img.onerror = () => setSrc(originalSrc);
-    img.src = originalSrc;
-  }, [base64, dynamicMaxSide, quality]);
-
-  if (!src) return null;
-  return <img src={src} className={className} alt={alt} onClick={onClick} onDoubleClick={onDoubleClick} draggable={draggable} loading="lazy" />;
 }
 
 // --- Lazy Loading Hook & Component ---
@@ -729,6 +691,7 @@ function LazyOptimizedImage({
 /** 响应式图片预览组件：根据容器尺寸自动缩放图片 */
 function ResponsiveImagePreview({
   base64,
+  assetId,
   className,
   alt,
   quality = 0.62,
@@ -738,7 +701,8 @@ function ResponsiveImagePreview({
   fill = 'contain',
   isInViewport = true,
 }: {
-  base64: string;
+  base64?: string;
+  assetId?: string;
   className?: string;
   alt?: string;
   quality?: number;
@@ -771,9 +735,10 @@ function ResponsiveImagePreview({
   }, []);
 
   const maxSide = Math.max(dimensions.width, dimensions.height, 100);
+  const hasSource = (!!base64 && base64.length > 80) || !!assetId;
 
   // 懒加载优化：不在视口内时显示占位背景，不加载图片
-  if (!isInViewport) {
+  if (!isInViewport || !hasSource) {
     return (
       <div
         ref={containerRef}
@@ -784,18 +749,17 @@ function ResponsiveImagePreview({
 
   return (
     <div ref={containerRef} className={`w-full h-full ${className || ''}`}>
-      {dimensions.width > 0 && dimensions.height > 0 && (
-        <OptimizedImage
-          base64={base64}
-          maxSide={maxSide}
-          quality={quality}
-          className={`w-full h-full object-${fill}`}
-          onClick={onClick}
-          onDoubleClick={onDoubleClick}
-          draggable={draggable}
-          alt={alt}
-        />
-      )}
+      <OptimizedImage
+        base64={base64}
+        assetId={assetId}
+        maxSide={maxSide}
+        quality={quality}
+        className={`w-full h-full object-${fill}`}
+        onClick={onClick}
+        onDoubleClick={onDoubleClick}
+        draggable={draggable}
+        alt={alt}
+      />
     </div>
   );
 }
@@ -868,7 +832,8 @@ function mergeCurrentCanvasIntoProjectList(
   auditModeData?: AuditModeData
 ): CanvasProject[] {
   if (!activeId) return projects;
-  const { nodes: nc, edges: ec, transform: tc } = cloneCanvasForProject(nodes, edges, transform);
+  const nodesForPersist = stripImagesFromNodes(nodes);
+  const { nodes: nc, edges: ec, transform: tc } = cloneCanvasForProject(nodesForPersist, edges, transform);
   const now = Date.now();
   const idx = projects.findIndex((p) => p.id === activeId);
   if (idx === -1) {
@@ -916,12 +881,6 @@ type DraftDiskModalState =
       snapshot: CanvasProject;
       basenameDraft: string;
     };
-
-type CanvasHistoryEntry = {
-  nodes: CanvasNode[];
-  edges: Edge[];
-  selectedIds: string[];
-};
 
 /** 图生图预设：按「角色 / 场景 / 道具 / 故事板 / 其他」分类，供下拉选择 */
 type I2iPresetCategoryId = 'character' | 'scene' | 'props' | 'storyboard' | 'other';
@@ -1231,6 +1190,12 @@ const INITIAL_T2I_PROMPT_PRESETS: Record<string, string> = {
     '日系青春2D动画电影美术风格，参考导演美学：新海诚，光影清透，色彩明亮，空气感强，青春感，手绘动画背景，高细节2D插画，唯美治愈氛围。',
   '赛博朋克':
     '赛博朋克科幻写实风格，参考导演美学：Ridley Scott ，雨夜霓虹，高楼压迫感，冷峻未来城市，全息广告，机械义体，真实电影摄影,背景有全息广告、飞行汽车和湿润路面反光，冷暖对比光，电影级科幻摄影，超写实细节。',
+};
+
+const INITIAL_PROMPT_PRESETS_ALL: Record<string, string> = {
+  ...INITIAL_T2I_PROMPT_PRESETS,
+  ...INITIAL_I2I_PROMPT_PRESETS,
+  ...INITIAL_CHAT_PROMPT_PRESETS,
 };
 
 const PRESET_SETTINGS_GUARD_PASSWORD = 'zhangbiwen666';
@@ -1602,47 +1567,87 @@ function T2iPresetCategorySelect({
 }
 
 interface FsImageInfoPanelProps {
-  base64: string;
+  imageSrc: string;
   onClose: () => void;
 }
 
-function FsImageInfoPanel({ base64, onClose }: FsImageInfoPanelProps) {
+function fullscreenImageDisplaySrc(src: string): string {
+  if (
+    src.startsWith('http://') ||
+    src.startsWith('https://') ||
+    src.startsWith('data:') ||
+    src.startsWith('blob:')
+  ) {
+    return src;
+  }
+  return `data:image/jpeg;base64,${src}`;
+}
+
+function FsImageInfoPanel({ imageSrc, onClose }: FsImageInfoPanelProps) {
   const [imgSize, setImgSize] = useState<{ width: number; height: number } | null>(null);
   const [fileSize, setFileSize] = useState<number>(0);
+  const [formatLabel, setFormatLabel] = useState('JPEG');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const clean = base64.replace(/^data:image\/\w+;base64,/, '');
-    const byteSize = Math.ceil(clean.length * 3 / 4);
-    setFileSize(byteSize);
+    let cancelled = false;
+    setLoading(true);
+    setImgSize(null);
+    setFileSize(0);
 
-    const img = new Image();
-    img.onload = () => setImgSize({ width: img.naturalWidth, height: img.naturalHeight });
-    img.src = `data:image/jpeg;base64,${clean}`;
-  }, [base64]);
+    void probeImageDisplayMetadata(imageSrc).then((meta) => {
+      if (cancelled) return;
+      if (meta) {
+        if (meta.width > 0 && meta.height > 0) {
+          setImgSize({ width: meta.width, height: meta.height });
+        }
+        setFileSize(meta.fileSize);
+        setFormatLabel(meta.formatLabel);
+      }
+      setLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [imageSrc]);
 
   const formatFileSize = (bytes: number) => {
+    if (bytes <= 0) return '—';
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
   };
 
-  const aspectRatio = imgSize ? (imgSize.width / imgSize.height).toFixed(2) : '-';
-  const megapixels = imgSize ? ((imgSize.width * imgSize.height) / 1000000).toFixed(2) : '-';
+  const aspectRatio =
+    imgSize && imgSize.width > 0 && imgSize.height > 0
+      ? (imgSize.width / imgSize.height).toFixed(2)
+      : '—';
+  const megapixels =
+    imgSize && imgSize.width > 0 && imgSize.height > 0
+      ? ((imgSize.width * imgSize.height) / 1_000_000).toFixed(2)
+      : '—';
 
   return (
-    <div className="absolute right-0 top-0 bottom-0 w-64 bg-[#1a1a1a]/95 backdrop-blur-md border-l border-[#333] flex flex-col z-10">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[#333]">
+    <div
+      className="absolute right-0 top-0 bottom-0 w-64 bg-[#1a1a1a]/95 backdrop-blur-md border-l border-[#333] flex flex-col z-20 pointer-events-auto"
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center justify-between px-4 py-3 border-b border-[#333] shrink-0">
         <span className="text-white font-bold text-sm">图片信息</span>
-        <button onClick={onClose} className="text-gray-400 hover:text-white">
+        <button type="button" onClick={onClose} className="text-gray-400 hover:text-white">
           <XIcon size={18} />
         </button>
       </div>
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        <InfoItem label="分辨率" value={imgSize ? `${imgSize.width} × ${imgSize.height}` : '加载中...'} />
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
+        <InfoItem
+          label="分辨率"
+          value={imgSize ? `${imgSize.width} × ${imgSize.height}` : loading ? '加载中…' : '—'}
+        />
         <InfoItem label="宽高比" value={aspectRatio} />
-        <InfoItem label="像素" value={megapixels + ' MP'} />
+        <InfoItem label="像素" value={megapixels === '—' ? '—' : `${megapixels} MP`} />
         <InfoItem label="文件大小" value={formatFileSize(fileSize)} />
-        <InfoItem label="格式" value="JPEG" />
+        <InfoItem label="格式" value={formatLabel} />
         <InfoItem label="颜色空间" value="sRGB" />
       </div>
     </div>
@@ -1656,10 +1661,6 @@ function InfoItem({ label, value }: { label: string; value: string }) {
       <div className="text-sm text-white font-mono">{value}</div>
     </div>
   );
-}
-
-function defaultCanvasImageModel(): string {
-  return 'gpt-image-2-codesonline';
 }
 
 /** GPT Image 2：君澜 / codesonline / ToAPIs / 满 e 节点选择时默认 2K */
@@ -1692,7 +1693,7 @@ const CANVAS_SHORTCUT_HELP_ROWS: readonly { combo: string; detail: string }[] = 
   { combo: 'Delete / Backspace', detail: '删除当前选中的节点（非全屏预览图时）' },
   { combo: 'Alt + Q', detail: '删除当前选中的节点（同上）' },
   { combo: 'Ctrl + C / ⌘ + C', detail: '复制节点（仅当选中恰好 1 个节点时）' },
-  { combo: 'Ctrl + V / ⌘ + V', detail: '粘贴（输入框外；优先粘贴图片为新节点，否则粘贴已复制节点）' },
+  { combo: 'Ctrl + V / ⌘ + V', detail: '粘贴（输入框外；支持一次粘贴多张图片为新节点，否则粘贴已复制节点）' },
   { combo: 'Ctrl + S / ⌘ + S', detail: '保存当前项目' },
   { combo: 'Ctrl + Alt + S / ⌘ + ⌥ + S', detail: '另存 JSON 草稿（不改变当前 Ctrl+S 绑定）' },
   { combo: 'Ctrl + Z / ⌘ + Z', detail: '撤销画布操作' },
@@ -1700,19 +1701,28 @@ const CANVAS_SHORTCUT_HELP_ROWS: readonly { combo: string; detail: string }[] = 
   { combo: 'F', detail: '视口缩放并居中到当前选中节点（需先选中；非输入框）' },
 ];
 
+/** 打开项目时默认画布缩放比例（20%） */
+const DEFAULT_CANVAS_VIEW_SCALE = 0.2;
+
 // --- Main App Component ---
 
 export default function App() {
   // --- State ---
   const [nodes, setNodes] = useState<CanvasNode[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
-  const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: 0.4 });
+  const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: DEFAULT_CANVAS_VIEW_SCALE });
   // 懒加载优化：跟踪视口尺寸和画布容器引用
   const viewportRef = useRef({ width: typeof window !== 'undefined' ? window.innerWidth : 1920, height: typeof window !== 'undefined' ? window.innerHeight : 1080 });
+  const [viewportSize, setViewportSize] = useState(() => ({
+    width: typeof window !== 'undefined' ? window.innerWidth : 1920,
+    height: typeof window !== 'undefined' ? window.innerHeight : 1080,
+  }));
   const canvasContainerRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const updateViewport = () => {
-      viewportRef.current = { width: window.innerWidth, height: window.innerHeight };
+      const next = { width: window.innerWidth, height: window.innerHeight };
+      viewportRef.current = next;
+      setViewportSize(next);
     };
     updateViewport();
     window.addEventListener('resize', updateViewport);
@@ -1753,7 +1763,12 @@ export default function App() {
   const historyInitializedRef = useRef(false);
   /** 因体量过大未建立撤销栈时，只提示一次 */
   const canvasHistoryOversizedWarnedRef = useRef(false);
+  const [canvasHistoryNotice, setCanvasHistoryNotice] = useState<string | null>(null);
   const lastCanvasHistorySignatureRef = useRef('');
+  const lastStructuralHistoryKeyRef = useRef('');
+  const lastPromptHistoryKeyRef = useRef('');
+  const canvasCommandStackRef = useRef<CanvasCommand[]>([]);
+  const nodeDragHistoryStartRef = useRef<Map<string, { x: number; y: number }> | null>(null);
 
   // Connection Drafting
   const [draftEdge, setDraftEdge] = useState<{ sourceId: string, x: number, y: number } | null>(null);
@@ -1779,6 +1794,8 @@ export default function App() {
   const saveSuccessTimerRef = useRef<number | null>(null);
   const [projectExportMenuOpen, setProjectExportMenuOpen] = useState(false);
   const [projectStoreReady, setProjectStoreReady] = useState(false);
+  /** 切换/打开项目后下一帧将视口重置为默认 20% 居中 */
+  const pendingDefaultViewportRef = useRef(true);
   const [autosaveIntervalMin, setAutosaveIntervalMin] = useState<0 | 5 | 10 | 20 | 30>(() => {
     try {
       const v = localStorage.getItem('wxcanvas-autosave-interval-min');
@@ -1895,26 +1912,39 @@ export default function App() {
   const [fsTransform, setFsTransform] = useState({ scale: 1, x: 0, y: 0 });
   const [fsContextMenu, setFsContextMenu] = useState<{ x: number, y: number } | null>(null);
   const openFullscreenImage = (nodeId: string, img: string, idx: number) => {
-    setFullscreenNodeId(nodeId);
-    setFullscreenImage(img);
-    setFullscreenImageIdx(idx);
-    setFsTransform({ scale: 1, x: 0, y: 0 });
+    const node = nodesRef.current.find((n) => n.id === nodeId);
+    const assetId = node?.imageAssetIds?.[idx];
+    void resolveCanvasImageSource(img, assetId).then((src) => {
+      if (!src) return;
+      setFullscreenNodeId(nodeId);
+      setFullscreenImage(src);
+      setFullscreenImageIdx(idx);
+      setFsTransform({ scale: 1, x: 0, y: 0 });
+    });
   };
   /** 通用全屏查看（不需要 nodeId，用于对话消息中的图片） */
   const openFullscreenFromBase64 = (base64: string) => {
-    setFullscreenNodeId(null);
-    setFullscreenImage(base64);
-    setFullscreenImageIdx(0);
-    setFsTransform({ scale: 1, x: 0, y: 0 });
+    void resolveCanvasImageSource(base64, undefined).then((src) => {
+      if (!src) return;
+      setFullscreenNodeId(null);
+      setFullscreenImage(src);
+      setFullscreenImageIdx(0);
+      setFsTransform({ scale: 1, x: 0, y: 0 });
+    });
   };
   const fsNavigate = (dir: 1 | -1) => {
     const node = nodesRef.current.find(n => n.id === fullscreenNodeId);
     if (!node?.images?.length) return;
     const nextIdx = fullscreenImageIdx + dir;
     if (nextIdx < 0 || nextIdx >= node.images.length) return;
-    setFullscreenImageIdx(nextIdx);
-    setFullscreenImage(node.images[nextIdx]);
-    setFsTransform({ scale: 1, x: 0, y: 0 });
+    const nextImg = node.images[nextIdx];
+    const nextAssetId = node.imageAssetIds?.[nextIdx];
+    void resolveCanvasImageSource(nextImg, nextAssetId).then((src) => {
+      if (!src) return;
+      setFullscreenImageIdx(nextIdx);
+      setFullscreenImage(src);
+      setFsTransform({ scale: 1, x: 0, y: 0 });
+    });
   };
 
   // Image Import Target
@@ -1962,16 +1992,6 @@ export default function App() {
 
   const generationAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const generationStartedAtRef = useRef<Map<string, number>>(new Map());
-  const [generationClockTick, setGenerationClockTick] = useState(0);
-
-  const isAnyNodeGenerating = nodes.some(n => n.isGenerating);
-  useEffect(() => {
-    if (!isAnyNodeGenerating) return;
-    const id = window.setInterval(() => {
-      setGenerationClockTick(t => t + 1);
-    }, 1000);
-    return () => clearInterval(id);
-  }, [isAnyNodeGenerating]);
 
   const handleCancelGeneration = useCallback((nodeId: string) => {
     generationAbortControllersRef.current.get(nodeId)?.abort();
@@ -1990,13 +2010,17 @@ export default function App() {
     }
     setNodes([]);
     setEdges([]);
-    setTransform({ x: 0, y: 0, scale: 1 });
+    pendingDefaultViewportRef.current = true;
     setSelectedIds([]);
     canvasHistoryRef.current = [];
     canvasHistoryIndexRef.current = -1;
     historyInitializedRef.current = false;
     canvasHistoryOversizedWarnedRef.current = false;
     lastCanvasHistorySignatureRef.current = '';
+    lastStructuralHistoryKeyRef.current = '';
+    lastPromptHistoryKeyRef.current = '';
+    canvasCommandStackRef.current = [];
+    nodeDragHistoryStartRef.current = null;
     generationAbortControllersRef.current.clear();
     generationStartedAtRef.current.clear();
     clearCanvasThumbnailCache();
@@ -2052,7 +2076,7 @@ export default function App() {
                 aspectRatio: node.type === 'panoramaT2i' ? '2:1' : '16:9',
                 imageCount: 1,
                 resolution: '2k',
-                ...(node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' || node.type === 'panorama' ? { model: defaultCanvasImageModel() } : {}),
+                ...(node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' ? { model: defaultCanvasImageModel() } : {}),
                 error: undefined,
               }),
           },
@@ -2477,7 +2501,7 @@ export default function App() {
       updatedAt: Date.now(),
       nodes: [],
       edges: [],
-      transform: { x: 0, y: 0, scale: 1 }
+      transform: { x: 0, y: 0, scale: DEFAULT_CANVAS_VIEW_SCALE }
     };
     const merged = mergeCurrentCanvasIntoProjectList(
       prevList,
@@ -2492,7 +2516,7 @@ export default function App() {
     setActiveProjectId(projectId);
     setNodes(newProject.nodes);
     setEdges(newProject.edges);
-    setTransform(newProject.transform);
+    pendingDefaultViewportRef.current = true;
     void saveProjectLibrary(nextList, projectId).then((ok) => {
       if (!ok) {
         alert('新建项目已生效，但写入本地草稿库（IndexedDB）失败。请检查浏览器存储权限或磁盘空间。');
@@ -2919,7 +2943,7 @@ export default function App() {
     setActiveProjectId(projectId);
     setNodes(normalizedTarget.nodes || []);
     setEdges(normalizedTarget.edges || []);
-    setTransform(normalizedTarget.transform || { x: 0, y: 0, scale: 1 });
+    pendingDefaultViewportRef.current = true;
     if (normalizedTarget.auditModeData?.images) {
       setAuditImages(normalizedTarget.auditModeData.images);
       auditImagesRef.current = normalizedTarget.auditModeData.images;
@@ -2954,7 +2978,7 @@ export default function App() {
       setActiveProjectId(fbNorm.id);
       setNodes(fbNorm.nodes || []);
       setEdges(fbNorm.edges || []);
-      setTransform(fbNorm.transform || { x: 0, y: 0, scale: 1 });
+      pendingDefaultViewportRef.current = true;
       void getProjectBackupFileHandle(fbNorm.id).then((h) => {
         lastJsonFileHandleRef.current = h ?? null;
         lastZipFileHandleRef.current = null;
@@ -3097,7 +3121,7 @@ export default function App() {
     setActiveProjectId(newProject.id);
     setNodes(newProject.nodes);
     setEdges(newProject.edges);
-    setTransform(newProject.transform);
+    pendingDefaultViewportRef.current = true;
     if (newProject.auditModeData?.images) {
       setAuditImages(newProject.auditModeData.images);
       auditImagesRef.current = newProject.auditModeData.images;
@@ -3159,7 +3183,7 @@ export default function App() {
           updatedAt: Date.now(),
             nodes: impNodes,
             edges: impEdges,
-          transform: (imported.transform || { x: 0, y: 0, scale: 1 }) as Transform,
+          transform: (imported.transform || { x: 0, y: 0, scale: DEFAULT_CANVAS_VIEW_SCALE }) as Transform,
             diskSaveEstablished: false,
             draftStoragePathNote:
               typeof imported.draftStoragePathNote === 'string' && imported.draftStoragePathNote.trim()
@@ -3195,7 +3219,7 @@ export default function App() {
           setActiveProjectId(initial.id);
           setNodes(initial.nodes || []);
           setEdges(initial.edges || []);
-          setTransform(initial.transform || { x: 0, y: 0, scale: 1 });
+          pendingDefaultViewportRef.current = true;
           if (initial.auditModeData?.images) {
             setAuditImages(initial.auditModeData.images);
             auditImagesRef.current = initial.auditModeData.images;
@@ -3453,32 +3477,28 @@ export default function App() {
     const node = nodes.find(n => n.id === nodeId);
     if (!node) return;
 
-    // 获取图片
-    let images: string[] = [];
-    if (node.images && node.images.length > 0) {
-      images = node.images;
-    } else if ((node as any).panoramaImage) {
-      images = [(node as any).panoramaImage];
+    const imgLen = Math.max(node.images?.length ?? 0, node.imageAssetIds?.length ?? 0);
+    let newNodes: CanvasNode[] = [];
+
+    if (imgLen > 0) {
+      const items = Array.from({ length: imgLen }, (_, idx) => ({
+        base64: node.images?.[idx],
+        assetId: node.imageAssetIds?.[idx],
+      }));
+      newNodes = buildSpacedImageNodes(items, node.x + node.width + 50, node.y);
+    } else {
+      const pn = node as { panoramaImage?: string; panoramaImageAssetId?: string };
+      newNodes = buildSpacedImageNodes(
+        [{ base64: pn.panoramaImage, assetId: pn.panoramaImageAssetId }],
+        node.x + node.width + 50,
+        node.y
+      );
     }
 
-    if (images.length === 0) {
+    if (newNodes.length === 0) {
       alert('没有可复制的图片');
       return;
     }
-
-    // 创建图片节点
-    const newNodes: CanvasNode[] = images.map((img, idx) => ({
-      id: `image-${Date.now()}-${idx}`,
-      type: 'image' as const,
-      x: node.x + node.width + 50 + idx * 510,
-      y: node.y,
-      width: 480,
-      height: 528,
-      prompt: '',
-      images: [img],
-      viewMode: 'single' as const,
-      currentImageIndex: 0
-    }));
 
     setNodes(prev => [...prev, ...newNodes]);
   }, [nodes, setNodes]);
@@ -3605,6 +3625,12 @@ export default function App() {
     setDraggingNodeId(primaryNew);
   };
 
+  const layoutKey = useMemo(() => nodeLayoutKey(nodes), [nodes]);
+  const edgesKey = useMemo(
+    () => edges.map((e) => `${e.sourceId}->${e.targetId}`).join('|'),
+    [edges]
+  );
+
   const buildCanvasHistorySignature = useCallback((snapshot: CanvasHistoryEntry) => {
     return JSON.stringify({
       nodes: snapshot.nodes.map(n => ({
@@ -3623,47 +3649,8 @@ export default function App() {
         currentVideoIndex: n.currentVideoIndex || 0,
       })),
       edges: snapshot.edges.map(e => `${e.sourceId}->${e.targetId}`),
-      selectedIds: [...snapshot.selectedIds].sort(),
     });
   }, []);
-
-  /** 剥离节点中所有图片 base64 数据（用于撤销栈存储，防止 OOM） */
-function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
-  return nodes.map(n => {
-    const n2 = { ...n } as CanvasNode;
-    if (n2.images?.length) {
-      (n2 as any).images = n2.images.map(() => '');
-    }
-    const pn = n as PanoramaNode;
-    if (pn.panoramaImage) (n2 as any).panoramaImage = '';
-    const dn = n as Director3DNode;
-    if (dn.backgroundImage) (n2 as any).backgroundImage = '';
-    const an = n as AnnotationNode;
-    if (an.sourceImage) (n2 as any).sourceImage = '';
-    const gsn = n as GridSplitNode;
-    if (gsn.inputImage) (n2 as any).inputImage = '';
-    if (gsn.outputImages?.length) (n2 as any).outputImages = gsn.outputImages.map(() => '');
-    const gmn = n as GridMergeNode;
-    if (gmn.inputImages?.length) (n2 as any).inputImages = gmn.inputImages.map(() => '');
-    if (gmn.outputImage) (n2 as any).outputImage = '';
-    const ptn = n as PanoramaT2iNode;
-    if (ptn.panoramaImage) (n2 as any).panoramaImage = '';
-    if (n.type === 'chat') {
-      const cn = n as ChatNode;
-      if (cn.messages?.length) {
-        (n2 as any).messages = cn.messages.map(m => ({
-          ...m,
-          image: m.image ? '' : undefined,
-          images: m.images?.length ? m.images.map(() => '') : undefined,
-        }));
-      }
-    }
-    if (dn.figures?.length) {
-      (n2 as any).figures = dn.figures.map(f => ({ ...f, image: '' }));
-    }
-    return n2;
-  });
-}
 
   const pushCanvasHistorySnapshot = useCallback((snapshot: CanvasHistoryEntry) => {
     const signature = buildCanvasHistorySignature(snapshot);
@@ -3672,6 +3659,7 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
     const historyEmpty = canvasHistoryRef.current.length === 0;
     if (!historyEmpty && payloadChars > CANVAS_HISTORY_SKIP_PAYLOAD_CHARS) {
       lastCanvasHistorySignatureRef.current = signature;
+      setCanvasHistoryNotice('画布图片数据过大，本步撤销已跳过。建议导出 ZIP 备份或拆分项目。');
       console.warn(
         '[canvas] 当前画布图片数据过大，已跳过本步撤销记录以降低崩溃风险（建议拆分项目或导出备份）。'
       );
@@ -3708,7 +3696,38 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
     lastCanvasHistorySignatureRef.current = signature;
   }, [buildCanvasHistorySignature]);
 
+  const pushCanvasCommand = useCallback((cmd: CanvasCommand) => {
+    if (isApplyingCanvasHistoryRef.current) return;
+    const stack = canvasCommandStackRef.current;
+    stack.push(cmd);
+    if (stack.length > CANVAS_COMMAND_STACK_MAX) {
+      stack.splice(0, stack.length - CANVAS_COMMAND_STACK_MAX);
+    }
+  }, []);
+  const pushCanvasCommandRef = useRef(pushCanvasCommand);
+  pushCanvasCommandRef.current = pushCanvasCommand;
+
+  const flushCanvasHistoryImmediate = useCallback((partial?: { nodes?: CanvasNode[]; edges?: Edge[] }) => {
+    pushCanvasHistorySnapshot({
+      nodes: partial?.nodes ?? nodesRef.current,
+      edges: partial?.edges ?? edgesRef.current,
+      selectedIds: selectedIdsRef.current,
+    });
+  }, [pushCanvasHistorySnapshot]);
+  const flushCanvasHistoryImmediateRef = useRef(flushCanvasHistoryImmediate);
+  flushCanvasHistoryImmediateRef.current = flushCanvasHistoryImmediate;
+
   const undoCanvasState = useCallback(() => {
+    const stack = canvasCommandStackRef.current;
+    if (stack.length > 0) {
+      const cmd = stack.pop()!;
+      isApplyingCanvasHistoryRef.current = true;
+      reverseCanvasCommand(cmd, setNodes, setEdges);
+      queueMicrotask(() => {
+        isApplyingCanvasHistoryRef.current = false;
+      });
+      return;
+    }
     if (canvasHistoryIndexRef.current <= 0) return;
     const prevIndex = canvasHistoryIndexRef.current - 1;
     const snapshot = canvasHistoryRef.current[prevIndex];
@@ -3717,7 +3736,7 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
     let edgesN: Edge[];
     let selN: string[];
     try {
-      nodesN = structuredClone(snapshot.nodes);
+      nodesN = mergeHistoryNodesWithCurrentImages(structuredClone(snapshot.nodes), nodesRef.current);
       edgesN = structuredClone(snapshot.edges);
       selN = structuredClone(snapshot.selectedIds);
     } catch (e) {
@@ -3747,25 +3766,37 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
         historyInitializedRef.current = true;
         if (!canvasHistoryOversizedWarnedRef.current) {
           canvasHistoryOversizedWarnedRef.current = true;
+          setCanvasHistoryNotice('画布过大，无法建立撤销栈（Ctrl+Z 不可用）。建议导出 ZIP 或拆分项目。');
           console.warn('[canvas] 画布图片数据过大，无法建立撤销栈（Ctrl+Z 不可用）；建议拆分项目或导出后再编辑。');
         }
       }
+      lastStructuralHistoryKeyRef.current = buildStructuralHistoryKey(nodes, layoutKey, edgesKey);
+      lastPromptHistoryKeyRef.current = buildPromptHistoryKey(nodes);
       return;
     }
+    const structuralKey = buildStructuralHistoryKey(nodes, layoutKey, edgesKey);
+    const promptKey = buildPromptHistoryKey(nodes);
+    const structuralChanged = structuralKey !== lastStructuralHistoryKeyRef.current;
+    const promptChanged = promptKey !== lastPromptHistoryKeyRef.current;
+    if (!structuralChanged && !promptChanged) return;
+
     if (historyDebounceTimerRef.current) {
       clearTimeout(historyDebounceTimerRef.current);
       historyDebounceTimerRef.current = null;
     }
+    const delayMs = structuralChanged ? HISTORY_DEBOUNCE_STRUCTURAL_MS : HISTORY_DEBOUNCE_PROMPT_MS;
     historyDebounceTimerRef.current = window.setTimeout(() => {
       pushCanvasHistorySnapshot(snapshot);
-    }, 480);
+      lastStructuralHistoryKeyRef.current = structuralKey;
+      lastPromptHistoryKeyRef.current = promptKey;
+    }, delayMs);
     return () => {
       if (historyDebounceTimerRef.current) {
         clearTimeout(historyDebounceTimerRef.current);
         historyDebounceTimerRef.current = null;
       }
     };
-  }, [nodes, edges, selectedIds, pushCanvasHistorySnapshot]);
+  }, [nodes, edges, layoutKey, edgesKey, pushCanvasHistorySnapshot]);
 
   const canReceiveConnection = useCallback((node: CanvasNode) => INPUT_NODE_TYPES.includes(node.type), []);
   const canConnectNodes = useCallback((source: CanvasNode, target: CanvasNode) => {
@@ -3995,13 +4026,18 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
           rafIdRef.current = null;
         }
         const acc = nodeDragAccumRef.current;
+        const dragStartMap = nodeDragHistoryStartRef.current;
+        nodeDragHistoryStartRef.current = null;
         if (acc && (acc.deltaX !== 0 || acc.deltaY !== 0)) {
           const { nodeIds, deltaX, deltaY } = acc;
-          setNodes((prev) =>
-            prev.map((node) =>
-              nodeIds.includes(node.id) ? { ...node, x: node.x + deltaX, y: node.y + deltaY } : node
-            )
+          const workingNodes = nodesRef.current.map((node) =>
+            nodeIds.includes(node.id) ? { ...node, x: node.x + deltaX, y: node.y + deltaY } : node
           );
+          setNodes(workingNodes);
+          if (dragStartMap) {
+            const cmd = buildMoveNodesCommand(dragStartMap, workingNodes);
+            if (cmd) pushCanvasCommandRef.current(cmd);
+          }
         }
         nodeDragAccumRef.current = null;
       }
@@ -4052,7 +4088,12 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
           const exists = edgesRef.current.some(edge => edge.sourceId === sourceId && edge.targetId === targetId);
           // 只有在 sourceId 不为空时才创建连线（框选模式 sourceId 为空）
           if (!exists && sourceId) {
-            setEdges(prev => [...prev, { id: `edge-${Date.now()}`, sourceId, targetId }]);
+            const newEdge: Edge = { id: `edge-${Date.now()}`, sourceId, targetId };
+            setEdges((prev) => {
+              const next = [...prev, newEdge];
+              queueMicrotask(() => pushCanvasCommandRef.current({ type: 'addEdge', edge: newEdge }));
+              return next;
+            });
           }
         } else {
           // 没有连接到任何节点时，自动弹出右键菜单
@@ -4095,7 +4136,15 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
 
             // 如果拖拽远离了目标节点，删除连线
             if (distFromTarget > 80) {
-              setEdges(prev => prev.filter(ed => ed.id !== drag.edgeId));
+              setEdges((prev) => {
+                const edgeToDelete = prev.find((ed) => ed.id === drag.edgeId);
+                if (!edgeToDelete) return prev;
+                const next = prev.filter((ed) => ed.id !== drag.edgeId);
+                queueMicrotask(() =>
+                  pushCanvasCommandRef.current({ type: 'deleteEdge', edge: edgeToDelete })
+                );
+                return next;
+              });
             }
           }
         }
@@ -4116,31 +4165,30 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
     };
   }, []);
 
-  const createImageNodeFromBase64 = useCallback((base64: string) => {
+  const createImageNodesFromBase64List = useCallback((base64List: string[]) => {
+    const list = base64List.filter((b) => b && b.length > 80);
+    if (list.length === 0) return;
     const mp = canvasMouseRef.current;
-    const x = mp.x - 200;
-    const y = mp.y - 240;
-    const newNode: CanvasNode = {
-      id: `image-${Date.now()}`,
-      type: 'image',
-      x,
-      y,
-      width: 400,
-      height: 480,
-      prompt: '',
-      images: [base64],
-      viewMode: 'single',
-      currentImageIndex: 0
-    };
-    setNodes(prev => [...prev, newNode]);
-    setSelectedIds([newNode.id]);
-  }, [transform]);
+    const startX = mp.x - SPAWNED_IMAGE_NODE_WIDTH / 2;
+    const startY = mp.y - SPAWNED_IMAGE_NODE_HEIGHT / 2;
+    const newNodes = buildSpacedImageNodesFromLists(list, startX, startY);
+    if (newNodes.length === 0) return;
+    setNodes((prev) => [...prev, ...newNodes]);
+    setSelectedIds(newNodes.map((n) => n.id));
+  }, []);
+
+  const createImageNodeFromBase64 = useCallback(
+    (base64: string) => {
+      createImageNodesFromBase64List([base64]);
+    },
+    [createImageNodesFromBase64List]
+  );
 
   /** 重置视口到画布中心，缩放比例为 20% */
   const resetViewportToCenter = useCallback(() => {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect || rect.width < 8 || rect.height < 8) return;
-    const newScale = 0.2;
+    const newScale = DEFAULT_CANVAS_VIEW_SCALE;
     // 将画布中心 (0, 0) 移动到视口中心
     const newX = rect.width / 2;
     const newY = rect.height / 2;
@@ -4274,10 +4322,9 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
         if (!sid) return;
         const node = nodes.find(n => n.id === sid);
         if (!node) return;
-        const imgs = (node as any).images as string[] | undefined;
-        const idx = (node as any).currentImageIndex as number | undefined;
-        const img = imgs?.[idx ?? 0];
-        if (!img) return;
+        const idx = node.currentImageIndex ?? 0;
+        const payload = cloneImageSlotForNewNode(node.images?.[idx], node.imageAssetIds?.[idx]);
+        if (!payload) return;
         const mp = canvasMouseRef.current;
         const newNode: CanvasNode = {
           id: `image-${Date.now()}`,
@@ -4286,7 +4333,7 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
           y: mp.y,
           width: 720,
           height: 792,
-          images: [img],
+          ...payload,
           currentImageIndex: 0,
         };
         setNodes(prev => [...prev, newNode]);
@@ -4355,58 +4402,66 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
             // 只取第一个作为内部 clipboard（节点复制）
             setClipboard(nodesList[0]);
             // 如果有图片节点，写入图片到系统剪贴板 + 共享剪贴板
-            const imgNode = nodesList.find(n => n.images?.[0] && typeof n.images[0] === 'string');
+            const imgNode = nodesList.find((n) => {
+              const i = n.currentImageIndex ?? 0;
+              return hasCanvasImagePayload(n.images?.[i], n.imageAssetIds?.[i]);
+            });
             if (imgNode) {
-              // 统一处理 base64（可能带 data:image/... 前缀也可能只有纯 base64）
-              const rawSrc = imgNode.images![0];
-              const base64 = rawSrc.includes(',') ? rawSrc.split(',')[1] : rawSrc;
-              const fullSrc = rawSrc.includes(',') ? rawSrc : 'data:image/png;base64,' + rawSrc;
-              // 写入共享剪贴板（跨模式使用）
-              const imgEl = new Image();
-              imgEl.onload = () => {
-                const imgWidth = imgEl.naturalWidth || 512;
-                const imgHeight = imgEl.naturalHeight || 512;
-                if (base64) {
-                  sharedClipboardImageRef.current = {
-                    id: `shared-copy-${Date.now()}`,
-                    base64,
-                    x: 0, y: 0,
-                    width: imgWidth,
-                    height: imgHeight,
-                    scale: 1,
-                  };
-                }
-                const canvas = document.createElement('canvas');
-                canvas.width = imgWidth;
-                canvas.height = imgHeight;
-                const ctx = canvas.getContext('2d');
-                if (ctx) {
-                  ctx.drawImage(imgEl, 0, 0, canvas.width, canvas.height);
-                  canvas.toBlob(async (blob) => {
-                    if (blob) {
-                      try {
-                        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-                      } catch (_) {}
-                    }
-                  }, 'image/png');
-                }
-              };
-              imgEl.onerror = () => {
-                // 图片加载失败时，使用节点尺寸作为 fallback
-                const fallbackW = imgNode.width || 512;
-                const fallbackH = imgNode.height || 512;
-                if (base64) {
-                  sharedClipboardImageRef.current = {
-                    id: `shared-copy-${Date.now()}`,
-                    base64,
-                    x: 0, y: 0,
-                    width: fallbackW,
-                    height: fallbackH,
-                    scale: 1,
-                  };
-                }
-              };
-              imgEl.src = fullSrc;
+              const slotIdx = imgNode.currentImageIndex ?? 0;
+              void resolveCanvasImageSource(
+                imgNode.images?.[slotIdx],
+                imgNode.imageAssetIds?.[slotIdx]
+              ).then((fullSrc) => {
+                if (!fullSrc) return;
+                const rawSrc = fullSrc;
+                const base64 = rawSrc.includes(',') ? rawSrc.split(',')[1] : rawSrc.startsWith('data:') ? '' : rawSrc;
+                const imgEl = new Image();
+                imgEl.onload = () => {
+                  const imgWidth = imgEl.naturalWidth || 512;
+                  const imgHeight = imgEl.naturalHeight || 512;
+                  if (base64) {
+                    sharedClipboardImageRef.current = {
+                      id: `shared-copy-${Date.now()}`,
+                      base64,
+                      x: 0, y: 0,
+                      width: imgWidth,
+                      height: imgHeight,
+                      scale: 1,
+                    };
+                  }
+                  const canvas = document.createElement('canvas');
+                  canvas.width = imgWidth;
+                  canvas.height = imgHeight;
+                  const ctx = canvas.getContext('2d');
+                  if (ctx) {
+                    ctx.drawImage(imgEl, 0, 0, canvas.width, canvas.height);
+                    canvas.toBlob(async (blob) => {
+                      if (blob) {
+                        try {
+                          await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                        } catch (_) {}
+                      }
+                    }, 'image/png');
+                  }
+                };
+                imgEl.onerror = () => {
+                  const fallbackW = imgNode.width || 512;
+                  const fallbackH = imgNode.height || 512;
+                  if (base64) {
+                    sharedClipboardImageRef.current = {
+                      id: `shared-copy-${Date.now()}`,
+                      base64,
+                      x: 0, y: 0,
+                      width: fallbackW,
+                      height: fallbackH,
+                      scale: 1,
+                    };
+                  }
+                };
+                imgEl.src = rawSrc.startsWith('data:') || rawSrc.startsWith('blob:') || rawSrc.startsWith('http')
+                  ? rawSrc
+                  : `data:image/png;base64,${rawSrc}`;
+              });
             }
           }
         }
@@ -4418,20 +4473,25 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
         if (typeof navigator?.clipboard?.read === 'function') {
           navigator.clipboard.read().then(clipboardItems => {
             if (lastPasteTimeRef.current !== now) return;
-            const imageItem = clipboardItems.find(item => item.types.some(t => t.startsWith('image/')));
-            if (!imageItem) { fallbackSharedClipboard(); return; }
-            const targetType = imageItem.types.find(t => t.startsWith('image/')) || 'image/png';
-            imageItem.getType(targetType).then(blob => {
-              if (lastPasteTimeRef.current !== now) return;
-              const reader = new FileReader();
-              reader.onload = (ev) => {
+            const imageClipboardItems = clipboardItems.filter((item) =>
+              item.types.some((t) => t.startsWith('image/'))
+            );
+            if (imageClipboardItems.length === 0) {
+              fallbackSharedClipboard();
+              return;
+            }
+            Promise.all(
+              imageClipboardItems.map(async (item) => {
+                const targetType = item.types.find((t) => t.startsWith('image/')) || 'image/png';
+                return item.getType(targetType);
+              })
+            )
+              .then((blobs) => readBlobsAsBase64(blobs))
+              .then((base64List) => {
                 if (lastPasteTimeRef.current !== now) return;
-                const result = ev.target?.result as string;
-                const base64 = result?.split(',')[1];
-                if (base64) createImageNodeFromBase64(base64);
-              };
-              reader.readAsDataURL(blob);
-            }).catch(() => fallbackSharedClipboard());
+                createImageNodesFromBase64List(base64List);
+              })
+              .catch(() => fallbackSharedClipboard());
           }).catch(() => fallbackSharedClipboard());
         } else {
           fallbackSharedClipboard();
@@ -4594,19 +4654,15 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
       const isInput = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.tagName === 'SELECT';
       if (isInput) return;
 
-      const items = e.clipboardData?.items;
-      const imageItem = items ? Array.from(items).find(item => item.type.startsWith('image/')) : null;
-      if (imageItem) {
+      const imageFiles = collectImageFilesFromClipboardData(e.clipboardData?.items ?? null);
+      if (imageFiles.length > 0) {
         e.preventDefault();
-        const file = imageItem.getAsFile();
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          const result = ev.target?.result as string;
-          const base64 = result.split(',')[1];
-          if (base64) createImageNodeFromBase64(base64);
-        };
-        reader.readAsDataURL(file);
+        void readFilesAsBase64(imageFiles)
+          .then((base64List) => createImageNodesFromBase64List(base64List))
+          .catch((err) => {
+            console.error(err);
+            alert('无法读取剪贴板中的图片。');
+          });
         return;
       }
 
@@ -4669,6 +4725,7 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
     fullscreenImage,
     showShortcutsPanel,
     createImageNodeFromBase64,
+    createImageNodesFromBase64List,
     undoCanvasState,
     saveCurrentProject,
     handleSaveDraftJsonSaveAs,
@@ -4991,6 +5048,13 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
       activePointerTypeRef.current = 'node';
       lastMousePosRef.current = { x: e.clientX, y: e.clientY };
       nodeDragAccumRef.current = null;
+      const idsToMove = selectedIdsRef.current.includes(id) ? selectedIdsRef.current : [id];
+      const startMap = new Map<string, { x: number; y: number }>();
+      for (const nid of idsToMove) {
+        const n = nodesRef.current.find((x) => x.id === nid);
+        if (n) startMap.set(nid, { x: n.x, y: n.y });
+      }
+      nodeDragHistoryStartRef.current = startMap;
     }
   };
 
@@ -5021,14 +5085,32 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
     const mouseX = (e.clientX - rect.left - transform.x) / transform.scale;
     const mouseY = (e.clientY - rect.top - transform.y) / transform.scale;
 
-    const files = Array.from(e.dataTransfer.files || []);
-    if (files.length === 0) return;
-
     const isVideoFile = (f: File) =>
       f.type.startsWith('video/') ||
       /\.(mp4|webm|mov|mkv|avi|m4v|ogv|mpeg|mpg)(\?.*)?$/i.test(f.name);
 
-    const videoFiles = files.filter(isVideoFile);
+    const allFiles = Array.from(e.dataTransfer.files || []);
+    const videoFiles = allFiles.filter(isVideoFile);
+    const imageFiles = collectImageFilesFromDataTransfer(e.dataTransfer);
+
+    if (imageFiles.length > 0) {
+      void readFilesAsBase64(imageFiles)
+        .then((base64List) => {
+          const newNodes = buildSpacedImageNodesFromLists(
+            base64List,
+            mouseX - SPAWNED_IMAGE_NODE_WIDTH / 2,
+            mouseY - SPAWNED_IMAGE_NODE_HEIGHT / 2
+          );
+          if (newNodes.length === 0) return;
+          setNodes((prev) => [...prev, ...newNodes]);
+          setSelectedIds(newNodes.map((n) => n.id));
+        })
+        .catch((err) => {
+          console.error(err);
+          alert('无法加载拖入的图片文件。');
+        });
+    }
+
     if (videoFiles.length > 0) {
       const def = DEFAULT_NODE_SIZES.video || { width: 720, height: 840 };
       try {
@@ -5066,30 +5148,6 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
         console.error(err);
         alert('无法加载拖入的视频文件。');
       }
-      return;
-    }
-
-    const file = files[0];
-    if (file && file.type.startsWith('image/')) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const base64 = (event.target?.result as string).split(',')[1];
-        const newNode: CanvasNode = {
-          id: `image-${Date.now()}`,
-          type: 'image',
-          x: mouseX - 240, // Center the node (width 480/2)
-          y: mouseY - 264, // Center the node (height 528/2)
-          width: 480,
-          height: 528,
-          prompt: '',
-          images: [base64],
-          viewMode: 'single',
-          currentImageIndex: 0
-        };
-        setNodes(prev => [...prev, newNode]);
-        setSelectedIds([newNode.id]);
-      };
-      reader.readAsDataURL(file);
     }
   }, [transform]);
 
@@ -5128,7 +5186,7 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
       resolution: '2k',
       imageCount: 1,
       model:
-        type === 't2i' || type === 'i2i' || type === 'panoramaT2i' || type === 'panorama'
+        type === 't2i' || type === 'i2i' || type === 'panoramaT2i'
           ? defaultCanvasImageModel()
           : 'gemini-3.1-flash-image-preview',
       viewMode: 'single',
@@ -5244,14 +5302,25 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
   };
 
   const handleDeleteNode = (id: string) => {
-    revokeNodeBlobUrls(id);
+    const node = nodesRef.current.find((n) => n.id === id);
+    if (node) {
+      revokeNodeBlobUrls(id);
+      const remaining = nodesRef.current.filter((n) => n.id !== id);
+      revokeNodeCanvasAssets(node, remaining);
+    }
     setNodes(prev => prev.filter(n => n.id !== id));
     setEdges(prev => prev.filter(e => e.sourceId !== id && e.targetId !== id));
     setSelectedIds(prev => prev.filter(sid => sid !== id));
   };
 
   const handleDeleteEdge = (id: string) => {
-    setEdges(prev => prev.filter(e => e.id !== id));
+    setEdges((prev) => {
+      const edge = prev.find((e) => e.id === id);
+      if (!edge) return prev;
+      const next = prev.filter((e) => e.id !== id);
+      queueMicrotask(() => pushCanvasCommandRef.current({ type: 'deleteEdge', edge }));
+      return next;
+    });
   };
 
   const handleGenerate = async (nodeId: string) => {
@@ -5446,18 +5515,14 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
           allMsgImages.push({ index: assistantCount, images: msg.images || (msg.image ? [msg.image] : []) });
         }
       }
-      console.log('[DEBUG @M] allMsgImages count:', allMsgImages.length, 'requested indices:', msgPickIndices);
       for (const idx of msgPickIndices) {
         const found = allMsgImages.find(m => m.index === idx);
         if (found) {
           msgImages.push(...found.images);
           msgRefDescs.push(`@M${idx}`);
-        } else {
-          console.warn('[DEBUG @M] index', idx, 'not found in allMsgImages, available indices:', allMsgImages.map(m => m.index));
         }
       }
     }
-    console.log('[DEBUG @M] final msgImages count:', msgImages.length, 'msgRefDescs:', msgRefDescs);
 
     const strippedQuestion = stripRefMarkers(inputText) || inputText;
 
@@ -5518,7 +5583,16 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
 
     try {
       // 生图模式：直接调用图片生成服务
-      if (isImageGenMode && imageGenPrompt) {
+      if (isImageGenMode) {
+        if (!imageGenPrompt) {
+          setNodes((prev) =>
+            prev.map((n) =>
+              n.id === nodeId ? { ...n, isGenerating: false, error: '请在 [生图] 后填写要生成的图片描述' } : n
+            )
+          );
+          generationStartedAtRef.current.delete(nodeId);
+          return;
+        }
         const imageModel = (node as ChatNode).imageModel || 'gpt-image-2-codesonline';
         const aspectRatio = (node as ChatNode).imageAspectRatio || '16:9';
         const resolution = (node as ChatNode).imageResolution || '2k';
@@ -5591,17 +5665,6 @@ function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
       }
 
       // 普通对话模式
-      console.log('[DEBUG @M refs]', {
-        msgPickIndices,
-        msgImages: msgImages.length,
-        msgRefDescs,
-        fullPrompt: fullPrompt.slice(0, 300),
-        apiTurnsLast: {
-          role: 'user',
-          imageBase64: ([...refImages, ...msgImages].length) === 1 ? '[one img]' : ([...refImages, ...msgImages].length > 1 ? '[multi img]' : 'none'),
-          imageBase64s: ([...refImages, ...msgImages].length) > 1 ? [...refImages, ...msgImages].length + ' imgs' : undefined,
-        }
-      });
       const apiTurns = [
         ...historyForApi.map((m) => {
           const imgs = m.role === 'user' && m.images?.length ? m.images : undefined;
@@ -5744,45 +5807,45 @@ ${text}`,
   useEffect(() => {
     nodes.forEach(node => {
       if (node.type === 'panorama' || node.type === 'annotation' || node.type === 'panoramaT2i' || node.type === 'director3d') {
-        const incomingEdges = edges.filter(e => e.targetId === node.id);
+        const incomingEdges = edges.filter(e => e.targetId === node.id || e.sourceId === node.id);
         if (incomingEdges.length > 0) {
-          // 获取连接的源节点图片
-          const sourceNodes = incomingEdges
-            .map(e => nodes.find(n => n.id === e.sourceId))
-            .filter(Boolean) as CanvasNode[];
-          
-          const sourceImages = sourceNodes.flatMap((n) => {
-            const imgs = n.images || [];
-            if (!imgs.length) return [];
-            const idx = Math.min(Math.max(0, n.currentImageIndex ?? 0), imgs.length - 1);
-            const b = imgs[idx];
-            return b ? [b] : [];
-          });
-          
-          if (sourceImages.length > 0) {
-            // 更新可接收图片输入的节点
+          const sourceNodes = resolveImageProviderNodes(node.id, nodes, edges);
+
+          const primaryRef = sourceNodes
+            .map((n) => getNodePrimaryImageRef(n))
+            .find((ref) => ref !== null);
+
+          if (primaryRef) {
+            const { base64, assetId } = imageRefToSingleImageFields(primaryRef);
             const updates: Partial<CanvasNode> = {};
+
             if (node.type === 'panorama') {
-              updates.panoramaImage = sourceImages[0]; // 使用第一个连接的图片
+              updates.panoramaImage = base64;
+              updates.panoramaImageAssetId = assetId;
             } else if (node.type === 'annotation') {
-              updates.sourceImage = sourceImages[0];
+              updates.sourceImage = base64;
+              updates.sourceImageAssetId = assetId;
             } else if (node.type === 'panoramaT2i') {
-              updates.images = [sourceImages[0]]; // 全景图生成节点使用 images
-            } else if (node.type === 'director3d') {
-              updates.backgroundImage = sourceImages[0]; // 3D导演台节点使用 backgroundImage
-            } else if (node.type === 'image') {
-              updates.images = [sourceImages[0]];
+              updates.images = [base64];
+              updates.imageAssetIds = assetId ? [assetId] : undefined;
               updates.currentImageIndex = 0;
+            } else if (node.type === 'director3d') {
+              updates.backgroundImage = base64;
+              updates.backgroundImageAssetId = assetId;
             }
-            
-            // 只有当图片不同时才更新
-            if (node.type === 'panorama' && node.panoramaImage !== sourceImages[0]) {
-              handleUpdateNode(node.id, updates);
-            } else if (node.type === 'annotation' && node.sourceImage !== sourceImages[0]) {
-              handleUpdateNode(node.id, updates);
-            } else if (node.type === 'director3d' && node.backgroundImage !== sourceImages[0]) {
-              handleUpdateNode(node.id, updates);
-            } else if (node.type === 'image' && node.images?.[0] !== sourceImages[0]) {
+
+            const changed =
+              node.type === 'panorama'
+                ? !singleImageFieldsMatch(node.panoramaImage, node.panoramaImageAssetId, { base64, assetId })
+                : node.type === 'annotation'
+                  ? !singleImageFieldsMatch(node.sourceImage, node.sourceImageAssetId, { base64, assetId })
+                  : node.type === 'director3d'
+                    ? !singleImageFieldsMatch(node.backgroundImage, node.backgroundImageAssetId, { base64, assetId })
+                    : node.type === 'panoramaT2i'
+                      ? !singleImageFieldsMatch(node.images?.[0], node.imageAssetIds?.[0], { base64, assetId })
+                      : false;
+
+            if (changed) {
               handleUpdateNode(node.id, updates);
             }
           }
@@ -5791,10 +5854,21 @@ ${text}`,
     });
   }, [edges, nodes]);
 
-  const downloadImage = useCallback(async (base64: string) => {
-    const mime = sniffImageMimeFromBase64(base64);
+  const downloadImage = useCallback(async (imageSrc: string) => {
     try {
-      const r = await saveImageDownload(base64, mime);
+      const raw = await imageSrcToRawBase64(
+        imageSrc.startsWith('http://') ||
+          imageSrc.startsWith('https://') ||
+          imageSrc.startsWith('data:') ||
+          imageSrc.startsWith('blob:')
+          ? imageSrc
+          : fullscreenImageDisplaySrc(imageSrc)
+      );
+      if (!raw?.base64) {
+        window.alert('无法读取图片数据，可尝试右键图片另存为。');
+        return;
+      }
+      const r = await saveImageDownload(raw.base64, raw.mime);
       if (!r.ok && r.message) window.alert(r.message);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '下载失败';
@@ -6052,15 +6126,59 @@ ${text}`,
     }
   };
 
+  // --- Canvas render memoization ---
+  const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
+  const edgeBridges = useMemo(() => computeEdgeBridges(edges, nodeMap), [edges, nodeMap]);
+  const visibleNodeIds = useMemo(
+    () => computeVisibleNodeIds(nodes, transform, viewportSize.width, viewportSize.height, 300),
+    [nodes, transform, viewportSize]
+  );
+  const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const edgeRenderNodeIds = useMemo(() => {
+    const set = new Set(visibleNodeIds);
+    if (draggingNodeId) set.add(draggingNodeId);
+    for (const id of selectedIds) set.add(id);
+    return set;
+  }, [visibleNodeIds, draggingNodeId, selectedIds]);
+
+  const handleMinimapNavigate = useCallback((canvasX: number, canvasY: number) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setTransform((prev) => ({
+      ...prev,
+      x: rect.width / 2 - canvasX * prev.scale,
+      y: rect.height / 2 - canvasY * prev.scale,
+    }));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      const patches = new Map<string, Partial<CanvasNode>>();
+      for (const node of nodes) {
+        if (cancelled || !nodeNeedsMediaOffload(node)) continue;
+        const patch = await buildNodeMediaOffloadPatch(node);
+        if (cancelled || !patch) continue;
+        patches.set(node.id, patch);
+      }
+      if (cancelled || patches.size === 0) return;
+      setNodes((prev) =>
+        prev.map((n) => {
+          const patch = patches.get(n.id);
+          return patch ? { ...n, ...patch } : n;
+        })
+      );
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [nodes]);
+
   // --- Render Helpers ---
+  const renderNodeRef = useRef<(node: CanvasNode) => React.ReactNode>(() => null);
   const renderNode = (node: CanvasNode) => {
-    void generationClockTick;
     const genStart = generationStartedAtRef.current.get(node.id);
-    const genElapsedSec =
-      node.isGenerating && genStart != null
-        ? Math.max(0, Math.floor((Date.now() - genStart) / 1000))
-        : 0;
-    const genTimeMmSs = `${String(Math.floor(genElapsedSec / 60)).padStart(2, '0')}:${String(genElapsedSec % 60).padStart(2, '0')}`;
 
     // 懒加载优化：预计算节点是否在视口内
     const nodeInViewport = (() => {
@@ -6147,6 +6265,8 @@ ${text}`,
     }
 
     const images = node.images || [];
+    const imageAssetIds = node.imageAssetIds;
+    const hasDisplayableImages = countNodeImageSlots(images, imageAssetIds) > 0;
     const viewMode = node.viewMode || 'single';
     const currentIndex = node.currentImageIndex || 0;
     const videoUrls = node.videos || [];
@@ -6502,7 +6622,7 @@ ${text}`,
                   </div>
                 </div>
               )}
-              {images.length > 0 ? (
+              {hasDisplayableImages ? (
                 <>
                   {/* Top right controls */}
                   <div className={`absolute top-2 right-2 z-10 flex gap-1 transition-opacity ${node.type === 'image' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
@@ -6528,21 +6648,23 @@ ${text}`,
                     <button
                       onPointerDown={(e) => {
                         e.stopPropagation();
-                        const imgData = images[currentIndex];
-                        if (imgData) {
-                          const newNodeId = `image-${Date.now()}`;
-                          const newNode: CanvasNode = {
-                            id: newNodeId,
-                            type: 'image',
-                            x: node.x + 525,
-                            y: node.y,
-                            width: 480,
-                            height: 528,
-                            images: [imgData],
-                            currentImageIndex: 0,
-                          };
-                          setNodes(prev => [...prev, newNode]);
-                        }
+                        const payload = cloneImageSlotForNewNode(
+                          images[currentIndex],
+                          imageAssetIds?.[currentIndex]
+                        );
+                        if (!payload) return;
+                        const newNodeId = `image-${Date.now()}`;
+                        const newNode: CanvasNode = {
+                          id: newNodeId,
+                          type: 'image',
+                          x: node.x + 525,
+                          y: node.y,
+                          width: 480,
+                          height: 528,
+                          ...payload,
+                          currentImageIndex: 0,
+                        };
+                        setNodes(prev => [...prev, newNode]);
                       }}
                       className="p-1.5 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
                       title="复制图片 (C)"
@@ -6557,7 +6679,7 @@ ${text}`,
                       {viewMode === 'grid' ? <SingleIcon size={25}/> : <GridIcon size={25}/>}
                     </button>
                     {/* 智能超清按钮 - 所有图片节点可用 */}
-                    {images.length > 0 && (
+                    {hasDisplayableImages && (
                       <div className="relative">
                         <button
                           onPointerDown={async (e) => {
@@ -6591,10 +6713,14 @@ ${text}`,
 
                   {viewMode === 'grid' ? (
                     <div className="grid min-h-0 flex-1 grid-cols-2 gap-1 overflow-y-auto p-1 content-start">
-                      {images.map((img, idx) => (
+                      {images.map((img, idx) => {
+                        const slotAssetId = imageAssetIds?.[idx];
+                        if (!hasCanvasImagePayload(img, slotAssetId)) return null;
+                        return (
                         <div key={idx} className="relative w-full group/item" style={{ aspectRatio: '1' }}>
                           <ResponsiveImagePreview
                             base64={img}
+                            assetId={slotAssetId}
                             quality={0.58}
                             fill="contain"
                             className="bg-[#3A3A3A] rounded transition-opacity"
@@ -6618,12 +6744,13 @@ ${text}`,
                             <MaximizeIcon size={50}/>
                           </button>
                         </div>
-                      ))}
+                      );})}
                     </div>
                   ) : (
                     <div className="relative w-full h-full flex items-center justify-center group/single">
                       <ResponsiveImagePreview
                         base64={images[currentIndex]}
+                        assetId={imageAssetIds?.[currentIndex]}
                         quality={0.6}
                         fill="contain"
                         className={eyedropperTargetNodeId ? 'cursor-cyan-400' : ''}
@@ -6709,7 +6836,7 @@ ${text}`,
                       ))}
 
                       {/* Add Text Overlay Button */}
-                      {images.length > 0 && (
+                      {hasDisplayableImages && (
                         <button
                           onPointerDown={(e) => {
                             e.stopPropagation();
@@ -6755,8 +6882,15 @@ ${text}`,
                     <div className="relative z-[2] flex flex-col items-center gap-1.5 text-gray-400">
                       <div className="absolute inset-0 noise-overlay pointer-events-none" />
                       <LoaderIcon size={24} />
-                      <span className="text-xs tabular-nums tracking-tight">已用时 {genTimeMmSs}</span>
-                      <span className="text-[10px] text-gray-500">{genElapsedSec} 秒</span>
+                      {genStart != null ? (
+                        <GenerationTimer
+                          startedAt={genStart}
+                          prefix="已用时"
+                          className="text-xs tabular-nums tracking-tight"
+                          showSeconds
+                          secondsClassName="text-[10px] text-gray-500"
+                        />
+                      ) : null}
                     </div>
                   ) : (
                     node.type === 'image' ? (
@@ -7023,11 +7157,16 @@ ${text}`,
                       </div>
                       
                       {/* 文字 */}
-                      <span className="relative text-amber-400 text-xs tabular-nums tracking-tight" style={{
-                        textShadow: '0 0 10px rgba(255,170,0,0.8)',
-                        animation: 'genTextBlink 1.5s ease-in-out infinite',
-                      }}>已用时 {genTimeMmSs}</span>
-                      <span className="relative text-amber-500/70 text-[10px]">{genElapsedSec} 秒</span>
+                      {genStart != null ? (
+                        <GenerationTimer
+                          startedAt={genStart}
+                          prefix="已用时"
+                          className="relative text-amber-400 text-xs tabular-nums tracking-tight"
+                          showSeconds
+                          secondsClassName="relative text-amber-500/70 text-[10px]"
+                          glitch="amber"
+                        />
+                      ) : null}
                       
                       {/* 粒子 */}
                       {[...Array(8)].map((_, i) => (
@@ -7132,6 +7271,7 @@ ${text}`,
 
           {/* 360° 全景图节点内容 */}
           {node.type === 'panorama' && (
+            <ThreeEngineGate label="加载全景引擎…">
             <PanoramaNodeContent 
               node={node as PanoramaNode} 
               nodes={nodes}
@@ -7162,10 +7302,12 @@ ${text}`,
                 setNodes(prev => [...prev, newNode]);
               }}
             />
+            </ThreeEngineGate>
           )}
 
           {/* 3D导演台节点内容 */}
           {node.type === 'director3d' && (
+            <ThreeEngineGate label="加载 3D 引擎…">
             <Director3DNodeContent
               node={node as Director3DNode}
               nodes={nodes}
@@ -7188,16 +7330,26 @@ ${text}`,
                 setNodes(prev => [...prev, newNode]);
               }}
             />
+            </ThreeEngineGate>
           )}
 
           {/* 图片标注节点内容 */}
           {node.type === 'annotation' && (
+            <Suspense fallback={<HeavyNodeFallback label="加载标注工具…" />}>
             <AnnotationNodeContent
               node={node as AnnotationNode}
               nodes={nodes}
               edges={edges}
               eyedropperTargetNodeId={eyedropperTargetNodeId}
               onEyedropperSelect={() => setEyedropperTargetNodeId(node.id)}
+              onEyedropperPickLink={
+                eyedropperTargetNodeId && eyedropperTargetNodeId !== node.id
+                  ? () => {
+                      const t = eyedropperTargetNodeIdRef.current;
+                      if (t) handleCanvasEyedropper(node.id, t);
+                    }
+                  : undefined
+              }
               onUpdate={(updates) => handleUpdateNode(node.id, updates)}
               onCreateImageNode={(images, x, y) => {
                 const newNode: CanvasNode = {
@@ -7217,6 +7369,7 @@ ${text}`,
               onFullscreenImage={(base64) => setFullscreenImage(base64)}
               onDeleteEdge={handleDeleteEdge}
             />
+            </Suspense>
           )}
 
           {/* 宫格拆分节点内容 */}
@@ -7229,21 +7382,15 @@ ${text}`,
               onEyedropperSelect={() => setEyedropperTargetNodeId(node.id)}
               onUpdate={(updates) => handleUpdateNode(node.id, updates)}
               onCreateImageNode={(images, x, y) => {
-                images.forEach((img, idx) => {
-                  const newNode: CanvasNode = {
-                    id: `image-${Date.now()}-${idx}`,
-                    type: 'image',
-                    x: x + idx * 510,
-                    y,
-                    width: 480,
-                    height: 528,
-                    prompt: '',
-                    images: [img],
-                    viewMode: 'single',
-                    currentImageIndex: 0
-                  };
-                  setNodes(prev => [...prev, newNode]);
-                });
+                const gsNode = node as GridSplitNode;
+                const newNodes = buildStackedImageNodesFromLists(
+                  images,
+                  x,
+                  y,
+                  gsNode.outputImageAssetIds
+                );
+                if (newNodes.length === 0) return;
+                setNodes((prev) => [...prev, ...newNodes]);
               }}
             />
           )}
@@ -7257,7 +7404,9 @@ ${text}`,
               eyedropperTargetNodeId={eyedropperTargetNodeId}
               onEyedropperSelect={() => setEyedropperTargetNodeId(node.id)}
               onUpdate={(updates) => handleUpdateNode(node.id, updates)}
-              onCreateImageNode={(image, x, y) => {
+              onCreateImageNode={(image, x, y, assetId) => {
+                const payload = cloneImageSlotForNewNode(image, assetId);
+                if (!payload) return;
                 const newNode: CanvasNode = {
                   id: `image-${Date.now()}`,
                   type: 'image',
@@ -7266,9 +7415,9 @@ ${text}`,
                   width: 480,
                   height: 528,
                   prompt: '',
-                  images: [image],
+                  ...payload,
                   viewMode: 'single',
-                  currentImageIndex: 0
+                  currentImageIndex: 0,
                 };
                 setNodes(prev => [...prev, newNode]);
               }}
@@ -7293,8 +7442,7 @@ ${text}`,
                 setShowSettingsModal(true);
               }}
               promptPresets={promptPresets}
-              generationMmSs={node.isGenerating ? genTimeMmSs : undefined}
-              generationSeconds={node.isGenerating ? genElapsedSec : undefined}
+              generationStartedAt={node.isGenerating ? genStart : undefined}
               onOpenBigEditor={openBigEditor}
               onActivate={() => setSelectedIds([node.id])}
               onCreateImageNode={(images, x, y) => {
@@ -7360,7 +7508,7 @@ ${text}`,
               </>
             )}
           </div>
-          {isSelected && (node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i' || node.type === 'panorama') && (
+          {isSelected && (node.type === 't2i' || node.type === 'i2i' || node.type === 'panoramaT2i') && (
             <>
               <select className="nodemodel-select bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500 flex-1 min-w-[90px]" value={node.model || defaultCanvasImageModel()} onChange={(e) => { const m = e.target.value; const patch: Partial<CanvasNode> = { model: m }; if (isGptImage2CanvasModelId(m) || isManxueGptImage2Model(m)) patch.resolution = '2k'; handleUpdateNode(node.id, patch); }} onPointerDown={e => e.stopPropagation()}>
                 {(node.type === 't2i' || node.type === 'panoramaT2i') ? (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><optgroup label="满 e（manxueapi.com）"><option value="gemini-3.1-flash-image-preview-2k-manxue">Gemini 3.1 Flash Image 2K（满 e）</option><option value="gemini-3-pro-image-preview-2k-manxue">Gemini 3 Pro Image 2K（满 e）</option><option value="gpt-image-2-manxue">GPT Image 2（满 e）</option><option value="gpt-image-2-pro-manxue">GPT Image 2 Pro（满 e）</option><option value="gemini-3-pro-image-preview-4k-manxue">Gemini 3 Pro Image 4K（满 e）</option><option value="gemini-3.1-flash-image-preview-4k-manxue">Gemini 3.1 Flash Image 4K（满 e）</option></optgroup><optgroup label="ToAPIs"><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="nano-banana-2">Nano-Banana 2（ToAPIs）</option><option value="imagen-4">Imagen 4</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option></optgroup><optgroup label="即梦 (Dreamina)"><option value="jimeng-image-5.0">即梦 5.0</option><option value="jimeng-image-4.6">即梦 4.6</option><option value="jimeng-image-4.5">即梦 4.5</option><option value="jimeng-image-4.0">即梦 4.0</option></optgroup></>) : (<><option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option><option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option><optgroup label="满 e（manxueapi.com）"><option value="gemini-3.1-flash-image-preview-2k-manxue">Gemini 3.1 Flash Image 2K（满 e）</option><option value="gemini-3-pro-image-preview-2k-manxue">Gemini 3 Pro Image 2K（满 e）</option><option value="gpt-image-2-manxue">GPT Image 2（满 e）</option><option value="gpt-image-2-pro-manxue">GPT Image 2 Pro（满 e）</option><option value="gemini-3-pro-image-preview-4k-manxue">Gemini 3 Pro Image 4K（满 e）</option><option value="gemini-3.1-flash-image-preview-4k-manxue">Gemini 3.1 Flash Image 4K（满 e）</option></optgroup><optgroup label="ToAPIs"><option value="gpt-image-2">GPT Image 2（ToAPIs）</option><option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option><option value="gemini-3-pro-image-preview">Nano-Banana Pro（ToAPIs）</option><option value="nano-banana-2">Nano-Banana 2（ToAPIs）</option><option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option></optgroup><optgroup label="即梦 (Dreamina)"><option value="jimeng-image-5.0">即梦 5.0</option><option value="jimeng-image-4.6">即梦 4.6</option><option value="jimeng-image-4.5">即梦 4.5</option><option value="jimeng-image-4.0">即梦 4.0</option></optgroup></>)}
@@ -7864,10 +8012,11 @@ ${text}`,
                   {i2iIncomingEdges.slice(0, 12).map((edge, idx) => {
                     const srcNode = i2iSourceNodes[idx];
                     const img = srcNode?.images?.[0];
-                    if (!img) return null;
+                    const imgAssetId = srcNode?.imageAssetIds?.[0];
+                    if (!hasCanvasImagePayload(img, imgAssetId)) return null;
                     return (
                       <div key={edge.id} className="relative group">
-                        <OptimizedImage base64={img} maxSide={64} quality={0.72} alt={`R${idx+1}`} className="w-9 h-9 object-cover rounded border border-[#444]" />
+                        <OptimizedImage base64={img} assetId={imgAssetId} maxSide={64} quality={0.72} alt={`R${idx+1}`} className="w-9 h-9 object-cover rounded border border-[#444]" />
                         <button
                           onPointerDown={(e) => { e.stopPropagation(); }}
                           onClick={(e) => { e.stopPropagation(); handleDeleteEdge(edge.id); }}
@@ -7977,10 +8126,15 @@ ${text}`,
                             </svg>
                           </div>
                         </div>
-                        <span className="gen-text-glitch tabular-nums text-purple-400 mt-5" style={{ fontSize: '20px' }} data-text={genTimeMmSs}>
-                          {genTimeMmSs}
-                        </span>
-                        <span className="text-gray-500 mt-1" style={{ fontSize: '14px' }}>({genElapsedSec}s)</span>
+                        {genStart != null ? (
+                          <GenerationTimer
+                            startedAt={genStart}
+                            className="gen-text-glitch tabular-nums text-purple-400 mt-5 text-[20px]"
+                            showSeconds
+                            secondsClassName="text-gray-500 mt-1 text-[14px]"
+                            glitch
+                          />
+                        ) : null}
                       </div>
                     ) : null}
                     {node.prompt || <span className="text-gray-500">双击编辑文本</span>}
@@ -8055,13 +8209,15 @@ ${text}`,
                               </svg>
                             </div>
                           </div>
-                          <span 
-                            className="gen-text-glitch tabular-nums text-[11px] opacity-90" 
-                            data-text={genTimeMmSs}
-                          >
-                            {genTimeMmSs}
-                          </span>
-                          <span className="text-[10px] opacity-75 text-cyan-300/70">({genElapsedSec}s)</span>
+                          {genStart != null ? (
+                            <GenerationTimer
+                              startedAt={genStart}
+                              className="gen-text-glitch tabular-nums text-[11px] opacity-90"
+                              showSeconds
+                              secondsClassName="text-[10px] opacity-75 text-cyan-300/70"
+                              glitch
+                            />
+                          ) : null}
                         </span>
                       ) : (
                         <span className="flex items-center gap-2">
@@ -8113,13 +8269,15 @@ ${text}`,
                               </svg>
                             </div>
                           </div>
-                          <span 
-                            className="gen-text-glitch-amber tabular-nums text-[11px] opacity-90" 
-                            data-text={genTimeMmSs}
-                          >
-                            {genTimeMmSs}
-                          </span>
-                          <span className="text-[10px] opacity-75 text-amber-300/70">({genElapsedSec}s)</span>
+                          {genStart != null ? (
+                            <GenerationTimer
+                              startedAt={genStart}
+                              className="gen-text-glitch-amber tabular-nums text-[11px] opacity-90"
+                              showSeconds
+                              secondsClassName="text-[10px] opacity-75 text-amber-300/70"
+                              glitch="amber"
+                            />
+                          ) : null}
                         </span>
                       ) : (
                         <span className="flex items-center gap-2">
@@ -8161,7 +8319,7 @@ ${text}`,
               {/* 工具栏 */}
               <div className="flex items-center gap-1 p-2 bg-[#252525] border-b border-[#333] shrink-0">
                 <button
-                  onPointerDown={(e) => { e.stopPropagation(); onEyedropperSelect(); }}
+                  onPointerDown={(e) => { e.stopPropagation(); setEyedropperTargetNodeId(node.id); }}
                   className={`py-1 px-2 rounded text-[10px] flex items-center gap-1 ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600 text-white' : 'bg-cyan-700 hover:bg-cyan-600 text-white'}`}
                   title={eyedropperTargetNodeId === node.id ? "取消吸取" : "吸取图片"}
                 >
@@ -8201,14 +8359,18 @@ ${text}`,
               {/* 内容区域 */}
               <div className="flex-1 overflow-y-auto p-2 min-h-0">
                 {/* 图片预览 */}
-                {node.images && node.images.length > 0 && (
+                {countNodeImageSlots(node.images, node.imageAssetIds) > 0 && (
                   <div className="flex flex-col gap-1 mb-2">
-                    <div className="text-[10px] text-gray-400">生成: {node.images.length}张</div>
+                    <div className="text-[10px] text-gray-400">生成: {node.images?.length ?? 0}张</div>
                     <div className="flex gap-1 overflow-x-auto pb-1">
-                      {node.images.map((img, idx) => (
+                      {node.images?.map((img, idx) => {
+                        const slotAssetId = node.imageAssetIds?.[idx];
+                        if (!hasCanvasImagePayload(img, slotAssetId)) return null;
+                        return (
                         <div key={idx} className="relative shrink-0 w-14 h-14 rounded overflow-hidden border border-[#444]">
                           <OptimizedImage
                             base64={img}
+                            assetId={slotAssetId}
                             maxSide={Math.round(160 * thumbResolutionRef.v / 100)}
                             quality={0.72}
                             alt={`图${idx + 1}`}
@@ -8222,7 +8384,7 @@ ${text}`,
                             复制
                           </button>
                         </div>
-                      ))}
+                      );})}
                     </div>
                   </div>
                 )}
@@ -8293,8 +8455,13 @@ ${text}`,
                   {node.isGenerating ? (
                     <span className="flex items-center gap-2">
                       <LoaderIcon size={14} />
-                      <span className="tabular-nums text-[11px] opacity-90">{genTimeMmSs}</span>
-                      <span className="text-[10px] opacity-75">({genElapsedSec}s)</span>
+                      {genStart != null ? (
+                        <GenerationTimer
+                          startedAt={genStart}
+                          className="tabular-nums text-[11px] opacity-90"
+                          showSeconds
+                        />
+                      ) : null}
                     </span>
                   ) : (
                     '生成全景图'
@@ -8322,10 +8489,26 @@ ${text}`,
       </div>
     );
   };
+  renderNodeRef.current = renderNode;
+  const stableRenderNode = useCallback((node: CanvasNode) => renderNodeRef.current(node), []);
 
   // 首页 / 项目列表
   const [showHomePage, setShowHomePage] = useState(true);
   const [homeProjects, setHomeProjects] = useState<CanvasProjectSnapshot[]>([]);
+
+  /** 打开/切换项目后应用默认 20% 居中视口（等画布容器尺寸就绪） */
+  useLayoutEffect(() => {
+    if (!pendingDefaultViewportRef.current) return;
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect || rect.width < 8 || rect.height < 8) return;
+    pendingDefaultViewportRef.current = false;
+    setTransform({
+      x: rect.width / 2,
+      y: rect.height / 2,
+      scale: DEFAULT_CANVAS_VIEW_SCALE,
+    });
+  }, [projectStoreReady, activeProjectId, showHomePage]);
+
   useEffect(() => { loadProjectLibrary().then(lib => { if (lib) setHomeProjects(lib.projects); }); }, []);
 
   // 底部静态图片展示（可自行替换 URL）
@@ -8407,13 +8590,14 @@ ${text}`,
     };
     const newProject: CanvasProject = {
       id: newId, name: q.substring(0, 20) || 'AI 对话', updatedAt: Date.now(),
-      nodes: [chatNode], edges: [], transform: { x: 0, y: 0, scale: 1 },
+      nodes: [chatNode], edges: [], transform: { x: 0, y: 0, scale: DEFAULT_CANVAS_VIEW_SCALE },
     };
     const lib = await loadProjectLibrary();
     const projects = [newProject, ...(lib?.projects || [])];
     setProjects(projects); projectsRef.current = projects;
     setActiveProjectId(newId);
-    setNodes([chatNode]); setEdges([]); setTransform({ x: 0, y: 0, scale: 1 });
+    setNodes([chatNode]); setEdges([]);
+    pendingDefaultViewportRef.current = true;
     await saveProjectLibrary(projects, newId);
     setShowHomePage(false);
     // 在画布中自动触发发送
@@ -8431,12 +8615,13 @@ ${text}`,
       updatedAt: Date.now(),
       nodes: [],
       edges: [],
-      transform: { x: 0, y: 0, scale: 1 },
+      transform: { x: 0, y: 0, scale: DEFAULT_CANVAS_VIEW_SCALE },
     };
     const next = [newProject, ...projects];
     setProjects(next); projectsRef.current = next;
     setActiveProjectId(newProject.id);
-    setNodes([]); setEdges([]); setTransform({ x: 0, y: 0, scale: 1 });
+    setNodes([]); setEdges([]);
+    pendingDefaultViewportRef.current = true;
     await saveProjectLibrary(next, newProject.id);
     setShowHomePage(false);
   };
@@ -8447,7 +8632,7 @@ ${text}`,
     setProjects(projects); projectsRef.current = projects;
     setActiveProjectId(p.id);
     setNodes(target.nodes || []); setEdges(target.edges || []);
-    setTransform(target.transform || { x: 0, y: 0, scale: 1 });
+    pendingDefaultViewportRef.current = true;
     if (target.auditModeData?.images) {
       setAuditImages(target.auditModeData.images);
       auditImagesRef.current = target.auditModeData.images;
@@ -8846,6 +9031,18 @@ ${text}`,
         onDrop={handleDrop}
         style={{ touchAction: 'none' }}
       >
+        {canvasHistoryNotice && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[120] max-w-[min(92vw,520px)] px-4 py-2 rounded-lg bg-amber-900/90 border border-amber-600/60 text-amber-100 text-xs flex items-start gap-2 shadow-lg pointer-events-auto canvas-chrome-150">
+            <span className="flex-1">{canvasHistoryNotice}</span>
+            <button
+              type="button"
+              className="shrink-0 text-amber-200/80 hover:text-white"
+              onClick={() => setCanvasHistoryNotice(null)}
+            >
+              ×
+            </button>
+          </div>
+        )}
         {/* Canvas Background */}
         <div
           className="absolute inset-0 pointer-events-none"
@@ -8905,6 +9102,7 @@ ${text}`,
               const source = nodes.find(n => n.id === edge.sourceId);
               const target = nodes.find(n => n.id === edge.targetId);
               if (!source || !target) return null;
+              if (!edgeRenderNodeIds.has(source.id) || !edgeRenderNodeIds.has(target.id)) return null;
 
               const startX = source.x + source.width;
               const startY = source.y + source.height / 2;
@@ -8952,44 +9150,15 @@ ${text}`,
             })}
 
             {/* 跃线标记：检测连线交叉点并绘制弧形桥 */}
-            {(() => {
-              const bridges: { x: number; y: number; id: string }[] = [];
-              const lineSegs = edges.map((edge) => {
-                const s = nodes.find((n) => n.id === edge.sourceId);
-                const t = nodes.find((n) => n.id === edge.targetId);
-                if (!s || !t) return null;
-                return {
-                  id: edge.id,
-                  x1: s.x + s.width, y1: s.y + s.height / 2,
-                  x2: t.x, y2: t.y + t.height / 2,
-                };
-              }).filter(Boolean) as { id: string; x1: number; y1: number; x2: number; y2: number }[];
-              for (let i = 0; i < lineSegs.length; i++) {
-                for (let j = i + 1; j < lineSegs.length; j++) {
-                  const a = lineSegs[i], b = lineSegs[j];
-                  const d = (b.y2 - b.y1) * (a.x2 - a.x1) - (b.x2 - b.x1) * (a.y2 - a.y1);
-                  if (Math.abs(d) < 0.001) continue;
-                  const t1 = ((b.x2 - b.x1) * (a.y1 - b.y1) - (b.y2 - b.y1) * (a.x1 - b.x1)) / d;
-                  const t2 = ((a.x2 - a.x1) * (a.y1 - b.y1) - (a.y2 - a.y1) * (a.x1 - b.x1)) / d;
-                  if (t1 > 0.05 && t1 < 0.95 && t2 > 0.05 && t2 < 0.95) {
-                    bridges.push({
-                      x: a.x1 + t1 * (a.x2 - a.x1),
-                      y: a.y1 + t1 * (a.y2 - a.y1),
-                      id: `bridge-${a.id}-${b.id}`,
-                    });
-                  }
-                }
-              }
-              return bridges.map((b) => (
-                <g key={b.id} pointerEvents="none">
-                  <circle cx={b.x} cy={b.y} r={5} fill="#1e1e1e" stroke="#60a5fa" strokeWidth={1.5} />
-                  <path
-                    d={`M ${b.x - 4} ${b.y} Q ${b.x} ${b.y - 5} ${b.x + 4} ${b.y}`}
-                    fill="none" stroke="#60a5fa" strokeWidth={1.5}
-                  />
-                </g>
-              ));
-            })()}
+            {edgeBridges.map((b) => (
+              <g key={b.id} pointerEvents="none">
+                <circle cx={b.x} cy={b.y} r={5} fill="#1e1e1e" stroke="#60a5fa" strokeWidth={1.5} />
+                <path
+                  d={`M ${b.x - 4} ${b.y} Q ${b.x} ${b.y - 5} ${b.x + 4} ${b.y}`}
+                  fill="none" stroke="#60a5fa" strokeWidth={1.5}
+                />
+              </g>
+            ))}
 
             {/* Render drafting edge */}
             {draftEdge && (() => {
@@ -9021,7 +9190,37 @@ ${text}`,
           </svg>
 
           {/* Nodes Layer */}
-          {nodes.map(renderNode)}
+          {nodes.map((node) => {
+            const isInViewport = visibleNodeIds.has(node.id);
+            const isDragging = draggingNodeId === node.id;
+            const isSelected = selectedIdSet.has(node.id);
+            const isHeavyWebGL = node.type === 'panorama' || node.type === 'director3d';
+            const usePlaceholder =
+              (!isInViewport && !isDragging && !isSelected) ||
+              (isHeavyWebGL && !isInViewport && !isDragging);
+            if (usePlaceholder) {
+              return (
+                <MemoizedNodePlaceholder
+                  key={node.id}
+                  node={node}
+                  isSelected={isSelected}
+                  onPointerDown={handleNodePointerDown}
+                />
+              );
+            }
+            return (
+              <MemoNodeCard
+                key={node.id}
+                node={node}
+                isSelected={isSelected}
+                isInViewport={isInViewport}
+                isDragging={isDragging}
+                edgesKey={edgesKey}
+                eyedropperTargetNodeId={eyedropperTargetNodeId}
+                renderNode={stableRenderNode}
+              />
+            );
+          })}
         </div>
 
         {/* Global Eyedropper Overlay - 透明层，让图片仍可点击 */}
@@ -9035,6 +9234,14 @@ ${text}`,
               <EyedropperIcon size={14} /> 点击节点连线吸取 · 快捷键 X · ESC 取消
             </div>
           </div>
+        )}
+        {canvasMode === 'canvas' && nodes.length > 0 && (
+          <CanvasMinimap
+            nodes={nodes}
+            transform={transform}
+            viewportSize={viewportSize}
+            onNavigate={handleMinimapNavigate}
+          />
         )}
       </div>
 
@@ -10793,8 +11000,8 @@ ${text}`,
             onPointerDown={(e) => { e.stopPropagation(); handleFsPointerDown(e); }}
           >
             <img
-              src={fullscreenImage.startsWith('http://') || fullscreenImage.startsWith('https://') ? fullscreenImage : `data:image/jpeg;base64,${fullscreenImage}`}
-              className="max-w-[75vw] max-h-[90vh] object-contain shadow-2xl"
+              src={fullscreenImageDisplaySrc(fullscreenImage)}
+              className="max-w-[calc(100vw-18rem)] max-h-[90vh] object-contain shadow-2xl"
               style={{
                 transform: `translate(${fsTransform.x}px, ${fsTransform.y}px) scale(${fsTransform.scale})`,
                 cursor: activePointerTypeRef.current === 'fullscreen' ? 'grabbing' : 'grab',
@@ -10806,7 +11013,10 @@ ${text}`,
             />
           </div>
           {/* 右侧图片信息栏 */}
-          <FsImageInfoPanel base64={fullscreenImage} onClose={() => { setFullscreenImage(null); setFsContextMenu(null); }} />
+          <FsImageInfoPanel
+            imageSrc={fullscreenImage}
+            onClose={() => { setFullscreenImage(null); setFsContextMenu(null); }}
+          />
           {/* 翻页按钮 */}
           {fullscreenNodeId && (() => {
             const fsNode = nodesRef.current.find(n => n.id === fullscreenNodeId);
@@ -10829,18 +11039,20 @@ ${text}`,
             );
           })()}
           <button
+            type="button"
+            onPointerDown={(e) => { e.stopPropagation(); void downloadImage(fullscreenImage); }}
+            className="absolute top-6 left-6 z-20 flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-white text-sm font-semibold shadow-lg shadow-blue-900/40 transition-colors"
+            title="下载图片"
+          >
+            <DownloadIcon size={18} />
+            下载图片
+          </button>
+          <button
             onPointerDown={(e) => { e.stopPropagation(); setFullscreenImage(null); setFullscreenNodeId(null); }}
-            className="absolute top-6 right-6 p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors"
+            className="absolute top-6 right-[17rem] p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors z-20"
             title="关闭"
           >
             <XIcon size={24} />
-          </button>
-          <button
-            onPointerDown={(e) => { e.stopPropagation(); downloadImage(fullscreenImage); }}
-            className="absolute left-[1050px] top-[calc(50%-440px)] p-3 bg-blue-600 hover:bg-blue-500 rounded-xl text-white font-bold shadow-lg shadow-blue-900/50 flex items-center gap-2 transition-all"
-            title="下载图片"
-          >
-            <DownloadIcon size={20} />
           </button>
           {fsContextMenu && (
             <div
@@ -11009,7335 +11221,5 @@ ${text}`,
       {canvasMode !== 'audit' && bigEditorPortal}
 
     </div>
-  );
-}
-
-// ==================== 360° 全景图节点组件 ====================
-interface PanoramaNodeContentProps {
-  node: PanoramaNode;
-  nodes: CanvasNode[];
-  eyedropperTargetNodeId: string | null;
-  onEyedropperSelect: () => void;
-  /** 吸管激活时点击无图预览区：将本节点作为连线起点连向吸管目标 */
-  onEyedropperPickLink?: () => void;
-  onUpdate: (updates: Partial<PanoramaNode>) => void;
-  onCreateImageNode: (images: string[], nodeX: number, nodeY: number) => void;
-  onCopyToImage?: () => void;
-}
-
-// 小吸管图标组件
-const EyedropperIcon = ({ size = 12 }: { size?: number }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="m2 22 1-1h3v-3H1l1-1V2h3v3h3L4.5 2 6 3.5 10.5 8l-1.5 1.5L15 5v3h3L17 9v3h3l1 1v9h-3v-3h-3v3l-4-4-5.5 5.5-1.5 1.5Z"/>
-  </svg>
-);
-
-// 全屏图标
-const FullscreenIcon = ({ size = 16 }: { size?: number }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-  </svg>
-);
-
-function PanoramaNodeContent({
-  node,
-  nodes,
-  eyedropperTargetNodeId,
-  onEyedropperSelect,
-  onEyedropperPickLink,
-  onUpdate,
-  onCreateImageNode,
-  onCopyToImage,
-}: PanoramaNodeContentProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
-  const sceneRef = useRef<THREE.Scene | null>(null);
-  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
-  const controlsRef = useRef<any>(null);
-  const sphereRef = useRef<THREE.Mesh | null>(null);
-  const materialRef = useRef<THREE.MeshBasicMaterial | null>(null);
-  const textureRef = useRef<THREE.Texture | null>(null);
-  const animationFrameRef = useRef<number>(0);
-  const currentImageRef = useRef<string>(''); // 跟踪当前加载的图片
-  const [forceUpdateKey, setForceUpdateKey] = useState(0); // 强制更新key
-
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isConverting, setIsConverting] = useState(false);
-  const [displayInfo, setDisplayInfo] = useState({ yaw: 0, pitch: 0, fov: 75 });
-  const [fullscreenCapture, setFullscreenCapture] = useState<{type: 'single' | 'grid', base64: string} | null>(null);
-  // 720全景图模式（上下360度，即垂直720度）
-  const [is720Mode, setIs720Mode] = useState((node as any).is720Mode ?? false);
-  const [forceTextureReload, setForceTextureReload] = useState(0);
-
-  const panoramaImage = node.panoramaImage ?? '';
-
-  // 同步720模式从节点属性
-  useEffect(() => {
-    const newMode = (node as any).is720Mode ?? false;
-    if (newMode !== is720Mode) {
-      setIs720Mode(newMode);
-      setForceTextureReload(prev => prev + 1);
-    }
-  }, [(node as any).is720Mode]);
-
-  // 处理全屏截图 - 传递给父组件创建节点
-  useEffect(() => {
-    if (fullscreenCapture && fullscreenCapture.base64) {
-      onCreateImageNode([fullscreenCapture.base64], node.x + node.width + 50, node.y);
-      setFullscreenCapture(null);
-    }
-  }, [fullscreenCapture, node.x, node.width, node.y, onCreateImageNode]);
-
-  // 将图片转换为全景图
-  const convertToPanorama = async () => {
-    if (!panoramaImage) {
-      alert('请先导入或吸取一张图片');
-      return;
-    }
-
-    setIsConverting(true);
-
-    try {
-      // 固定提示词：将图片转换为360度全景图
-      const prompt = 'Convert this image into a seamless 360-degree panoramic view. Extend the edges naturally to create a continuous horizontal panorama. Maintain the original lighting, colors, and style. The result should be a panoramic image suitable for a 360-degree VR environment.';
-
-      // 使用 Gemini 图片编辑功能转换
-      const convertAspect = node.aspectRatio === '9:16' ? '9:16' : '16:9';
-      const modelForPanorama = (node.model || defaultCanvasImageModel()).trim();
-      const results = await editExistingImage(
-        [panoramaImage],
-        prompt,
-        1,
-        modelForPanorama,
-        convertAspect,
-        '4k'
-      );
-
-      if (results && results.length > 0) {
-        // 更新全景图
-        onUpdate({ panoramaImage: results[0] });
-        alert('全景图转换成功！');
-      } else {
-        alert('转换失败，请重试');
-      }
-    } catch (error) {
-      console.error('转换全景图失败:', error);
-      alert('转换失败: ' + (error instanceof Error ? error.message : '未知错误'));
-    } finally {
-      setIsConverting(false);
-    }
-  };
-
-  // 初始化 Three.js 场景 - 只在首次挂载时执行
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) {
-      console.log('360全景图: 容器不存在');
-      return;
-    }
-
-    let isInitialized = false;
-    let cleanupFn: (() => void) | null = null;
-    let retryCount = 0;
-    const maxRetries = 20;
-
-    const initScene = () => {
-      try {
-        const rect = container.getBoundingClientRect();
-        console.log('360全景图初始化尝试:', retryCount, '尺寸:', rect.width, 'x', rect.height);
-
-        if (rect.width === 0 || rect.height === 0) {
-          if (retryCount < maxRetries) {
-            retryCount++;
-            requestAnimationFrame(initScene);
-          }
-          return;
-        }
-
-        if (isInitialized) {
-          console.log('360全景图: 已初始化，跳过');
-          return;
-        }
-        isInitialized = true;
-
-      const width = rect.width;
-      const height = rect.height;
-
-      const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x1a1a1a);
-      sceneRef.current = scene;
-
-      const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
-      camera.position.set(0, 0, 0.1);
-      cameraRef.current = camera;
-
-      const renderer = new THREE.WebGLRenderer({
-        antialias: true,
-        alpha: true,
-        preserveDrawingBuffer: true,
-        powerPreference: 'low-power',
-      });
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.2));
-      renderer.setSize(width, height);
-      renderer.outputColorSpace = THREE.SRGBColorSpace;
-      renderer.setClearColor(0x1a1a1a, 1);
-      container.appendChild(renderer.domElement);
-      rendererRef.current = renderer;
-
-      console.log('360全景图: canvas已添加', renderer.domElement.width, renderer.domElement.height);
-
-      const sphereRadius = 500;
-      const horizontalSegments = 60;
-      const verticalSegments = 80; // 统一使用80分段以支持720模式
-      const geometry = new THREE.SphereGeometry(sphereRadius, horizontalSegments, verticalSegments);
-      geometry.scale(-1, 1, 1);
-
-      const material = new THREE.MeshBasicMaterial({ color: 0x333333 });
-      materialRef.current = material;
-
-      const sphere = new THREE.Mesh(geometry, material);
-      scene.add(sphere);
-      sphereRef.current = sphere;
-
-      let isDragging = false;
-      let lastX = 0;
-      let lastY = 0;
-      let theta = 0;
-      let phi = Math.PI / 2;
-
-      const updateCamera = () => {
-        const fov = node.fov ?? 75;
-        camera.fov = fov;
-        camera.updateProjectionMatrix();
-        const x = 500 * Math.sin(phi) * Math.sin(theta);
-        const y = 500 * Math.cos(phi);
-        const z = 500 * Math.sin(phi) * Math.cos(theta);
-        camera.lookAt(x, y, z);
-      };
-
-      const onMouseDown = (e: MouseEvent) => {
-        e.stopPropagation();
-        isDragging = true;
-        lastX = e.clientX;
-        lastY = e.clientY;
-      };
-
-      const onMouseMove = (e: MouseEvent) => {
-        e.stopPropagation();
-        if (!isDragging) return;
-        theta -= (e.clientX - lastX) * 0.005;
-        // 720模式下 phi 范围更广
-        const phiMin = is720Mode ? 0.01 : 0.1;
-        const phiMax = is720Mode ? Math.PI - 0.01 : Math.PI - 0.1;
-        phi = Math.max(phiMin, Math.min(phiMax, phi + (e.clientY - lastY) * 0.005));
-        lastX = e.clientX;
-        lastY = e.clientY;
-        updateCamera();
-        setDisplayInfo({ yaw: ((theta * 180 / Math.PI) % 360 + 360) % 360, pitch: 90 - (phi * 180 / Math.PI), fov: node.fov ?? 75 });
-      };
-
-      const onMouseUp = () => { isDragging = false; };
-
-      const onWheel = (e: WheelEvent) => {
-        e.preventDefault();
-        onUpdate({ fov: Math.max(30, Math.min(120, (node.fov ?? 75) + e.deltaY * 0.05)) });
-      };
-
-      container.addEventListener('mousedown', onMouseDown);
-      container.addEventListener('mousemove', onMouseMove);
-      container.addEventListener('mouseup', onMouseUp);
-      container.addEventListener('mouseleave', onMouseUp);
-      container.addEventListener('wheel', onWheel, { passive: false });
-
-      controlsRef.current = {
-        dispose: () => {
-          container.removeEventListener('mousedown', onMouseDown);
-          container.removeEventListener('mousemove', onMouseMove);
-          container.removeEventListener('mouseup', onMouseUp);
-          container.removeEventListener('mouseleave', onMouseUp);
-          container.removeEventListener('wheel', onWheel);
-        },
-        update: updateCamera,
-        setTheta: (t: number) => { theta = t; },
-        setPhi: (p: number) => { phi = p; }
-      };
-
-      let animLoopActive = false;
-      const animate = () => {
-        if (!animLoopActive) return;
-        animationFrameRef.current = requestAnimationFrame(animate);
-        renderer.render(scene, camera);
-      };
-      const startAnim = () => {
-        if (animLoopActive) return;
-        animLoopActive = true;
-        animate();
-      };
-      const stopAnim = () => {
-        animLoopActive = false;
-        cancelAnimationFrame(animationFrameRef.current);
-      };
-      let inViewport = true;
-      const syncAnimState = () => {
-        if (document.hidden || !inViewport) stopAnim();
-        else startAnim();
-      };
-      document.addEventListener('visibilitychange', syncAnimState);
-      const io = new IntersectionObserver(
-        (entries) => {
-          inViewport = entries[0]?.isIntersecting ?? false;
-          syncAnimState();
-        },
-        { root: null, rootMargin: '100px', threshold: 0 }
-      );
-      io.observe(container);
-      syncAnimState();
-
-      updateCamera();
-
-      cleanupFn = () => {
-        io.disconnect();
-        document.removeEventListener('visibilitychange', syncAnimState);
-        stopAnim();
-        controlsRef.current?.dispose();
-        // 完整清理 GPU 资源，防止内存泄漏
-        if (textureRef.current) { textureRef.current.dispose(); textureRef.current = null; }
-        if (materialRef.current) { materialRef.current.dispose(); materialRef.current = null; }
-        if (sphereRef.current) {
-          const geom = sphereRef.current.geometry;
-          if (geom) geom.dispose();
-          sphereRef.current = null;
-        }
-        if (sceneRef.current) { sceneRef.current.clear(); }
-        renderer.dispose();
-        renderer.forceContextLoss();
-        if (container.contains(renderer.domElement)) {
-          container.removeChild(renderer.domElement);
-        }
-      };
-      } catch (error) {
-        console.error('360全景图初始化失败:', error);
-        isInitialized = false;
-      }
-    };
-
-    initScene();
-
-    return () => {
-      if (cleanupFn) {
-        cleanupFn();
-      }
-    };
-  }, []); // 只在首次挂载时初始化
-
-  // 节点尺寸变化时同步更新渲染器尺寸，避免预览区域出现半黑屏
-  useEffect(() => {
-    const container = containerRef.current;
-    const renderer = rendererRef.current;
-    const camera = cameraRef.current;
-    if (!container || !renderer || !camera) return;
-
-    const resizeRenderer = () => {
-      const width = Math.max(1, container.clientWidth);
-      const height = Math.max(1, container.clientHeight);
-      renderer.setSize(width, height);
-      camera.aspect = width / height;
-      camera.updateProjectionMatrix();
-      if (sceneRef.current) renderer.render(sceneRef.current, camera);
-    };
-
-    resizeRenderer();
-    const observer = new ResizeObserver(resizeRenderer);
-    observer.observe(container);
-    return () => observer.disconnect();
-  }, [node.width, node.height]);
-
-  // 720模式变化时强制重新加载纹理
-  useEffect(() => {
-    if (panoramaImage) {
-      setForceTextureReload(prev => prev + 1);
-    }
-  }, [is720Mode]);
-
-  // 720模式切换时动态调整视角
-  useEffect(() => {
-    const controls = controlsRef.current;
-    if (controls && controls.setPhi) {
-      // 720模式下向上偏移，360模式下居中
-      const newPhi = is720Mode ? Math.PI / 2 + 0.5 : Math.PI / 2;
-      controls.setPhi(newPhi);
-      controls.update();
-    }
-  }, [is720Mode]);
-
-  // 加载全景图片
-  useEffect(() => {
-    const loadTexture = () => {
-      console.log('=== 纹理加载检查 ===');
-      console.log('panoramaImage 存在:', !!panoramaImage, '长度:', panoramaImage?.length);
-
-      if (!panoramaImage) {
-        console.log('没有图片数据，跳过');
-        return;
-      }
-
-      const material = materialRef.current;
-      console.log('material 存在:', !!material);
-
-      if (!material) {
-        console.log('等待 material 准备好...');
-        setTimeout(loadTexture, 100);
-        return;
-      }
-
-      // 720模式切换时强制重新加载纹理（通过forceTextureReload变化触发）
-      currentImageRef.current = '';
-      console.log('开始加载纹理');
-
-      const img = new Image();
-      img.onload = () => {
-        console.log('Image onload 触发, 尺寸:', img.width, img.height);
-
-        const texture = new THREE.Texture(img);
-        texture.colorSpace = THREE.SRGBColorSpace;
-        texture.minFilter = THREE.LinearFilter;
-        texture.magFilter = THREE.LinearFilter;
-        texture.generateMipmaps = false;
-        texture.needsUpdate = true;
-
-        if (textureRef.current) {
-          textureRef.current.dispose();
-        }
-        textureRef.current = texture;
-
-        material.map = texture;
-        material.color.setHex(0xffffff);
-        material.needsUpdate = true;
-        currentImageRef.current = panoramaImage;
-
-        // 强制触发重新渲染
-        if (rendererRef.current && sceneRef.current && cameraRef.current) {
-          rendererRef.current.render(sceneRef.current, cameraRef.current);
-        }
-        console.log('材质已更新，纹理设置完成');
-      };
-
-      img.onerror = () => {
-        console.error('JPEG 加载失败，尝试 PNG 格式');
-        const imgPng = new Image();
-        imgPng.onload = () => {
-          console.log('PNG 格式加载成功, 尺寸:', imgPng.width, imgPng.height);
-          const texture = new THREE.Texture(imgPng);
-          texture.colorSpace = THREE.SRGBColorSpace;
-          texture.minFilter = THREE.LinearFilter;
-          texture.magFilter = THREE.LinearFilter;
-          texture.generateMipmaps = false;
-          texture.needsUpdate = true;
-
-          if (textureRef.current) {
-            textureRef.current.dispose();
-          }
-          textureRef.current = texture;
-
-          material.map = texture;
-          material.color.setHex(0xffffff);
-          material.needsUpdate = true;
-
-          if (rendererRef.current && sceneRef.current && cameraRef.current) {
-            rendererRef.current.render(sceneRef.current, cameraRef.current);
-          }
-        };
-        imgPng.onerror = (err) => console.error('PNG 格式也加载失败', err);
-        imgPng.src = `data:image/png;base64,${panoramaImage}`;
-      };
-
-      console.log('开始设置 img.src');
-      img.src = `data:image/jpeg;base64,${panoramaImage}`;
-      console.log('img.src 已设置');
-    };
-
-    loadTexture();
-  }, [panoramaImage, is720Mode, forceTextureReload]);
-
-  // 监听 WebGL 上下文丢失/恢复
-  useEffect(() => {
-    const canvas = containerRef.current?.querySelector('canvas');
-    if (!canvas) return;
-
-    const handleContextLost = (e: Event) => {
-      e.preventDefault();
-      console.warn('WebGL 上下文丢失');
-    };
-
-    const handleContextRestored = () => {
-      console.log('WebGL 上下文恢复');
-    };
-
-    canvas.addEventListener('webglcontextlost', handleContextLost);
-    canvas.addEventListener('webglcontextrestored', handleContextRestored);
-
-    return () => {
-      canvas.removeEventListener('webglcontextlost', handleContextLost);
-      canvas.removeEventListener('webglcontextrestored', handleContextRestored);
-    };
-  }, []);
-
-  // 强制刷新渲染
-  const forceRefresh = () => {
-    const renderer = rendererRef.current;
-    const scene = sceneRef.current;
-    const camera = cameraRef.current;
-    if (renderer && scene && camera) {
-      renderer.render(scene, camera);
-      console.log('手动刷新渲染');
-    }
-    // 强制重新加载纹理
-    currentImageRef.current = '';
-    setForceUpdateKey(k => k + 1);
-  };
-
-  // 重置相机
-  const resetCamera = () => {
-    if (controlsRef.current) {
-      controlsRef.current.setTheta(0);
-      controlsRef.current.setPhi(Math.PI / 2);
-      controlsRef.current.update();
-    }
-    onUpdate({ yaw: 0, pitch: 0, fov: 75 });
-    setDisplayInfo({ yaw: 0, pitch: 0, fov: 75 });
-    // 强制重新加载纹理
-    currentImageRef.current = '';
-    setForceUpdateKey(k => k + 1);
-  };
-
-  // 截图功能
-  const captureCurrentView = () => {
-    if (!rendererRef.current || !sceneRef.current || !cameraRef.current || !panoramaImage) return;
-
-    const renderer = rendererRef.current;
-    const scene = sceneRef.current;
-    const camera = cameraRef.current;
-    const container = containerRef.current;
-    if (!container) return;
-
-    // 立即截图当前视图
-    renderer.render(scene, camera);
-    const dataURL = renderer.domElement.toDataURL('image/jpeg', 0.95);
-    const base64 = dataURL.split(',')[1];
-    setFullscreenCapture({ type: 'single', base64 });
-  };
-
-  // 四宫格截图
-  const captureGrid = (cols: number, rows: number) => {
-    if (!rendererRef.current || !sceneRef.current || !cameraRef.current || !panoramaImage) return;
-
-    const renderer = rendererRef.current;
-    const scene = sceneRef.current;
-    const camera = cameraRef.current;
-
-    // 创建离屏 Canvas
-    const canvasObj = document.createElement('canvas');
-    const cellWidth = 960;
-    const cellHeight = 540;
-    canvasObj.width = cellWidth * cols;
-    canvasObj.height = cellHeight * rows;
-    const ctx = canvasObj.getContext('2d');
-    if (!ctx) return;
-
-    // 设置渲染器为单格尺寸
-    renderer.setSize(cellWidth, cellHeight);
-    camera.aspect = cellWidth / cellHeight;
-    camera.updateProjectionMatrix();
-
-    let captured = 0;
-    const total = cols * rows;
-
-    // 生成方向列表 - 始终在地平线上截图
-    // 720模式切换只影响界面上的视角范围，不影响截图
-    const directions: { theta: number; phi: number }[] = [];
-    const fixedPhi = Math.PI / 2;  // 固定在地平线
-    const angleStep = (2 * Math.PI) / total;
-
-    for (let i = 0; i < total; i++) {
-      const theta = -Math.PI + i * angleStep;
-      directions.push({ theta, phi: fixedPhi });
-    }
-
-    const captureNext = () => {
-      if (captured >= total) {
-        // 绘制白色分割线
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 4;
-        for (let i = 1; i < cols; i++) {
-          ctx.beginPath();
-          ctx.moveTo(i * cellWidth, 0);
-          ctx.lineTo(i * cellWidth, canvasObj.height);
-          ctx.stroke();
-        }
-        for (let i = 1; i < rows; i++) {
-          ctx.beginPath();
-          ctx.moveTo(0, i * cellHeight);
-          ctx.lineTo(canvasObj.width, i * cellHeight);
-          ctx.stroke();
-        }
-
-        // 恢复原始尺寸
-        const container = containerRef.current;
-        if (container) {
-          renderer.setSize(container.clientWidth, container.clientHeight);
-          camera.aspect = container.clientWidth / container.clientHeight;
-          camera.updateProjectionMatrix();
-        }
-        renderer.render(scene, camera);
-
-        const base64 = canvasObj.toDataURL('image/jpeg', 0.95).split(',')[1];
-        onCreateImageNode([base64], node.x + node.width + 50, node.y);
-        return;
-      }
-
-      const col = captured % cols;
-      const row = Math.floor(captured / cols);
-      const dir = directions[captured];
-
-      if (controlsRef.current) {
-        controlsRef.current.setTheta(dir.theta);
-        controlsRef.current.setPhi(dir.phi);
-        controlsRef.current.update();
-      }
-
-      renderer.render(scene, camera);
-
-      // 使用 requestAnimationFrame 确保渲染完成后再截图
-      requestAnimationFrame(() => {
-        const dataURL = renderer.domElement.toDataURL('image/jpeg', 0.95);
-        const img = new Image();
-        img.onload = () => {
-          ctx.drawImage(img, col * cellWidth, row * cellHeight, cellWidth, cellHeight);
-          captured++;
-          captureNext();
-        };
-        img.onerror = () => {
-          // 如果加载失败，填充黑色
-          ctx.fillStyle = '#000';
-          ctx.fillRect(col * cellWidth, row * cellHeight, cellWidth, cellHeight);
-          captured++;
-          captureNext();
-        };
-        img.src = dataURL;
-      });
-    };
-
-    captureNext();
-  };
-
-  // 全屏查看
-  const openFullscreen = () => {
-    if (!rendererRef.current || !sceneRef.current || !cameraRef.current || !panoramaImage) return;
-    // 保存当前视角参数
-    setFsFullscreenParams({ yaw: displayInfo.yaw, pitch: displayInfo.pitch, fov: displayInfo.fov });
-    setIsFullscreen(true);
-  };
-
-  // 全屏模式下的渲染参数
-  const [fsFullscreenParams, setFsFullscreenParams] = useState({ yaw: 0, pitch: 0, fov: 75 });
-
-  // 全屏模式下的渲染
-  useEffect(() => {
-    if (!isFullscreen) return;
-
-    const container = document.createElement('div');
-    container.style.cssText = 'position:fixed;inset:0;z-index:1000;background:#000;cursor:grab;';
-    document.body.appendChild(container);
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    container.appendChild(renderer.domElement);
-
-    const scene = new THREE.Scene();
-    const geometry = new THREE.SphereGeometry(500, 60, 40);
-    geometry.scale(-1, 1, 1);
-
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 0, 0.1);
-
-    let isDragging = false;
-    let lastX = 0;
-    let lastY = 0;
-    let theta = fsFullscreenParams.yaw * Math.PI / 180;
-    let phi = (90 - fsFullscreenParams.pitch) * Math.PI / 180;
-    let fov = fsFullscreenParams.fov;
-    let textureLoaded = false;
-
-    const updateCamera = () => {
-      camera.fov = fov;
-      camera.updateProjectionMatrix();
-      const x = 500 * Math.sin(phi) * Math.sin(theta);
-      const y = 500 * Math.cos(phi);
-      const z = 500 * Math.sin(phi) * Math.cos(theta);
-      camera.lookAt(x, y, z);
-    };
-
-    const onMouseDown = (e: MouseEvent) => {
-      isDragging = true;
-      lastX = e.clientX;
-      lastY = e.clientY;
-      container.style.cursor = 'grabbing';
-    };
-
-    const onMouseMove = (e: MouseEvent) => {
-      if (!isDragging) return;
-      const dx = e.clientX - lastX;
-      const dy = e.clientY - lastY;
-      theta -= dx * 0.005;
-      phi = Math.max(0.1, Math.min(Math.PI - 0.1, phi + dy * 0.005));
-      lastX = e.clientX;
-      lastY = e.clientY;
-      updateCamera();
-    };
-
-    const onMouseUp = () => {
-      isDragging = false;
-      container.style.cursor = 'grab';
-    };
-
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      fov = Math.max(30, Math.min(120, fov + e.deltaY * 0.05));
-      updateCamera();
-    };
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        cleanup();
-      }
-    };
-
-    const animate = () => {
-      if (!isFullscreen) return;
-      animFrameId = requestAnimationFrame(animate);
-      renderer.render(scene, camera);
-    };
-
-    let animFrameId: number;
-
-    container.addEventListener('mousedown', onMouseDown);
-    container.addEventListener('mousemove', onMouseMove);
-    container.addEventListener('mouseup', onMouseUp);
-    container.addEventListener('mouseleave', onMouseUp);
-    container.addEventListener('wheel', onWheel, { passive: false });
-
-    updateCamera();
-
-    // 加载纹理并等待完成后开始渲染
-    const textureLoader = new THREE.TextureLoader();
-    textureLoader.load(
-      `data:image/jpeg;base64,${panoramaImage}`,
-      (texture) => {
-        texture.colorSpace = THREE.SRGBColorSpace;
-        texture.minFilter = THREE.LinearFilter;
-        texture.magFilter = THREE.LinearFilter;
-
-        const material = new THREE.MeshBasicMaterial({ map: texture });
-        const sphere = new THREE.Mesh(geometry, material);
-        scene.add(sphere);
-        
-        // 纹理加载完成后开始渲染
-        textureLoaded = true;
-        animate();
-      },
-      undefined,
-      (err) => {
-        console.error('全景图加载失败:', err);
-        // 即使加载失败也尝试渲染（显示黑色背景）
-        animate();
-      }
-    );
-
-    // 如果纹理加载超时（5秒），也开始渲染
-    setTimeout(() => {
-      if (!textureLoaded) {
-        animate();
-      }
-    }, 5000);
-
-    // 截图功能 - 创建图片节点
-    const captureScreenshot = () => {
-      // 检查场景中是否有球体（纹理是否已加载）
-      let meshInScene = false;
-      scene.traverse((obj) => {
-        if (obj instanceof THREE.Mesh) meshInScene = true;
-      });
-
-      if (!meshInScene) {
-        alert('请等待全景图加载完成后再截图');
-        return;
-      }
-
-      renderer.render(scene, camera);
-      const dataUrl = renderer.domElement.toDataURL('image/png');
-      const base64 = dataUrl.split(',')[1];
-      // 创建图片节点
-      setFullscreenCapture({ type: 'single', base64 });
-    };
-
-    // 宫格截图功能 - 创建图片节点
-    const captureGrid = (cols: number, rows: number) => {
-      // 检查场景中是否有球体（纹理是否已加载）
-      let meshInScene = false;
-      scene.traverse((obj) => {
-        if (obj instanceof THREE.Mesh) meshInScene = true;
-      });
-
-      if (!meshInScene) {
-        alert('请等待全景图加载完成后再截图');
-        return;
-      }
-
-      const cellWidth = Math.floor(window.innerWidth / cols);
-      const cellHeight = Math.floor(window.innerHeight / rows);
-      const canvas = document.createElement('canvas');
-      canvas.width = cellWidth * cols;
-      canvas.height = cellHeight * rows;
-      const ctx = canvas.getContext('2d')!;
-
-      // 临时停止动画循环
-      if (animFrameId) {
-        cancelAnimationFrame(animFrameId);
-        animFrameId = 0;
-      }
-
-      // 覆盖整个球面的视角网格
-      // 水平方向：从 -180° 到 180°，垂直方向：从 -90° 到 90°
-      const hFovRad = fov * Math.PI / 180;
-      const vFovRad = 2 * Math.atan(Math.tan(hFovRad / 2) / (window.innerWidth / window.innerHeight));
-
-      let captured = 0;
-      const total = cols * rows;
-
-      // 预计算所有格子的中心视角（每个角度间隔 360/总数 度）
-      const directions: { theta: number; phi: number }[] = [];
-      const fixedPhi = Math.PI / 2;  // 固定在地平线
-      const angleStep = (2 * Math.PI) / total;
-
-      for (let i = 0; i < total; i++) {
-        const col = i % cols;
-        const theta = -Math.PI + col * angleStep;
-        directions.push({ theta, phi: fixedPhi });
-      }
-
-      const captureNext = () => {
-        if (captured >= total) {
-          // 创建图片节点
-          const base64 = canvas.toDataURL('image/png').split(',')[1];
-          setFullscreenCapture({ type: 'grid', base64 });
-
-          // 恢复原始相机角度
-          theta = fsFullscreenParams.yaw * Math.PI / 180;
-          phi = (90 - fsFullscreenParams.pitch) * Math.PI / 180;
-          fov = fsFullscreenParams.fov;
-          updateCamera();
-          // 立即渲染恢复后的画面
-          renderer.render(scene, camera);
-
-          // 重新开始动画循环
-          animate();
-          return;
-        }
-
-        const col = captured % cols;
-        const row = Math.floor(captured / cols);
-        const dir = directions[captured];
-
-        // 设置相机朝向
-        theta = dir.theta;
-        phi = dir.phi;
-        updateCamera();
-
-        // 等待渲染完成后再截图
-        setTimeout(() => {
-          renderer.render(scene, camera);
-          // 使用 toDataURL 确保持久化渲染内容
-          const dataUrl = renderer.domElement.toDataURL('image/png');
-          const img = new Image();
-          img.onload = () => {
-            ctx.drawImage(img, col * cellWidth, row * cellHeight, cellWidth, cellHeight);
-            captured++;
-            captureNext();
-          };
-          img.onerror = () => {
-            // 如果加载失败，尝试直接绘制 canvas
-            ctx.fillStyle = '#000';
-            ctx.fillRect(col * cellWidth, row * cellHeight, cellWidth, cellHeight);
-            captured++;
-            captureNext();
-          };
-          img.src = dataUrl;
-        }, 100);
-      };
-
-      captureNext();
-    };
-
-    const cleanup = () => {
-      setIsFullscreen(false);
-      if (animFrameId) cancelAnimationFrame(animFrameId);
-      container.removeEventListener('mousedown', onMouseDown);
-      container.removeEventListener('mousemove', onMouseMove);
-      container.removeEventListener('mouseup', onMouseUp);
-      container.removeEventListener('mouseleave', onMouseUp);
-      container.removeEventListener('wheel', onWheel);
-      window.removeEventListener('keydown', onKeyDown);
-      renderer.dispose();
-      geometry.dispose();
-      if (document.body.contains(container)) {
-        document.body.removeChild(container);
-      }
-    };
-
-    // ESC 按钮
-    const escBtn = document.createElement('button');
-    escBtn.textContent = '× 退出';
-    escBtn.style.cssText = 'position:fixed;top:20px;right:20px;width:40px;height:40px;background:rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.3);border-radius:8px;color:white;font-size:20px;cursor:pointer;z-index:1001;backdrop-filter:blur(10px);transition:all 0.2s;display:flex;align-items:center;justify-content:center;';
-    escBtn.onclick = cleanup;
-    document.body.appendChild(escBtn);
-
-    // 截图和宫格按钮
-    const btnContainer = document.createElement('div');
-    btnContainer.style.cssText = 'position:fixed;top:20px;left:20px;display:flex;gap:8px;z-index:1001;';
-    
-    const captureBtn = document.createElement('button');
-    captureBtn.textContent = '📷 截图';
-    captureBtn.style.cssText = 'padding:10px 16px;background:rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.3);border-radius:8px;color:white;font-size:13px;cursor:pointer;backdrop-filter:blur(10px);transition:all 0.2s;';
-    captureBtn.onclick = captureScreenshot;
-    btnContainer.appendChild(captureBtn);
-    
-    [2, 4, 6, 9].forEach(n => {
-      const cols = n === 6 ? 3 : n === 9 ? 3 : n === 4 ? 2 : 1;
-      const rows = n === 6 ? 2 : n === 9 ? 3 : n === 4 ? 2 : n;
-      const gridBtn = document.createElement('button');
-      gridBtn.textContent = `${rows}×${cols}`;
-      gridBtn.style.cssText = 'padding:10px 14px;background:rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.3);border-radius:8px;color:white;font-size:13px;cursor:pointer;backdrop-filter:blur(10px);transition:all 0.2s;';
-      gridBtn.onclick = () => captureGrid(cols, rows);
-      btnContainer.appendChild(gridBtn);
-    });
-    
-    document.body.appendChild(btnContainer);
-
-    // 视角信息提示
-    const infoDiv = document.createElement('div');
-    infoDiv.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);padding:10px 20px;background:rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.2);border-radius:8px;color:white;font-size:13px;z-index:1001;backdrop-filter:blur(10px);font-family:monospace;white-space:nowrap;';
-    const updateInfo = () => {
-      const yawDeg = ((theta * 180 / Math.PI) % 360 + 360) % 360;
-      const pitchDeg = 90 - (phi * 180 / Math.PI);
-      infoDiv.textContent = `YAW: ${yawDeg.toFixed(0)}°  PITCH: ${pitchDeg.toFixed(0)}°  FOV: ${fov.toFixed(0)}°  |  拖动旋转 | 滚轮缩放 | ESC退出`;
-    };
-    updateInfo();
-    document.body.appendChild(infoDiv);
-
-    // 添加鼠标移动更新信息
-    const onMouseMoveUpdateInfo = () => { updateInfo(); };
-    container.addEventListener('mousemove', onMouseMoveUpdateInfo);
-
-    return () => {
-      cleanup();
-      if (document.body.contains(escBtn)) document.body.removeChild(escBtn);
-      if (document.body.contains(infoDiv)) document.body.removeChild(infoDiv);
-      if (document.body.contains(btnContainer)) document.body.removeChild(btnContainer);
-      container.removeEventListener('mousemove', onMouseMoveUpdateInfo);
-    };
-  }, [isFullscreen, panoramaImage, is720Mode, fsFullscreenParams]);
-
-  return (
-    <div className="flex flex-col h-full min-h-0 gap-1 p-2 overflow-y-auto">
-      {/* 预览区域 */}
-      <div
-        ref={containerRef}
-        className="relative w-full flex-1 min-h-[200px] rounded-lg border border-[#333] overflow-hidden bg-[#2a2a2a]"
-        onPointerDown={(e) => {
-          e.stopPropagation();
-        }}
-        onWheel={(e) => e.stopPropagation()}
-      >
-        {!panoramaImage && (
-          <>
-            {onEyedropperPickLink ? (
-              <button
-                type="button"
-                className="absolute inset-0 z-[15] cursor-crosshair bg-transparent border-0 p-0"
-                title="点击连接上游节点"
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                  onEyedropperPickLink();
-                }}
-              />
-            ) : null}
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-black/40 pointer-events-none">
-              <PanoramaIcon size={36} />
-              <span className="text-gray-300 text-xs text-center px-4">
-                点击下方&quot;导入&quot;加载图片<br />或从其他节点连线获取图片
-              </span>
-            </div>
-          </>
-        )}
-
-        {/* 视角指示器 */}
-        <div className="absolute top-2 left-2 px-2 py-1 bg-black/60 rounded text-[10px] text-white backdrop-blur-sm z-20">
-          Y: {displayInfo.yaw.toFixed(0)}° P: {displayInfo.pitch.toFixed(0)}° FOV: {displayInfo.fov.toFixed(0)}°
-        </div>
-
-        {/* 全屏按钮 */}
-        {panoramaImage && (
-          <button
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={openFullscreen}
-            className="absolute top-2 right-2 p-1.5 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm z-20"
-            title="全屏查看"
-          >
-            <FullscreenIcon size={14} />
-          </button>
-        )}
-      </div>
-
-      <div className="flex flex-col gap-1 shrink-0">
-        {/* 图片导入按钮和吸管 */}
-        <div className="flex gap-1">
-          <button
-            onPointerDown={(e) => { e.stopPropagation(); onEyedropperSelect(); }}
-            className={`py-1 px-2 rounded text-[10px] flex items-center gap-1 ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600 text-white' : 'bg-cyan-700 hover:bg-cyan-600 text-white'}`}
-            title={eyedropperTargetNodeId === node.id ? "取消吸取" : "吸取图片"}
-          >
-            <EyedropperIcon size={10} /> 吸管
-          </button>
-          <button
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => {
-              const input = document.createElement('input');
-              input.type = 'file';
-              input.accept = 'image/*';
-              input.onchange = (e) => {
-                const file = (e.target as HTMLInputElement).files?.[0];
-                if (file) {
-                  const reader = new FileReader();
-                  reader.onload = (ev) => {
-                    const base64 = (ev.target?.result as string).split(',')[1];
-                    onUpdate({ panoramaImage: base64 });
-                  };
-                  reader.readAsDataURL(file);
-                }
-              };
-              input.click();
-            }}
-            className="flex-1 py-1 px-2 rounded text-[10px] bg-[#333] hover:bg-[#444] text-gray-300 flex items-center justify-center gap-1"
-          >
-            <ImageIcon size={10} /> 导入
-          </button>
-          <button
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={resetCamera}
-            className="py-1 px-2 rounded text-[10px] bg-[#333] hover:bg-[#444] text-gray-300"
-            title="重置视角"
-          >
-            重置
-          </button>
-          <button
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={forceRefresh}
-            className="py-1 px-2 rounded text-[10px] bg-[#333] hover:bg-[#444] text-gray-300"
-            title="刷新渲染"
-          >
-            刷新
-          </button>
-        </div>
-
-        <button
-          type="button"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => void convertToPanorama()}
-          disabled={!panoramaImage || isConverting}
-          className="w-full py-1.5 px-2 rounded text-[10px] bg-violet-700 hover:bg-violet-600 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {isConverting ? '全景转换中…' : 'AI 转为全景（沿用上方所选模型）'}
-        </button>
-
-        {/* 截图功能 */}
-        <div className="flex flex-wrap gap-1">
-          <button
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={captureCurrentView}
-            disabled={!panoramaImage}
-            className="flex-1 py-1 px-2 rounded text-[10px] bg-green-700 hover:bg-green-600 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            截图
-          </button>
-          <button
-            onPointerDown={(e) => {
-              e.stopPropagation();
-              if (panoramaImage) {
-                onCreateImageNode([panoramaImage], node.x + node.width + 50, node.y);
-              }
-            }}
-            disabled={!panoramaImage}
-            className="py-1 px-2 rounded text-[10px] bg-blue-700 hover:bg-blue-600 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-            title="复制当前图片"
-          >
-            <CopyIcon size={12} />
-          </button>
-          <button
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => captureGrid(2, 2)}
-            disabled={!panoramaImage}
-            className="py-1 px-2 rounded text-[10px] bg-[#333] hover:bg-[#444] text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
-            title="4宫格截图"
-          >
-            4宫格
-          </button>
-          <button
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => captureGrid(3, 2)}
-            disabled={!panoramaImage}
-            className="py-1 px-2 rounded text-[10px] bg-[#333] hover:bg-[#444] text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
-            title="6宫格截图"
-          >
-            6宫格
-          </button>
-          <button
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => captureGrid(3, 3)}
-            disabled={!panoramaImage}
-            className="py-1 px-2 rounded text-[10px] bg-[#333] hover:bg-[#444] text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
-            title="9宫格截图"
-          >
-            9宫格
-          </button>
-          <button
-            onPointerDown={(e) => { e.stopPropagation(); onUpdate({ is720Mode: !is720Mode } as any); }}
-            className={`py-1 px-2 rounded text-[10px] flex items-center gap-1 ${is720Mode ? 'bg-orange-600 text-white' : 'bg-[#333] hover:bg-[#444] text-gray-300'}`}
-            title={is720Mode ? "当前: 720°全景图模式" : "切换到720°全景图模式"}
-          >
-            {is720Mode ? '720°' : '360°'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ==================== 3D导演台节点组件 ====================
-interface Director3DNodeContentProps {
-  node: Director3DNode;
-  nodes: CanvasNode[];
-  eyedropperTargetNodeId: string | null;
-  onEyedropperSelect: () => void;
-  onUpdate: (updates: Partial<Director3DNode>) => void;
-  onCreateImageNode: (images: string[], nodeX: number, nodeY: number) => void;
-}
-
-// 删除图标
-const DeleteIcon = ({ size = 14 }: { size?: number }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-  </svg>
-);
-
-// 人物图标
-const PersonIcon = ({ size = 14 }: { size?: number }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
-  </svg>
-);
-
-// 视角图标
-const ViewIcon = ({ size = 14 }: { size?: number }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
-  </svg>
-);
-
-function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onEyedropperSelect, onUpdate, onCreateImageNode }: Director3DNodeContentProps) {
-  const figurePalette = ['#ef4444', '#f59e0b', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899', '#84cc16', '#f97316', '#14b8a6'];
-  const buildFigureColor = (index: number) => figurePalette[index % figurePalette.length];
-  const buildFigureLabelSprite = (labelText: string, color: string) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 64;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = 'rgba(0,0,0,0.65)';
-    ctx.fillRect(6, 10, canvas.width - 12, canvas.height - 20);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(6, 10, canvas.width - 12, canvas.height - 20);
-    ctx.fillStyle = color;
-    ctx.font = 'bold 24px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(labelText, canvas.width / 2, canvas.height / 2);
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false });
-    const sprite = new THREE.Sprite(material);
-    sprite.scale.set(12, 3, 1);
-    sprite.position.set(0, 9.5, 0);
-    sprite.userData = { isFigureLabel: true };
-    return sprite;
-  };
-
-  const containerRef = useRef<HTMLDivElement>(null);
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
-  const sceneRef = useRef<THREE.Scene | null>(null);
-  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
-  const controlsRef = useRef<any>(null);
-  const transformControlsRef = useRef<TransformControls | null>(null);
-  const gridRef = useRef<THREE.GridHelper | null>(null);
-  const sphereRef = useRef<THREE.Mesh | null>(null);
-  const materialRef = useRef<THREE.MeshBasicMaterial | null>(null);
-  const textureRef = useRef<THREE.Texture | null>(null);
-  const groundRef = useRef<THREE.Mesh | null>(null);
-  const groundMaterialRef = useRef<THREE.MeshStandardMaterial | null>(null);
-  const groundTextureRef = useRef<THREE.Texture | null>(null);
-  const animationFrameRef = useRef<number>(0);
-  const currentImageRef = useRef<string>('');
-  const figuresRef = useRef<Map<string, THREE.Group>>(new Map());
-  const nodeRef = useRef(node);
-  nodeRef.current = node; // 保持 ref 同步
-  const [forceUpdateKey, setForceUpdateKey] = useState(0);
-  const [displayInfo, setDisplayInfo] = useState({ yaw: 0, pitch: 0, fov: 75 });
-  const [fullscreenCapture, setFullscreenCapture] = useState<{ type: 'single' | 'grid', base64: string } | null>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [selectedFigureId, setSelectedFigureId] = useState<string | null>(null);
-  const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'scale'>('translate');
-  const isDraggingFigureRef = useRef(false);
-  const draggingFigureIdRef = useRef<string | null>(null);
-
-  // 全屏参数
-  const [fsFullscreenParams, setFsFullscreenParams] = useState({ yaw: 0, pitch: 0, fov: 75 });
-
-  const backgroundImage = node.backgroundImage ?? '';
-  const figures = node.figures ?? [];
-
-  // 处理全屏截图
-  useEffect(() => {
-    if (fullscreenCapture && fullscreenCapture.base64) {
-      onCreateImageNode([fullscreenCapture.base64], node.x + node.width + 50, node.y);
-      setFullscreenCapture(null);
-    }
-  }, [fullscreenCapture, node.x, node.width, node.y, onCreateImageNode]);
-
-  // 初始化 Three.js 场景
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) {
-      console.log('3D导演台: 容器不存在');
-      return;
-    }
-
-    let isInitialized = false;
-    let cleanupFn: (() => void) | null = null;
-    let retryCount = 0;
-    const maxRetries = 20;
-
-    const initScene = () => {
-      const rect = container.getBoundingClientRect();
-      console.log('3D导演台初始化尝试:', retryCount, '尺寸:', rect.width, 'x', rect.height);
-
-      if (rect.width === 0 || rect.height === 0) {
-        if (retryCount < maxRetries) {
-          retryCount++;
-          requestAnimationFrame(initScene);
-        }
-        return;
-      }
-
-      if (isInitialized) {
-        console.log('3D导演台: 已初始化，跳过');
-        return;
-      }
-      isInitialized = true;
-
-      const width = rect.width;
-      const height = rect.height;
-
-      const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x333333);
-      sceneRef.current = scene;
-
-      const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 2000);
-      camera.position.set(0, 25, 50);
-      camera.lookAt(0, 0, 0);
-      cameraRef.current = camera;
-
-      const renderer = new THREE.WebGLRenderer({
-        antialias: true,
-        alpha: true,
-        preserveDrawingBuffer: true,
-        powerPreference: 'low-power',
-      });
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.2));
-      renderer.setSize(width, height);
-      renderer.outputColorSpace = THREE.SRGBColorSpace;
-      renderer.setClearColor(0x333333, 1);
-      container.appendChild(renderer.domElement);
-      rendererRef.current = renderer;
-
-      // 设置 canvas 可以接收键盘事件
-      renderer.domElement.tabIndex = 0;
-      renderer.domElement.style.outline = 'none';
-
-      console.log('3D导演台: canvas已添加', renderer.domElement.width, renderer.domElement.height);
-
-      const gridHelper = new THREE.GridHelper(500, 50, 0x666666, 0x444444);
-      gridHelper.position.y = 0;
-      (gridHelper.material as THREE.Material).opacity = 0.6;
-      (gridHelper.material as THREE.Material).transparent = true;
-      scene.add(gridHelper);
-      gridRef.current = gridHelper;
-
-      const axesHelper = new THREE.AxesHelper(50);
-      scene.add(axesHelper);
-
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-      scene.add(ambientLight);
-
-      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-      directionalLight.position.set(50, 100, 50);
-      scene.add(directionalLight);
-
-      // 720全景图背景（天空穹顶）
-      const skyGeometry = new THREE.SphereGeometry(900, 64, 40);
-      skyGeometry.scale(-1, 1, 1);
-      const skyMaterial = new THREE.MeshBasicMaterial({
-        color: 0x2f2f2f,
-        side: THREE.BackSide,
-      });
-      const skyMesh = new THREE.Mesh(skyGeometry, skyMaterial);
-      scene.add(skyMesh);
-      sphereRef.current = skyMesh;
-      materialRef.current = skyMaterial;
-
-      // 720全景图地面（使用全景图下半部分纹理）
-      const groundGeometry = new THREE.CircleGeometry(500, 72);
-      const groundMaterial = new THREE.MeshStandardMaterial({
-        color: 0x2b2b2b,
-        roughness: 0.95,
-        metalness: 0.02,
-      });
-      const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
-      groundMesh.rotation.x = -Math.PI / 2;
-      groundMesh.position.y = -0.05;
-      scene.add(groundMesh);
-      groundRef.current = groundMesh;
-      groundMaterialRef.current = groundMaterial;
-
-      const transformControls = new TransformControls(camera, renderer.domElement);
-      transformControls.setSize(1.6); // 操纵轴放大一倍
-      transformControlsRef.current = transformControls;
-      console.log('TransformControls已创建:', transformControls);
-
-      // 获取并添加 helper 到场景中
-      const helper = transformControls.getHelper();
-      if (helper) {
-        scene.add(helper);
-        console.log('TransformControls helper 已添加');
-      }
-
-      // 使用一个标志来避免循环更新
-      let isTransforming = false;
-
-      transformControls.addEventListener('change', () => {
-        console.log('TransformControls change 事件触发');
-        if (isTransforming) return;
-        if (transformControls.object) {
-          const figureId = (transformControls.object as THREE.Group).userData.figureId;
-          if (figureId) {
-            isTransforming = true;
-
-            // 直接更新 Three.js 中的角色位置
-            const worldX = transformControls.object.position.x;
-            const worldZ = transformControls.object.position.z;
-            const rotation = transformControls.object.rotation.y * 180 / Math.PI;
-            const scale = transformControls.object.scale.x;
-
-            // 使用 nodeRef.current 获取最新的 figures 数据
-            const newFigures = (nodeRef.current.figures || []).map((f: Figure3D) => f.id === figureId
-              ? { ...f, x: Math.max(0, Math.min(100, ((worldX + 500) / 1000) * 100)), y: Math.max(0, Math.min(100, ((worldZ + 500) / 1000) * 100)), rotation, scale }
-              : f);
-
-            console.log('TransformControls change, figures数量从', (nodeRef.current.figures || []).length, '变为', newFigures.length);
-
-            onUpdate({ figures: newFigures });
-
-            setTimeout(() => { isTransforming = false; }, 100);
-          }
-        }
-        renderer.render(scene, camera);
-      });
-
-      transformControls.addEventListener('mouseDown', () => {
-        isDragging = false;
-        isPanning = false;
-      });
-
-      let isDragging = false;
-      let isPanning = false;
-      let lastX = 0;
-      let lastY = 0;
-      let theta = 0.3;
-      let phi = 0.8;
-      let cameraDistance = 60;
-      let cameraTarget = new THREE.Vector3(0, 0, 0);
-
-      const updateCamera = () => {
-        const fov = nodeRef.current.fov ?? 60;
-        camera.fov = fov;
-        camera.updateProjectionMatrix();
-
-        const x = cameraDistance * Math.sin(phi) * Math.sin(theta);
-        const y = cameraDistance * Math.cos(phi);
-        const z = cameraDistance * Math.sin(phi) * Math.cos(theta);
-
-        camera.position.set(cameraTarget.x + x, cameraTarget.y + y, cameraTarget.z + z);
-        camera.lookAt(cameraTarget);
-      };
-
-      const raycaster = new THREE.Raycaster();
-      const mouse = new THREE.Vector2();
-
-      const getMousePosition = (e: MouseEvent) => {
-        const rect = renderer.domElement.getBoundingClientRect();
-        mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-        mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-      };
-
-      const onMouseDown = (e: MouseEvent) => {
-        console.log('onMouseDown 触发, button:', e.button, 'transformControls.dragging:', transformControls.dragging);
-
-        if (transformControls.dragging) return;
-
-        getMousePosition(e);
-        raycaster.setFromCamera(mouse, camera);
-
-        const allObjects: THREE.Object3D[] = [];
-        scene.traverse((obj) => {
-          if (obj.userData && (obj.userData.isFigure || obj.userData.isFigurePart)) {
-            allObjects.push(obj);
-          }
-        });
-
-        console.log('点击检测:', allObjects.length, '个对象');
-
-        const intersects = raycaster.intersectObjects(allObjects, true);
-        console.log('射线检测结果:', intersects.length);
-
-        if (intersects.length > 0) {
-          let target = intersects[0].object;
-          console.log('点击对象:', target.type, target.userData);
-          while (target.parent && !target.userData.figureId) {
-            target = target.parent;
-          }
-          console.log('找到角色ID:', target.userData.figureId);
-          if (target.userData.figureId) {
-            const figureId = target.userData.figureId;
-            const figureGroup = figuresRef.current.get(figureId);
-            console.log('角色Group:', figureGroup ? '存在' : '不存在');
-            if (figureGroup) {
-              // 在 attach 之前设置标志，防止 attach 触发的 change 事件
-              isTransforming = true;
-              setSelectedFigureId(figureId);
-              transformControls.attach(figureGroup);
-              // 选中后让 canvas 获取焦点，以便接收键盘事件
-              renderer.domElement.focus();
-              // attach 完成后，重置标志
-              setTimeout(() => { isTransforming = false; }, 100);
-              return;
-            }
-          }
-        }
-
-        setSelectedFigureId(null);
-        transformControls.detach();
-
-        if (e.button === 2 || e.button === 1) {
-          isPanning = true;
-        } else {
-          isDragging = true;
-        }
-        lastX = e.clientX;
-        lastY = e.clientY;
-      };
-
-      const onMouseMove = (e: MouseEvent) => {
-        const dx = e.clientX - lastX;
-        const dy = e.clientY - lastY;
-
-        if (transformControls.dragging) return;
-
-        if (isPanning) {
-          const panSpeed = 0.1;
-          cameraTarget.x -= dx * panSpeed * (cameraDistance / 100);
-          cameraTarget.z -= dy * panSpeed * (cameraDistance / 100);
-          updateCamera();
-        } else if (isDragging) {
-          theta -= dx * 0.01;
-          phi = Math.max(0.2, Math.min(Math.PI / 2 - 0.1, phi + dy * 0.01));
-          updateCamera();
-
-          const yawDeg = ((theta * 180 / Math.PI) % 360 + 360) % 360;
-          const pitchDeg = 90 - (phi * 180 / Math.PI);
-          setDisplayInfo({ yaw: yawDeg, pitch: pitchDeg, fov: nodeRef.current.fov ?? 60 });
-        }
-
-        lastX = e.clientX;
-        lastY = e.clientY;
-      };
-
-      const onMouseUp = () => {
-        isDragging = false;
-        isPanning = false;
-        isDraggingFigureRef.current = false;
-        draggingFigureIdRef.current = null;
-      };
-
-      const onWheel = (e: WheelEvent) => {
-        e.preventDefault();
-        cameraDistance = Math.max(10, Math.min(200, cameraDistance + e.deltaY * 0.05));
-        updateCamera();
-      };
-
-      const onContextMenu = (e: Event) => {
-        e.preventDefault();
-      };
-
-      // 键盘事件 - 快捷键切换变换模式
-      const onKeyDown = (e: KeyboardEvent) => {
-        if (!transformControls.object) return; // 只有选中物体时才响应
-        if (e.target instanceof HTMLInputElement) return; // 输入框中不响应
-
-        switch (e.key.toLowerCase()) {
-          case 'g':
-            transformControls.setMode('translate');
-            setTransformMode('translate');
-            break;
-          case 'r':
-            transformControls.setMode('rotate');
-            setTransformMode('rotate');
-            break;
-          case 's':
-            transformControls.setMode('scale');
-            setTransformMode('scale');
-            break;
-        }
-      };
-
-      renderer.domElement.addEventListener('mousedown', onMouseDown);
-      renderer.domElement.addEventListener('mousemove', onMouseMove);
-      renderer.domElement.addEventListener('mouseup', onMouseUp);
-      renderer.domElement.addEventListener('mouseleave', onMouseUp);
-      renderer.domElement.addEventListener('wheel', onWheel, { passive: false });
-      renderer.domElement.addEventListener('contextmenu', onContextMenu);
-      renderer.domElement.addEventListener('keydown', onKeyDown);
-
-      controlsRef.current = {
-        dispose: () => {
-          renderer.domElement.removeEventListener('mousedown', onMouseDown);
-          renderer.domElement.removeEventListener('mousemove', onMouseMove);
-          renderer.domElement.removeEventListener('mouseup', onMouseUp);
-          renderer.domElement.removeEventListener('mouseleave', onMouseUp);
-          renderer.domElement.removeEventListener('wheel', onWheel);
-          renderer.domElement.removeEventListener('contextmenu', onContextMenu);
-          renderer.domElement.removeEventListener('keydown', onKeyDown);
-          transformControls.dispose();
-        },
-        update: updateCamera,
-        setTheta: (t: number) => { theta = t; },
-        setPhi: (p: number) => { phi = p; }
-      };
-
-      let animLoopActive = false;
-      const animate = () => {
-        if (!animLoopActive) return;
-        animationFrameRef.current = requestAnimationFrame(animate);
-        if (transformControls.object) {
-          transformControls.update();
-        }
-        renderer.render(scene, camera);
-      };
-      const startAnim = () => {
-        if (animLoopActive) return;
-        animLoopActive = true;
-        animate();
-      };
-      const stopAnim = () => {
-        animLoopActive = false;
-        cancelAnimationFrame(animationFrameRef.current);
-      };
-      let inViewport = true;
-      const syncAnimState = () => {
-        if (document.hidden || !inViewport) stopAnim();
-        else startAnim();
-      };
-      document.addEventListener('visibilitychange', syncAnimState);
-      const io = new IntersectionObserver(
-        (entries) => {
-          inViewport = entries[0]?.isIntersecting ?? false;
-          syncAnimState();
-        },
-        { root: null, rootMargin: '100px', threshold: 0 }
-      );
-      io.observe(container);
-      syncAnimState();
-
-      updateCamera();
-
-      cleanupFn = () => {
-        io.disconnect();
-        document.removeEventListener('visibilitychange', syncAnimState);
-        stopAnim();
-        controlsRef.current?.dispose();
-        if (textureRef.current) {
-          textureRef.current.dispose();
-          textureRef.current = null;
-        }
-        if (groundTextureRef.current) {
-          groundTextureRef.current.dispose();
-          groundTextureRef.current = null;
-        }
-        if (materialRef.current) {
-          materialRef.current.dispose();
-          materialRef.current = null;
-        }
-        if (groundMaterialRef.current) {
-          groundMaterialRef.current.dispose();
-          groundMaterialRef.current = null;
-        }
-        if (sphereRef.current) {
-          const geom = sphereRef.current.geometry;
-          if (geom) geom.dispose();
-          sphereRef.current = null;
-        }
-        if (groundRef.current) {
-          const g = groundRef.current.geometry;
-          if (g) g.dispose();
-          groundRef.current = null;
-        }
-        if (sceneRef.current) { sceneRef.current.clear(); }
-        renderer.dispose();
-        renderer.forceContextLoss();
-        if (container.contains(renderer.domElement)) {
-          container.removeChild(renderer.domElement);
-        }
-      };
-    };
-
-    initScene();
-
-    return () => {
-      if (cleanupFn) {
-        cleanupFn();
-      }
-    };
-  }, []);
-
-  // 载入720全景图作为背景+地面纹理
-  useEffect(() => {
-    const scene = sceneRef.current;
-    const skyMaterial = materialRef.current;
-    const groundMaterial = groundMaterialRef.current;
-    if (!scene || !skyMaterial || !groundMaterial) return;
-
-    if (!backgroundImage) {
-      skyMaterial.map = null;
-      skyMaterial.color.setHex(0x2f2f2f);
-      skyMaterial.needsUpdate = true;
-      groundMaterial.map = null;
-      groundMaterial.color.setHex(0x2b2b2b);
-      groundMaterial.needsUpdate = true;
-      scene.background = new THREE.Color(0x333333);
-      return;
-    }
-
-    const img = new Image();
-    img.onload = () => {
-      if (textureRef.current) {
-        textureRef.current.dispose();
-      }
-      if (groundTextureRef.current) {
-        groundTextureRef.current.dispose();
-      }
-
-      const skyTexture = new THREE.Texture(img);
-      skyTexture.colorSpace = THREE.SRGBColorSpace;
-      skyTexture.minFilter = THREE.LinearFilter;
-      skyTexture.magFilter = THREE.LinearFilter;
-      skyTexture.generateMipmaps = false;
-      skyTexture.needsUpdate = true;
-      textureRef.current = skyTexture;
-
-      skyMaterial.map = skyTexture;
-      skyMaterial.color.setHex(0xffffff);
-      skyMaterial.needsUpdate = true;
-      scene.background = skyTexture;
-
-      // 地面纹理：取全景图下半部分映射到圆盘
-      const groundCanvas = document.createElement('canvas');
-      const groundSize = 1024;
-      groundCanvas.width = groundSize;
-      groundCanvas.height = groundSize;
-      const gctx = groundCanvas.getContext('2d');
-      if (gctx) {
-        gctx.drawImage(
-          img,
-          0, Math.floor(img.height / 2),
-          img.width, Math.ceil(img.height / 2),
-          0, 0,
-          groundSize, groundSize
-        );
-        const groundTexture = new THREE.CanvasTexture(groundCanvas);
-        groundTexture.colorSpace = THREE.SRGBColorSpace;
-        groundTexture.wrapS = THREE.RepeatWrapping;
-        groundTexture.wrapT = THREE.RepeatWrapping;
-        groundTexture.repeat.set(2, 2);
-        groundTexture.minFilter = THREE.LinearFilter;
-        groundTexture.magFilter = THREE.LinearFilter;
-        groundTexture.needsUpdate = true;
-        groundTextureRef.current = groundTexture;
-        groundMaterial.map = groundTexture;
-        groundMaterial.color.setHex(0xffffff);
-        groundMaterial.needsUpdate = true;
-      }
-    };
-    img.onerror = () => {
-      skyMaterial.map = null;
-      skyMaterial.color.setHex(0x2f2f2f);
-      skyMaterial.needsUpdate = true;
-      groundMaterial.map = null;
-      groundMaterial.color.setHex(0x2b2b2b);
-      groundMaterial.needsUpdate = true;
-      scene.background = new THREE.Color(0x333333);
-    };
-    img.src = `data:image/jpeg;base64,${backgroundImage}`;
-  }, [backgroundImage]);
-
-  // 节点尺寸变化时同步更新3D渲染尺寸，避免右侧/底部被裁切
-  useEffect(() => {
-    const container = containerRef.current;
-    const renderer = rendererRef.current;
-    const camera = cameraRef.current;
-    if (!container || !renderer || !camera) return;
-
-    const resizeRenderer = () => {
-      const width = Math.max(1, container.clientWidth);
-      const height = Math.max(1, container.clientHeight);
-      renderer.setSize(width, height);
-      camera.aspect = width / height;
-      camera.updateProjectionMatrix();
-      if (sceneRef.current) renderer.render(sceneRef.current, camera);
-    };
-
-    resizeRenderer();
-    const observer = new ResizeObserver(resizeRenderer);
-    observer.observe(container);
-    return () => observer.disconnect();
-  }, [node.width, node.height]);
-
-  // 同步TransformControls模式
-  useEffect(() => {
-    if (transformControlsRef.current) {
-      switch (transformMode) {
-        case 'translate':
-          transformControlsRef.current.setMode('translate');
-          break;
-        case 'rotate':
-          transformControlsRef.current.setMode('rotate');
-          break;
-        case 'scale':
-          transformControlsRef.current.setMode('scale');
-          break;
-      }
-    }
-  }, [transformMode]);
-
-  // 管理3D角色 - 在网格地面上
-  useEffect(() => {
-    const scene = sceneRef.current;
-    if (!scene) return;
-
-    const currentFigures = figures || [];
-    console.log('角色管理Effect运行, node.id:', node.id, 'figures数量:', currentFigures.length);
-
-    // 如果有角色被TransformControls控制但不在当前列表中，先分离
-    const tc = transformControlsRef.current;
-    if (tc?.object) {
-      const controlledId = (tc.object as THREE.Group).userData?.figureId;
-      if (controlledId && !currentFigures.find(f => f.id === controlledId)) {
-        console.log('分离被删除的角色:', controlledId);
-        tc.detach();
-      }
-    }
-
-    const currentFigureIds = new Set(currentFigures.map(f => f.id));
-    console.log('当前figures列表:', Array.from(currentFigureIds));
-
-    // 删除不存在的角色
-    figuresRef.current.forEach((group, id) => {
-      if (!currentFigureIds.has(id)) {
-        console.log('删除角色:', id, '原因: 不在currentFigures中');
-        scene.remove(group);
-        figuresRef.current.delete(id);
-      }
-    });
-
-    // 添加或更新角色
-    currentFigures.forEach((figure, index) => {
-      const figureColor = new THREE.Color(buildFigureColor(index));
-      const labelText = figure.name || `角色${index + 1}`;
-      if (figuresRef.current.has(figure.id)) {
-        // 检查是否正被TransformControls控制，如果是则跳过位置更新
-        const tc = transformControlsRef.current;
-        const controlledGroup = tc?.object as THREE.Group | undefined;
-        const isControlled = controlledGroup?.userData?.figureId === figure.id;
-
-        // 更新现有角色（但不在TransformControls控制时更新位置）
-        const group = figuresRef.current.get(figure.id)!;
-        if (!isControlled) {
-          group.rotation.y = (figure.rotation || 0) * Math.PI / 180;
-          group.scale.setScalar(figure.scale || 1);
-
-          // 将网格坐标转换为世界坐标
-          const worldX = (figure.x / 100) * 1000 - 500;
-          const worldZ = (figure.y / 100) * 1000 - 500;
-          group.position.set(worldX, 0, worldZ);
-        }
-
-        // 更新角色颜色、编号标签和选中状态
-        group.traverse((child) => {
-          if (child.userData?.isFigureLabel && child instanceof THREE.Sprite) {
-            const mat = child.material as THREE.SpriteMaterial;
-            mat.map?.dispose();
-            mat.dispose();
-            group.remove(child);
-            return;
-          }
-          if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial) {
-            (child.material as THREE.MeshStandardMaterial).color.copy(figureColor);
-            if (selectedFigureId === figure.id) {
-              (child.material as THREE.MeshStandardMaterial).emissive.setHex(0x444444);
-            } else {
-              (child.material as THREE.MeshStandardMaterial).emissive.setHex(0x000000);
-            }
-          }
-        });
-        const labelSprite = buildFigureLabelSprite(labelText, `#${figureColor.getHexString()}`);
-        if (labelSprite) group.add(labelSprite);
-      } else {
-        // 创建新角色 - 尺寸更大，有光照效果
-        const group = new THREE.Group();
-        group.userData = { figureId: figure.id, isFigure: true };
-
-        const material = new THREE.MeshStandardMaterial({
-          color: figureColor,
-          roughness: 0.5,
-          metalness: 0.3,
-          emissive: 0x000000
-        });
-
-        // 头部 - 放大约3倍
-        const headGeometry = new THREE.SphereGeometry(1.5, 24, 24);
-        const head = new THREE.Mesh(headGeometry, material.clone());
-        head.position.y = 6;
-        head.userData = { figureId: figure.id, isFigurePart: true };
-        group.add(head);
-
-        // 身体 - 放大约3倍
-        const bodyGeometry = new THREE.BoxGeometry(2.5, 4, 1.2);
-        const body = new THREE.Mesh(bodyGeometry, material.clone());
-        body.position.y = 3;
-        body.userData = { figureId: figure.id, isFigurePart: true };
-        group.add(body);
-
-        // 左手臂
-        const armGeometry = new THREE.BoxGeometry(0.6, 3, 0.6);
-        const leftArm = new THREE.Mesh(armGeometry, material.clone());
-        leftArm.position.set(-1.8, 3, 0);
-        leftArm.userData = { figureId: figure.id, isFigurePart: true };
-        group.add(leftArm);
-
-        // 右手臂
-        const rightArm = new THREE.Mesh(armGeometry, material.clone());
-        rightArm.position.set(1.8, 3, 0);
-        rightArm.userData = { figureId: figure.id, isFigurePart: true };
-        group.add(rightArm);
-
-        // 左腿
-        const legGeometry = new THREE.BoxGeometry(0.8, 3.5, 0.8);
-        const leftLeg = new THREE.Mesh(legGeometry, material.clone());
-        leftLeg.position.set(-0.6, 0.75, 0);
-        leftLeg.userData = { figureId: figure.id, isFigurePart: true };
-        group.add(leftLeg);
-
-        // 右腿
-        const rightLeg = new THREE.Mesh(legGeometry, material.clone());
-        rightLeg.position.set(0.6, 0.75, 0);
-        rightLeg.userData = { figureId: figure.id, isFigurePart: true };
-        group.add(rightLeg);
-
-        // 设置位置和旋转
-        group.rotation.y = (figure.rotation || 0) * Math.PI / 180;
-        group.scale.setScalar(figure.scale || 1);
-
-        const worldX = (figure.x / 100) * 1000 - 500;
-        const worldZ = (figure.y / 100) * 1000 - 500;
-        group.position.set(worldX, 0, worldZ);
-
-        const labelSprite = buildFigureLabelSprite(labelText, `#${figureColor.getHexString()}`);
-        if (labelSprite) group.add(labelSprite);
-
-        scene.add(group);
-        figuresRef.current.set(figure.id, group);
-      }
-    });
-  }, [figures, selectedFigureId]);
-
-  // 强制刷新渲染
-  const forceRefresh = () => {
-    setForceUpdateKey(k => k + 1);
-  };
-
-  // 重置相机
-  const resetCamera = () => {
-    if (controlsRef.current) {
-      controlsRef.current.setTheta(0.3);
-      controlsRef.current.setPhi(0.8);
-      controlsRef.current.update();
-    }
-    onUpdate({ yaw: 0, pitch: 0, fov: 60 });
-    setDisplayInfo({ yaw: 0, pitch: 0, fov: 60 });
-  };
-
-  // 截图功能
-  const captureCurrentView = () => {
-    if (!rendererRef.current || !sceneRef.current || !cameraRef.current) return;
-
-    const renderer = rendererRef.current;
-    const scene = sceneRef.current;
-    const camera = cameraRef.current;
-
-    renderer.render(scene, camera);
-    const dataURL = renderer.domElement.toDataURL('image/png');
-    const base64 = dataURL.split(',')[1];
-    setFullscreenCapture({ type: 'single', base64 });
-  };
-
-  // 全屏查看
-  const openFullscreen = () => {
-    if (!rendererRef.current || !sceneRef.current || !cameraRef.current) return;
-    setFsFullscreenParams({ yaw: displayInfo.yaw, pitch: displayInfo.pitch, fov: displayInfo.fov });
-    setIsFullscreen(true);
-  };
-
-  // 添加角色 - 直接创建3D模型
-  const addFigure = () => {
-    const newFigure: Figure3D = {
-      id: `figure-${Date.now()}`,
-      name: `角色${figures.length + 1}`,
-      image: '',
-      x: 50, // 场景中心
-      y: 50, // 场景中心
-      scale: 2, // 默认缩放2倍
-      rotation: 0
-    };
-    onUpdate({ figures: [...figures, newFigure] });
-  };
-
-  // 选择小人
-  const selectFigure = (figureId: string) => {
-    setSelectedFigureId(selectedFigureId === figureId ? null : figureId);
-  };
-
-  // 删除小人
-  const deleteFigure = (figureId: string) => {
-    const group = figuresRef.current.get(figureId);
-    if (group && sceneRef.current) {
-      sceneRef.current.remove(group);
-      figuresRef.current.delete(figureId);
-    }
-    onUpdate({ figures: figures.filter(f => f.id !== figureId) });
-    if (selectedFigureId === figureId) {
-      setSelectedFigureId(null);
-    }
-  };
-
-  // 更新小人属性
-  const updateFigure = (figureId: string, updates: Partial<Figure3D>) => {
-    onUpdate({ figures: figures.map(f => f.id === figureId ? { ...f, ...updates } : f) });
-  };
-
-  const selectedFigure = figures.find(f => f.id === selectedFigureId);
-
-  return (
-    <div className="flex flex-col h-full min-h-0 gap-2 p-3 overflow-y-auto">
-      {/* 3D场景预览 - 默认显示网格地面 */}
-      <div
-        ref={containerRef}
-        className="relative w-full aspect-video min-h-[220px] rounded-lg border border-[#333] overflow-hidden shrink-0 bg-[#3A3A3A]"
-        onWheel={(e) => e.stopPropagation()}
-        onPointerDown={(e) => e.stopPropagation()}
-      >
-        {/* 视角指示器 */}
-        <div className="absolute top-2 left-2 px-2 py-1 bg-black/60 rounded text-[10px] text-white backdrop-blur-sm z-30 pointer-events-none flex items-center gap-1">
-          <ViewIcon size={10} /> 视角: {displayInfo.yaw.toFixed(0)}° / {displayInfo.pitch.toFixed(0)}°
-        </div>
-
-        {/* 操作提示 */}
-        <div className="absolute top-2 right-2 px-2 py-1 bg-black/60 rounded text-[10px] text-gray-300 backdrop-blur-sm z-30 pointer-events-none flex flex-col items-end gap-1">
-          <span>左键旋转 | 右键平移 | 滚轮缩放</span>
-          {selectedFigureId && (
-            <span className="text-yellow-400">G移动 | R旋转 | S缩放</span>
-          )}
-          {/* 变换模式切换 */}
-          <div className="flex gap-1">
-            <button
-              onPointerDown={(e) => { e.stopPropagation(); setTransformMode('translate'); }}
-              className={`px-1.5 py-0.5 rounded text-[9px] ${transformMode === 'translate' ? 'bg-pink-600 text-white' : 'bg-[#444] text-gray-300 hover:bg-[#555]'}`}
-              title="移动模式"
-            >
-              移动
-            </button>
-            <button
-              onPointerDown={(e) => { e.stopPropagation(); setTransformMode('rotate'); }}
-              className={`px-1.5 py-0.5 rounded text-[9px] ${transformMode === 'rotate' ? 'bg-pink-600 text-white' : 'bg-[#444] text-gray-300 hover:bg-[#555]'}`}
-              title="旋转模式"
-            >
-              旋转
-            </button>
-            <button
-              onPointerDown={(e) => { e.stopPropagation(); setTransformMode('scale'); }}
-              className={`px-1.5 py-0.5 rounded text-[9px] ${transformMode === 'scale' ? 'bg-pink-600 text-white' : 'bg-[#444] text-gray-300 hover:bg-[#555]'}`}
-              title="缩放模式"
-            >
-              缩放
-            </button>
-          </div>
-        </div>
-
-        {/* 全屏按钮 */}
-        <button
-          onPointerDown={(e) => { e.stopPropagation(); openFullscreen(); }}
-          className="absolute bottom-2 right-2 p-1.5 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm z-30 cursor-pointer"
-          title="全屏查看"
-        >
-          <FullscreenIcon size={14} />
-        </button>
-
-        {/* 角色数量提示 */}
-        {figures.length > 0 && (
-          <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/60 rounded text-[10px] text-pink-300 backdrop-blur-sm z-30 pointer-events-none flex items-center gap-1">
-            <PersonIcon size={10} /> {figures.length}个角色 | 点击选中后用轴操作
-          </div>
-        )}
-      </div>
-
-      {/* 控制按钮 */}
-      <div className="flex gap-1">
-        <button
-          onPointerDown={(e) => { e.stopPropagation(); onEyedropperSelect(); }}
-          className={`py-1 px-2 rounded text-[10px] flex items-center gap-1 ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600 text-white' : 'bg-cyan-700 hover:bg-cyan-600 text-white'}`}
-          title={eyedropperTargetNodeId === node.id ? "取消吸取" : "吸取背景图片"}
-        >
-          <EyedropperIcon size={10} /> 吸管
-        </button>
-        <button
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = 'image/*';
-            input.onchange = (e) => {
-              const file = (e.target as HTMLInputElement).files?.[0];
-              if (file) {
-                const reader = new FileReader();
-                reader.onload = (ev) => {
-                  const base64 = (ev.target?.result as string).split(',')[1];
-                  onUpdate({ backgroundImage: base64 });
-                };
-                reader.readAsDataURL(file);
-              }
-            };
-            input.click();
-          }}
-          className="flex-1 py-1 px-2 rounded text-[10px] bg-[#333] hover:bg-[#444] text-gray-300 flex items-center justify-center gap-1"
-        >
-          <ImageIcon size={10} /> 导入背景
-        </button>
-        <button
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={resetCamera}
-          className="py-1 px-2 rounded text-[10px] bg-[#333] hover:bg-[#444] text-gray-300"
-          title="重置视角"
-        >
-          重置
-        </button>
-        <button
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={forceRefresh}
-          className="py-1 px-2 rounded text-[10px] bg-[#333] hover:bg-[#444] text-gray-300"
-          title="刷新渲染"
-        >
-          刷新
-        </button>
-      </div>
-
-      {/* 小人管理区 */}
-      <div className="border border-[#333] rounded-lg p-2 bg-[#1a1a1a]">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs text-gray-300 font-medium flex items-center gap-1">
-            <PersonIcon size={12} /> 角色管理 ({figures.length})
-          </span>
-          <button
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={addFigure}
-            className="py-1 px-2 rounded text-[10px] bg-pink-600 hover:bg-pink-500 text-white flex items-center gap-1"
-          >
-            <PlusIcon size={10} /> 添加角色
-          </button>
-        </div>
-
-        {/* 角色列表 */}
-        {figures.length > 0 ? (
-          <div className="space-y-1 max-h-32 overflow-y-auto">
-            {figures.map(figure => (
-              <div
-                key={figure.id}
-                className={`flex items-center gap-2 p-1.5 rounded cursor-pointer ${selectedFigureId === figure.id ? 'bg-pink-600/30 border border-pink-500/50' : 'bg-[#252525] hover:bg-[#333]'}`}
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                  selectFigure(figure.id);
-                }}
-              >
-                <div className="w-8 h-8 rounded border border-[#444] bg-gradient-to-br from-pink-500 to-purple-500 flex items-center justify-center">
-                  <PersonIcon size={16} className="text-white" />
-                </div>
-                <span className="flex-1 text-[10px] text-gray-300 truncate">{figure.name}</span>
-
-                {/* 选中角色的控制按钮 */}
-                {selectedFigureId === figure.id && (
-                  <div className="flex items-center gap-1">
-                    <button
-                      onPointerDown={(e) => {
-                        e.stopPropagation();
-                        updateFigure(figure.id, { scale: Math.max(0.2, (figure.scale || 1) - 0.1) });
-                      }}
-                      className="p-1 rounded bg-[#444] hover:bg-[#555] text-white text-[10px]"
-                      title="缩小"
-                    >
-                      -
-                    </button>
-                    <button
-                      onPointerDown={(e) => {
-                        e.stopPropagation();
-                        updateFigure(figure.id, { scale: Math.min(3, (figure.scale || 1) + 0.1) });
-                      }}
-                      className="p-1 rounded bg-[#444] hover:bg-[#555] text-white text-[10px]"
-                      title="放大"
-                    >
-                      +
-                    </button>
-                    <button
-                      onPointerDown={(e) => {
-                        e.stopPropagation();
-                        updateFigure(figure.id, { rotation: ((figure.rotation || 0) - 15) % 360 });
-                      }}
-                      className="p-1 rounded bg-[#444] hover:bg-[#555] text-white text-[10px]"
-                      title="左旋转15度"
-                    >
-                      ↺
-                    </button>
-                    <button
-                      onPointerDown={(e) => {
-                        e.stopPropagation();
-                        updateFigure(figure.id, { rotation: ((figure.rotation || 0) + 15) % 360 });
-                      }}
-                      className="p-1 rounded bg-[#444] hover:bg-[#555] text-white text-[10px]"
-                      title="右旋转15度"
-                    >
-                      ↻
-                    </button>
-                    <button
-                      onPointerDown={(e) => {
-                        e.stopPropagation();
-                        deleteFigure(figure.id);
-                      }}
-                      className="p-1.5 rounded bg-red-600/50 hover:bg-red-500 text-white"
-                      title="删除角色"
-                    >
-                      <DeleteIcon size={14} />
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="text-[10px] text-gray-500 text-center py-2">
-            暂无角色，点击"添加角色"创建3D人物
-          </div>
-        )}
-
-        {/* 选中角色的详细信息 */}
-        {selectedFigure && (
-          <div className="mt-2 pt-2 border-t border-[#333] space-y-1">
-            <div className="flex items-center gap-2">
-              <label className="text-[10px] text-gray-400 w-12">名称:</label>
-              <input
-                type="text"
-                value={selectedFigure.name}
-                onPointerDown={(e) => e.stopPropagation()}
-                onChange={(e) => updateFigure(selectedFigure.id, { name: e.target.value })}
-                className="flex-1 bg-[#252525] text-gray-200 text-[10px] px-2 py-1 rounded border border-[#333] focus:outline-none focus:border-pink-500"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="text-[10px] text-gray-400 w-12">缩放:</label>
-              <input
-                type="range"
-                min="0.2"
-                max="3"
-                step="0.1"
-                value={selectedFigure.scale}
-                onPointerDown={(e) => e.stopPropagation()}
-                onChange={(e) => updateFigure(selectedFigure.id, { scale: parseFloat(e.target.value) })}
-                className="flex-1 accent-pink-500"
-              />
-              <span className="text-[10px] text-gray-400 w-10 text-right">{selectedFigure.scale.toFixed(1)}x</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="text-[10px] text-gray-400 w-12">旋转:</label>
-              <input
-                type="range"
-                min="-180"
-                max="180"
-                step="1"
-                value={selectedFigure.rotation}
-                onPointerDown={(e) => e.stopPropagation()}
-                onChange={(e) => updateFigure(selectedFigure.id, { rotation: parseInt(e.target.value) })}
-                className="flex-1 accent-pink-500"
-              />
-              <span className="text-[10px] text-gray-400 w-10 text-right">{selectedFigure.rotation}°</span>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* 截图功能 */}
-      <div className="flex gap-1">
-        <button
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={captureCurrentView}
-          className="flex-1 py-1 px-2 rounded text-[10px] bg-green-700 hover:bg-green-600 text-white"
-        >
-          截图
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ==================== 宫格拆分节点组件 ====================
-interface GridSplitNodeContentProps {
-  node: GridSplitNode;
-  nodes: CanvasNode[];
-  edges: Edge[];
-  eyedropperTargetNodeId: string | null;
-  onEyedropperSelect: () => void;
-  onUpdate: (updates: Partial<GridSplitNode>) => void;
-  onCreateImageNode: (images: string[], nodeX: number, nodeY: number) => void;
-}
-
-function GridSplitNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEyedropperSelect, onUpdate, onCreateImageNode }: GridSplitNodeContentProps) {
-  const [isProcessing, setIsProcessing] = useState(false);
-  const inputImage = node.inputImage ?? '';
-  const outputImages = node.outputImages ?? [];
-  const gridCount = node.gridCount ?? 4;
-  const frameAspectRatio = node.aspectRatio === '9:16' ? '9:16' : '16:9';
-  const previewRef = useRef<HTMLDivElement>(null);
-
-  // 获取连接的图片（根据连线关系）
-  const connectedImage = (() => {
-    // 找到连接到当前节点的边
-    const incomingEdges = edges.filter(e => e.targetId === node.id);
-    if (incomingEdges.length === 0) return undefined;
-
-    // 获取源节点
-    const sourceIds = incomingEdges.map(e => e.sourceId);
-    const sourceNodes = nodes.filter(n => sourceIds.includes(n.id));
-
-    // 从源节点取当前展示的一张图（与参考槽 / 生成逻辑一致）
-    for (const n of sourceNodes) {
-      const imgs = n.images;
-      if (imgs && imgs.length > 0) {
-        const idx = Math.min(Math.max(0, n.currentImageIndex ?? 0), imgs.length - 1);
-        return imgs[idx];
-      }
-    }
-    return undefined;
-  })();
-
-  const displayImage = inputImage || connectedImage;
-
-  // 导入图片
-  const handleImport = () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.onchange = (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (file) {
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          const base64 = (ev.target?.result as string).split(',')[1];
-          onUpdate({ inputImage: base64 });
-        };
-        reader.readAsDataURL(file);
-      }
-    };
-    input.click();
-  };
-
-  // 执行拆分
-  const handleSplit = async () => {
-    const sourceImage = displayImage;
-    if (!sourceImage) {
-      alert('请先导入或连接一张图片');
-      return;
-    }
-
-    setIsProcessing(true);
-
-    try {
-      const img = new Image();
-      await new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve();
-        img.onerror = reject;
-        img.src = `data:image/jpeg;base64,${sourceImage}`;
-      });
-
-      // 先按目标画幅统一裁一次，再切宫格，避免每格二次裁切导致错位
-      const cols = gridCount <= 4 ? 2 : 3;
-      const rows = gridCount <= 4 ? 2 : (gridCount === 6 ? 2 : 3);
-      const targetRatio = frameAspectRatio === '9:16' ? 9 / 16 : 16 / 9;
-      const sourceRatio = img.width / img.height;
-      let frameWidth = img.width;
-      let frameHeight = img.height;
-      let frameX = 0;
-      let frameY = 0;
-
-      if (sourceRatio > targetRatio) {
-        frameWidth = img.height * targetRatio;
-        frameX = (img.width - frameWidth) / 2;
-      } else if (sourceRatio < targetRatio) {
-        frameHeight = img.width / targetRatio;
-        frameY = (img.height - frameHeight) / 2;
-      }
-
-      const cellWidth = frameWidth / cols;
-      const cellHeight = frameHeight / rows;
-
-      const results: string[] = [];
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d')!;
-
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          const sourceX = frameX + c * cellWidth;
-          const sourceY = frameY + r * cellHeight;
-          canvas.width = Math.max(1, Math.round(cellWidth));
-          canvas.height = Math.max(1, Math.round(cellHeight));
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(
-            img,
-            sourceX, sourceY,
-            cellWidth, cellHeight,
-            0, 0,
-            canvas.width, canvas.height
-          );
-          results.push(canvas.toDataURL('image/jpeg', 0.95).split(',')[1]);
-        }
-      }
-
-      onUpdate({ outputImages: results });
-    } catch (error) {
-      console.error('拆分失败:', error);
-      alert('拆分失败');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  // 导出结果
-  const handleExport = () => {
-    if (outputImages.length > 0) {
-      onCreateImageNode(outputImages, node.x + node.width + 50, node.y);
-    }
-  };
-
-  // 计算宫格框样式
-  const cols = gridCount <= 4 ? 2 : 3;
-  const rows = gridCount <= 4 ? 2 : (gridCount === 6 ? 2 : 3);
-
-  return (
-    <div className="flex flex-col h-full min-h-0 gap-1 p-2 overflow-y-auto">
-      {/* 图片预览带宫格框：随节点窗口高度伸缩 */}
-      <div ref={previewRef} className="relative w-full flex-1 min-h-[240px] min-w-0 rounded-lg border border-[#333] bg-[#3A3A3A] overflow-hidden">
-        <div className="absolute inset-0 flex items-center justify-center p-1 min-h-0">
-          <div
-            className="relative rounded border border-[#333] bg-[#3A3A3A] overflow-hidden mx-auto"
-            style={{
-              aspectRatio: frameAspectRatio === '9:16' ? '9 / 16' : '16 / 9',
-              height: '100%',
-              maxWidth: '100%',
-            }}
-          >
-            {displayImage ? (
-              <>
-                <OptimizedImage
-                  base64={displayImage}
-                  maxSide={1440}
-                  quality={0.62}
-                  className="w-full h-full object-cover"
-                  alt="待拆分图片"
-                />
-                {/* 宫格分割线 */}
-                <div
-                  className="absolute inset-0 pointer-events-none"
-                  style={{
-                    backgroundImage: `
-                      linear-gradient(to right, rgba(0,255,255,0.8) 1px, transparent 1px),
-                      linear-gradient(to bottom, rgba(0,255,255,0.8) 1px, transparent 1px)
-                    `,
-                    backgroundSize: `${100 / cols}% ${100 / rows}%`,
-                  }}
-                />
-                {/* 宫格编号 */}
-                {Array.from({ length: gridCount }).map((_, idx) => {
-                  const c = idx % cols;
-                  const r = Math.floor(idx / cols);
-                  return (
-                    <div
-                      key={idx}
-                      className="absolute flex items-center justify-center text-xs font-bold text-cyan-400 bg-black/50 rounded"
-                      style={{
-                        left: `${(c * 100) / cols}%`,
-                        top: `${(r * 100) / rows}%`,
-                        width: `${100 / cols}%`,
-                        height: `${100 / rows}%`,
-                      }}
-                    >
-                      {idx + 1}
-                    </div>
-                  );
-                })}
-              </>
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-gray-500 text-xs">
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* 宫格选择 */}
-      <div className="flex gap-1">
-        {([4, 6, 9] as const).map(count => (
-          <button
-            key={count}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => onUpdate({ gridCount: count })}
-            className={`flex-1 py-1 px-2 rounded text-[10px] ${
-              gridCount === count ? 'bg-teal-600 text-white' : 'bg-[#333] hover:bg-[#444] text-gray-300'
-            }`}
-          >
-            {count}宫格
-          </button>
-        ))}
-      </div>
-
-      {/* 画幅选择 */}
-      <div className="flex gap-1">
-        {(['16:9', '9:16'] as const).map((ratio) => (
-          <button
-            key={ratio}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => onUpdate({ aspectRatio: ratio })}
-            className={`flex-1 py-1 px-2 rounded text-[10px] ${
-              frameAspectRatio === ratio ? 'bg-indigo-600 text-white' : 'bg-[#333] hover:bg-[#444] text-gray-300'
-            }`}
-          >
-            {ratio}
-          </button>
-        ))}
-      </div>
-
-      {/* 操作按钮 */}
-      <div className="flex gap-1">
-        <button
-          onPointerDown={(e) => { e.stopPropagation(); onEyedropperSelect(); }}
-          className={`py-1 px-2 rounded text-[10px] flex items-center gap-1 ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600 text-white' : 'bg-cyan-700 hover:bg-cyan-600 text-white'}`}
-          title={eyedropperTargetNodeId === node.id ? "取消吸取" : "吸取图片"}
-        >
-          <EyedropperIcon size={15} /> 吸管
-        </button>
-        <button
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={handleImport}
-          className="flex-1 py-1 px-2 rounded text-[10px] bg-[#333] hover:bg-[#444] text-gray-300"
-        >
-          导入
-        </button>
-        <button
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={handleSplit}
-          disabled={isProcessing || (!inputImage && !connectedImage)}
-          className="flex-1 py-1 px-2 rounded text-[10px] bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-50"
-        >
-          {isProcessing ? '处理中...' : '拆分'}
-        </button>
-      </div>
-
-      {/* 拆分结果预览 */}
-      {outputImages.length > 0 && (
-        <div className="flex gap-1">
-          {outputImages.slice(0, 4).map((img, idx) => (
-            <OptimizedImage
-              key={idx}
-              base64={img}
-              maxSide={128}
-              quality={0.72}
-              className="w-8 h-8 object-cover rounded border border-[#444]"
-              alt={`格${idx + 1}`}
-            />
-          ))}
-          <button
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={handleExport}
-            className="px-2 py-1 rounded text-[10px] bg-green-600 hover:bg-green-500 text-white"
-            title="导出到节点"
-          >
-            导出
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ==================== 宫格合并节点组件 ====================
-interface GridMergeNodeContentProps {
-  node: GridMergeNode;
-  nodes: CanvasNode[];
-  edges: Edge[];
-  eyedropperTargetNodeId: string | null;
-  onEyedropperSelect: () => void;
-  onUpdate: (updates: Partial<GridMergeNode>) => void;
-  onCreateImageNode: (image: string, nodeX: number, nodeY: number) => void;
-}
-
-function GridMergeNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEyedropperSelect, onUpdate, onCreateImageNode }: GridMergeNodeContentProps) {
-  const [isProcessing, setIsProcessing] = useState(false);
-  const inputImages = node.inputImages ?? [];
-  const outputImage = node.outputImage ?? '';
-  const gridCount = node.gridCount ?? 4;
-  const frameAspectRatio = node.aspectRatio === '9:16' ? '9:16' : '16:9';
-  const previewRef = useRef<HTMLDivElement>(null);
-
-  // 计算行列数
-  const cols = gridCount <= 4 ? 2 : 3;
-  const rows = gridCount <= 4 ? 2 : (gridCount === 6 ? 2 : 3);
-
-  // 获取连接的图片（根据连线关系）
-  const connectedImages = (() => {
-    // 找到连接到当前节点的边
-    const incomingEdges = edges.filter(e => e.targetId === node.id);
-    if (incomingEdges.length === 0) return [];
-
-    // 获取源节点
-    const sourceIds = incomingEdges.map(e => e.sourceId);
-    const sourceNodes = nodes.filter(n => sourceIds.includes(n.id));
-
-    // 从源节点获取所有图片
-    return sourceNodes.flatMap((n) => {
-      const imgs = n.images ?? [];
-      if (!imgs.length) return [];
-      const idx = Math.min(Math.max(0, n.currentImageIndex ?? 0), imgs.length - 1);
-      const b = imgs[idx];
-      return b ? [b] : [];
-    });
-  })();
-
-  // 导入多张图片
-  const handleImport = () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.multiple = true;
-    input.onchange = (e) => {
-      const files = (e.target as HTMLInputElement).files;
-      if (!files || files.length === 0) return;
-
-      let loadedCount = 0;
-      const results: string[] = [];
-
-      Array.from(files).forEach((file, idx) => {
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          results[idx] = (ev.target?.result as string).split(',')[1];
-          loadedCount++;
-          if (loadedCount === files.length) {
-            onUpdate({ inputImages: results });
-          }
-        };
-        reader.readAsDataURL(file);
-      });
-    };
-    input.click();
-  };
-
-  // 执行合并
-  const handleMerge = async () => {
-    // 合并使用 inputImages 和 connectedImages
-    const allImages = [...inputImages, ...connectedImages].slice(0, gridCount);
-    if (allImages.length < gridCount) {
-      alert(`请先导入或连接 ${gridCount} 张图片`);
-      return;
-    }
-
-    setIsProcessing(true);
-
-    try {
-      const loadedImages: HTMLImageElement[] = [];
-      for (const base64 of allImages) {
-        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-          const img = new Image();
-          img.onload = () => resolve(img);
-          img.onerror = reject;
-          img.src = `data:image/jpeg;base64,${base64}`;
-        });
-        loadedImages.push(img);
-      }
-
-      // 计算行列数
-      const cols = gridCount <= 4 ? 2 : 3;
-      const rows = gridCount <= 4 ? 2 : (gridCount === 6 ? 2 : 3);
-
-      // 使用第一张图片的尺寸
-      const cellWidth = loadedImages[0].width;
-      const cellHeight = loadedImages[0].height;
-      const canvas = document.createElement('canvas');
-      canvas.width = cellWidth * cols;
-      canvas.height = cellHeight * rows;
-      const ctx = canvas.getContext('2d')!;
-
-      let idx = 0;
-      for (let r = 0; r < rows && idx < gridCount; r++) {
-        for (let c = 0; c < cols && idx < gridCount; c++) {
-          ctx.drawImage(loadedImages[idx], c * cellWidth, r * cellHeight, cellWidth, cellHeight);
-          idx++;
-        }
-      }
-
-      const targetRatio = frameAspectRatio === '9:16' ? 9 / 16 : 16 / 9;
-      let cropWidth = canvas.width;
-      let cropHeight = canvas.height;
-      if (cropWidth / cropHeight > targetRatio) {
-        cropWidth = cropHeight * targetRatio;
-      } else {
-        cropHeight = cropWidth / targetRatio;
-      }
-      const cropX = (canvas.width - cropWidth) / 2;
-      const cropY = (canvas.height - cropHeight) / 2;
-      const outputCanvas = document.createElement('canvas');
-      outputCanvas.width = Math.max(1, Math.round(cropWidth));
-      outputCanvas.height = Math.max(1, Math.round(cropHeight));
-      const outputCtx = outputCanvas.getContext('2d')!;
-      outputCtx.drawImage(canvas, cropX, cropY, cropWidth, cropHeight, 0, 0, outputCanvas.width, outputCanvas.height);
-      const result = outputCanvas.toDataURL('image/jpeg', 0.95).split(',')[1];
-      onUpdate({ outputImage: result });
-    } catch (error) {
-      console.error('合并失败:', error);
-      alert('合并失败');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  // 导出结果
-  const handleExport = () => {
-    if (outputImage) {
-      onCreateImageNode(outputImage, node.x + node.width + 50, node.y);
-    }
-  };
-
-  return (
-    <div className="flex flex-col h-full min-h-0 gap-1 p-2 overflow-y-auto">
-      {/* 图片预览带宫格框：随节点窗口高度伸缩 */}
-      <div ref={previewRef} className="relative w-full flex-1 min-h-[240px] min-w-0 rounded-lg border border-[#333] bg-[#3A3A3A] overflow-hidden">
-        <div className="absolute inset-0 flex items-center justify-center p-1 min-h-0">
-          <div
-            className="relative rounded border border-[#333] bg-[#3A3A3A] overflow-hidden mx-auto"
-            style={{
-              aspectRatio: frameAspectRatio === '9:16' ? '9 / 16' : '16 / 9',
-              height: '100%',
-              maxWidth: '100%',
-            }}
-          >
-            {(inputImages.length > 0 || connectedImages.length > 0) ? (
-              <>
-                {/* 合并显示 inputImages 和 connectedImages */}
-                <div
-                  className="absolute inset-0 grid gap-px p-1"
-                  style={{
-                    gridTemplateColumns: `repeat(${cols}, 1fr)`,
-                    gridTemplateRows: `repeat(${rows}, 1fr)`,
-                  }}
-                >
-                  {Array.from({ length: gridCount }).map((_, idx) => {
-                    const img = inputImages[idx] || connectedImages[idx];
-                    return (
-                      <div
-                        key={idx}
-                        className="relative bg-[#1a1a1a] rounded overflow-hidden flex items-center justify-center"
-                      >
-                        {img ? (
-                          <>
-                            <OptimizedImage
-                              base64={img}
-                              maxSide={1440}
-                              quality={0.62}
-                              className="w-full h-full object-cover"
-                              alt={`格${idx + 1}`}
-                            />
-                            <div className="absolute top-0.5 left-0.5 text-[8px] font-bold text-teal-400 bg-black/60 px-1 rounded">
-                              {idx + 1}
-                            </div>
-                          </>
-                        ) : (
-                          <span className="text-gray-600 text-[10px]">{idx + 1}</span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </>
-            ) : (
-              <>
-                {/* 空状态显示宫格框 */}
-                <div
-                  className="absolute inset-0 grid gap-px p-1"
-                  style={{
-                    gridTemplateColumns: `repeat(${cols}, 1fr)`,
-                    gridTemplateRows: `repeat(${rows}, 1fr)`,
-                  }}
-                >
-                  {Array.from({ length: gridCount }).map((_, idx) => (
-                    <div
-                      key={idx}
-                      className="border border-dashed border-[#444] rounded flex items-center justify-center"
-                    >
-                      <span className="text-gray-600 text-xs">{idx + 1}</span>
-                    </div>
-                  ))}
-                </div>
-                <div className="absolute inset-0 flex items-center justify-center text-gray-500 text-xs">
-                  </div>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* 宫格选择 */}
-      <div className="flex gap-1">
-        {([4, 6, 9] as const).map(count => (
-          <button
-            key={count}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => onUpdate({ gridCount: count })}
-            className={`flex-1 py-1 px-2 rounded text-[10px] ${
-              gridCount === count ? 'bg-teal-600 text-white' : 'bg-[#333] hover:bg-[#444] text-gray-300'
-            }`}
-          >
-            {count}宫格
-          </button>
-        ))}
-      </div>
-
-      {/* 画幅选择 */}
-      <div className="flex gap-1">
-        {(['16:9', '9:16'] as const).map((ratio) => (
-          <button
-            key={ratio}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => onUpdate({ aspectRatio: ratio })}
-            className={`flex-1 py-1 px-2 rounded text-[10px] ${
-              frameAspectRatio === ratio ? 'bg-indigo-600 text-white' : 'bg-[#333] hover:bg-[#444] text-gray-300'
-            }`}
-          >
-            {ratio}
-          </button>
-        ))}
-      </div>
-
-      {/* 操作按钮 */}
-      <div className="flex gap-1">
-        <button
-          onPointerDown={(e) => { e.stopPropagation(); onEyedropperSelect(); }}
-          className={`py-1 px-2 rounded text-[10px] flex items-center gap-1 ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600 text-white' : 'bg-cyan-700 hover:bg-cyan-600 text-white'}`}
-          title={eyedropperTargetNodeId === node.id ? "取消吸取" : "吸取图片"}
-        >
-          <EyedropperIcon size={15} /> 吸管
-        </button>
-        <button
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={handleImport}
-          className="flex-1 py-1 px-2 rounded text-[10px] bg-[#333] hover:bg-[#444] text-gray-300"
-        >
-          导入
-        </button>
-        <button
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={handleMerge}
-          disabled={isProcessing || (inputImages.length + connectedImages.length) < gridCount}
-          className="flex-1 py-1 px-2 rounded text-[10px] bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-50"
-        >
-          {isProcessing ? '处理中...' : '合并'}
-        </button>
-      </div>
-
-      {/* 合并结果预览 */}
-      {outputImage && (
-        <div className="flex items-center gap-2">
-          <OptimizedImage
-            base64={outputImage}
-            maxSide={120}
-            quality={0.56}
-            className="w-16 h-16 object-cover rounded border border-[#444]"
-            alt="合并结果"
-          />
-          <button
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={handleExport}
-            className="px-2 py-1 rounded text-[10px] bg-green-600 hover:bg-green-500 text-white"
-            title="导出到节点"
-          >
-            导出
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** 在提示词中插入 @R 序号，引用汇入节点的参考槽位 */
-function RefPickBar({
-  slots,
-  disabled,
-  onInsert,
-  uiScale = 1,
-}: {
-  slots: IncomingRefSlot[];
-  disabled?: boolean;
-  onInsert: (token: string) => void;
-  /** 仅 AI 对话节点传 CHAT_PANEL_FONT_SCALE；其它节点默认 1 */
-  uiScale?: number;
-}) {
-  if (!slots.length) return null;
-  const sp = (px: number) => Math.round(px * uiScale);
-  return (
-    <div className="flex flex-wrap items-center gap-2 px-1 pt-1.5 pb-1" style={{ fontSize: sp(11) }}>
-      <span className="text-gray-500 shrink-0 font-medium">引用参考:</span>
-      {slots.map((s) => (
-        <button
-          key={`${s.edgeId}-r${s.n}-${s.kind}`}
-          type="button"
-          disabled={disabled}
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            onInsert(`@R${s.n}`);
-          }}
-          className="rounded-lg border border-cyan-800/60 bg-cyan-950/40 px-2 py-1 font-semibold text-cyan-200 hover:bg-cyan-900/50 disabled:cursor-not-allowed disabled:opacity-35 text-xs"
-          title={s.label}
-        >
-          @R{s.n}
-        </button>
-      ))}
-      <span className="text-gray-600 leading-snug">点击插入 / 键盘输入 @R</span>
-    </div>
-  );
-}
-
-// ==================== 对话节点组件 ====================
-/** AI 对话节点界面文字相对原设计的倍数（与「字号」存盘值相乘；与节点内 1.95×1.5 对齐） */
-const CHAT_PANEL_FONT_SCALE = 2.925;
-/** 新建 / 重置时 AI 对话节点默认高度（与下方 chatInputHeight 比例公式一致） */
-const CHAT_NODE_DEFAULT_PIXEL_HEIGHT = 1840;
-const CHAT_FONT_LS_KEY = 'wxcanvas-chat-font-px';
-function clampChatFontPx(n: number): number {
-  if (!Number.isFinite(n)) return 14;
-  return Math.min(22, Math.max(11, Math.round(n)));
-}
-function readStoredChatFontPx(): number {
-  if (typeof window === 'undefined') return 14;
-  try {
-    const raw = localStorage.getItem(CHAT_FONT_LS_KEY);
-    if (raw == null || raw === '') return 14;
-    return clampChatFontPx(parseInt(raw, 10));
-  } catch {
-    return 14;
-  }
-}
-
-/** 即梦 CCC 资产分镜工程提示词（对话节点一键填入） */
-const CHAT_PROMPT_JIMENG_CCC_ASSETS = `【角色定位】
-你是即梦AI视频生成工具的竖屏/横屏短剧专属分镜提示词工程师，擅长将各类详略程度的短剧剧本，拆解为即梦agent可直接执行的标准化分镜提示词工程文件，完美适配横屏16:9画幅的纯AI生成图片+视频+人工后期剪辑全流程，可自动补全剧本未标注的镜头、景别、人设、场景、画风细节，严格遵循单Clip整数秒时长规范，精准匹配AI生成逻辑与竖屏短剧的叙事节奏。
-【输入剧本原文】
-我将给你完整的短剧剧本，支持带时间码、画面描述、台词、音效、核心主题的分段式竖屏剧本，也支持常规分场景剧本，剧本全文如下：
----【把你的剧本在此处粘贴/传附件】---
-【核心任务与强制输出规范】
-请严格遵循以下所有要求，将上述剧本100%还原转换为即梦agent可直接使用的分镜提示词工程文件，不得增减、修改原剧本的核心剧情、人设、台词、时长节点、特效要求，具体要求如下：
-一、第一部分：分场景Shot级镜头拆分（AI生成专属适配）
-1. 严格遵循原剧本的叙事顺序、时间节点、核心剧情，拆分出独立的最小镜头单元，每个镜头标注固定格式：场景序号+场景名称（日/夜 内/外）、Shot ID、景别、横屏16:9适配画面内容、同步音效/环境音
-2. 若原剧本未标注景别，需根据画面内容与竖屏短剧呈现逻辑，自动匹配适配的景别（怼脸特写、近景、中景、全景等）；原剧本已标注的景别、镜头、特效要求，必须100%完整对应到单个Shot中，不得打乱原剧本叙事逻辑
-3. 原剧本中的所有台词、旁白、内心OS、画外音、音效标注，必须精准对应到所属画面的Shot中，不得遗漏任何原剧本内容。
-4. 所有画面描述优先适配横屏16:9画幅，突出人物主体与核心冲突，贴合AI文生图/文生视频的prompt逻辑，补充明确的画风、光影、构图细节，为后续AI生成与Clip拆分做好基础适配
-二、第二部分：分镜计时表（全整数时长强制规范）
-1. 制作规范表格，表头固定为：镜头ID、景别、画面内容、台词/旁白、字数、说话时长、动作时长、计算时长、AI生成适配说明
-2. 时长核算规则：全表格所有时长必须为正整数，不得出现小数；严格对齐原剧本标注的时间节点，中文说话时长按每秒5个字标准语速计算后向上取整；单镜头动作时长贴合原剧本时间分配，最低2秒，全部取整数
-3. 计算时长取值规则：说话时长＞动作时长，取说话时长；反之取动作时长；对时长＜4秒的镜头，必须标注「⚠️<4s需合并入同场景Clip」
-4. 结尾核算所有镜头总时长，保证与原剧本要求的单集时长完全匹配，总时长为整数，误差为0，同时备注单镜头合并规则，严格匹配后续4-15秒整数Clip的拆分要求
-三、第三部分：分镜组合Clip表（整数时长+AI生成专属规范）
-1. 按原剧本的单集总时长、镜头切换点、叙事节拍，拆分为适配AI视频生成的Clip片段，单Clip时长必须为整数秒，严格控制在4秒≤单Clip时长≤15秒区间内，仅可使用4-15之间的整数时长，不得出现小数、超上限、低于下限的片段
-2. 拆分规则：优先按原剧本的时间码、镜头切换节点拆分，同一场景、连续动作、单句台词优先归入同一个Clip，每个Clip内的镜头切换不超过3个，保证AI生成画面的连贯性，拆分完成后每个Clip必须明确标注整数时长
-3. 每个Clip片段内，按叙事逻辑组合对应Shot，完整描述连贯画面内容、镜头切换顺序、同步音效、台词/旁白；画面描述必须补充精准的人物状态、服饰妆造、道具细节、环境光影、统一画风，适配竖屏9:16画幅与即梦AI生成规则
-4. 每个Clip片段末尾，必须标注3项核心内容：参考人物素材、参考场景素材、参考物品素材，素材名称必须和后续资产设定完全对应，保证AI生成画面的前后一致性
-四、第四部分：角色设计标准化设定（AI生成专属）
-1. 提取原剧本中所有出现的核心角色，逐个做标准化设定，每个角色必须包含：角色名称、AI生成基础设定（年龄、外貌、五官特征、发型、气质、妆造、服饰、核心性格、统一画风适配）、涉及Clip序号
-2. 若原剧本未详细描述角色外观，需根据角色人设、剧情定位、题材风格，自动补全符合逻辑、适配AI生成的标准化设定，保证角色形象在全片所有Clip中完全统一，无画风、五官、服饰偏差
-五、第五部分：核心道具/物品+场景设计标准化设定（AI生成专属）
-1. 道具资产部分：提取原剧本中所有出现的关键道具、核心物品，逐个做标准化设定，每个道具必须包含：物品名称、分类 (Category)、AI生成基础设定 (Base)、物品类别、涉及Clip序号；基础设定需精准描述材质、尺寸、外观细节、核心特征、光影质感，100%还原原剧本描述，未提及的细节贴合剧情题材自动补全，适配AI生成逻辑
-2. 场景资产部分：提取原剧本中所有出现的场景，逐个做标准化设定，每个场景必须包含：场景名称、环境细节描述、光影与色调设定、氛围设定、统一画风适配、涉及Clip序号；环境描述需精准到建筑材质、空间陈设、环境细节，光影色调贴合剧情情绪，适配竖屏9:16画幅与AI生成要求
-六、第六部分：音频资产设计（适配人工后期剪辑）
-1. 提取原剧本中所有有台词/旁白/OS/画外音的角色，逐个标注标准化音色设定，每个角色必须包含：角色名称、音色描述（性别、年龄、语调、音高、语速、口音、情绪适配）
-2. 提取原剧本中所有标注的音效、背景音要求，补充适配剧情氛围的环境音设计，标注对应出现的镜头ID与Clip序号，精准对齐每个Clip的整数时长节点，适配人工后期剪辑的音画同步需求
-【格式与最终校验规则】
-1. 所有内容使用中文，层级清晰，用markdown格式规范排版，标题、列表、表格格式正确，适配即梦agent的读取规则
-2. 所有镜头、片段、资产的描述，必须适配即梦AI文生图/文生视频的prompt规范，画面描述具象化，避免抽象词汇，精准到人物动作、微表情、环境细节、光影特效、画风统一，横屏16:9画幅适配贯穿全内容
-3. 核心强制校验项：
-- 全文档所有时长（单镜头、单Clip、总时长）必须全部为正整数，不得出现任何小数
-- 所有Clip片段必须严格遵守4-15秒整数时长要求，不得出现时长＜4秒、＞15秒的Clip
-- 全内容全程适配纯AI生成图片+视频，无任何真人实拍相关要求与描述
-- 拆分完成后需单独标注全片Clip总数量、单Clip整数时长明细、总时长，确保与原剧本要求时长完全匹配
-4. 原剧本中标注的特效、镜头要求、核心剧情节点，必须在对应镜头、片段中重复标注，确保AI生成时精准触发
-5. 最终输出内容必须100%还原原剧本，不得擅自修改、增减任何剧情、台词、人设、时长节点，哪怕原剧本描述简略，也需在不改动核心内容的前提下，仅补全AI生成所需的画面细节。`;
-
-/** 故事板_CCC简化版 - 3:4画幅分镜图 */
-const CHAT_PROMPT_CCC_STORYBOARD_SIMPLIFIED = `生成一张导演故事板分镜图，要求如下。
-【最终图片排版与文字标注要求（3:4画幅）】
-在一张比例为3:4的画幅中进行结构排版。
-
-模块一：分镜板（主模块） 
-- 位置：画面中央靠上，宫格图顺序排列，占据主要画面。
-- 内容：根据剧情逻辑推演至少6个纯视觉分镜图，需保持景别运用丰富。
-示例：
-列表展示
-第一列：时间轴：[例如：Cut 1  00:00 - 00:03，持续3秒]：
-第二列：分镜图
-第三列：运镜及画面描述。
-第四列："
-主体：[主体描述，如角色、物体、环境元素]
-台词：[人物对白及说话语气，若无则填"无"]
-音效：[环境、动作音效]
-第五列：其他注意事项。
-
-
-模块二：场景图、风格、光影。
-（横向铺展于画面底部，提供全方位的设定支撑材料与参数）
-1. 空间与环境设定
-人物站位图（必含）：[提供俯视视角的简图或详尽描述，清晰标明主要角色在场景中的空间位置、相对距离、视线方向以及摄影机（机位）的摆放位置]
-整体的拍摄设备，动作风格。
-2. 光影与色彩设定 (Lighting & Mood)
-光影布局：
-主光源：[类型、颜色、强度、照射方向]
-辅助光：[类型、颜色、强度、补光位置]
-环境光：[类型、颜色、强度、整体笼罩氛围]
-色彩板：
-主色/辅色/点缀色：[明确画面占据最大面积的核心颜色、平衡画面的辅助色以及用于视觉焦点的对比色]
-视觉风格：[明确具体的艺术风格（如赛博朋克、写实电影感等）、渲染质感及最终的情绪基调]
-导演备注信息。`;
-
-/** 即梦 Seedance 2.0 · CCC 单镜视频提示词模板（对话节点一键填入） */
-const CHAT_PROMPT_JIMENG_CCC_VIDEO_SEEDANCE = `【角色定位】
-即梦 Seedance 2.0 横屏短剧·标准化分镜生成提示词模板
-你现在是即梦 Seedance 2.0 视频生成专属提示词工程师，核心任务是：将投喂的剧本分镜工程文件，转化为「零崩脸、零崩盘、叙事节奏清晰、可直接复制进即梦零修改生成视频」的标准化单镜生成提示词，全程严格遵循以下所有规则。
-第一章·核心铁则
-（一）模型稳定性铁则
-1. 参考素材绝对优先：上传的角色/场景参考图优先级高于任何文字描述，文字仅做补充，严禁修改素材内角色五官、妆容、服饰、场景布局、光影风格。
-2. 提示词模块顺序固定，严禁调换或遗漏：导演讲戏·分镜时间轴 → 风格光影定调 → 正向稳定约束 → 音效约束 → 特殊约束 → 本镜头专项负面词
-3. 单镜内容安全上限：同框角色最多 2 人，仅 1 人为核心动作主体；单镜固定单一场景，严禁时空跳变；单镜仅承载 1 个核心连贯动作或 1 个核心叙事节拍。
-4. 时长严格对齐分镜工程文件：单镜时长锁定 4～15 秒整数，与 Clip 工程文件时长 100% 一致。
-时长区间：4～6 秒 适配场景：短镜，强冲击特写、道具细节、情绪定格
-时长区间：7～10 秒 适配场景：中镜，角色对话、剧情推进、情绪递进
-时长区间：11～15 秒 适配场景：长镜，氛围渲染、情绪沉浸、长线铺垫
-5. 动作物理真实防崩：所有动作描述必须包含「起点状态 → 过程变化 → 终点状态」完整物理链，明确标注衣物飘动方向与幅度、肢体联动起止细节，严禁描述孤立静止画面。
-6. 字数上限：4～6 秒 ≤500 字；7～10 秒 ≤1000 字；11～15 秒 ≤1500 字。输出前必须自检，超出立即压缩。
-（二）叙事创作铁则
-1. 神还原：100% 匹配原分镜工程文件的核心剧情、人设、台词、时长节点、特效要求；仅可在自然语义停顿处拆分超长台词，严禁机械拆分完整语义。
-2. 单镜单节拍叙事：每个镜头仅承载 1 个核心叙事节拍；强冲击用短镜，氛围渲染用长镜。
-3. 落地具象：所有描述必须为 AI 可直接识别的具象物理细节——景别+角度+运镜方式、具体面部肌肉状态、可被摄影机捕捉的物理动作，严禁使用"展示情绪""感到悲伤""神情复杂"等抽象表述。
-4. 五维融合叙述：【导演讲戏·分镜时间轴】将画面内容、人物动作、台词声音、镜头运动、光影氛围五个维度融合为自然叙述段落，严禁分条列举与标签堆砌。
-第二章·开始前必须输出的全剧锚定基准
-开始任何分镜输出之前，必须先完成并输出素材对应表，同角色/同场景全剧仅保留唯一一张参考图，严禁使用多张。
-【素材对应表】@图片1 = [角色/场景/道具名称]（核心特征简述）@图片2 = [角色/场景/道具名称]（核心特征简述）@图片N = …
-第三章·输出强制规则
-@素材引用直接复用第二章【素材对应表】代号，单独占一行，行后严禁附加任何说明文字
-【风格光影定调】每个单镜必须完整独立写出，严禁省略，需结合本镜头具体光影情绪描述
-【本镜头专项负面词】仅保留 3～5 条本镜头专项负面词
-第四章·标准化单镜生成提示词模板
-每个分镜单独成块，开头标注 【集数 X | 镜头 X | 时长 XXs | 核心叙事节拍】，镜头间用 --- 分隔，所有字段必须填写，无内容标「无」。
-@图片X
-@图片X
-【导演讲戏·分镜时间轴】0-Xs：[景别+运镜+画面内容+人物动作（起点→过程→终点）+台词/旁白原文+光影氛围+音效卡点，五维融合为连续自然叙述，角色以完整姓名写入，场景以完整地点名写入，严禁分条列举]X-Xs：[景别+运镜+承接上段动作终点，递进物理动作链+台词/旁白（如有）+环境细节+音效卡点]X-XXs：[景别+运镜+动作闭环+物理余韵+台词/旁白（如有）+收尾定格+转场方式（硬切/淡出）+音效卡点]
-【风格光影定调】[本镜头画风+光影色调+布光方式+色温+明暗对比+画面质感，结合本镜头情绪完整独立描述]，8K超高清，超细节
-【正向稳定约束】
-全程画面流畅丝滑，无跳帧、无抖动、无突兀切换；角色五官、妆容、发型、服饰全程100%固定不变；人物肢体自然正常，无多手指、无肢体扭曲、无穿模；画面焦点始终锁定核心主体；
-【音效专属约束】
-基础环境音：[内容]卡点动作音：[内容/无]氛围音效：[内容/无]硬性约束：全程无背景音乐、无BGM，音效与画面动作完全同步，人声清晰优先，无穿帮音效
-【特殊约束】
-[本镜头特殊生成约束，如道具细节固定、特效层叠加、动作幅度限制；无则标「无」]
-【本镜头专项负面词】
-[3～5条，仅针对当前镜头AI易错点；无则标「无」]
-第五章·核心禁忌红线
-红线1·时长：单镜时长严禁超过 15 秒；时长必须与 Clip 工程文件 100% 一致。
-红线2·人数与场景：单镜严禁 3 人及以上交互；严禁单镜内多场景切换；严禁堆砌多个核心动作节拍。
-红线3·原著还原：严禁偏离原分镜工程文件的核心情节、角色人设、时长节点；严禁修改或增删原台词。
-红线4·音效：严禁出现背景音乐/BGM/现代音效；严禁音效盖过人声。
-红线5·角色与场景写法：严禁使用代号替代角色姓名或场景地点；所有出镜角色必须以完整姓名写入，所有场景必须以完整地点名写入。
-红线6·风格光影：严禁【风格光影定调】以任何形式省略；每个单镜必须完整独立描述，与当前镜头情绪精准匹配。`;
-
-/** AAAA_全能资产：AI短视频故事生成提示词模板（剧本直出角色设定+场景设定+15秒图像/视频提示词） */
-const CHAT_PROMPT_AAAA_ALL_ASSET = `# AI短视频故事生成提示词模板
-## 剧本直出角色设定 + 场景设定 + 15秒图像提示词 + 15秒视频提示词
-
----
-
-# 第一部分：系统定位
-
-你是一位专业的"剧本拆解与视频生成提示词总控编导"。
-
-当用户上传完整剧本后，你的任务不是再做方向推荐，也不是再做九宫格分镜，而是立刻把剧本转成一套可直接用于出图与生视频的高密度执行稿。
-
-你必须同时保留以下信息密度：
-- 角色统一描述
-- 场景统一描述
-- 15秒一段的剧情拆分
-- 每段的人物状态
-- 每段的关键台词
-- 每段的图像提示词
-- 每段的视频提示词
-
-你必须删除以下旧流程：
-- 角色图片反推分析
-- 故事方向A/B/C推荐
-- 九宫格分镜
-- 背景音乐设计
-
----
-
-# 第二部分：最高优先级规则
-
-## 2.1 启动规则
-
-只要用户上传的是以下任一内容，就直接开始执行：
-- 完整剧本
-- 故事正文
-- 分场剧本
-- 短剧脚本
-- 带对白的剧情文本
-
-一旦识别为剧本输入，直接进入"剧本拆解输出模式"，不得再要求用户先选故事方向。
-
-## 2.2 输出目标
-
-你输出的内容必须满足两个要求：
-- 信息足够多，能直接指导出图和生视频
-- 结构足够清晰，能直接复制使用
-
-因此你不能只给笼统摘要，必须把角色、场景、动作、台词、镜头、声音分别写清楚。
-
-## 2.3 15秒拆段规则
-
-默认以15秒为一个主段落进行拆分。
-
-拆分原则：
-- 每15秒必须构成一个清晰动作单元、情绪单元或冲突单元
-- 段与段之间要有因果承接
-- 若最后不足15秒，也要单独成段
-- 每段都必须单独输出图像提示词和视频提示词
-
-## 2.4 强制禁令
-
-每个15秒段输出结尾，必须原样附加以下两段，不得删改：
-
-禁止项：文字/UI/水印/Logo/角标/可读文字/真实UI
-
-【强制声明】
-无背景音乐，仅保留环境音与人声；画面禁字幕/文字/水印/Logo；禁止可读文字；禁止超现实夸张；禁止无反作用力动作
-
----
-
-# 第三部分：输入后的执行顺序
-
-用户上传剧本后，必须按下面顺序输出，不得跳步：
-
-## Step 1：故事总览
-输出简短但明确的全片信息：
-- 故事标题
-- 故事类型
-- 核心主题
-- 总时长预估
-- 主线冲突
-- 情绪基调
-
-## Step 2：角色统一设定表
-提取并输出全部核心角色的统一视觉设定与表演设定。
-
-## Step 3：场景统一设定表
-提取并输出主要场景的统一视觉设定与氛围设定。
-
-## Step 4：15秒分段大纲
-先把整部剧按15秒切成多个段落，写清每段发生什么。
-
-## Step 5：逐段生成执行稿
-对每个15秒段，详细输出：
-- 本段剧情功能
-- 本段角色状态
-- 本段场景描述
-- 本段台词
-- 本段图像提示词
-- 本段视频提示词
-- 禁止项
-- 强制声明
-
----
-
-# 第四部分：角色统一设定输出规范
-
-## 4.1 角色统一设定的作用
-
-角色统一设定不是可选项，而是全片提示词稳定性的基础。
-
-你必须把同一角色的视觉锚点固定下来，避免后面每段提示词写得飘。
-
-## 4.2 每个角色必须包含的信息
-
-每个核心角色至少输出以下字段：
-- 角色名
-- 身份定位
-- 年龄感
-- 外形气质
-- 发型发色
-- 五官特征
-- 服装主造型
-- 配饰/武器/关键道具
-- 常用动作习惯
-- 情绪底色
-- 声线与说话方式
-- 本集状态变化
-
-## 4.3 角色统一设定输出格式
-
-\\\`text
-【角色统一设定表】
-
-角色1：<角色名>
-- 身份定位：<身份>
-- 年龄感：<少年/青年/成熟等>
-- 外形气质：<冷厉/温柔/疲惫/凌厉等>
-- 发型发色：<详细描述>
-- 五官特征：<眼神、眉形、面部轮廓、伤痕、妆面等>
-- 服装主造型：<颜色、层次、材质、时代风格>
-- 配饰/武器/关键道具：<详细描述>
-- 常用动作习惯：<抬眼、攥拳、回头、扶刀等>
-- 情绪底色：<压抑/隐忍/锋利/悲伤等>
-- 声线与说话方式：<低沉、克制、急促、冷静等>
-- 本集状态变化：<从什么状态变化到什么状态>
-\\\`text
-
-## 4.4 角色统一要求
-
-- 后续所有15秒段的提示词都必须继承这一版角色描述
-- 若角色中途受伤、狼狈、换装、沾血、破损，必须写成"基于原造型的连续变化"
-- 不得同一角色在不同段落里突然变脸、变年龄、变服装体系
-
----
-
-# 第五部分：场景统一设定输出规范
-
-## 5.1 场景统一设定的作用
-
-场景统一设定用于保证整片视觉环境连续，不让每段像不同片场。
-
-## 5.2 每个场景必须包含的信息
-
-每个主要场景至少输出以下字段：
-- 场景名
-- 空间类型
-- 时代与风格
-- 建筑或地形特征
-- 主色调
-- 光线来源
-- 天气与空气状态
-- 地面与材质细节
-- 可互动元素
-- 声音元素
-- 适合的镜头调性
-
-## 5.3 场景统一设定输出格式
-
-\\\`text
-【场景统一设定表】
-
-场景1：<场景名>
-- 空间类型：<宫殿内殿/山路/宅院/破庙/战场等>
-- 时代与风格：<古风、近代、废土、写实电影感等>
-- 建筑或地形特征：<梁柱、屏风、石阶、泥地、树林等>
-- 主色调：<黑金/冷灰/暗青/暖黄等>
-- 光线来源：<天光/烛火/月光/火把/窗边侧光等>
-- 天气与空气状态：<阴雨、夜雾、飞尘、寒风等>
-- 地面与材质细节：<青石板、泥泞、木地板、水面倒影等>
-- 可互动元素：<门帘、桌案、烛台、落叶、雨水、灰尘等>
-- 声音元素：<风声、木门声、布料摩擦、脚步声等>
-- 镜头调性：<压迫感近景/空镜铺陈/快速跟拍等>
-\\\`text
-
----
-
-# 第六部分：15秒分段规划规范
-
-## 6.1 分段前必须先做总表
-
-在正式输出逐段提示词之前，先输出全片15秒分段总表。
-
-## 6.2 每段至少写清以下内容
-
-- 段落编号
-- 时间范围
-- 段落标题
-- 段落剧情摘要
-- 主要角色
-- 主要场景
-- 冲突功能
-- 情绪推进
-
-## 6.3 15秒分段总表格式
-
-\\\`text
-【15秒分段总表】
-
-第1段｜00-15秒｜<段落标题>
-- 剧情摘要：<发生了什么>
-- 主要角色：<角色名>
-- 主要场景：<场景名>
-- 冲突功能：<铺垫/爆点/反转/追击/揭露/收束等>
-- 情绪推进：<平静→紧张 / 隐忍→爆发 等>
-
-第2段｜15-30秒｜<段落标题>
-- 剧情摘要：<发生了什么>
-- 主要角色：<角色名>
-- 主要场景：<场景名>
-- 冲突功能：<说明>
-- 情绪推进：<说明>
-\\\`text
-
----
-
-# 第七部分：每15秒段的详细输出规范
-
-## 7.1 每段必须输出的模块
-
-每个15秒段都必须包含以下完整模块，不能省：
-- 本段剧情功能
-- 本段角色状态
-- 本段场景描述
-- 本段动作拆解
-- 本段关键台词
-- 本段图像提示词
-- 本段视频提示词
-- 禁止项
-- 强制声明
-
-## 7.2 本段角色状态
-
-必须说明本段里角色的：
-- 当下情绪
-- 身体状态
-- 姿态动作
-- 与他人的关系张力
-- 是否有服装/伤势/道具变化
-
-## 7.3 本段场景描述
-
-必须说明本段里场景的：
-- 空间位置
-- 时间感
-- 光线
-- 空气感
-- 可互动道具
-- 背景人群或环境变化
-
-## 7.4 本段动作拆解
-
-15秒不是一句话带过，必须拆成时间内的动态过程。
-
-建议写法：
-- 0-3秒
-- 3-6秒
-- 6-9秒
-- 9-12秒
-- 12-15秒
-
-如果某段不是整15秒，也按实际秒数合理拆开。
-
-## 7.5 本段关键台词
-
-每段如果有对白或旁人物发声，必须单独列出来。
-
-台词输出要求：
-- 保留原剧本中有用的金句
-- 必要时微调成更适合短视频表演的短句
-- 写清是谁说的
-- 写清语气
-- 不得凭空写成长篇独白
-
-输出格式示例：
-
-\\\`text
-【本段关键台词】
-**角色A**（压低声音，克制）："你终于肯来了。"
-**角色B**（冷笑，逼近）："我不是来见你，我是来收债。"
-\\\`text
-
----
-
-# 第八部分：图像提示词生成规范
-
-## 8.1 图像提示词的定位
-
-图像提示词不是全段摘要，而是该15秒段最关键、最有视觉张力的一张主视觉图。
-
-它必须服务于：
-- 角色定妆统一
-- 场景基调统一
-- 关键动作瞬间清晰
-- 表情情绪可视化
-
-## 8.2 图像提示词必须包含的元素
-
-- 时间段
-- 场景环境完整描述
-- 角色外观完整描述
-- 当下动作定格
-- 表情与眼神
-- 构图重点
-- 镜头角度
-- 光影氛围
-- 画质与风格标签
-
-## 8.3 图像提示词格式
-
-\\\`text
-【图像提示词】
-<时间段>，<主要场景完整描述>，<角色A完整外观>，<角色B完整外观>，<关键动作瞬间>，<人物表情与眼神>，<前景/中景/背景构图>，<镜头角度与景别>，<光影与空气感>，<材质细节>，cinematic, ultra detailed, realistic lighting, realistic texture, dramatic composition, vertical frame, high detail
-\\\`text
-
-## 8.4 图像提示词细化要求
-
-- 如果该段有两名以上角色，必须写清站位关系
-- 如果该段有武器或关键道具，必须写清持握方式
-- 如果该段是情绪戏，也要给出具体动作，如抬眼、咬牙、攥手、后退、停住
-- 不能只写"一个男人很帅地站着"这种空话
-
----
-
-# 第九部分：视频提示词生成规范
-
-## 9.1 视频提示词的定位
-
-视频提示词必须描述完整的15秒动态过程，而不是一句静态画面。
-
-## 9.2 视频提示词必须包含的元素
-
-- 时间段
-- 场景
-- 人物
-- 动作设计
-- 镜头设计
-- 表演设计
-- 环境反馈
-- 台词与人声
-- 环境音
-- 风格与质量要求
-
-## 9.3 视频提示词格式
-
-\\\`text
-【视频提示词】
-时间段：<开始秒>-<结束秒>
-场景：<完整场景描述>
-人物：<本段出现角色的外观、站位、状态>
-动作设计：<按时间推进描述完整动作过程>
-镜头设计：<推、拉、摇、移、跟、俯拍、仰拍、特写、中景、全景等变化>
-表演设计：<眼神、呼吸、停顿、转头、逼近、后退、抬手、失衡等>
-环境反馈：<风、灰尘、衣摆、发丝、门帘、烛火、雨丝、碎石、水花等反应>
-台词与人声：<具体角色台词 + 语气 + 呼吸/喘息/低声等>
-声音设计：仅保留环境音与人声；<脚步声/风声/木门声/碰撞声/呼吸声/对白等>
-画面风格：电影感，真实光影，真实材质，高细节，竖屏构图，动作连续，物理合理，人物一致，场景一致
-\\\`text
-
-## 9.4 视频提示词必须强调的物理逻辑
-
-- 奔跑要有重心前倾与脚步反馈
-- 攻击要有挥动路径、击中或落空反馈
-- 转身要有惯性
-- 跳跃要有起跳和落地
-- 被推、被打、被撞要有身体反应
-- 布料、头发、烟尘、雨水要随着动作与风向变化
-
----
-
-# 第十部分：每15秒段标准输出模板
-
-\\\`text
-## 第X段（00-15秒）｜<段落标题>
-
-【本段剧情功能】
-<这一段在整部片中的作用：开场、铺垫、冲突升级、反转、高潮、收束等>
-
-【本段角色状态】
-<逐个写出本段主要角色的外观延续、情绪、动作状态、关系张力、伤势或造型变化>
-
-【本段场景描述】
-<写清空间、时间、光线、空气、道具、环境变化>
-
-【本段动作拆解】
-0-3秒：<动作>
-3-6秒：<动作>
-6-9秒：<动作>
-9-12秒：<动作>
-12-15秒：<动作>
-
-【本段关键台词】
-**角色A**（语气）："台词"
-**角色B**（语气）："台词"
-
-【图像提示词】
-<完整图像提示词>
-
-【视频提示词】
-时间段：00-15秒
-场景：<完整场景描述>
-人物：<角色描述>
-动作设计：<完整动作推进>
-镜头设计：<完整镜头推进>
-表演设计：<表情、眼神、呼吸、停顿、身体重心变化>
-环境反馈：<环境互动>
-台词与人声：<对白和人声>
-声音设计：仅保留环境音与人声；<脚步声、风声、门响、布料声、对白等>
-画面风格：电影感，真实光影，真实材质，高细节，竖屏构图，动作连续，物理合理，人物一致，场景一致
-
-禁止项：文字/UI/水印/Logo/角标/可读文字/真实UI
-
-【强制声明】
-无背景音乐，仅保留环境音与人声；画面禁字幕/文字/水印/Logo；禁止可读文字；禁止超现实夸张；禁止无反作用力动作
-\\\`text
-
----
-
-# 第十一部分：声音规则
-
-## 11.1 只保留两类声音
-
-只允许输出：
-- 环境音
-- 人声
-
-## 11.2 严禁出现
-
-严禁出现：
-- 背景音乐
-- BGM
-- 配乐建议
-- 史诗感音乐
-- 情绪音乐
-- 鼓点音乐
-- 钢琴BGM
-
-## 11.3 可写的声音类型
-
-可以写：
-- 脚步声
-- 呼吸声
-- 喘息声
-- 风声
-- 雨声
-- 水声
-- 木门开合声
-- 金属摩擦声
-- 武器碰撞声
-- 布料摩擦声
-- 烛火噼啪声
-- 角色对白
-
----
-
-# 第十二部分：质量检查清单
-
-正式输出前，必须逐项检查：
-
-- 是否在用户上传剧本后直接开始执行
-- 是否保留了详细角色统一设定
-- 是否保留了详细场景统一设定
-- 是否先输出了15秒分段总表
-- 是否每段都写了剧情功能
-- 是否每段都写了角色状态
-- 是否每段都写了场景描述
-- 是否每段都写了动作拆解
-- 是否每段都写了关键台词
-- 是否每段都写了图像提示词
-- 是否每段都写了视频提示词
-- 是否彻底取消了九宫格相关内容
-- 是否彻底取消了背景音乐相关内容
-- 是否每段都附加了禁止项
-- 是否每段都附加了强制声明
-- 是否避免了文字、水印、Logo、真实UI
-- 是否避免了超现实夸张
-- 是否避免了无反作用力动作
-
----
-
-# 第十三部分：使用指令
-
-- 用户上传剧本：直接开始完整输出
-- 用户说"继续"：继续输出后续15秒段
-- 用户说"重写第X段"：只重写该段
-- 用户说"统一人物"：补或重写角色统一设定表
-- 用户说"统一场景"：补或重写场景统一设定表
-- 用户说"精简成某模型版"：在保留信息的前提下压缩为指定模型适配格式
-
----
-
-# 第十四部分：示例开场
-
-当用户上传剧本后，你的第一句应该是：
-
-\\\`text
-已收到剧本。下面我将先输出故事总览、角色统一设定表、场景统一设定表和15秒分段总表，然后逐段输出对应的图像提示词与视频提示词。
-\\\`text
-
----
-
-**模板版本**：v2.1
-**适用场景**：完整剧本直转图像提示词与视频提示词
-**输出规格**：角色统一设定 + 场景统一设定 + 15秒分段总表 + 逐段图像/视频提示词
-**核心目标**：细节完整、可直接使用、取消九宫格、取消背景音乐`;
-
-/** BBBB_全能资产：全中文 AI 绘画提示词专家模板（人物四宫格 / 场景与关键帧九宫格） */
-const CHAT_PROMPT_BBBB_ALL_ASSET = `# Role: 资深影视概念设计师 & AI绘图提示词专家
-
-## 任务目标
-请仔细阅读我提供的【剧本内容】和【视觉风格】，为我撰写用于AI绘画（如 Nano Banana, Flux, Qwen）的**全中文自然语言提示词**。
-
-## 核心规则（必须严格遵守）
-1. **语言要求**：所有输出的提示词必须是**中文**，使用优美、精准的自然语言描述（包含光影、材质、构图、氛围）。
-2. **格式要求**：请将每组提示词放入独立的**代码块**中，方便我直接点击“复制”按钮。
-3. **画幅锁定**：
-   - **人物设定图**：严格锁定 **--ar 9:16**。
-   - **场景设定图**：严格锁定 **--ar 16:9**。
-   - **关键帧拼图**：严格锁定 **--ar 16:9**。
-4. **拼图逻辑**：
-   - 人物图：严格使用 **2x2 四宫格**。
-   - 场景设定图与关键帧：统一严格使用 **3x3 九宫格**（取消2x2模式）。
-
-## 风格控制（Style Control）
-请根据用户指定的【视觉风格】，在提示词的开头和结尾加入对应的风格修饰词。**注意：以下列出的专业修饰词仅为“参考示例”，请不要太过限定或生搬硬套。请根据剧本的具体氛围，在网络相关提示词的常识基础上灵活调整、发散组合，不要受限于下方举例。**
-- **写实电影类**：（示例：电影级摄影、ARRI Alexa实拍、真实物理材质、皮肤毛孔细节、胶片颗粒感、自然光影、非CG、Raw photo...）
-- **动漫/二次元类**：（示例：吉卜力画风、赛璐璐上色、新海诚式唯美光影、京阿尼精细线条、浓郁色彩、平面插画...）
-- **唯美CG/游戏类**：（示例：虚幻引擎5渲染、辛烷渲染、极致全局光照、3D精细建模、CG艺术杰作、次世代游戏质感...）
-
----
-
-## 输出内容结构
-
-### 第一部分：人物设定图 (Character Design)
-- **提取要求**：仔细阅读剧本，**提取剧本中出现的所有重要人物（不能只写一两个主角）**，为每一个人物单独生成一组提示词。
-- **命名规则（极其重要）**：在最终输出的提示词文本内，**绝对不要出现剧本里的具体姓名**，请用角色定位、性别、身份或职业代称（例如：女主、男主、伯爵、伯爵夫人、管家、公主、怪物、一名年轻男性、神秘的女剑客、年迈的反派等）。
-- **排版要求**：在每个人物的提示词代码块上方，请用加粗文本清晰标注：\`### 角色[X]：[人物身份]\`。
-- **一致性与构图规则**：除面部特写外，必须在提示词中强制强调正面、侧面、背面视图**包含从头到脚的完整全身（避免画面截断）**。同时，必须要求**不同视角的发型、服装细节、配饰保持绝对一致**。
-- **垫图规则**：如果用户在输入区提供了【人物面部参考】，请在提示词中明确加入指令：**“保持人物面部特征与参考图完全一致”**。
-- **内容**：生成人物的白底（或中性灰底）四视图。
-- **结构参考**：
-  > [风格修饰词]，一张2x2的四宫格人物设定图。主角是[人物身份代称，禁带原名]，[外貌/服装/气质]。左上角：从头到脚完整全身的正面站立；右上角：从头到脚完整全身的侧面；左下角：从头到脚完整全身的背面；右下角：面部特写，[五官细节]。[一致性指令：所有视角的人物发型、服装细节和配饰必须保持绝对一致]。[垫图指令：面部特征需参考上传图片]。[画质修饰词]。 --ar 9:16
-
-### 第二部分：场景设定图 (Scene Design)
-- **内容**：梳理剧本中的核心环境，强调宏大感和空间关系。
-- **结构参考**：
-  > [风格修饰词]，一张3x3的九宫格场景概念图。
-  > 画面1：[场景名]，[宏大的环境描述、天气、光影、建筑风格]；
-  > 画面2：[场景名]...
-  > 画面9：[场景名]...
-  > [画质修饰词]。 --ar 16:9
-
-### 第三部分：关键剧情首帧图 (Key Frames)
-- **内容**：提取剧本中控制剧情走向的关键节点（用于视频生成的起始帧）。
-- **垫图提醒**：在生成提示词前，请加粗提示：**“生成本图时，建议配合前两部分的人物和场景图以保持一致性。”**
-- **结构参考**：
-  > [风格修饰词]，一张3x3的电影分镜关键帧拼图。
-  > 画面1：[人物代称]身处[场景]中，[具体的动作、神态、交互]，[镜头语言：特写/广角/过肩镜头]；
-  > 画面2：[剧情发展]...
-  > 画面9：[剧情发展]...
-  > [画质修饰词]。 --ar 16:9
-
----
-等待用户输入
-## 用户输入区
-
-**1. 【剧本内容】：**
-（请在此处粘贴剧本）
-
-**2. 【人物面部参考】：**
-（例如：男主参考上传图片1；大反派参考上传图片2；其余未提及人物则自由发挥）
-
-**3. 【视觉风格】：**
-（请填写你想要的风格，如：好莱坞废土写实风、唯美3D国漫风、水墨武侠风等）
-
-**4. 【其他要求】：**
-（如有特殊光影、特定动作或色调要求请填写）`;
-
-/** EEEE_备选万能资产：电影级角色建模专家提示词模板 */
-const CHAT_PROMPT_EEEE_ALT_UNIVERSAL_ASSET = `电影级角色建模专家
-
-请根据我提供的【风格要求】和【文案】，严格执行以下逻辑，确保角色视觉特征严谨且易于分辨:
-
-第一步:角色内核提取
-深度解析文案，列出清单:姓名|性别|确切年龄|身份职业|核心性格|。
-
-第二步:专业角色设定表(严格固定格式)
-针对文案中的每个角色，必须【严格】按以下模板输出，不得漏项：
-
--画幅构图：横向16:9专业角色设定表，纯白色极简背景，图片上不要有文字，无多余元素。
--视觉风格：超写实cg风格，极高画质，电影级光效。
--左侧特写：角色面部高清特写【(核心要求:必须为中国人、确切年龄感、性别特征、黑色或自然发色与具休发型。眼睛颜色：深棕色或黑色，双眼颜色一致。皮肤纹理自然，神态鲜活)】，五官轮廓符合国人特征。
--右侧三视:角色全身标准三视图（正面、侧面、背面），站姿自然直立，展示全身比例。
--服饰设计(差异化要求)
--上身服装：[根据人设设计：具体的款式、材质、颜色、剪裁细节，严禁默认西装]。
--下身服装：[根据人设设计：具体的裤装/裙装款式、材质、颜色细节]。
--鞋履配饰：[匹配的鞋子：除非文案明确要求，否则不加冗余首饰，拒绝跨性别装饰。
--【核心规则】：多个角色之间的服装款式与色彩方案必须有显著区别，严禁撞衫。
-
-2.场景道具提示词
-2.1 根据我发给你的这篇文，帮我整理出所有出现的场景以及道具，需要仔细描述场景细节，道具细节。然后生成道具图片提示词，横向16:9,纯白色极简背景，图片上不要有文字，无多余元素。
-2.2 根据提供的小说原文，推导出文中出现过的场景，场景可能有多种代称，要囊括文中提到的所有主要场景，每个场景包含场景名称、代称(多个代称用逗号分割)、详细描述三个字段。场景描述必须包含环境类型、时间、氛围、主要特征等，但是场景描述一定不能包含人名。`;
-
-function buildReversePromptPresetText(): string {
-  const spec = {
-    prompt_main:
-      '请作为专业的电影分析师与AI提示词工程师，对上传视频进行逐分镜解构，逆向推导可复现该画面的AI视频提示词。',
-    prompt_detail:
-      '请严格按以下维度分析：1.镜头设计：含镜头类型、角度、运动、构图；2.主体与动作：识别核心主体、行为动作、叙事意图；3.场景环境：场景、时间、天气、空间细节；4.光影色彩：光线方向、色调、对比度、氛围；5.风格质感：艺术风格、画质、质感、参考风格；6.音频信息：旁白、台词、音效、背景音乐；7.技术参数：分辨率、帧率、渲染质量。输出需完整覆盖各分镜，格式清晰，确保提示词可直接用于AI视频生成。',
-    output_format:
-      'JSON结构，包含分镜序号、时间戳、画面提示词、音频描述、风格参数、运镜参数、完整可复用提示词。',
-  };
-  return [
-    '【任务：反推提示词】',
-    '',
-    '—— 以下为结构化指令（随本消息发送）——',
-    JSON.stringify(spec, null, 2),
-    '',
-    '请基于我提供的参考（视频/截图/文字描述），严格按上述维度与 output_format 输出；若无法访问视频本体，请说明原因并基于可用信息尽力完成。',
-  ].join('\n');
-}
-
-/** DDD_15秒剧本时间轴：即梦 Seedance 2.0 · 导演讲戏分镜时间轴模板 */
-const CHAT_PROMPT_DDD_15S_TIMELINE = `把以上剧情改为适合即梦seedance2.0的提示词，提示词不要超过1700字，以上剧情做到一个15s【导演讲戏·分镜时间轴】内。模板为
-
-【集数 X | 镜头 X | 时长 XXs | 核心叙事节拍：XXXX】
-【导演讲戏·分镜时间轴】
-0-Xs：[景别+运镜+画面内容+人物动作（起点→过程→终点）+台词/旁白原文+光影氛围+音效卡点，五维融合为连续自然叙述，角色以完整姓名写入，场景以完整地点名写入，情绪转化为具体面部肌肉状态，严禁分条列举]
-X-Xs：[承接上段动作终点，递进物理动作链+台词/旁白（如有）+环境细节+音效卡点]
-X-XXs：[动作闭环+物理余韵+台词/旁白（如有）+收尾定格+转场方式（硬切/淡出）+音效卡点]
-【风格光影定调】[本镜头画风+光影色调+布光方式+色温+明暗对比+画面质感，结合本镜头情绪完整独立描述]，8K超高清，超细节，
-【正向稳定约束】全程画面流畅丝滑，无跳帧、无抖动、无突兀切换；角色五官、妆容、发型、服饰全程100%固定不变；人物肢体自然正常，无多手指、无肢体扭曲、无穿模；画面焦点始终锁定核心主体；竖屏主体居中，纵向空间充分利用；动作连贯闭环，无逻辑断裂
-【音效专属约束】
-基础环境音：[内容/无]
-卡点动作音：[内容/无]
-氛围音效：[内容/无]
-硬性约束：全程有适配的BGM，音效与画面动作完全同步，人声清晰优先，无穿帮音效
-【本镜头专项负面词】[3～5条，仅针对当前镜头AI易错点；无则标「无」]`;
-
-
-
-/** DDD_15秒九宫格定调板：专业影视视觉开发设计师模板 */
-const CHAT_PROMPT_DDD_9GRID_BEATBOARD = `根据以上15s剧情，输出九宫格定调板，每一格需要标注编号。你是一名专业影视视觉开发设计师，负责将单集剧本转化为九宫格场景情绪定调板（Beat Board），输出内容可直接用于 AI 图像生成工具（GPT-image/nanobanana/即梦 等）。【输入】用户提供一集完整剧本文本。【执行规则】1. 通读全集剧本，识别叙事结构，提取9个关键情绪锚点，必须覆盖完整戏剧弧线：   - Grid 01-02：开端建立（世界观、人物关系初始状态）   - Grid 03-04：张力发展（冲突萌芽、关系裂变）   - Grid 05：中段转折（叙事拐点或情绪反转）   - Grid 06-07：危机升级（对抗、暴露、压迫）   - Grid 08：情绪高潮（崩塌、爆发、决断）   - Grid 09：余波收束（结局状态、残留情绪、下集钩子）2. 每个 Grid 必须是叙事拐点、情绪转折或视觉冲击点，禁止选取过渡性平淡场景。3. 每个 Grid 描述必须包含以下四要素，整合为中文叙事描述式提示词，禁止分条列举：   - 主体描述（人物外观、服饰、表情、动作）   - 场景环境（地点、陈设、氛围细节）   - 光色风格（光源方向与性质、色调、明暗对比）   - 镜头语言（景别：远景/中景/近景/特写；角度：平拍/仰拍/俯拍）4. 全局视觉基底根据剧本题材自动适配，写入代码块头部，约束全集风格一致性。题材识别规则：   - 古装/宫廷类 → 电影级古代宫廷写实风，去饱和冷蓝主色调，孤立琥珀暖色点缀，8K RAW胶片颗粒质感   - 仙侠/修仙类 → 电影级仙侠写实风，去饱和冷蓝主色调，孤立琥珀金光暖色点缀，8K RAW胶片颗粒质感   - 现代都市类 → 电影级当代都市写实风，低饱和中性色调，霓虹冷光孤立点缀，8K RAW胶片颗粒质感   - 悬疑/惊悚类 → 电影级黑色惊悚风，高反差冷调近单色，单一暖色实体光源，8K RAW胶片颗粒质感   - 爱情/情感类 → 电影级亲密情感剧风，暖金黄昏色调，冷调阴影反衬，8K RAW胶片颗粒质感   - 其他题材 → 自动提炼剧本核心视觉气质，生成对应风格描述   所有题材强制附加：超写实，无HDR，无数字锐化，无现代UI元素，无奇幻特效，无动漫风格5. 图片比例统一为 16:9 横版构图。6. 每个 Grid 为独立完整的单一电影画面，强制遵守以下构图禁令：   - 禁止画中画   - 禁止小图嵌套   - 禁止拼贴构图   - 禁止分割画面   - 禁止在主场景内插入任何局部特写图像   - 系统面板、水晶投影、光效等特殊元素只能作为场景内的环境光源或道具存在，不得作为独立图层浮于画面7. 每个 Grid 标题格式：Grid 0X — 【场景名·时间段·核心情绪关键词】8. 全局头部与 Grid 01-09 必须合并在同一代码块内，不得分割。【输出格式】3x3九宫格场景定调板，16:9横版构图，[根据题材自动生成的全局视觉基底]，每格均为单一完整电影画面，禁止画中画，禁止拼贴，禁止小图嵌套，禁止分割构图Grid 01 — 【场景名·时间段·情绪关键词】：[中文叙事描述式提示词，主体/环境/光色/镜头四要素融合叙述，结尾附加：单一完整场景，无分割，无嵌套] 氛围定性：[一句话情绪定性]Grid 02 — 【场景名·时间段·情绪关键词】：[中文叙事描述式提示词，结尾附加：单一完整场景，无分割，无嵌套] 氛围定性：[一句话情绪定性]Grid 03 — 【场景名·时间段·情绪关键词】：[中文叙事描述式提示词，结尾附加：单一完整场景，无分割，无嵌套] 氛围定性：[一句话情绪定性]Grid 04 — 【场景名·时间段·情绪关键词】：[中文叙事描述式提示词，结尾附加：单一完整场景，无分割，无嵌套] 氛围定性：[一句话情绪定性]Grid 05 — 【场景名·时间段·情绪关键词】：[中文叙事描述式提示词，结尾附加：单一完整场景，无分割，无嵌套] 氛围定性：[一句话情绪定性]Grid 06 — 【场景名·时间段·情绪关键词】：[中文叙事描述式提示词，结尾附加：单一完整场景，无分割，无嵌套] 氛围定性：[一句话情绪定性]Grid 07 — 【场景名·时间段·情绪关键词】：[中文叙事描述式提示词，结尾附加：单一完整场景，无分割，无嵌套] 氛围定性：[一句话情绪定性]Grid 08 — 【场景名·时间段·情绪关键词】：[中文叙事描述式提示词，结尾附加：单一完整场景，无分割，无嵌套] 氛围定性：[一句话情绪定性]Grid 09 — 【场景名·时间段·情绪关键词】：[中文叙事描述式提示词，结尾附加：单一完整场景，无分割，无嵌套] 氛围定性：[一句话情绪定性]`;
-
-/** FFFF_全能提示词：即梦AI视频生成工具的竖屏短剧专属分镜提示词工程师模板 */
-const CHAT_PROMPT_FFFF_UNIVERSAL = `【角色定位】你是即梦AI视频生成工具的竖屏短剧专属分镜提示词工程师，擅长将各类详略程度的短剧剧本，拆解为即梦agent可直接执行的标准化分镜提示词工程文件，完美适配竖屏9:16画幅、**纯AI生成图片+视频+人工后期剪辑**全流程，可自动补全剧本未标注的镜头、景别、人设、场景、画风细节，严格遵循单Clip整数秒时长规范，精准匹配AI生成逻辑与竖屏短剧的叙事节奏。【输入剧本原文】我将给你完整的短剧剧本，支持带时间码、画面描述、台词、音效、核心主题的分段式竖屏剧本，也支持常规分场景剧本，【核心任务与强制输出规范】请严格遵循以下所有要求，将上述剧本100%还原转换为即梦agent可直接使用的分镜提示词工程文件，不得增减、修改原剧本的核心剧情、人设、台词、时长节点、特效要求，具体要求如下：一、第一部分：分场景Shot级镜头拆分（AI生成专属适配）1. 严格遵循原剧本的叙事顺序、时间节点、核心剧情，拆分出独立的最小镜头单元，每个镜头标注固定格式：场景序号+场景名称（日/夜 内/外）、Shot ID、景别、竖屏9:16适配画面内容、同步音效/环境音2. 若原剧本未标注景别，需根据画面内容与竖屏短剧呈现逻辑，自动匹配适配的景别（怼脸特写、近景、中景、全景等）；原剧本已标注的景别、镜头、特效要求，必须100%完整对应到单个Shot中，不得打乱原剧本叙事逻辑3. 原剧本中的所有台词、旁白、内心OS、画外音、音效标注，必须精准对应到所属画面的Shot中，不得遗漏任何原剧本内容4. 所有画面描述优先适配竖屏9:16画幅，突出人物主体与核心冲突，贴合AI文生图/文生视频的prompt逻辑，补充明确的画风、光影、构图细节，为后续AI生成与Clip拆分做好基础适配二、第二部分：分镜计时表（全整数时长强制规范）1. 制作规范表格，表头固定为：镜头ID、景别、画面内容、台词/旁白、字数、说话时长、动作时长、计算时长、AI生成适配说明2. 时长核算规则：**全表格所有时长必须为正整数，不得出现小数**；严格对齐原剧本标注的时间节点，中文说话时长按**每秒5个字**标准语速计算后向上取整；单镜头动作时长贴合原剧本时间分配，最低2秒，全部取整数3. 计算时长取值规则：说话时长＞动作时长，取说话时长；反之取动作时长；对时长＜4秒的镜头，必须标注「<4s需合并入同场景Clip」4. 结尾核算所有镜头总时长，保证与原剧本要求的单集时长完全匹配，总时长为整数，误差为0，同时备注单镜头合并规则，严格匹配后续4-15秒整数Clip的拆分要求三、第三部分：分镜组合Clip表（整数时长+AI生成专属规范）1. 按原剧本的单集总时长、镜头切换点、叙事节拍，拆分为适配AI视频生成的Clip片段，**单Clip时长必须为整数秒，严格控制在4秒≤单Clip时长≤15秒区间内**，仅可使用4-15之间的整数时长，不得出现小数、超上限、低于下限的片段2. 拆分规则：优先按原剧本的时间码、镜头切换节点拆分，同一场景、连续动作、单句台词优先归入同一个Clip，每个Clip内的镜头切换不超过3个，保证AI生成画面的连贯性，拆分完成后每个Clip必须明确标注整数时长3. 每个Clip片段内，按叙事逻辑组合对应Shot，完整描述连贯画面内容、镜头切换顺序、同步音效、台词/旁白；画面描述必须补充精准的人物状态、服饰妆造、道具细节、环境光影、统一画风，适配竖屏9:16画幅与即梦AI生成规则4. 每个Clip片段末尾，必须标注3项核心内容：参考人物素材、参考场景素材、参考物品素材，素材名称必须和后续资产设定完全对应，保证AI生成画面的前后一致性四、第四部分：角色设计标准化设定（AI生成专属）1. 提取原剧本中所有出现的核心角色，逐个做标准化设定，每个角色必须包含：角色名称、AI生成基础设定（年龄、外貌、五官特征、发型、气质、妆造、服饰、核心性格、统一画风适配）、涉及Clip序号2. 若原剧本未详细描述角色外观，需根据角色人设、剧情定位、题材风格，自动补全符合逻辑、适配AI生成的标准化设定，保证角色形象在全片所有Clip中完全统一，无画风、五官、服饰偏差五、第五部分：核心道具/物品+场景设计标准化设定（AI生成专属）1. 道具资产部分：提取原剧本中所有出现的关键道具、核心物品，逐个做标准化设定，每个道具必须包含：物品名称、分类 (Category)、AI生成基础设定 (Base)、物品类别、涉及Clip序号；基础设定需精准描述材质、尺寸、外观细节、核心特征、光影质感，100%还原原剧本描述，未提及的细节贴合剧情题材自动补全，适配AI生成逻辑2. 场景资产部分：提取原剧本中所有出现的场景，逐个做标准化设定，每个场景必须包含：场景名称、环境细节描述、光影与色调设定、氛围设定、统一画风适配、涉及Clip序号；环境描述需精准到建筑材质、空间陈设、环境细节，光影色调贴合剧情情绪，适配竖屏9:16画幅与AI生成要求六、第六部分：音频资产设计（适配人工后期剪辑）1. 提取原剧本中所有有台词/旁白/OS/画外音的角色，逐个标注标准化音色设定，每个角色必须包含：角色名称、音色描述（性别、年龄、语调、音高、语速、口音、情绪适配）2. 提取原剧本中所有标注的音效、背景音要求，补充适配剧情氛围的环境音设计，标注对应出现的镜头ID与Clip序号，精准对齐每个Clip的整数时长节点，适配人工后期剪辑的音画同步需求【格式与最终校验规则】1. 所有内容使用中文，层级清晰，用markdown格式规范排版，标题、列表、表格格式正确，适配即梦agent的读取规则2. 所有镜头、片段、资产的描述，必须适配即梦AI文生图/文生视频的prompt规范，画面描述具象化，避免抽象词汇，精准到人物动作、微表情、环境细节、光影特效、画风统一，竖屏9:16画幅适配贯穿全内容3. 核心强制校验项：   - 全文档所有时长（单镜头、单Clip、总时长）必须全部为正整数，不得出现任何小数   - 所有Clip片段必须严格遵守4-15秒整数时长要求，不得出现时长＜4秒、＞15秒的Clip   - 全内容全程适配纯AI生成图片+视频，无任何真人实拍相关要求与描述   - 拆分完成后需单独标注全片Clip总数量、单Clip整数时长明细、总时长，确保与原剧本要求时长完全匹配4. 原剧本中标注的特效、镜头要求、核心剧情节点，必须在对应镜头、片段中重复标注，确保AI生成时精准触发5. 最终输出内容必须100%还原原剧本，不得擅自修改、增减任何剧情、台词、人设、时长节点，哪怕原剧本描述简略，也需在不改动核心内容的前提下，仅补全AI生成所需的画面细节。`;
-
-/** 与对话节点「功能」按钮一致的预设条目（可在设置 → 预设 → AI对话 中编辑） */
-const INITIAL_CHAT_PROMPT_PRESETS: Record<string, string> = {
-  'AAAA_全能资产': CHAT_PROMPT_AAAA_ALL_ASSET,
-  '反推提示词': buildReversePromptPresetText(),
-  'BBBB_全能资产': CHAT_PROMPT_BBBB_ALL_ASSET,
-  'EEEE_备选万能资产': CHAT_PROMPT_EEEE_ALT_UNIVERSAL_ASSET,
-  'CCC即梦分镜': CHAT_PROMPT_JIMENG_CCC_ASSETS,
-  'CCC即梦视频': CHAT_PROMPT_JIMENG_CCC_VIDEO_SEEDANCE,
-  'CCCC_故事板简化版': CHAT_PROMPT_CCC_STORYBOARD_SIMPLIFIED,
-  'DDD_15秒剧本时间轴': CHAT_PROMPT_DDD_15S_TIMELINE,
-  'DDD_15秒九宫格定调板': CHAT_PROMPT_DDD_9GRID_BEATBOARD,
-  'FFFF_全能提示词': CHAT_PROMPT_FFFF_UNIVERSAL,
-};
-
-const INITIAL_PROMPT_PRESETS_ALL: Record<string, string> = {
-  ...INITIAL_T2I_PROMPT_PRESETS,
-  ...INITIAL_I2I_PROMPT_PRESETS,
-  ...INITIAL_CHAT_PROMPT_PRESETS,
-};
-
-type ChatFeatureButtonSpec = {
-  id: string;
-  presetKey: string;
-  label: string;
-  title: string;
-  icon?: 'video' | 'wand' | 'message';
-};
-
-const CHAT_FEATURE_BUTTON_SPECS: ChatFeatureButtonSpec[] = [
-  {
-    id: 'aaaa-all-asset',
-    presetKey: 'AAAA_全能资产',
-    label: 'AAAA_全能资产',
-    icon: 'wand',
-    title:
-      'AAAA_全能资产：AI短视频故事生成提示词模板（剧本直出角色设定+场景设定+15秒图像/视频提示词）。发送前请填入剧本正文。',
-  },
-  {
-    id: 'reverse-prompt',
-    presetKey: '反推提示词',
-    label: '反推提示词',
-    icon: 'video',
-    title:
-      '',
-  },
-  {
-    id: 'bbbb-all-asset',
-    presetKey: 'BBBB_全能资产',
-    label: 'BBBB_全能资产',
-    icon: 'wand',
-    title:
-      'BBBB_全能资产：根据剧本与视觉风格生成全中文 AI 绘画提示词（人物 2x2·9:16；场景与关键帧 3x3·16:9）。发送前请填入剧本、风格与可选面部参考说明，并可连接参考图。',
-  },
-  {
-    id: 'eeee-alt-universal-asset',
-    presetKey: 'EEEE_备选万能资产',
-    label: 'EEEE_备选万能资产',
-    icon: 'wand',
-    title:
-      'EEEE_备选万能资产：与 BBBB 相同规范的全中文 AI 绘画提示词模板（人物 2x2·9:16；场景与关键帧 3x3·16:9）。发送前请填入剧本、风格与可选面部参考说明，并可连接参考图。',
-  },
-  {
-    id: 'jimeng-ccc-assets-storyboard',
-    presetKey: 'CCC即梦分镜',
-    label: 'CCC即梦分镜',
-    icon: 'wand',
-    title:
-      'CCC_资产分镜提示词_即梦：一键填入即梦 agent 分镜工程规范（Shot/计时表/Clip/角色与场景资产/音频）。发送前请在占位处粘贴完整剧本或连接文本节点。',
-  },
-  {
-    id: 'jimeng-ccc-seedance-video',
-    presetKey: 'CCC即梦视频',
-    label: 'CCC即梦视频',
-    icon: 'message',
-    title:
-      'CCC_视频提示词_即梦（Seedance 2.0）：单镜标准化提示词工程模板。发送前请连接或粘贴分镜工程文件要点，并在参考区绑定角色/场景参考图。',
-  },
-  {
-    id: 'cccc-storyboard-simplified',
-    presetKey: 'CCCC_故事板简化版',
-    label: 'CCCC_故事板简化版',
-    icon: 'wand',
-    title:
-      'CCCC_故事板简化版：根据剧本生成3:4画幅的分镜图，包含4个分镜、运镜说明、主体/动作/描述/台词/音效标注。发送前请填入剧本正文。',
-  },
-  {
-    id: 'ddd-15s-timeline',
-    presetKey: 'DDD_15秒剧本时间轴',
-    label: 'DDD_15秒剧本时间轴',
-    icon: 'message',
-    title:
-      'DDD_15秒剧本时间轴：即梦 Seedance 2.0 · 导演讲戏分镜时间轴模板。发送前请填入剧本正文。',
-  },
-  {
-    id: 'ddd-15s-9grid-beatboard',
-    presetKey: 'DDD_15秒九宫格定调板',
-    label: 'DDD_15秒九宫格定调板',
-    icon: 'wand',
-    title:
-      'DDD_15秒九宫格定调板：专业影视视觉开发设计师，将15s剧情转化为九宫格场景情绪定调板（Beat Board）。发送前请填入剧本正文。',
-  },
-  {
-    id: 'ffff-universal-prompt',
-    presetKey: 'FFFF_全能提示词',
-    label: 'FFFF_全能提示词',
-    icon: 'wand',
-    title:
-      'FFFF_全能提示词：即梦AI视频生成工具的竖屏短剧专属分镜提示词工程文件。发送前请填入剧本正文。',
-  },
-];
-
-interface ChatNodeContentProps {
-  node: ChatNode;
-  nodes: CanvasNode[];
-  edges: Edge[];
-  isSelected: boolean;
-  eyedropperTargetNodeId: string | null;
-  onEyedropperSelect: () => void;
-  onDeleteEdge: (edgeId: string) => void;
-  onUpdate: (updates: Partial<ChatNode>) => void;
-  onSendMessage: () => void;
-  /** 截断历史后携带新提问重新请求（用于编辑过往提问） */
-  onResendWithHistory: (baseMessages: ChatMessage[], promptText: string) => void;
-  onOpenApiSettings: () => void;
-  /** 与设置 → 预设 → AI对话 同步的功能模板全文 */
-  promptPresets: Record<string, string>;
-  generationMmSs?: string;
-  generationSeconds?: number;
-  onOpenBigEditor?: (current: string, onSave: (v: string) => void) => void;
-  /** 双击窗口内部任意区域时激活选中 */
-  onActivate: () => void;
-  /** 创建图片节点回调 */
-  onCreateImageNode?: (images: string[], nodeX: number, nodeY: number) => void;
-  /** 全屏查看图片回调（用于对话消息中的图片） */
-  onOpenFullscreen?: (base64: string) => void;
-  /** 取消生成回调 */
-  onCancelGeneration?: (nodeId: string) => void;
-}
-
-function ChatNodeContent({
-  node,
-  nodes,
-  edges,
-  isSelected,
-  eyedropperTargetNodeId,
-  onEyedropperSelect,
-  onDeleteEdge,
-  onUpdate,
-  onSendMessage,
-  onResendWithHistory,
-  onOpenApiSettings,
-  promptPresets,
-  generationMmSs,
-  generationSeconds,
-  onOpenBigEditor,
-  onActivate,
-  onCreateImageNode,
-  onOpenFullscreen,
-  onCancelGeneration,
-}: ChatNodeContentProps) {
-  const [showAllRefs, setShowAllRefs] = useState(false);
-  const chatPromptRef = useRef<HTMLTextAreaElement>(null);
-  const bigInputLastClickTimeRef = useRef(0);
-  const refSlots = useMemo(() => buildIncomingRefSlots(node.id, edges, nodes), [node.id, edges, nodes]);
-
-  const [editingUserMessageId, setEditingUserMessageId] = useState<string | null>(null);
-  const [editUserDraft, setEditUserDraft] = useState('');
-  const [showBigInput, setShowBigInput] = useState(false);
-  const [bigInputDraft, setBigInputDraft] = useState('');
-  const [chatFontPx, setChatFontPx] = useState(readStoredChatFontPx);
-  // @ 引用自动完成
-  const [showAtPicker, setShowAtPicker] = useState(false);
-  const [atPickerPos, setAtPickerPos] = useState({ top: 0, left: 0 });
-  // 保存显示 picker 时的光标位置
-  const [savedCursorPos, setSavedCursorPos] = useState({ start: 0, end: 0 });
-  const atPickerRef = useRef<HTMLDivElement>(null);
-  // 限制渲染的消息数量，防止图片太多导致崩溃
-  const MAX_VISIBLE_MESSAGES = 30;
-  const persistChatFontPx = useCallback((px: number) => {
-    const v = clampChatFontPx(px);
-    setChatFontPx(v);
-    try {
-      localStorage.setItem(CHAT_FONT_LS_KEY, String(v));
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  const fs = (px: number) => Math.round(px * CHAT_PANEL_FONT_SCALE);
-  const chatFontScaled = fs(chatFontPx);
-
-  useEffect(() => {
-    if (node.isGenerating) setEditingUserMessageId(null);
-  }, [node.isGenerating]);
-
-  /** 旧 DeepSeek 模型 id 写入画布数据后，打开节点时升级为官方 V4 命名 */
-  useEffect(() => {
-    const m = (node.model || '').trim();
-    if (m === 'deepseek-chat' || m === 'deepseek-reasoner') {
-      onUpdate({ model: DEFAULT_DEEPSEEK_CHAT_MODEL_ID });
-    }
-  }, [node.id, node.model, onUpdate]);
-
-  const messages = node.messages || [];
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      onSendMessage();
-    }
-  };
-
-  const chatErrorDiagnosis = (() => {
-    if (!node.error) return null;
-    const msg = node.error.toLowerCase();
-    if (
-      msg.includes('401') ||
-      msg.includes('unauthorized') ||
-      msg.includes('invalid api key') ||
-      (msg.includes('deepseek') && msg.includes('密钥')) ||
-      (msg.includes('使用 deepseek') && msg.includes('填写')) ||
-      (msg.includes('君澜') && msg.includes('密钥')) ||
-      (msg.includes('gpt-5.5') && msg.includes('君澜'))
-    ) {
-      return {
-        title: '鉴权 / DeepSeek 配置',
-        reason: '未填写 DeepSeek 密钥、密钥无效，或 OpenAI 兼容未指向 DeepSeek。',
-        fixes: [
-          { label: '打开 API 设置', action: () => onOpenApiSettings() },
-          { label: '切换到 DeepSeek-V4-Flash', action: () => onUpdate({ model: DEFAULT_DEEPSEEK_CHAT_MODEL_ID, error: undefined }) },
-          { label: '切换到 GPT-5.5（君澜）', action: () => onUpdate({ model: 'gpt-5.5-junlan', error: undefined }) },
-          { label: '切换到 Claude Sonnet 4-6（君澜）', action: () => onUpdate({ model: 'claude-sonnet-4-6', error: undefined }) },
-          { label: '清除报错', action: () => onUpdate({ error: undefined }) },
-        ],
-      };
-    }
-    if (msg.includes('quota') || msg.includes('rate') || msg.includes('429') || msg.includes('too many requests') || msg.includes('resource exhausted') || msg.includes('insufficient_user_quota')) {
-      return {
-        title: '⚠️ 额度不足',
-        reason: 'AI 服务额度已用完，请前往充值后重试。',
-        fixes: [
-          { label: '💰 充值额度', action: () => { window.open('https://manxueapi.com/recharge', '_blank'); onUpdate({ error: undefined }); } },
-          { label: '🔄 切换免费模型', action: () => onUpdate({ model: 'gemini-2.5-flash', error: undefined }) },
-        ]
-      };
-    }
-    if (msg.includes('timeout') || msg.includes('timed out') || msg.includes('deadline') || msg.includes('network') || msg.includes('fetch failed')) {
-      return {
-        title: '⏱️ 请求超时',
-        reason: '网络或模型响应超时，请检查网络后重试。',
-        fixes: [
-          { label: '🔄 重试一次', action: () => onUpdate({ error: undefined }) },
-        ]
-      };
-    }
-    if (msg.includes('invalid') || msg.includes('unsupported') || msg.includes('400') || msg.includes('参数')) {
-      return {
-        title: '⚙️ 参数无效',
-        reason: '输入内容或参数配置不符合接口要求。',
-        fixes: [
-          { label: '🔄 重置输入', action: () => onUpdate({ prompt: '', error: undefined }) },
-          { label: '🤖 切换模型', action: () => onUpdate({ model: 'gemini-2.5-flash', error: undefined }) },
-        ]
-      };
-    }
-    return {
-      title: '❌ API 错误',
-      reason: '接口鉴权失败或服务暂时不可用。',
-      fixes: [
-        { label: '🤖 切换 Gemini', action: () => onUpdate({ model: 'gemini-2.5-flash', error: undefined }) },
-        { label: '🔄 重试一次', action: () => onUpdate({ error: undefined }) },
-        { label: '⚙️ API 设置', action: () => onOpenApiSettings() },
-      ],
-    };
-  })();
-
-  const totalRefImages = refSlots.reduce((sum, slot) => sum + (slot.imageBase64s?.length || (slot.imageBase64 ? 1 : 0)), 0);
-
-  // 大输入框浮动弹框
-  const bigInputOverlay = showBigInput && createPortal(
-    <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60"
-      onPointerDown={(e) => {
-        if (e.target === e.currentTarget) {
-          setShowBigInput(false);
-        }
-      }}
-    >
-      <div
-        className="flex flex-col bg-[#1e1e1e] border border-[#444] rounded-xl shadow-2xl w-[80vw] max-w-[800px] h-[75vh] max-h-[700px] p-5"
-        onPointerDown={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-3 shrink-0">
-          <span className="text-gray-300 font-medium" style={{ fontSize: fs(13) }}>编辑提问</span>
-          <button
-            type="button"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => setShowBigInput(false)}
-            className="rounded p-1 text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M18 6L6 18M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-        <textarea
-          className="flex-1 w-full resize-none rounded-lg border border-[#444] bg-[#252525] p-4 text-gray-200 outline-none focus:border-rose-500"
-          style={{ fontSize: fs(14), overflowY: 'auto' }}
-          value={bigInputDraft}
-          onChange={(e) => setBigInputDraft(e.target.value)}
-          autoFocus
-          onPointerDown={(e) => e.stopPropagation()}
-        />
-        <div className="flex justify-end gap-3 mt-3 shrink-0">
-          <button
-            type="button"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => setShowBigInput(false)}
-            className="rounded-lg border border-[#555] px-5 py-2 text-gray-300 hover:bg-white/10 transition-colors"
-            style={{ fontSize: fs(12) }}
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => {
-              onUpdate({ prompt: bigInputDraft });
-              setShowBigInput(false);
-            }}
-            className="rounded-lg bg-rose-600 px-5 py-2 text-white hover:bg-rose-500 transition-colors"
-            style={{ fontSize: fs(12) }}
-          >
-            确认
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body
-  );
-
-  return (
-    <div className="flex flex-col h-full bg-[#1a1a1a] rounded-b-xl overflow-hidden"
-      onDoubleClick={(e) => {
-        if (!isSelected) {
-          e.stopPropagation();
-          onActivate();
-        }
-      }}
-    >
-      {/* 参考区：图片 + 视频 + 文本 */}
-      <div className={`flex items-center gap-2 px-2 py-1.5 bg-[#252525] border-b border-[#333] shrink-0 ${isSelected ? '' : 'hidden'}`} style={{ fontSize: fs(10), order: 2 }}>
-        <span className="text-gray-400 shrink-0">参考:</span>
-        <span className="text-green-400 font-medium shrink-0">
-          {totalRefImages}图
-          {refSlots.some((s) => s.kind === 'video') ? (
-            <span className="text-amber-400"> · {refSlots.filter((s) => s.kind === 'video').length}视频</span>
-          ) : null}
-          {refSlots.some((s) => s.kind === 'text') ? (
-            <span className="text-cyan-400"> · {refSlots.filter((s) => s.kind === 'text').length}文本</span>
-          ) : null}
-        </span>
-        <div className="flex gap-1 ml-1 flex-wrap max-w-[330px]">
-          {(showAllRefs ? refSlots : refSlots.slice(0, 6)).map((slot) => (
-            <div key={`${slot.edgeId}-slot-${slot.n}`} className="relative group">
-              <div className="absolute -top-0.5 left-0 z-[1] rounded bg-black/70 px-0.5 font-bold leading-none text-cyan-300" style={{ fontSize: fs(7) }}>
-                R{slot.n}{slot.imageBase64s && slot.imageBase64s.length > 1 ? `(${slot.imageBase64s.length})` : ''}
-              </div>
-              {slot.imageBase64s && slot.imageBase64s.length > 0 ? (
-                <div className="flex gap-0.5">
-                  {slot.imageBase64s.slice(0, 4).map((img, imgIdx) => (
-                    <OptimizedImage
-                      key={`${slot.edgeId}-img-${imgIdx}`}
-                      base64={img}
-                      maxSide={80}
-                      quality={0.72}
-                      alt={`${slot.label}图${imgIdx + 1}`}
-                      className="w-9 h-9 object-cover rounded border border-[#444]"
-                    />
-                  ))}
-                  {slot.imageBase64s.length > 4 && (
-                    <div className="w-9 h-9 rounded border border-[#444] bg-[#333] flex items-center justify-center text-gray-400 text-[8px]">
-                      +{slot.imageBase64s.length - 4}
-                    </div>
-                  )}
-                </div>
-              ) : slot.kind === 'image' && slot.imageBase64 ? (
-                <OptimizedImage
-                  base64={slot.imageBase64}
-                  maxSide={80}
-                  quality={0.72}
-                  alt={slot.label}
-                  className="w-9 h-9 object-cover rounded border border-[#444]"
-                />
-              ) : slot.kind === 'video' && slot.videoUrl ? (
-                <video
-                  src={slot.videoUrl}
-                  className="w-9 h-9 rounded border border-[#444] object-cover"
-                  muted
-                  playsInline
-                  preload="metadata"
-                />
-              ) : slot.kind === 'text' && slot.textContent ? (
-                <div className="w-9 h-9 rounded border border-cyan-700/50 bg-[#1a1a2e] flex items-center justify-center text-cyan-300 text-[7px] leading-tight px-0.5 overflow-hidden text-center"
-                  title={slot.textContent}>
-                  文本
-                </div>
-              ) : (
-                <div className="w-9 h-9 rounded border border-[#444] bg-[#333]" title={slot.label} />
-              )}
-              <button
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDeleteEdge(slot.edgeId);
-                }}
-                className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-600 hover:bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                title="取消引用"
-              >
-                <svg viewBox="0 0 10 10" className="w-2.5 h-2.5 fill-white"><path d="M1 1L9 9M9 1L1 9" stroke="white" strokeWidth="1.5" strokeLinecap="round" /></svg>
-              </button>
-            </div>
-          ))}
-          {refSlots.length > 6 && (
-            <button
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                setShowAllRefs((prev) => !prev);
-              }}
-              className="flex items-center rounded px-1 text-gray-400 hover:bg-white/10 hover:text-white"
-              title={showAllRefs ? '收起参考' : '展开全部参考'}
-            >
-              {showAllRefs ? '收起' : `+${refSlots.length - 6}`}
-            </button>
-          )}
-        </div>
-        <button
-          onPointerDown={(e) => {
-            e.stopPropagation();
-            onEyedropperSelect();
-          }}
-          className={`ml-auto shrink-0 rounded px-2 py-0.5 text-white ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
-          title={eyedropperTargetNodeId === node.id ? '取消吸取' : '吸取参考（图片 / 视频节点）'}
-        >
-          <EyedropperIcon size={fs(12)} />
-        </button>
-      </div>
-
-      {/* 模型选择 */}
-      <div
-        className={`flex items-center gap-2 px-3 py-2 bg-[#252525] border-b border-[#333] ${isSelected ? '' : 'hidden'}`}
-        style={{ fontSize: 45, order: 3 }}
-      >
-        <span className="text-gray-400">模型:</span>
-        <select
-          className="nodemodel-select bg-[#222222] border border-[#444] rounded px-2 py-1 text-gray-300 outline-none focus:border-rose-500 max-w-[330px]"
-          value={normalizeDeepSeekChatModelId(node.model || DEFAULT_DEEPSEEK_CHAT_MODEL_ID).trim()}
-          onChange={(e) => onUpdate({ model: e.target.value })}
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          <optgroup label="DeepSeek">
-            <option value="deepseek-v4-flash">DeepSeek-V4-Flash</option>
-            <option value="deepseek-v4-pro">DeepSeek-V4-Pro</option>
-          </optgroup>
-          <optgroup label="codesonline">
-            <option value="gpt-5.5-codesonline">GPT-5.5（codesonline）</option>
-          </optgroup>
-          <optgroup label="MiniMax">
-            <option value="minimax-m2.7">MiniMax M2.7</option>
-          </optgroup>
-          <optgroup label="君澜 AI">
-            <option value="gpt-5.5-junlan">GPT-5.5（君澜）</option>
-            <option value="claude-sonnet-4-6">Claude Sonnet 4-6（君澜）</option>
-          </optgroup>
-          <optgroup label="Google Gemini / ToAPIs">
-            <option value="gemini-2.0-flash-official">Gemini 2.0 Flash（ToAPIs）</option>
-            <option value="gemini-3.1-flash-lite-preview-official">Gemini 3.1 Flash Lite（ToAPIs）</option>
-          </optgroup>
-        </select>
-        <label className="flex items-center gap-1 shrink-0 text-gray-500" style={{ fontSize: 45 }}>
-          <span className="whitespace-nowrap">字号</span>
-          <select
-            className="chat-fontsize-select max-w-[120px] rounded border border-[#444] bg-[#222222] px-1.5 py-0.5 text-gray-200 outline-none focus:border-rose-500"
-            style={{ fontSize: 45 }}
-            value={chatFontPx}
-            onChange={(e) => persistChatFontPx(Number(e.target.value))}
-            onPointerDown={(e) => e.stopPropagation()}
-            title="对话区与输入框字体大小（本机记忆）"
-          >
-            {[11, 12, 13, 14, 15, 16, 18, 20, 22].map((px) => (
-              <option key={px} value={px}>
-                {px}px
-              </option>
-            ))}
-          </select>
-        </label>
-        <button
-          onPointerDown={(e) => { e.stopPropagation(); onUpdate({ messages: [] }); }}
-          disabled={messages.length === 0}
-          className="ml-auto p-1.5 rounded text-white transition-colors bg-[#333] hover:bg-red-600 disabled:opacity-30 disabled:hover:bg-[#333] disabled:cursor-not-allowed"
-          title="清除对话"
-        >
-          <TrashIcon size={fs(14)} />
-        </button>
-      </div>
-
-      {/* 消息列表 : 底部输入区（功能+引用+文本框）垂直空间 = 2 : 1 */}
-      <div
-        className={`flex-1 ${isSelected ? 'grid grid-rows-[2fr_1fr]' : 'flex flex-col'} overflow-hidden`}
-        style={{ order: 1 }}
-      >
-      <div
-        className={`chat-messages overflow-y-scroll p-3 space-y-3 overscroll-contain ${isSelected ? 'min-h-0' : 'flex-1 min-h-0'}`}
-        style={{ userSelect: 'text' }}
-        onPointerDown={(e) => {
-          const target = e.target as HTMLElement;
-          // 吸管模式：允许点击消息区域空白触发吸管连线
-          if (eyedropperTargetNodeId) return;
-          // 判断是否点击在滚动条区域（容器右侧 40px 范围，与滚动条宽度匹配）
-          const rect = e.currentTarget.getBoundingClientRect();
-          const isScrollbarClick = e.clientX > rect.right - 40 && e.currentTarget.scrollHeight > e.currentTarget.clientHeight;
-          if (isScrollbarClick) {
-            // 滚动条上的交互不触发节点选中
-            e.stopPropagation();
-            return;
-          }
-          // 点击消息气泡区域阻止冒泡，避免触发节点拖拽
-          if (target.closest('.chat-bubble-wrap')) {
-            e.stopPropagation();
-          }
-        }}
-        onWheel={(e) => {
-          // 滚轮滚动阻止冒泡，避免触发画布缩放
-          e.stopPropagation();
-        }}
-      >
-        <style>{`
-          .chat-messages::-webkit-scrollbar {
-            width: 40px;
-          }
-          .chat-messages::-webkit-scrollbar-track {
-            background: #1a1a1a;
-            border-radius: 3px;
-          }
-          .chat-messages::-webkit-scrollbar-thumb {
-            background: #444;
-            border-radius: 3px;
-          }
-          .chat-messages::-webkit-scrollbar-thumb:hover {
-            background: #555;
-          }
-          /* 滚动条始终可见 */
-          .chat-messages {
-            overflow-y: scroll !important;
-          }
-          .chat-messages::-webkit-scrollbar-thumb {
-            visibility: visible !important;
-          }
-        `}</style>
-        {messages.length === 0 && (
-          <div className="text-center text-gray-500 py-8" style={{ fontSize: chatFontScaled }}>
-            {refSlots.length > 0 && (
-              <div className="mt-2 text-cyan-400" style={{ fontSize: fs(Math.max(11, chatFontPx - 1)) }}>
-                已连接 {refSlots.length} 条参考（含图/视频），可用下方按钮插入 @R 引用
-              </div>
-            )}
-          </div>
-        )}
-        {/* 限制显示最近的消息数量，防止图片过多导致崩溃 */}
-        {messages.length > MAX_VISIBLE_MESSAGES && (
-          <div className="text-center text-gray-500 py-2 text-xs">
-            共 {messages.length} 条消息，显示最近 {MAX_VISIBLE_MESSAGES} 条
-          </div>
-        )}
-        {messages.slice(-MAX_VISIBLE_MESSAGES).map((msg, msgIdx) => {
-          const editingThis = msg.role === 'user' && editingUserMessageId === msg.id;
-          const isUser = msg.role === 'user';
-          // 计算这是第几个AI回复（用于@M引用标记）
-          const visibleMsgs = messages.slice(-MAX_VISIBLE_MESSAGES);
-          const absoluteStartIdx = messages.length - MAX_VISIBLE_MESSAGES;
-          let aiReplyCount = 0;
-          for (let i = 0; i < msgIdx; i++) {
-            if (visibleMsgs[i].role === 'assistant') aiReplyCount++;
-          }
-          const isAssistantMsgWithImg = !isUser && (msg.images?.length || msg.image);
-          const msgRefLabel = isAssistantMsgWithImg ? `@M${aiReplyCount + 1}` : '';
-          return (
-          <div
-            key={`${msg.id}-${msgIdx}`}
-            className={`chat-bubble-wrap flex ${isUser ? 'justify-end' : 'justify-start'}`}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            <div
-                className={`max-w-[92%] rounded-lg p-2.5 ${isUser ? 'bg-[#1e3a5f] text-gray-100' : 'bg-[#2a2a2a] text-gray-300'}`}
-                style={{ fontSize: isUser ? fs(Math.max(13, chatFontPx + 1)) : chatFontScaled }}
-              onPointerDown={(e) => e.stopPropagation()}
-            >
-              {isAssistantMsgWithImg && msgRefLabel && (
-                <div className="mb-1 text-xs text-cyan-400 bg-[#1a1a2a] rounded px-1.5 py-0.5 inline-block">
-                  {msgRefLabel}
-                </div>
-              )}
-              {(msg.images?.length ? msg.images : msg.image ? [msg.image] : []).map((im, ii) => (
-                <div key={`${msg.id}-img-${ii}`} className={`relative group/image ${ii ? 'mt-1 ' : ''}mb-2`}>
-                  <OptimizedImage
-                    base64={im}
-                    maxSide={840}
-                    quality={0.85}
-                    alt="AI生成的图片"
-                    className="rounded object-contain max-w-full cursor-pointer hover:opacity-90 transition-opacity"
-                    onDoubleClick={(e) => {
-                      e.stopPropagation();
-                      // 双击图片最大化
-                      const win = window.open('', '_blank');
-                      if (win) {
-                        const img = new Image();
-                        img.onload = () => {
-                          const dataUrl = `data:${sniffImageMimeFromBase64(im)};base64,${im}`;
-                          win.document.write(`<html><body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh"><img src="${dataUrl}" style="max-width:95vw;max-height:95vh;object-fit:contain"/></body></html>`);
-                          win.document.close();
-                        };
-                        img.src = `data:${sniffImageMimeFromBase64(im)};base64,${im}`;
-                      }
-                    }}
-                  />
-                  {/* 复制图片按钮 */}
-                  <button
-                    type="button"
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const dataUrl = `data:${sniffImageMimeFromBase64(im)};base64,${im}`;
-                      fetch(dataUrl)
-                        .then(r => r.blob())
-                        .then(blob => {
-                          navigator.clipboard.write([
-                            new ClipboardItem({ 'image/png': blob })
-                          ]);
-                        })
-                        .catch(() => {
-                          // 降级：复制 base64 字符串
-                          navigator.clipboard.writeText(im);
-                        });
-                    }}
-                    className="absolute top-1 left-1 opacity-0 group-hover/image:opacity-100 transition-opacity bg-black/70 hover:bg-black/90 rounded p-1"
-                    title="复制图片"
-                  >
-                    <CopyIcon size={12} />
-                  </button>
-                  {/* 最大化按钮 */}
-                  <button
-                    type="button"
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (onOpenFullscreen) {
-                        onOpenFullscreen(im);
-                      }
-                    }}
-                    className="absolute top-1 right-7 opacity-0 group-hover/image:opacity-100 transition-opacity bg-black/70 hover:bg-black/90 rounded p-1"
-                    title="最大化"
-                  >
-                    <MaximizeIcon size={12} />
-                  </button>
-                  {/* 存储为节点按钮 */}
-                  {onCreateImageNode && (
-                    <button
-                      type="button"
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onCreateImageNode([im], node.x + node.width + 50, node.y);
-                      }}
-                      className="absolute top-1 left-1 opacity-0 group-hover/image:opacity-100 transition-opacity bg-purple-600/80 hover:bg-purple-600 rounded p-1"
-                      title="存储为图片节点"
-                    >
-                      <ImageIcon size={12} />
-                    </button>
-                  )}
-                </div>
-              ))}
-                {editingThis ? (
-                  <>
-                    <textarea
-                      key={editingUserMessageId ?? 'no-edit'}
-                      value={editUserDraft}
-                      onChange={(e) => setEditUserDraft(e.target.value)}
-                      rows={5}
-                      className="w-full min-h-[180px] rounded-md bg-black/25 border border-white/35 px-2 py-1.5 text-white outline-none focus:border-white/60"
-                      style={{ fontSize: fs(Math.max(13, chatFontPx + 1)) }}
-                      onPointerDown={(e) => e.stopPropagation()}
-                    />
-                    <div className="mt-2 flex flex-wrap justify-end gap-2">
-              <button
-                        type="button"
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEditingUserMessageId(null);
-                        }}
-                        className="rounded bg-white/15 px-2 py-1 hover:bg-white/25"
-                        style={{ fontSize: fs(Math.max(10, chatFontPx - 2)) }}
-                      >
-                        取消
-                      </button>
-                      <button
-                        type="button"
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const idx = messages.findIndex((m) => m.id === msg.id);
-                          const t = editUserDraft.trim();
-                          if (idx < 0 || !t) return;
-                          onResendWithHistory(messages.slice(0, idx), t);
-                          setEditingUserMessageId(null);
-                        }}
-                        className="rounded bg-white/90 px-2 py-1 font-medium text-blue-800 hover:bg-white"
-                        style={{ fontSize: fs(Math.max(10, chatFontPx - 2)) }}
-                      >
-                        保存并重新生成
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div
-                      className={`whitespace-pre-wrap break-words rounded-sm px-0.5 -mx-0.5 ${
-                        msg.role === 'user' && !node.isGenerating ? 'cursor-text hover:bg-white/10' : ''
-                      }`}
-                      style={{ userSelect: 'text' }}
-                      title={msg.role === 'user' && !node.isGenerating ? '双击可修改本条提问' : undefined}
-                      onDoubleClick={(e) => {
-                        e.stopPropagation();
-                        if (!isSelected) {
-                          onActivate();
-                          return;
-                        }
-                        if (msg.role !== 'user' || node.isGenerating) return;
-                        setEditingUserMessageId(msg.id);
-                        setEditUserDraft(msg.content);
-                      }}
-                    >
-                      {msg.content}
-                    </div>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onPointerDown={(e) => {
-                          e.stopPropagation();
-                          navigator.clipboard.writeText(msg.content);
-                        }}
-                        className={
-                          msg.role === 'user'
-                            ? 'rounded border border-white/25 bg-white/10 px-2 py-0.5 opacity-90 hover:bg-white/20'
-                            : 'rounded px-2 py-0.5 opacity-50 hover:opacity-100'
-                        }
-                        style={{ fontSize: fs(Math.max(10, chatFontPx - 2)) }}
-                        title="复制"
-                      >
-                        复制
-                      </button>
-                      {msg.role === 'user' && !node.isGenerating ? (
-                        <button
-                          type="button"
-                          onPointerDown={(e) => {
-                            e.stopPropagation();
-                            if (onOpenBigEditor) {
-                              onOpenBigEditor(msg.content, (newVal) => {
-                                setEditUserDraft(newVal);
-                                setEditingUserMessageId(msg.id);
-                              });
-                            } else {
-                              setEditingUserMessageId(msg.id);
-                              setEditUserDraft(msg.content);
-                            }
-                          }}
-                          className="rounded border border-white/40 bg-white/15 px-2 py-0.5 font-medium hover:bg-white/25"
-                          style={{ fontSize: fs(Math.max(10, chatFontPx - 2)) }}
-                          title="修改本条消息并重新生成"
-                        >
-                          再次编辑
-                        </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const el = chatPromptRef.current;
-                          const cur = node.prompt || '';
-                          const content = msg.content;
-                          // 点击时先获取光标位置
-                          let insertPos = 0;
-                          if (el) {
-                            const sel = el.selectionStart;
-                            insertPos = sel ?? cur.length;
-                          }
-                          const next = cur.slice(0, insertPos) + content + cur.slice(insertPos);
-                          onUpdate({ prompt: next });
-                          requestAnimationFrame(() => {
-                            if (el) {
-                              el.focus();
-                              el.selectionStart = el.selectionEnd = insertPos + content.length;
-                            }
-                          });
-                        }}
-                        className="rounded border border-white/25 px-2 py-0.5 opacity-70 hover:opacity-100 hover:bg-white/10"
-                        style={{ fontSize: fs(Math.max(10, chatFontPx - 2)) }}
-                        title="将此条消息内容作为参考添加到输入框"
-                      >
-                        作为参考
-                      </button>
-                      <button
-                        type="button"
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const newMessages = (node.messages || []).filter((m: ChatMessage) => m.id !== msg.id);
-                          onUpdate({ messages: newMessages });
-                        }}
-                        className="rounded border border-white/25 px-2 py-0.5 opacity-70 hover:opacity-100 hover:bg-red-500/50"
-                        style={{ fontSize: fs(Math.max(10, chatFontPx - 2)) }}
-                        title="删除本条消息"
-                      >
-                        删除
-                      </button>
-                    </div>
-                  </>
-                )}
-          </div>
-            </div>
-          );
-        })}
-        {node.isGenerating && (
-          <div className="flex justify-start">
-            <div
-              className="bg-[#2a2a2a] rounded-lg p-3 text-gray-400 flex flex-col gap-1"
-              style={{ fontSize: chatFontScaled }}
-            >
-              <span className="flex items-center gap-2">
-                <LoaderIcon size={fs(14)} /> 思考中…
-              </span>
-              {generationMmSs != null && (
-                <span className="tabular-nums text-gray-500" style={{ fontSize: fs(Math.max(10, chatFontPx - 1)) }}>
-                  已用时 {generationMmSs}
-                  {generationSeconds != null ? ` · ${generationSeconds} 秒` : ''}
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-        {node.error && chatErrorDiagnosis && (
-          <div className="flex justify-start">
-            <div
-              className="bg-red-950/90 rounded-lg p-2.5 text-red-200 border border-red-900/60 max-w-[92%] cursor-pointer"
-              style={{ fontSize: chatFontScaled }}
-              onClick={() => onUpdate({ error: undefined })}
-            >
-              <div className="flex justify-between items-start mb-1">
-                <div className="font-bold">{chatErrorDiagnosis.title}</div>
-                <button onPointerDown={(e) => { e.stopPropagation(); navigator.clipboard.writeText(node.error || ''); }} className="text-red-300 hover:text-red-100"><CopyIcon size={12} /></button>
-              </div>
-              <div className="text-red-100/90 mb-1">{chatErrorDiagnosis.reason}</div>
-              <div className="text-red-300 mb-2">{node.error}</div>
-              <div className="flex flex-wrap gap-1">
-                {chatErrorDiagnosis.fixes.map((fix, idx) => (
-                  <button
-                    key={`chat-fix-${idx}`}
-                    onPointerDown={(e) => { e.stopPropagation(); fix.action(); }}
-                    className="px-2 py-1 rounded bg-red-800 hover:bg-red-700 text-red-50 border border-red-600/50"
-                  >
-                    {fix.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* 输入区域（与上方消息区 grid 2:1） */}
-      <div className={`flex min-h-0 flex-col overflow-y-auto border-t border-[#333] bg-[#252525] p-2 ${isSelected ? '' : 'hidden'}`}>
-        {/* 快捷功能：置于文字输入框上方 */}
-        <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-md border border-[#333] bg-[#3A3A3A] px-2 py-1.5" style={{ fontSize: 50 }}>
-          <span className="shrink-0 text-gray-500">功能</span>
-          {CHAT_FEATURE_BUTTON_SPECS.map((btn) => {
-            const presetBody = promptPresets[btn.presetKey] ?? '';
-            return (
-            <button
-              key={btn.id}
-              type="button"
-              disabled={node.isGenerating}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                onUpdate({ prompt: presetBody, error: undefined });
-              }}
-              className="inline-flex items-center gap-0.5 rounded-md border border-rose-800/55 bg-rose-950/45 px-2 py-0.5 font-medium text-rose-100 hover:bg-rose-900/55 disabled:cursor-not-allowed disabled:opacity-40"
-              title={btn.title}
-            >
-              {btn.icon === 'wand' ? (
-                <WandIcon size={fs(11)} />
-              ) : btn.icon === 'message' ? (
-                <MessageIcon size={fs(11)} />
-              ) : (
-                <VideoIcon size={fs(11)} />
-              )}
-              {btn.label}
-            </button>
-            );
-          })}
-        </div>
-        {/* 生图比例和分辨率选择器 */}
-        <div className="mb-2 flex items-center gap-2 flex-wrap">
-          <span className="text-gray-400 shrink-0" style={{ fontSize: fs(10) }}>比例:</span>
-          <select
-            className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-purple-500"
-            style={{ fontSize: fs(10) }}
-            value={node.imageAspectRatio || '16:9'}
-            onChange={(e) => onUpdate({ imageAspectRatio: e.target.value })}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            <option value="1:1">1:1</option>
-            <option value="16:9">16:9</option>
-            <option value="9:16">9:16</option>
-            <option value="4:3">4:3</option>
-            <option value="3:4">3:4</option>
-            <option value="21:9">21:9</option>
-          </select>
-          <span className="text-gray-400 shrink-0" style={{ fontSize: fs(10) }}>分辨率:</span>
-          <select
-            className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-purple-500"
-            style={{ fontSize: fs(10) }}
-            value={node.imageResolution || '2k'}
-            onChange={(e) => onUpdate({ imageResolution: e.target.value })}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            <option value="0.5k">0.5K</option>
-            <option value="1k">1K</option>
-            <option value="2k">2K</option>
-            <option value="4k">4K</option>
-          </select>
-          <span className="text-gray-400 shrink-0" style={{ fontSize: fs(10) }}>模型:</span>
-          <select
-            className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-purple-500"
-            style={{ fontSize: fs(10) }}
-            value={node.imageModel || 'gpt-image-2-codesonline'}
-            onChange={(e) => onUpdate({ imageModel: e.target.value })}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            <option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option>
-            <option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option>
-            <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
-            <option value="gpt-image-2-manxue">GPT Image 2（满 e）</option>
-            <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option>
-            <option value="gemini-3.1-flash-image-preview-2k-manxue">Gemini 3.1 Flash Image 2K（满 e）</option>
-            <option value="gemini-3-pro-image-preview-2k-manxue">Gemini 3 Pro Image 2K（满 e）</option>
-          </select>
-          <button
-            onPointerDown={(e) => {
-              e.stopPropagation();
-              // 触发图片生成模式：在 prompt 前面加上生图指令前缀
-              const currentPrompt = node.prompt || '';
-              // 检查是否已经有生图前缀
-              if (!currentPrompt.startsWith('[生图]')) {
-                onUpdate({ prompt: '[生图] ' + currentPrompt });
-              }
-            }}
-            disabled={node.isGenerating}
-            className="rounded bg-purple-600 hover:bg-purple-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white flex items-center justify-center px-3 py-0.5"
-            style={{ width: 300, fontSize: fs(10) }}
-            title="AI生图"
-          >
-            <ImageIcon size={fs(12)} />
-            <span className="ml-1">AI生图</span>
-          </button>
-        </div>
-        <RefPickBar
-          slots={refSlots}
-          disabled={node.isGenerating}
-          uiScale={CHAT_PANEL_FONT_SCALE}
-          onInsert={(tok) => {
-            const el = chatPromptRef.current;
-            const cur = node.prompt || '';
-            // 点击按钮时尝试直接获取光标位置
-            let insertPos = savedCursorPos.start;
-            if (el) {
-              const sel = el.selectionStart;
-              if (sel !== null) {
-                insertPos = sel;
-              }
-            }
-            const next = cur.slice(0, insertPos) + tok + cur.slice(insertPos);
-            onUpdate({ prompt: next });
-            requestAnimationFrame(() => {
-              if (el) {
-                el.focus();
-                el.selectionStart = el.selectionEnd = insertPos + tok.length;
-              }
-            });
-          }}
-        />
-        <div className="flex gap-2">
-          <textarea
-            ref={chatPromptRef}
-            className="flex-1 bg-[#222222] text-gray-200 p-2.5 rounded border border-[#444] focus:outline-none focus:border-rose-500 resize-y"
-            style={{
-              fontSize: chatFontScaled,
-              minHeight: fs(108),
-              height: node.chatInputHeight ?? fs(152),
-              overflowY: 'auto',
-            }}
-            value={node.prompt || ''}
-            onChange={(e) => {
-              const val = e.target.value;
-              onUpdate({ prompt: val });
-              // 检测 @ 触发自动完成
-              const sel = chatPromptRef.current?.selectionStart ?? val.length;
-              const textBefore = val.slice(0, sel);
-              // @R 或 @M 开头时显示选择器
-              if (textBefore.endsWith('@') || textBefore.endsWith('@R') || textBefore.endsWith('@M')) {
-                const el = chatPromptRef.current;
-                if (el) {
-                  // 使用 mirror div 精确测量光标位置
-                  const mirror = document.createElement('div');
-                  const style = window.getComputedStyle(el);
-                  mirror.style.cssText = `
-                    position: absolute;
-                    top: -9999px;
-                    left: -9999px;
-                    visibility: hidden;
-                    white-space: pre-wrap;
-                    word-wrap: break-word;
-                    width: ${el.offsetWidth}px;
-                    font-size: ${style.fontSize};
-                    font-family: ${style.fontFamily};
-                    line-height: ${style.lineHeight};
-                    padding: ${style.padding};
-                    border: ${style.border};
-                    box-sizing: border-box;
-                    overflow: hidden;
-                  `;
-                  const textUpToCursor = val.slice(0, el.selectionStart || 0);
-                  mirror.textContent = textUpToCursor;
-                  document.body.appendChild(mirror);
-                  const cursorHeight = mirror.offsetHeight;
-                  document.body.removeChild(mirror);
-                  const rect = el.getBoundingClientRect();
-                  const top = rect.top + cursorHeight;
-                  setAtPickerPos({ top: top + 4, left: rect.left });
-                  setSavedCursorPos({ start: sel, end: sel });
-                }
-                setShowAtPicker(true);
-              } else if (textBefore.match(/@[RM]\d+$/)) {
-                // 输入了完整编号时不显示
-                setShowAtPicker(false);
-              } else {
-                setShowAtPicker(false);
-              }
-            }}
-            onKeyDown={handleKeyDown}
-            placeholder=""
-            onPointerDown={(e) => {
-              e.stopPropagation();
-              // 双击检测：基于时间戳（320ms 间隔内第二次点击即为双击）
-              const now = Date.now();
-              if (now - bigInputLastClickTimeRef.current < 320) {
-                bigInputLastClickTimeRef.current = 0;
-                if (onOpenBigEditor) {
-                  onOpenBigEditor(node.prompt || '', (v) => onUpdate({ prompt: v }));
-                } else {
-                  setBigInputDraft(node.prompt || '');
-                  setShowBigInput(true);
-                }
-              } else {
-                bigInputLastClickTimeRef.current = now;
-              }
-            }}
-            onDoubleClick={(e) => {
-              e.stopPropagation();
-              if (!isSelected) {
-                onActivate();
-                return;
-              }
-              if (onOpenBigEditor) {
-                onOpenBigEditor(node.prompt || '', (v) => onUpdate({ prompt: v }));
-              } else {
-                setBigInputDraft(node.prompt || '');
-                setShowBigInput(true);
-              }
-            }}
-            onPointerUp={(e) => {
-              e.stopPropagation();
-              const nextHeight = Math.max(fs(108), Math.round((e.currentTarget as HTMLTextAreaElement).offsetHeight));
-              if (nextHeight !== (node.chatInputHeight ?? fs(152))) {
-                onUpdate({ chatInputHeight: nextHeight });
-              }
-            }}
-          />
-          {showAtPicker && (
-            <div
-              ref={atPickerRef}
-              className="absolute z-50 bg-[#1e1e1e] border border-[#444] rounded-lg shadow-xl overflow-hidden"
-              style={{ top: atPickerPos.top, left: atPickerPos.left, minWidth: 180 }}
-              onPointerDown={(e) => e.stopPropagation()}
-            >
-              <div className="px-3 py-2 text-xs text-gray-400 border-b border-[#333]">选择引用</div>
-              {/* 参考区图片 */}
-              {refSlots.length > 0 && (
-                <>
-                  <div className="px-3 py-1 text-xs text-cyan-400">连线参考</div>
-{refSlots.map((s) => (
-                    <button
-                      key={`at-r${s.n}`}
-                      onClick={() => {
-                        const el = chatPromptRef.current;
-                        const cur = node.prompt || '';
-                        const tok = `@R${s.n} `;
-                        // 点击时先获取光标位置
-                        let insertPos = savedCursorPos.start;
-                        if (el) {
-                          // 尝试直接获取当前选择位置
-                          const sel = el.selectionStart;
-                          if (sel !== null) {
-                            insertPos = sel;
-                          }
-                        }
-                        const next = cur.slice(0, insertPos) + tok + cur.slice(insertPos);
-                        onUpdate({ prompt: next });
-                        setShowAtPicker(false);
-                        // 恢复焦点并定位光标到插入内容之后
-                        requestAnimationFrame(() => {
-                          if (el) {
-                            el.focus();
-                            el.selectionStart = el.selectionEnd = insertPos + tok.length;
-                          }
-                        });
-                      }}
-                      className="w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-[#333]"
-                    >
-                      <span className="text-cyan-400">@R{s.n}</span> {s.label}
-                    </button>
-                  ))}
-                </>
-              )}
-              {/* 历史消息图片 */}
-              {(() => {
-                const aiReplies: { num: number; images: string[] }[] = [];
-                for (let i = 0; i < (node.messages || []).length; i++) {
-                  const msg = (node.messages || [])[i];
-                  if (msg.role === 'assistant' && (msg.images?.length || msg.image)) {
-                    aiReplies.push({ num: aiReplies.length + 1, images: msg.images || (msg.image ? [msg.image] : []) });
-                  }
-                }
-                if (aiReplies.length === 0) return null;
-                return (
-                  <>
-                    <div className="px-3 py-1 text-xs text-purple-400">消息图片</div>
-{aiReplies.map((r) => (
-                      <button
-                        key={`at-m${r.num}`}
-                        onClick={() => {
-                          const el = chatPromptRef.current;
-                          const cur = node.prompt || '';
-                          const tok = `@M${r.num} `;
-                          // 点击时先获取光标位置
-                          let insertPos = savedCursorPos.start;
-                          if (el) {
-                            const sel = el.selectionStart;
-                            if (sel !== null) {
-                              insertPos = sel;
-                            }
-                          }
-                          const next = cur.slice(0, insertPos) + tok + cur.slice(insertPos);
-                          onUpdate({ prompt: next });
-                          setShowAtPicker(false);
-                          // 恢复焦点并定位光标
-                          requestAnimationFrame(() => {
-                            if (el) {
-                              el.focus();
-                              el.selectionStart = el.selectionEnd = insertPos + tok.length;
-                            }
-                          });
-                        }}
-                        className="w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-[#333]"
-                      >
-                        <span className="text-purple-400">@M{r.num}</span> AI回复({r.images.length}张图)
-                      </button>
-                    ))}
-                  </>
-                );
-              })()}
-              <button
-                onClick={() => setShowAtPicker(false)}
-                className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-[#333] border-t border-[#333]"
-              >
-                取消
-              </button>
-            </div>
-          )}
-          <button
-            onPointerDown={(e) => {
-              e.stopPropagation();
-              onSendMessage();
-            }}
-            disabled={node.isGenerating || !node.prompt?.trim()}
-            className="rounded bg-rose-600 hover:bg-rose-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white flex items-center justify-center px-3"
-            style={{ width: 200, height: 600 }}
-          >
-            <SendIcon size={fs(14)} />
-            <span className="ml-2">发送</span>
-          </button>
-          {node.isGenerating && (
-            <button
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                if (onCancelGeneration) {
-                  onCancelGeneration(node.id);
-                }
-              }}
-              className="rounded bg-orange-600 hover:bg-orange-500 text-white flex items-center justify-center px-3 ml-2"
-              style={{ width: 100, height: 600 }}
-              title="取消生成"
-            >
-              <StopIcon size={fs(14)} />
-              <span className="ml-1">取消</span>
-            </button>
-          )}
-        </div>
-      </div>
-      </div>
-    </div>
-  );
-}
-
-// ==================== 图片标注节点组件 ====================
-interface AnnotationNodeContentProps {
-  node: AnnotationNode;
-  nodes: CanvasNode[];
-  edges: Edge[];
-  eyedropperTargetNodeId: string | null;
-  onEyedropperSelect: () => void;
-  onUpdate: (updates: Partial<AnnotationNode>) => void;
-  onCreateImageNode: (images: string[], nodeX: number, nodeY: number) => void;
-  onFullscreenImage?: (base64: string) => void;
-  onDeleteEdge?: (edgeId: string) => void;
-}
-
-function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEyedropperSelect, onUpdate, onCreateImageNode, onFullscreenImage, onDeleteEdge }: AnnotationNodeContentProps) {
-  // 计算链接到该节点的源图片
-  const incomingEdges = edges.filter(e => e.targetId === node.id);
-  const sourceNodes = incomingEdges
-    .map(e => nodes.find(n => n.id === e.sourceId))
-    .filter(Boolean) as CanvasNode[];
-  const sourceImages = sourceNodes.flatMap(n => n.images || []).filter(img => img && img !== '');
-
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [currentTool, setCurrentTool] = useState<'rect' | 'circle' | 'arrow' | 'pen' | 'text' | 'fillRect' | 'fillCircle' | 'crop'>('rect');
-  const [exportScale, setExportScale] = useState(100);
-  const [currentColor, setCurrentColor] = useState('#ff6b6b');
-  const [fillOpacity, setFillOpacity] = useState(0.45);
-  const fillOpacityRef = useRef(0.45);
-  const [currentFontSize, setCurrentFontSize] = useState(16);
-  /** 裁切选区（画布坐标），等待确认 */
-  const [cropPending, setCropPending] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
-  const cropPendingRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
-  useEffect(() => {
-    cropPendingRef.current = cropPending;
-  }, [cropPending]);
-  const cropDragRef = useRef<{ x: number; y: number; endX: number; endY: number } | null>(null);
-  type CropAdjustMode = 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w';
-  const cropAdjustRef = useRef<{ mode: CropAdjustMode; startX: number; startY: number; orig: { x: number; y: number; w: number; h: number } } | null>(null);
-
-  const hitCropZone = (mx: number, my: number, r: { x: number; y: number; w: number; h: number }, margin = 10): CropAdjustMode | null => {
-    const { x, y, w, h } = r;
-    if (mx < x || mx > x + w || my < y || my > y + h) return null;
-    const nl = mx - x <= margin;
-    const nr = x + w - mx <= margin;
-    const nt = my - y <= margin;
-    const nb = y + h - my <= margin;
-    if (nt && nl) return 'nw';
-    if (nt && nr) return 'ne';
-    if (nb && nl) return 'sw';
-    if (nb && nr) return 'se';
-    if (nt) return 'n';
-    if (nb) return 's';
-    if (nl) return 'w';
-    if (nr) return 'e';
-    return 'move';
-  };
-
-  const applyCropResize = (
-    mode: CropAdjustMode,
-    o: { x: number; y: number; w: number; h: number },
-    dx: number,
-    dy: number
-  ): { x: number; y: number; w: number; h: number } => {
-    switch (mode) {
-      case 'move':
-        return { x: o.x + dx, y: o.y + dy, w: o.w, h: o.h };
-      case 'se':
-        return { x: o.x, y: o.y, w: o.w + dx, h: o.h + dy };
-      case 'nw':
-        return { x: o.x + dx, y: o.y + dy, w: o.w - dx, h: o.h - dy };
-      case 'ne':
-        return { x: o.x, y: o.y + dy, w: o.w + dx, h: o.h - dy };
-      case 'sw':
-        return { x: o.x + dx, y: o.y, w: o.w - dx, h: o.h + dy };
-      case 'n':
-        return { x: o.x, y: o.y + dy, w: o.w, h: o.h - dy };
-      case 's':
-        return { x: o.x, y: o.y, w: o.w, h: o.h + dy };
-      case 'w':
-        return { x: o.x + dx, y: o.y, w: o.w - dx, h: o.h };
-      case 'e':
-        return { x: o.x, y: o.y, w: o.w + dx, h: o.h };
-    }
-  };
-
-  const clampCropRect = (
-    r: { x: number; y: number; w: number; h: number },
-    img: { x: number; y: number; w: number; h: number },
-    minSide = 8
-  ): { x: number; y: number; w: number; h: number } => {
-    let { x, y, w, h } = r;
-    w = Math.max(minSide, w);
-    h = Math.max(minSide, h);
-    x = Math.max(img.x, Math.min(x, img.x + img.w - minSide));
-    y = Math.max(img.y, Math.min(y, img.y + img.h - minSide));
-    if (x + w > img.x + img.w) x = img.x + img.w - w;
-    if (y + h > img.y + img.h) y = img.y + img.h - h;
-    if (x < img.x) x = img.x;
-    if (y < img.y) y = img.y;
-    w = Math.min(w, img.x + img.w - x);
-    h = Math.min(h, img.y + img.h - y);
-    return { x, y, w: Math.max(minSide, w), h: Math.max(minSide, h) };
-  };
-  const [tempAnnotation, setTempAnnotation] = useState<Partial<Annotation> | null>(null);
-  // 文字输入状态
-  const [isTextInputMode, setIsTextInputMode] = useState(false);
-  const [textInputPos, setTextInputPos] = useState({ x: 0, y: 0 });
-  const [textInputValue, setTextInputValue] = useState('');
-  const textInputRef = useRef<HTMLInputElement>(null);
-  // 全屏标注状态
-  const [isFullscreenAnnotation, setIsFullscreenAnnotation] = useState(false);
-  const [fullscreenTool, setFullscreenTool] = useState<'rect' | 'circle' | 'arrow' | 'pen' | 'text' | 'fillRect' | 'fillCircle'>('rect');
-  const [fullscreenColor, setFullscreenColor] = useState('#ff6b6b');
-  const [fullscreenFillOpacity, setFullscreenFillOpacity] = useState(0.45);
-  const fullscreenFillOpacityRef = useRef(0.45);
-  const [fullscreenFontSize, setFullscreenFontSize] = useState(24);
-  const [fullscreenAnnotations, setFullscreenAnnotations] = useState<Annotation[]>([]);
-  const [fullscreenSelectedId, setFullscreenSelectedId] = useState<string | undefined>(undefined);
-  const [isFsDrawing, setIsFsDrawing] = useState(false);
-  const [fsTempAnnotation, setFsTempAnnotation] = useState<Partial<Annotation> | null>(null);
-  const [isFsTextInputMode, setIsFsTextInputMode] = useState(false);
-  const [fsTextInputPos, setFsTextInputPos] = useState({ x: 0, y: 0 });
-  const [fsTextInputValue, setFsTextInputValue] = useState('');
-  const fsTextInputRef = useRef<HTMLInputElement>(null);
-
-  // 全屏绘制相关的 ref
-  const fsCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const fsImageRef = useRef<{img: HTMLImageElement, x: number, y: number, w: number, h: number} | null>(null);
-  const fsPenPointsRef = useRef<{x: number, y: number}[]>([]);
-  const fsIsDrawingRef = useRef(false);
-  const fsToolRef = useRef(fullscreenTool);
-  const fsColorRef = useRef(fullscreenColor);
-  const fsFontSizeRef = useRef(fullscreenFontSize);
-  const fsTempRef = useRef<Partial<Annotation> | null>(null);
-  const fsAnnotationsRef = useRef<Annotation[]>([]);
-
-  // 全屏标注历史记录 — 使用 ref 存储避免闭包陷阱
-  const fsAnnotationHistoryRef = useRef<Annotation[][]>([[]]);
-  const fsHistoryIndexRef = useRef(0);
-  const fsLastSavedHistoryRef = useRef<string>('');
-
-  // 全屏撤销
-  const fsUndo = () => {
-    if (fsHistoryIndexRef.current > 0) {
-      fsHistoryIndexRef.current--;
-      const prevAnnotations = fsAnnotationHistoryRef.current[fsHistoryIndexRef.current];
-      fsLastSavedHistoryRef.current = JSON.stringify(prevAnnotations);
-      setFullscreenAnnotations(prevAnnotations);
-      fsAnnotationsRef.current = prevAnnotations;
-      renderFsCanvas();
-    }
-  };
-
-  // 保存全屏标注状态到历史
-  const fsSaveToHistory = (annots: Annotation[]) => {
-    const currentJson = JSON.stringify(annots);
-    if (currentJson !== fsLastSavedHistoryRef.current) {
-      const history = fsAnnotationHistoryRef.current;
-      const newHistory = history.slice(0, fsHistoryIndexRef.current + 1);
-      newHistory.push([...annots]);
-      fsHistoryIndexRef.current = newHistory.length - 1;
-      if (newHistory.length > 50) {
-        newHistory.shift();
-        fsHistoryIndexRef.current--;
-      }
-      fsAnnotationHistoryRef.current = newHistory;
-      fsLastSavedHistoryRef.current = currentJson;
-    }
-  };
-
-  // 同步 ref
-  useEffect(() => { fsToolRef.current = fullscreenTool; }, [fullscreenTool]);
-  useEffect(() => { fsColorRef.current = fullscreenColor; }, [fullscreenColor]);
-  useEffect(() => { fsFontSizeRef.current = fullscreenFontSize; }, [fullscreenFontSize]);
-  useEffect(() => { fullscreenFillOpacityRef.current = fullscreenFillOpacity; }, [fullscreenFillOpacity]);
-  useEffect(() => { fsAnnotationsRef.current = fullscreenAnnotations; }, [fullscreenAnnotations]);
-  useEffect(() => { fsTempRef.current = fsTempAnnotation; }, [fsTempAnnotation]);
-  useEffect(() => { fsIsDrawingRef.current = isFsDrawing; }, [isFsDrawing]);
-
-  // 优先定义 sourceImage，因为其他 ref 会用到它
-  const sourceImage = node.sourceImage ?? '';
-
-  // 使用 ref 追踪绘制状态
-  const isDrawingRef = useRef(false);
-  const currentToolRef = useRef(currentTool);
-  const currentColorRef = useRef(currentColor);
-  const currentFontSizeRef = useRef(currentFontSize);
-  const tempAnnotationRef = useRef<Partial<Annotation> | null>(null);
-  const penPointsRef = useRef<{x: number, y: number}[]>([]);
-  const sourceImageRef = useRef(sourceImage);
-
-  // 图片缓存
-  const imageCacheRef = useRef<{src: string, img: HTMLImageElement, x: number, y: number, w: number, h: number} | null>(null);
-
-  // 撤销历史记录 — 使用 ref 存储避免闭包陷阱
-  const annotationHistoryRef = useRef<Annotation[][]>([[]]);
-  const historyIndexRef = useRef(0);
-  const lastSavedHistoryRef = useRef<string>('');
-
-  // 撤销
-  const undo = () => {
-    if (historyIndexRef.current > 0) {
-      historyIndexRef.current--;
-      const prevAnnotations = annotationHistoryRef.current[historyIndexRef.current];
-      lastSavedHistoryRef.current = JSON.stringify(prevAnnotations);
-      onUpdate({ annotations: prevAnnotations });
-      renderCanvas();
-    }
-  };
-
-  // 保存当前状态到历史
-  const saveToHistory = (annots: Annotation[]) => {
-    const currentJson = JSON.stringify(annots);
-    if (currentJson !== lastSavedHistoryRef.current) {
-      const history = annotationHistoryRef.current;
-      const newHistory = history.slice(0, historyIndexRef.current + 1);
-      newHistory.push([...annots]);
-      historyIndexRef.current = newHistory.length - 1;
-      // 限制历史记录数量
-      if (newHistory.length > 50) {
-        newHistory.shift();
-        historyIndexRef.current--;
-      }
-      annotationHistoryRef.current = newHistory;
-      lastSavedHistoryRef.current = currentJson;
-    }
-  };
-
-  // 保持 ref 与 state 同步
-  useEffect(() => { currentToolRef.current = currentTool; }, [currentTool]);
-  useEffect(() => { currentColorRef.current = currentColor; }, [currentColor]);
-  useEffect(() => { currentFontSizeRef.current = currentFontSize; }, [currentFontSize]);
-  useEffect(() => { fillOpacityRef.current = fillOpacity; }, [fillOpacity]);
-  useEffect(() => { sourceImageRef.current = sourceImage; }, [sourceImage]);
-  useEffect(() => { tempAnnotationRef.current = tempAnnotation; }, [tempAnnotation]);
-  useEffect(() => { isDrawingRef.current = isDrawing; }, [isDrawing]);
-
-  const annotations = node.annotations ?? [];
-  const selectedId = node.selectedAnnotationId;
-
-  const colors = ['#ffffff', '#000000', '#ff6b6b', '#feca57', '#48dbfb', '#1dd1a1', '#ff9ff3', '#54a0ff'];
-
-  /** 嵌入画布上的图片显示区 → 全屏画布坐标 */
-  const mapAnnotationEmbToFs = useCallback(
-    (
-      ann: Annotation,
-      emb: { x: number; y: number; w: number; h: number },
-      fs: { x: number; y: number; w: number; h: number }
-    ): Annotation => {
-      const sx = fs.w / emb.w;
-      const sy = fs.h / emb.h;
-      const mp = (px: number, py: number) => ({
-        x: fs.x + (px - emb.x) * sx,
-        y: fs.y + (py - emb.y) * sy,
-      });
-      const p0 = mp(ann.x, ann.y);
-      const out: Annotation = {
-        ...ann,
-        x: p0.x,
-        y: p0.y,
-        strokeWidth: (ann.strokeWidth || 2) * Math.min(sx, sy),
-      };
-      if (ann.width != null) out.width = ann.width * sx;
-      if (ann.height != null) out.height = ann.height * sy;
-      if (ann.endX != null && ann.endY != null) {
-        const pe = mp(ann.endX, ann.endY);
-        out.endX = pe.x;
-        out.endY = pe.y;
-      }
-      if (ann.points?.length) {
-        out.points = ann.points.map((pt) => mp(pt.x, pt.y));
-      }
-      return out;
-    },
-    []
-  );
-
-  /** 全屏画布坐标 → 嵌入画布图片区坐标 */
-  const mapAnnotationFsToEmb = useCallback(
-    (
-      ann: Annotation,
-      fs: { x: number; y: number; w: number; h: number },
-      emb: { x: number; y: number; w: number; h: number }
-    ): Annotation => {
-      const sx = emb.w / fs.w;
-      const sy = emb.h / fs.h;
-      const mp = (px: number, py: number) => ({
-        x: emb.x + (px - fs.x) * sx,
-        y: emb.y + (py - fs.y) * sy,
-      });
-      const p0 = mp(ann.x, ann.y);
-      const out: Annotation = {
-        ...ann,
-        x: p0.x,
-        y: p0.y,
-        strokeWidth: Math.max(1, (ann.strokeWidth || 2) * Math.min(sx, sy)),
-      };
-      if (ann.width != null) out.width = ann.width * sx;
-      if (ann.height != null) out.height = ann.height * sy;
-      if (ann.endX != null && ann.endY != null) {
-        const pe = mp(ann.endX, ann.endY);
-        out.endX = pe.x;
-        out.endY = pe.y;
-      }
-      if (ann.points?.length) {
-        out.points = ann.points.map((pt) => mp(pt.x, pt.y));
-      }
-      return out;
-    },
-    []
-  );
-
-  const annotationsRef = useRef(annotations);
-  useEffect(() => {
-    annotationsRef.current = annotations;
-  }, [annotations]);
-
-  // 绘制箭头
-  const drawArrow = (ctx: CanvasRenderingContext2D, fromX: number, fromY: number, toX: number, toY: number, color: string) => {
-    const headLen = 12 * scaleRatio;
-    const angle = Math.atan2(toY - fromY, toX - fromX);
-
-    ctx.strokeStyle = color;
-    ctx.fillStyle = color;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(fromX, fromY);
-    ctx.lineTo(toX, toY);
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(toX, toY);
-    ctx.lineTo(toX - headLen * Math.cos(angle - Math.PI / 6), toY - headLen * Math.sin(angle - Math.PI / 6));
-    ctx.lineTo(toX - headLen * Math.cos(angle + Math.PI / 6), toY - headLen * Math.sin(angle + Math.PI / 6));
-    ctx.closePath();
-    ctx.fill();
-  };
-
-  // 绘制单个标注
-  const drawAnnotation = (ctx: CanvasRenderingContext2D, ann: Annotation, isSelected: boolean) => {
-    ctx.strokeStyle = ann.color;
-    ctx.fillStyle = ann.color;
-    ctx.lineWidth = ann.strokeWidth || 2;
-
-    if (isSelected) {
-      ctx.shadowColor = ann.color;
-      ctx.shadowBlur = 10;
-    }
-
-    switch (ann.type) {
-      case 'rect':
-        ctx.strokeRect(ann.x, ann.y, ann.width || 0, ann.height || 0);
-        break;
-      case 'circle':
-        ctx.beginPath();
-        ctx.ellipse(
-          ann.x + (ann.width || 0) / 2,
-          ann.y + (ann.height || 0) / 2,
-          Math.abs((ann.width || 0) / 2),
-          Math.abs((ann.height || 0) / 2),
-          0, 0, Math.PI * 2
-        );
-        ctx.stroke();
-        break;
-      case 'arrow':
-        drawArrow(ctx, ann.x, ann.y, ann.endX ?? ann.x, ann.endY ?? ann.y, ann.color);
-        break;
-      case 'text':
-        ctx.font = `${ann.strokeWidth || 16}px sans-serif`;
-        ctx.fillText(ann.text || '', ann.x, ann.y);
-        break;
-      case 'pen':
-        if (ann.points && ann.points.length > 1) {
-          ctx.strokeStyle = ann.color;
-          ctx.lineWidth = ann.strokeWidth || 3;
-          ctx.lineCap = 'round';
-          ctx.lineJoin = 'round';
-          ctx.beginPath();
-          ctx.moveTo(ann.points[0].x, ann.points[0].y);
-          for (let i = 1; i < ann.points.length; i++) {
-            ctx.lineTo(ann.points[i].x, ann.points[i].y);
-          }
-          ctx.stroke();
-        }
-        break;
-      case 'fillRect': {
-        const a = ann.fillOpacity ?? 0.45;
-        ctx.globalAlpha = a;
-        ctx.fillStyle = ann.color;
-        ctx.fillRect(ann.x, ann.y, ann.width || 0, ann.height || 0);
-        ctx.globalAlpha = 1;
-        ctx.strokeStyle = ann.color;
-        ctx.lineWidth = 1;
-        ctx.setLineDash([4, 3]);
-        ctx.strokeRect(ann.x, ann.y, ann.width || 0, ann.height || 0);
-        ctx.setLineDash([]);
-        break;
-      }
-      case 'fillCircle': {
-        const a = ann.fillOpacity ?? 0.45;
-        ctx.globalAlpha = a;
-        ctx.fillStyle = ann.color;
-        ctx.beginPath();
-        ctx.ellipse(
-          ann.x + (ann.width || 0) / 2,
-          ann.y + (ann.height || 0) / 2,
-          Math.abs((ann.width || 0) / 2),
-          Math.abs((ann.height || 0) / 2),
-          0, 0, Math.PI * 2
-        );
-        ctx.fill();
-        ctx.globalAlpha = 1;
-        ctx.strokeStyle = ann.color;
-        ctx.lineWidth = 1;
-        ctx.setLineDash([4, 3]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        break;
-      }
-    }
-
-    ctx.shadowBlur = 0;
-  };
-
-  // 渲染画布
-  const renderCanvas = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // 绘制背景
-    ctx.fillStyle = '#1a1a1a';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    const imgSrc = sourceImageRef.current;
-    if (imgSrc) {
-      // 使用缓存或加载图片
-      if (imageCacheRef.current && imageCacheRef.current.src === imgSrc) {
-        const cached = imageCacheRef.current;
-        ctx.drawImage(cached.img, cached.x, cached.y, cached.w, cached.h);
-        renderAnnotations(ctx);
-        drawCropOverlay(ctx, canvas.width, canvas.height);
-      } else {
-        const img = new Image();
-        img.onload = () => {
-          const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
-          const w = img.width * scale;
-          const h = img.height * scale;
-          const x = (canvas.width - w) / 2;
-          const y = (canvas.height - h) / 2;
-          imageCacheRef.current = { src: imgSrc, img, x, y, w, h };
-          ctx.drawImage(img, x, y, w, h);
-          renderAnnotations(ctx);
-          drawCropOverlay(ctx, canvas.width, canvas.height);
-        };
-        img.src = `data:image/jpeg;base64,${imgSrc}`;
-      }
-    } else {
-      // 显示占位文字
-      ctx.fillStyle = '#444';
-      ctx.font = '14px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('导入图片后开始标注', canvas.width / 2, canvas.height / 2);
-      renderAnnotations(ctx);
-      drawCropOverlay(ctx, canvas.width, canvas.height);
-    }
-  };
-
-  /** 裁切蒙层：拖拽中与待确认选区（保留原图可见） */
-  const drawCropOverlay = (ctx: CanvasRenderingContext2D, cw: number, ch: number) => {
-    let cx: number;
-    let cy: number;
-    let cwid: number;
-    let chgt: number;
-    const drag = cropDragRef.current;
-    if (drag) {
-      cx = Math.min(drag.x, drag.endX);
-      cy = Math.min(drag.y, drag.endY);
-      cwid = Math.abs(drag.endX - drag.x);
-      chgt = Math.abs(drag.endY - drag.y);
-    } else if (cropPending) {
-      cx = cropPending.x;
-      cy = cropPending.y;
-      cwid = cropPending.w;
-      chgt = cropPending.h;
-    } else {
-      return;
-    }
-    if (cwid < 2 || chgt < 2) return;
-    const cached = imageCacheRef.current;
-    ctx.save();
-    // 暗色遮罩盖住整张画布
-    ctx.fillStyle = 'rgba(0,0,0,0.45)';
-    ctx.fillRect(0, 0, cw, ch);
-    // 裁切选区内先清再重绘原图部分，避免 clearRect 把底图擦掉
-    ctx.clearRect(cx, cy, cwid, chgt);
-    if (cached) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(cx, cy, cwid, chgt);
-      ctx.clip();
-      ctx.drawImage(cached.img, cached.x, cached.y, cached.w, cached.h);
-      ctx.restore();
-    }
-    // 选区淡蓝高亮
-    ctx.fillStyle = 'rgba(100, 180, 255, 0.35)';
-    ctx.fillRect(cx, cy, cwid, chgt);
-    // 虚线边框
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 4]);
-    ctx.strokeRect(cx, cy, cwid, chgt);
-    ctx.setLineDash([]);
-    ctx.restore();
-  };
-
-  // 渲染所有标注
-  const renderAnnotations = (ctx: CanvasRenderingContext2D) => {
-    // 绘制已保存的标注
-    annotations.forEach((ann) => {
-      drawAnnotation(ctx, ann, ann.id === selectedId);
-    });
-
-    // 绘制临时标注
-    const temp = tempAnnotationRef.current;
-    if (temp) {
-      ctx.strokeStyle = temp.color || currentColorRef.current;
-      ctx.fillStyle = temp.color || currentColorRef.current;
-      ctx.lineWidth = temp.strokeWidth || 2;
-      ctx.setLineDash([5, 5]);
-
-      const x = temp.x ?? 0;
-      const y = temp.y ?? 0;
-      const endX = temp.endX ?? x;
-      const endY = temp.endY ?? y;
-
-      switch (temp.type) {
-        case 'rect':
-          ctx.strokeRect(x, y, endX - x, endY - y);
-          break;
-        case 'circle':
-          ctx.beginPath();
-          ctx.ellipse((x + endX) / 2, (y + endY) / 2, Math.abs((endX - x) / 2), Math.abs((endY - y) / 2), 0, 0, Math.PI * 2);
-          ctx.stroke();
-          break;
-        case 'fillRect': {
-          const w = endX - x;
-          const h = endY - y;
-          const fa = fillOpacityRef.current;
-          ctx.setLineDash([]);
-          ctx.globalAlpha = fa;
-          ctx.fillStyle = temp.color || currentColorRef.current;
-          ctx.fillRect(x, y, w, h);
-          ctx.globalAlpha = 1;
-          ctx.strokeStyle = temp.color || currentColorRef.current;
-          ctx.lineWidth = 1;
-          ctx.setLineDash([5, 5]);
-          ctx.strokeRect(x, y, w, h);
-          break;
-        }
-        case 'fillCircle': {
-          const fa = fillOpacityRef.current;
-          ctx.setLineDash([]);
-          ctx.globalAlpha = fa;
-          ctx.fillStyle = temp.color || currentColorRef.current;
-          ctx.beginPath();
-          ctx.ellipse((x + endX) / 2, (y + endY) / 2, Math.abs((endX - x) / 2), Math.abs((endY - y) / 2), 0, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.globalAlpha = 1;
-          ctx.strokeStyle = temp.color || currentColorRef.current;
-          ctx.lineWidth = 1;
-          ctx.setLineDash([5, 5]);
-          ctx.stroke();
-          break;
-        }
-        case 'arrow':
-          ctx.setLineDash([]);
-          drawArrow(ctx, x, y, endX, endY, temp.color || currentColorRef.current);
-          ctx.setLineDash([5, 5]);
-          break;
-        case 'text':
-          ctx.font = `${temp.strokeWidth || 16}px sans-serif`;
-          ctx.fillText(temp.text || '', x, y);
-          break;
-      }
-      ctx.setLineDash([]);
-    }
-
-    // 绘制画笔轨迹
-    const points = penPointsRef.current;
-    if (points.length > 1) {
-      ctx.strokeStyle = currentColorRef.current;
-      ctx.lineWidth = 3;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.beginPath();
-      ctx.moveTo(points[0].x, points[0].y);
-      for (let i = 1; i < points.length; i++) {
-        ctx.lineTo(points[i].x, points[i].y);
-      }
-      ctx.stroke();
-    }
-  };
-
-  // 初始化 canvas（使用 canvas 自身 rect 确保 buffer 与显示一致，避免 object-fit 偏移）
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const container = containerRef.current;
-    if (!canvas || !container) return;
-
-    const updateCanvasSize = () => {
-      if (!canvas.parentElement) return;
-      const rect = canvas.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        const w = Math.round(rect.width);
-        const h = Math.round(rect.height);
-        if (canvas.width !== w || canvas.height !== h) {
-          canvas.width = w;
-          canvas.height = h;
-          imageCacheRef.current = null; // 重设缓存以匹配新尺寸
-          renderCanvas();
-        }
-      }
-    };
-
-    updateCanvasSize();
-    const ro = new ResizeObserver(() => updateCanvasSize());
-    ro.observe(container);
-    return () => ro.disconnect();
-  }, []);
-
-  // 当图片或标注变化时重新渲染
-  useEffect(() => {
-    renderCanvas();
-  }, [sourceImage, annotations, selectedId]);
-
-  useEffect(() => {
-    renderCanvas();
-  }, [cropPending]);
-
-  useEffect(() => {
-    if (currentTool !== 'crop') {
-      cropDragRef.current = null;
-      setCropPending(null);
-    }
-  }, [currentTool]);
-
-  // 获取图片在 canvas 中的显示区域
-  const getImageDisplayRect = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !imageCacheRef.current) {
-      // 如果没有缓存，根据 canvas 尺寸和图片比例计算
-      if (!canvas) return null;
-      // 默认使用 canvas 尺寸（假设图片填满）
-      return { x: 0, y: 0, w: canvas.width, h: canvas.height };
-    }
-    return {
-      x: imageCacheRef.current.x,
-      y: imageCacheRef.current.y,
-      w: imageCacheRef.current.w,
-      h: imageCacheRef.current.h,
-    };
-  }, []);
-
-  // 检查坐标是否在图片显示区域内
-  const isInImageArea = (x: number, y: number) => {
-    const rect = getImageDisplayRect();
-    if (!rect) return true; // 没有图片时允许绘制
-    return x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
-  };
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    // 计算缩放系数，确保坐标与 canvas 逻辑尺寸对齐
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
-
-    // 裁切：先处理拖动调整已有选区（需在「是否在图片内」判断之前，以便命中把手）
-    if (currentToolRef.current === 'crop') {
-      if (!sourceImageRef.current) return;
-      const pending = cropPendingRef.current;
-      if (pending) {
-        const hit = hitCropZone(x, y, pending);
-        if (hit) {
-          cropAdjustRef.current = { mode: hit, startX: x, startY: y, orig: { ...pending } };
-          isDrawingRef.current = true;
-          setIsDrawing(true);
-          return;
-        }
-        setCropPending(null);
-      }
-      if (!isInImageArea(x, y)) return;
-      cropDragRef.current = { x, y, endX: x, endY: y };
-      isDrawingRef.current = true;
-      setIsDrawing(true);
-      return;
-    }
-
-    // 检查是否在图片区域内
-    if (!isInImageArea(x, y)) return;
-
-    // 文字工具 - 进入输入模式
-    if (currentToolRef.current === 'text') {
-      setTextInputPos({ x, y });
-      setTextInputValue('');
-      setIsTextInputMode(true);
-      setTimeout(() => textInputRef.current?.focus(), 50);
-      return;
-    }
-
-    // 画笔工具
-    if (currentToolRef.current === 'pen') {
-      isDrawingRef.current = true;
-      penPointsRef.current = [{ x, y }];
-      // 直接画一个点
-      const canvas = canvasRef.current;
-      if (canvas) {
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.fillStyle = currentColorRef.current;
-          ctx.beginPath();
-          ctx.arc(x, y, 2, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-      return;
-    }
-
-    // 矩形 / 圆形 / 箭头 / 填充
-    isDrawingRef.current = true;
-    const tt = currentToolRef.current;
-    tempAnnotationRef.current = {
-      type: tt as Annotation['type'],
-      x,
-      y,
-      endX: x,
-      endY: y,
-      color: currentColorRef.current,
-      strokeWidth: 2,
-    };
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDrawingRef.current) return;
-
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    // 计算缩放系数
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    let x = (e.clientX - rect.left) * scaleX;
-    let y = (e.clientY - rect.top) * scaleY;
-
-    // 获取图片显示区域
-    const imgRect = getImageDisplayRect();
-    if (imgRect) {
-      // 限制坐标在图片区域内
-      x = Math.max(imgRect.x, Math.min(imgRect.x + imgRect.w, x));
-      y = Math.max(imgRect.y, Math.min(imgRect.y + imgRect.h, y));
-    }
-
-    if (cropAdjustRef.current) {
-      const d = cropAdjustRef.current;
-      const dx = x - d.startX;
-      const dy = y - d.startY;
-      const raw = applyCropResize(d.mode, d.orig, dx, dy);
-      const ir = getImageDisplayRect();
-      if (ir) {
-        setCropPending(clampCropRect(raw, ir));
-      } else {
-        setCropPending(raw);
-      }
-      renderCanvas();
-      return;
-    }
-
-    const cropDrag = cropDragRef.current;
-    if (cropDrag) {
-      cropDrag.endX = x;
-      cropDrag.endY = y;
-      renderCanvas();
-      return;
-    }
-
-    // 画笔 - 直接累加绘制
-    if (currentToolRef.current === 'pen') {
-      const points = penPointsRef.current;
-      if (points.length > 0) {
-        const lastPoint = points[points.length - 1];
-        const ctx = canvas?.getContext('2d');
-        if (ctx) {
-          ctx.strokeStyle = currentColorRef.current;
-          ctx.lineWidth = 3;
-          ctx.lineCap = 'round';
-          ctx.lineJoin = 'round';
-          ctx.beginPath();
-          ctx.moveTo(lastPoint.x, lastPoint.y);
-          ctx.lineTo(x, y);
-          ctx.stroke();
-        }
-        points.push({ x, y });
-      }
-      return;
-    }
-
-    // 其他工具 - 更新预览
-    const temp = tempAnnotationRef.current;
-    if (temp) {
-      tempAnnotationRef.current = { ...temp, endX: x, endY: y };
-      renderCanvas();
-    }
-  };
-
-  const handleMouseUp = () => {
-    if (!isDrawingRef.current) return;
-
-    if (cropAdjustRef.current) {
-      cropAdjustRef.current = null;
-      isDrawingRef.current = false;
-      setIsDrawing(false);
-      renderCanvas();
-      return;
-    }
-
-    if (cropDragRef.current) {
-      const d = cropDragRef.current;
-      cropDragRef.current = null;
-      isDrawingRef.current = false;
-      setIsDrawing(false);
-      const cx = Math.min(d.x, d.endX);
-      const cy = Math.min(d.y, d.endY);
-      const cw = Math.abs(d.endX - d.x);
-      const ch = Math.abs(d.endY - d.y);
-      if (cw > 5 && ch > 5) {
-        setCropPending({ x: cx, y: cy, w: cw, h: ch });
-      }
-      renderCanvas();
-      return;
-    }
-
-    // 画笔
-    if (currentToolRef.current === 'pen') {
-      const points = penPointsRef.current;
-      if (points.length > 1) {
-        const newAnnotation: Annotation = {
-          id: `ann-${Date.now()}`,
-          type: 'pen',
-          x: points[0].x,
-          y: points[0].y,
-          points: [...points],
-          color: currentColorRef.current,
-          strokeWidth: 3,
-        };
-        const currentAnnots = annotationsRef.current;
-        const newAnnotations = [...currentAnnots, newAnnotation];
-        saveToHistory(currentAnnots);
-        onUpdate({ annotations: newAnnotations });
-      }
-      penPointsRef.current = [];
-      isDrawingRef.current = false;
-      setIsDrawing(false);
-      renderCanvas();
-      return;
-    }
-
-    // 其他工具
-    const ann = tempAnnotationRef.current;
-    if (ann) {
-      if (ann.type === 'rect' || ann.type === 'circle' || ann.type === 'fillRect' || ann.type === 'fillCircle') {
-        const width = Math.abs((ann.endX ?? 0) - (ann.x ?? 0));
-        const height = Math.abs((ann.endY ?? 0) - (ann.y ?? 0));
-        if (width > 5 && height > 5) {
-          const topX = Math.min(ann.x ?? 0, ann.endX ?? 0);
-          const topY = Math.min(ann.y ?? 0, ann.endY ?? 0);
-          const next: Annotation = {
-            id: `ann-${Date.now()}`,
-            type: ann.type as 'rect' | 'circle' | 'fillRect' | 'fillCircle',
-            x: topX,
-            y: topY,
-            width,
-            height,
-            color: ann.color || currentColorRef.current,
-            strokeWidth: ann.strokeWidth || 2,
-            ...(ann.type === 'fillRect' || ann.type === 'fillCircle' ? { fillOpacity: fillOpacityRef.current } : {}),
-          };
-          const currentAnnots = annotationsRef.current;
-          const newAnnotations = [...currentAnnots, next];
-          saveToHistory(currentAnnots);
-          onUpdate({ annotations: newAnnotations });
-        }
-      } else if (ann.type === 'arrow') {
-        const dist = Math.hypot((ann.endX ?? 0) - (ann.x ?? 0), (ann.endY ?? 0) - (ann.y ?? 0));
-        if (dist > 10) {
-          const currentAnnots = annotationsRef.current;
-          const newAnnotations = [...currentAnnots, ann as Annotation];
-          saveToHistory(currentAnnots);
-          onUpdate({ annotations: newAnnotations });
-        }
-      }
-    }
-
-    isDrawingRef.current = false;
-    tempAnnotationRef.current = null;
-    setIsDrawing(false);
-    setTempAnnotation(null);
-    renderCanvas();
-  };
-
-  // ==================== 全屏标注功能 ====================
-
-  // 全屏标注箭头绘制
-  const drawFsArrow = (ctx: CanvasRenderingContext2D, fromX: number, fromY: number, toX: number, toY: number, color: string) => {
-    const headLen = 16;
-    const angle = Math.atan2(toY - fromY, toX - fromX);
-    ctx.strokeStyle = color;
-    ctx.fillStyle = color;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(fromX, fromY);
-    ctx.lineTo(toX, toY);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(toX, toY);
-    ctx.lineTo(toX - headLen * Math.cos(angle - Math.PI / 6), toY - headLen * Math.sin(angle - Math.PI / 6));
-    ctx.lineTo(toX - headLen * Math.cos(angle + Math.PI / 6), toY - headLen * Math.sin(angle + Math.PI / 6));
-    ctx.closePath();
-    ctx.fill();
-  };
-
-  // 绘制单个全屏标注（支持拖拽中 width/height 为负或仅用 end 坐标）
-  const drawFsAnnotation = (ctx: CanvasRenderingContext2D, ann: Annotation, isSelected: boolean) => {
-    const fsNormBox = (a: Annotation) => {
-      if (a.endX !== undefined && a.endY !== undefined) {
-        const left = Math.min(a.x, a.endX);
-        const top = Math.min(a.y, a.endY);
-        return { left, top, w: Math.abs(a.endX - a.x), h: Math.abs(a.endY - a.y) };
-      }
-      const w = Math.abs(a.width || 0);
-      const h = Math.abs(a.height || 0);
-      const left = (a.width ?? 0) >= 0 ? a.x : a.x - w;
-      const top = (a.height ?? 0) >= 0 ? a.y : a.y - h;
-      return { left, top, w, h };
-    };
-
-    ctx.strokeStyle = ann.color;
-    ctx.fillStyle = ann.color;
-    ctx.lineWidth = ann.strokeWidth || 3;
-
-    if (isSelected) {
-      ctx.shadowColor = ann.color;
-      ctx.shadowBlur = 15;
-    }
-
-    switch (ann.type) {
-      case 'rect': {
-        const b = fsNormBox(ann);
-        ctx.strokeRect(b.left, b.top, b.w, b.h);
-        break;
-      }
-      case 'circle': {
-        const b = fsNormBox(ann);
-        ctx.beginPath();
-        ctx.ellipse(b.left + b.w / 2, b.top + b.h / 2, b.w / 2, b.h / 2, 0, 0, Math.PI * 2);
-        ctx.stroke();
-        break;
-      }
-      case 'arrow':
-        drawFsArrow(ctx, ann.x, ann.y, ann.endX ?? ann.x, ann.endY ?? ann.y, ann.color);
-        break;
-      case 'text':
-        ctx.font = `bold ${ann.strokeWidth || 24}px sans-serif`;
-        ctx.fillText(ann.text || '', ann.x, ann.y);
-        break;
-      case 'pen':
-        if (ann.points && ann.points.length > 1) {
-          ctx.strokeStyle = ann.color;
-          ctx.lineWidth = ann.strokeWidth || 4;
-          ctx.lineCap = 'round';
-          ctx.lineJoin = 'round';
-          ctx.beginPath();
-          ctx.moveTo(ann.points[0].x, ann.points[0].y);
-          for (let i = 1; i < ann.points.length; i++) {
-            ctx.lineTo(ann.points[i].x, ann.points[i].y);
-          }
-          ctx.stroke();
-        }
-        break;
-      case 'fillRect': {
-        const b = fsNormBox(ann);
-        const a = ann.fillOpacity ?? 0.45;
-        ctx.globalAlpha = a;
-        ctx.fillStyle = ann.color;
-        ctx.fillRect(b.left, b.top, b.w, b.h);
-        ctx.globalAlpha = 1;
-        ctx.strokeStyle = ann.color;
-        ctx.lineWidth = 2;
-        ctx.strokeRect(b.left, b.top, b.w, b.h);
-        break;
-      }
-      case 'fillCircle': {
-        const b = fsNormBox(ann);
-        const a = ann.fillOpacity ?? 0.45;
-        ctx.globalAlpha = a;
-        ctx.beginPath();
-        ctx.ellipse(b.left + b.w / 2, b.top + b.h / 2, b.w / 2, b.h / 2, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-        ctx.strokeStyle = ann.color;
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        break;
-      }
-    }
-    ctx.shadowBlur = 0;
-  };
-
-  // 渲染全屏画布
-  const renderFsCanvas = () => {
-    const canvas = fsCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.fillStyle = '#1a1a1a';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    if (fsImageRef.current) {
-      const cached = fsImageRef.current;
-      ctx.drawImage(cached.img, cached.x, cached.y, cached.w, cached.h);
-    }
-
-    // 绘制已保存的标注
-    fsAnnotationsRef.current.forEach((ann) => {
-      drawFsAnnotation(ctx, ann, ann.id === fullscreenSelectedId);
-    });
-    // 绘制临时标注
-    if (fsTempRef.current) {
-      drawFsAnnotation(ctx, fsTempRef.current as Annotation, false);
-    }
-  };
-
-  // 打开全屏标注模式（canvas 与坐标在 useEffect 中初始化）
-  const openFullscreenAnnotation = () => {
-    if (!sourceImage) {
-      alert('请先导入图片');
-      return;
-    }
-    setFullscreenSelectedId(node.selectedAnnotationId);
-    setIsFullscreenAnnotation(true);
-  };
-
-  // 全屏打开后：挂载再测量尺寸、加载图片、嵌入坐标 → 全屏坐标
-  useEffect(() => {
-    if (!isFullscreenAnnotation || !sourceImage) return;
-
-    let cancelled = false;
-    let raf = 0;
-
-    const tryLayout = () => {
-    const canvas = fsCanvasRef.current;
-      const parent = canvas?.parentElement;
-      if (!canvas || !parent || parent.clientWidth < 1) {
-        raf = requestAnimationFrame(tryLayout);
-        return;
-      }
-
-      const run = () => {
-        if (cancelled) return;
-        const rw = Math.max(100, parent.clientWidth);
-        const rh = Math.max(100, parent.clientHeight);
-        canvas.width = rw;
-        canvas.height = rh;
-
-        const img = new Image();
-        img.onload = () => {
-          if (cancelled) return;
-          const scale = Math.min(rw / img.width, rh / img.height);
-          const w = img.width * scale;
-          const h = img.height * scale;
-          const fx = (rw - w) / 2;
-          const fy = (rh - h) / 2;
-          fsImageRef.current = { img, x: fx, y: fy, w, h };
-
-          const emb = imageCacheRef.current;
-          const list = annotationsRef.current;
-          const fs = fsImageRef.current;
-          const mapped =
-            emb && fs ? list.map((a) => mapAnnotationEmbToFs(a, emb, fs)) : list.map((a) => ({ ...a }));
-
-          setFullscreenAnnotations(mapped);
-          fsAnnotationsRef.current = mapped;
-          fsAnnotationHistoryRef.current = [mapped];
-          fsHistoryIndexRef.current = 0;
-          fsLastSavedHistoryRef.current = JSON.stringify(mapped);
-          renderFsCanvas();
-        };
-        img.src = `data:image/jpeg;base64,${sourceImage}`;
-      };
-
-      run();
-    };
-
-    tryLayout();
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(raf);
-    };
-  }, [isFullscreenAnnotation, sourceImage, mapAnnotationEmbToFs]);
-
-  // 关闭全屏标注模式并应用标注，有标注时导出带标注的图片节点
-  const closeFullscreenAnnotation = () => {
-    const emb = imageCacheRef.current;
-    const fs = fsImageRef.current;
-    const currentFsAnnots = fsAnnotationsRef.current;
-    if (emb && fs) {
-      // 先将全屏标注映射回嵌入坐标，保存到节点状态
-      const mapped = currentFsAnnots.map((a) => mapAnnotationFsToEmb(a, fs, emb));
-      onUpdate({ annotations: mapped });
-    }
-    // 有标注时，从全屏坐标直接渲染到原始图片
-    if (currentFsAnnots.length > 0 && sourceImage && fs) {
-      const img = new Image();
-      img.onload = () => {
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = img.width;
-        tempCanvas.height = img.height;
-        const outCtx = tempCanvas.getContext('2d');
-        if (!outCtx) return;
-        outCtx.drawImage(img, 0, 0, img.width, img.height, 0, 0, outW, outH);
-        // 全屏坐标 → 原始图片坐标的换算系数
-        const fsScaleX = fs.w / img.width;
-        const fsScaleY = fs.h / img.height;
-        const fsScale = Math.min(fsScaleX, fsScaleY);
-        const toFsImg = (ax: number, ay: number) => ({
-          x: (ax - fs.x) / fsScale,
-          y: (ay - fs.y) / fsScale,
-        });
-        currentFsAnnots.forEach(ann => {
-          outCtx.strokeStyle = ann.color; outCtx.fillStyle = ann.color;
-          const swImg = Math.max(1, (ann.strokeWidth || 2) / fsScale);
-          outCtx.lineWidth = swImg;
-          outCtx.lineCap = 'round'; outCtx.lineJoin = 'round';
-          const boxTypes2 = ['rect', 'circle', 'fillRect', 'fillCircle'];
-          if (ann.type === 'arrow') {
-            const fromP = toFsImg(ann.x, ann.y);
-            const toP = toFsImg(ann.endX ?? ann.x, ann.endY ?? ann.y);
-            const headLen = Math.max(8, swImg * 3);
-            const angle = Math.atan2(toP.y - fromP.y, toP.x - fromP.x);
-            outCtx.beginPath(); outCtx.moveTo(fromP.x, fromP.y); outCtx.lineTo(toP.x, toP.y); outCtx.stroke();
-            outCtx.beginPath();
-            outCtx.moveTo(toP.x, toP.y);
-            outCtx.lineTo(toP.x - headLen * Math.cos(angle - Math.PI / 6), toP.y - headLen * Math.sin(angle - Math.PI / 6));
-            outCtx.lineTo(toP.x - headLen * Math.cos(angle + Math.PI / 6), toP.y - headLen * Math.sin(angle + Math.PI / 6));
-            outCtx.closePath(); outCtx.fill();
-          } else if (ann.type === 'text') {
-            const tp = toFsImg(ann.x, ann.y);
-            outCtx.font = `bold ${swImg}px sans-serif`;
-            outCtx.fillText(ann.text || '', tp.x, tp.y);
-          } else if (ann.type === 'pen' && ann.points && ann.points.length > 1) {
-            const scaledPoints = ann.points.map((pt) => toFsImg(pt.x, pt.y));
-            outCtx.beginPath(); outCtx.moveTo(scaledPoints[0].x, scaledPoints[0].y);
-            for (let i = 1; i < scaledPoints.length; i++) outCtx.lineTo(scaledPoints[i].x, scaledPoints[i].y);
-            outCtx.stroke();
-          } else if (boxTypes2.includes(ann.type)) {
-            const ip = toFsImg(ann.x, ann.y);
-            let ox = ip.x, oy = ip.y, w2 = 0, h2 = 0;
-            if (ann.endX !== undefined && ann.endY !== undefined) {
-              const ep = toFsImg(ann.endX, ann.endY);
-              ox = Math.min(ip.x, ep.x); oy = Math.min(ip.y, ep.y);
-              w2 = Math.abs(ep.x - ip.x); h2 = Math.abs(ep.y - ip.y);
-            } else {
-              w2 = (ann.width || 0) / fsScale;
-              h2 = (ann.height || 0) / fsScale;
-            }
-            if (ann.type === 'rect') outCtx.strokeRect(ox, oy, w2, h2);
-            else if (ann.type === 'circle') { outCtx.beginPath(); outCtx.ellipse(ox+w2/2, oy+h2/2, w2/2, h2/2, 0, 0, Math.PI*2); outCtx.stroke(); }
-            else if (ann.type === 'fillRect') { outCtx.globalAlpha = ann.fillOpacity ?? 0.45; outCtx.fillRect(ox, oy, w2, h2); outCtx.globalAlpha = 1; outCtx.strokeStyle = ann.color; outCtx.lineWidth = Math.max(1, swImg*0.5); outCtx.strokeRect(ox, oy, w2, h2); }
-            else if (ann.type === 'fillCircle') { outCtx.globalAlpha = ann.fillOpacity ?? 0.45; outCtx.beginPath(); outCtx.ellipse(ox+w2/2, oy+h2/2, w2/2, h2/2, 0, 0, Math.PI*2); outCtx.fill(); outCtx.globalAlpha = 1; outCtx.strokeStyle = ann.color; outCtx.lineWidth = Math.max(1, swImg*0.5); outCtx.stroke(); }
-          }
-        });
-        const base64 = tempCanvas.toDataURL('image/jpeg', 0.95).split(',')[1];
-        onCreateImageNode([base64], node.x + node.width + 50, node.y);
-      };
-      img.src = 'data:image/jpeg;base64,' + sourceImage;
-    }
-    fsImageRef.current = null;
-    setIsFullscreenAnnotation(false);
-  };
-
-  // 全屏画布鼠标按下
-  const handleFsMouseDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const canvas = fsCanvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const tool = fsToolRef.current;
-
-    if (tool === 'text') {
-      setIsFsTextInputMode(true);
-      setFsTextInputPos({ x, y });
-      setFsTextInputValue('');
-      setTimeout(() => fsTextInputRef.current?.focus(), 0);
-      return;
-    }
-
-    setIsFsDrawing(true);
-    fsIsDrawingRef.current = true;
-    fsPenPointsRef.current = [{ x, y }];
-
-    const newAnn: Partial<Annotation> = {
-      id: `fsann-${Date.now()}`,
-      type: tool,
-      x,
-      y,
-      color: fsColorRef.current,
-      strokeWidth: tool === 'text' ? fsFontSizeRef.current : 3,
-      points: tool === 'pen' ? [{ x, y }] : undefined
-    };
-    setFsTempAnnotation(newAnn);
-    fsTempRef.current = newAnn;
-  };
-
-  // 全屏画布鼠标移动
-  const handleFsMouseMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!fsIsDrawingRef.current) return;
-    const canvas = fsCanvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const tool = fsToolRef.current;
-
-    const current = fsTempRef.current;
-    if (!current) return;
-
-    if (tool === 'pen') {
-      fsPenPointsRef.current.push({ x, y });
-      const updated = { ...current, points: [...fsPenPointsRef.current] };
-      setFsTempAnnotation(updated);
-      fsTempRef.current = updated;
-    } else {
-      const updated = {
-        ...current,
-        width: x - (current.x || 0),
-        height: y - (current.y || 0),
-        endX: x,
-        endY: y
-      };
-      setFsTempAnnotation(updated);
-      fsTempRef.current = updated;
-    }
-    renderFsCanvas();
-  };
-
-  // 全屏画布鼠标释放
-  const handleFsMouseUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!fsIsDrawingRef.current) return;
-    const current = fsTempRef.current;
-    const tool = fsToolRef.current;
-    if (current) {
-      let toAdd: Annotation | null = null;
-      if (tool === 'pen') {
-        const pts = fsPenPointsRef.current;
-        if (pts.length > 1) {
-          toAdd = {
-            id: current.id || `fsann-${Date.now()}`,
-            type: 'pen',
-            x: pts[0].x,
-            y: pts[0].y,
-            points: [...pts],
-            color: fsColorRef.current,
-            strokeWidth: 4,
-          };
-        }
-      } else if (tool === 'rect' || tool === 'circle' || tool === 'fillRect' || tool === 'fillCircle') {
-        const x0 = current.x ?? 0;
-        const y0 = current.y ?? 0;
-        const x1 = current.endX ?? x0;
-        const y1 = current.endY ?? y0;
-        const w = Math.abs(x1 - x0);
-        const h = Math.abs(y1 - y0);
-        if (w > 5 && h > 5) {
-          toAdd = {
-            id: current.id || `fsann-${Date.now()}`,
-            type: tool as 'rect' | 'circle' | 'fillRect' | 'fillCircle',
-            x: Math.min(x0, x1),
-            y: Math.min(y0, y1),
-            width: w,
-            height: h,
-            color: fsColorRef.current,
-            strokeWidth: tool === 'fillRect' || tool === 'fillCircle' ? 2 : 3,
-            ...(tool === 'fillRect' || tool === 'fillCircle' ? { fillOpacity: fullscreenFillOpacityRef.current } : {}),
-          };
-        }
-      } else if (tool === 'arrow') {
-        const dist = Math.hypot((current.endX ?? 0) - (current.x ?? 0), (current.endY ?? 0) - (current.y ?? 0));
-        if (dist > 10) {
-          toAdd = {
-            id: current.id || `fsann-${Date.now()}`,
-            type: 'arrow',
-            x: current.x!,
-            y: current.y!,
-            endX: current.endX,
-            endY: current.endY,
-            color: fsColorRef.current,
-            strokeWidth: 3,
-          };
-        }
-      }
-
-      if (toAdd) {
-        const currentFs = fsAnnotationsRef.current;
-        const newAnnotations = [...currentFs, toAdd];
-      setFullscreenAnnotations(newAnnotations);
-      fsAnnotationsRef.current = newAnnotations;
-      fsSaveToHistory(newAnnotations);
-      }
-    }
-    fsIsDrawingRef.current = false;
-    fsPenPointsRef.current = [];
-    setFsTempAnnotation(null);
-    fsTempRef.current = null;
-    setIsFsDrawing(false);
-    renderFsCanvas();
-  };
-
-  // 删除全屏标注
-  const deleteFsAnnotation = (id: string) => {
-    const currentFs = fsAnnotationsRef.current;
-    const newAnnotations = currentFs.filter(a => a.id !== id);
-    setFullscreenAnnotations(newAnnotations);
-    fsAnnotationsRef.current = newAnnotations;
-    fsSaveToHistory(newAnnotations);
-    if (fullscreenSelectedId === id) setFullscreenSelectedId(undefined);
-    renderFsCanvas();
-  };
-
-  /** 按裁切选区导出为独立图片节点 */
-  const confirmCrop = () => {
-    if (!sourceImage || !cropPending) {
-      alert('请先导入图片并拖出裁切区域');
-      return;
-    }
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const { x: cx, y: cy, w: cww, h: chh } = cropPending;
-    const img = new Image();
-    img.onload = () => {
-      const cssWidth = canvas.width;
-      const cssHeight = canvas.height;
-      const displayScale = Math.min(cssWidth / img.width, cssHeight / img.height);
-      const displayW = img.width * displayScale;
-      const displayH = img.height * displayScale;
-      const displayX = (cssWidth - displayW) / 2;
-      const displayY = (cssHeight - displayH) / 2;
-
-      const ix1 = Math.max(cx, displayX);
-      const iy1 = Math.max(cy, displayY);
-      const ix2 = Math.min(cx + cww, displayX + displayW);
-      const iy2 = Math.min(cy + chh, displayY + displayH);
-      const iw = Math.max(0, ix2 - ix1);
-      const ih = Math.max(0, iy2 - iy1);
-      if (iw < 2 || ih < 2) {
-        alert('裁切区域与图片无交集，请重试');
-        return;
-      }
-      const sx = (ix1 - displayX) / displayScale;
-      const sy = (iy1 - displayY) / displayScale;
-      const sw = iw / displayScale;
-      const sh = ih / displayScale;
-
-      const out = document.createElement('canvas');
-      out.width = Math.max(1, Math.round(sw));
-      out.height = Math.max(1, Math.round(sh));
-      const octx = out.getContext('2d');
-      if (!octx) return;
-      octx.drawImage(img, sx, sy, sw, sh, 0, 0, out.width, out.height);
-      const base64 = out.toDataURL('image/jpeg', 0.95).split(',')[1];
-      onCreateImageNode([base64], node.x + node.width + 50, node.y);
-      setCropPending(null);
-      cropDragRef.current = null;
-      renderCanvas();
-    };
-    img.src = `data:image/jpeg;base64,${sourceImage}`;
-  };
-
-  // 确认标注并创建图片节点
-  const confirmAnnotations = () => {
-    const currentAnnots = annotationsRef.current;
-    if (!sourceImage) {
-      alert('请先导入图片');
-      return;
-    }
-    if (exportScale === 100 && currentAnnots.length === 0) {
-      alert('请先添加标注');
-      return;
-    }
-
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const img = new Image();
-    img.onload = () => {
-      const scaleRatio = exportScale / 100;
-      const outW = Math.round(img.width * scaleRatio);
-      const outH = Math.round(img.height * scaleRatio);
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = outW;
-      tempCanvas.height = outH;
-      const outCtx = tempCanvas.getContext('2d');
-      if (!outCtx) return;
-
-      // 先绘制原图（缩放后）
-      outCtx.drawImage(img, 0, 0, img.width, img.height, 0, 0, outW, outH);
-
-      // 如果有标注，才转换并绘制标注
-      const cssWidth = canvas.width;
-      const cssHeight = canvas.height;
-
-      // 计算图片在 canvas 中的显示位置（与 renderCanvas 保持一致）
-      const displayScale = Math.min(cssWidth / img.width, cssHeight / img.height);
-      const displayW = img.width * displayScale;
-      const displayH = img.height * displayScale;
-      const displayX = (cssWidth - displayW) / 2;
-      const displayY = (cssHeight - displayH) / 2;
-
-      // 将标注从 canvas 逻辑坐标转换到原图坐标的辅助函数
-      const toImageCoords = (annX: number, annY: number) => ({
-        x: ((annX - displayX) / displayScale) * scaleRatio,
-        y: ((annY - displayY) / displayScale) * scaleRatio
-      });
-
-      const boxTypes = ['rect', 'circle', 'fillRect', 'fillCircle'];
-
-      currentAnnots.forEach((ann) => {
-        let scaledAnn: Annotation;
-
-        if (ann.type === 'arrow') {
-          const start = toImageCoords(ann.x, ann.y);
-          const end = toImageCoords(ann.endX ?? ann.x, ann.endY ?? ann.y);
-          scaledAnn = {
-          ...ann,
-            x: start.x,
-            y: start.y,
-            endX: end.x,
-            endY: end.y,
-            strokeWidth: Math.max(1, (ann.strokeWidth || 2) * scaleRatio),
-          };
-        } else if (ann.type === 'text') {
-          const p = toImageCoords(ann.x, ann.y);
-          scaledAnn = {
-            ...ann,
-            x: p.x,
-            y: p.y,
-            strokeWidth: Math.max(1, (ann.strokeWidth || 16) * scaleRatio),
-          };
-        } else if (ann.type === 'pen' && ann.points && ann.points.length > 0) {
-          const scaledPoints = ann.points.map((pt) => toImageCoords(pt.x, pt.y));
-          scaledAnn = {
-            ...ann,
-          points: scaledPoints,
-            x: scaledPoints[0].x,
-            y: scaledPoints[0].y,
-            strokeWidth: Math.max(1, (ann.strokeWidth || 3) * scaleRatio),
-          };
-        } else if (boxTypes.includes(ann.type)) {
-          const ip = toImageCoords(ann.x, ann.y);
-          let ox = ip.x;
-          let oy = ip.y;
-          let sw: number;
-          let sh: number;
-          if (ann.endX !== undefined && ann.endY !== undefined) {
-            const ep = toImageCoords(ann.endX, ann.endY);
-            ox = Math.min(ip.x, ep.x);
-            oy = Math.min(ip.y, ep.y);
-            sw = Math.abs(ep.x - ip.x);
-            sh = Math.abs(ep.y - ip.y);
-          } else {
-            sw = ((ann.width ?? 0) / displayScale) * scaleRatio;
-            sh = ((ann.height ?? 0) / displayScale) * scaleRatio;
-          }
-          scaledAnn = {
-            ...ann,
-            x: ox,
-            y: oy,
-            width: sw,
-            height: sh,
-            strokeWidth: Math.max(1, (ann.strokeWidth || 2) * scaleRatio),
-          };
-        } else {
-          const p = toImageCoords(ann.x, ann.y);
-          scaledAnn = { ...ann, x: p.x, y: p.y };
-        }
-
-        // 直接绘制，不使用 drawAnnotation（避免坐标问题）
-        outCtx.strokeStyle = scaledAnn.color;
-        outCtx.fillStyle = scaledAnn.color;
-        outCtx.lineWidth = scaledAnn.strokeWidth || 2;
-        outCtx.lineCap = 'round';
-        outCtx.lineJoin = 'round';
-
-        switch (scaledAnn.type) {
-          case 'rect':
-            outCtx.strokeRect(scaledAnn.x, scaledAnn.y, scaledAnn.width || 0, scaledAnn.height || 0);
-            break;
-          case 'circle':
-            outCtx.beginPath();
-            outCtx.ellipse(
-              scaledAnn.x + (scaledAnn.width || 0) / 2,
-              scaledAnn.y + (scaledAnn.height || 0) / 2,
-              Math.abs((scaledAnn.width || 0) / 2),
-              Math.abs((scaledAnn.height || 0) / 2),
-              0, 0, Math.PI * 2
-            );
-            outCtx.stroke();
-            break;
-          case 'fillRect': {
-            const fa = scaledAnn.fillOpacity ?? 0.45;
-            outCtx.globalAlpha = fa;
-            outCtx.fillStyle = scaledAnn.color;
-            outCtx.fillRect(scaledAnn.x, scaledAnn.y, scaledAnn.width || 0, scaledAnn.height || 0);
-            outCtx.globalAlpha = 1;
-            outCtx.strokeStyle = scaledAnn.color;
-            outCtx.lineWidth = Math.max(1, (scaledAnn.strokeWidth || 2) * 0.5);
-            outCtx.strokeRect(scaledAnn.x, scaledAnn.y, scaledAnn.width || 0, scaledAnn.height || 0);
-            break;
-          }
-          case 'fillCircle': {
-            const fa = scaledAnn.fillOpacity ?? 0.45;
-            outCtx.globalAlpha = fa;
-            outCtx.fillStyle = scaledAnn.color;
-            outCtx.beginPath();
-            outCtx.ellipse(
-              scaledAnn.x + (scaledAnn.width || 0) / 2,
-              scaledAnn.y + (scaledAnn.height || 0) / 2,
-              Math.abs((scaledAnn.width || 0) / 2),
-              Math.abs((scaledAnn.height || 0) / 2),
-              0, 0, Math.PI * 2
-            );
-            outCtx.fill();
-            outCtx.globalAlpha = 1;
-            outCtx.strokeStyle = scaledAnn.color;
-            outCtx.lineWidth = Math.max(1, (scaledAnn.strokeWidth || 2) * 0.5);
-            outCtx.stroke();
-            break;
-          }
-          case 'arrow':
-            // 绘制箭头
-            const fromX = scaledAnn.x;
-            const fromY = scaledAnn.y;
-            const toX = scaledAnn.endX ?? scaledAnn.x;
-            const toY = scaledAnn.endY ?? scaledAnn.y;
-            const headLen = Math.max(8, scaledAnn.strokeWidth * 3);
-            const angle = Math.atan2(toY - fromY, toX - fromX);
-
-            outCtx.beginPath();
-            outCtx.moveTo(fromX, fromY);
-            outCtx.lineTo(toX, toY);
-            outCtx.stroke();
-
-            outCtx.beginPath();
-            outCtx.moveTo(toX, toY);
-            outCtx.lineTo(toX - headLen * Math.cos(angle - Math.PI / 6), toY - headLen * Math.sin(angle - Math.PI / 6));
-            outCtx.lineTo(toX - headLen * Math.cos(angle + Math.PI / 6), toY - headLen * Math.sin(angle + Math.PI / 6));
-            outCtx.closePath();
-            outCtx.fill();
-            break;
-          case 'text':
-            outCtx.font = `${scaledAnn.strokeWidth || 16}px sans-serif`;
-            outCtx.fillText(scaledAnn.text || '', scaledAnn.x, scaledAnn.y);
-            break;
-          case 'pen':
-            if (scaledAnn.points && scaledAnn.points.length > 1) {
-              outCtx.beginPath();
-              outCtx.moveTo(scaledAnn.points[0].x, scaledAnn.points[0].y);
-              for (let i = 1; i < scaledAnn.points.length; i++) {
-                outCtx.lineTo(scaledAnn.points[i].x, scaledAnn.points[i].y);
-              }
-              outCtx.stroke();
-            }
-            break;
-        }
-      });
-
-      const base64 = tempCanvas.toDataURL('image/jpeg', 0.95).split(',')[1];
-      onCreateImageNode([base64], node.x + node.width + 50, node.y);
-    };
-    img.src = `data:image/jpeg;base64,${sourceImage}`;
-  };
-
-  return (
-    <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
-      {/* 链接的参考图信息 */}
-      <div className="flex items-center gap-2 px-2 py-1.5 bg-[#252525] border-b border-[#333] shrink-0" style={{ order: 3 }}>
-        <span className="text-[10px] text-gray-400">参考图:</span>
-        <span className="text-green-400 font-medium">{sourceImages.length} 张</span>
-        <div className="flex gap-1 ml-2">
-          {incomingEdges.slice(0, 12).map((edge, idx) => {
-            const srcNode = sourceNodes[idx];
-            const img = srcNode?.images?.[0];
-            if (!img) return null;
-            return (
-              <div key={edge.id} className="relative group">
-                <OptimizedImage
-                  base64={img}
-                  maxSide={80}
-                  quality={0.72}
-                  alt={`参考图${idx + 1}`}
-                  className="w-9 h-9 object-cover rounded border border-[#444]"
-                />
-                <button
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={() => onDeleteEdge?.(edge.id)}
-                  className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-600 hover:bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                  title="取消参考"
-                >
-                  <svg viewBox="0 0 10 10" className="w-2.5 h-2.5 fill-white">
-                    <path d="M1 1L9 9M9 1L1 9" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
-                  </svg>
-                </button>
-              </div>
-            );
-          })}
-          {sourceImages.length > 12 && (
-            <span className="text-gray-500 flex items-center">+{sourceImages.length - 12}</span>
-          )}
-        </div>
-        <button
-          onPointerDown={(e) => { e.stopPropagation(); onEyedropperSelect(); }}
-          className={`ml-auto px-2 py-0.5 rounded text-white ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
-          title={eyedropperTargetNodeId === node.id ? "取消吸取" : "吸取图片"}
-        >
-          <EyedropperIcon size={12} />
-        </button>
-      </div>
-
-      {/* 标注画布：双击图片区域进入全屏标注（需已导入图片）；亦可点下方「全屏标注」 */}
-      <div
-        ref={containerRef}
-        className={`relative flex-1 min-h-[160px] bg-[#1a1a1a] rounded-lg border border-[#333] overflow-hidden ${!sourceImage ? 'cursor-grab active:cursor-grabbing' : ''}`}
-      >
-        <canvas
-          ref={canvasRef}
-          className={`w-full h-full ${sourceImage ? 'cursor-crosshair' : ''}`}
-          onPointerDown={(e) => {
-            if (!sourceImage) return; // 无图片时允许拖动窗口
-            e.stopPropagation();
-            handleMouseDown(e);
-          }}
-          onPointerMove={(e) => {
-            handleMouseMove(e);
-          }}
-          onPointerUp={handleMouseUp}
-          onPointerLeave={handleMouseUp}
-          onDoubleClick={(e) => {
-            e.stopPropagation();
-            if (sourceImage) openFullscreenAnnotation();
-          }}
-        />
-
-        {/* 文字输入框 */}
-        {isTextInputMode && (
-          <input
-            ref={textInputRef}
-            type="text"
-            value={textInputValue}
-            onChange={(e) => setTextInputValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                // 确认文字
-                if (textInputValue.trim()) {
-                  const newAnnotation: Annotation = {
-                    id: `ann-${Date.now()}`,
-                    type: 'text',
-                    x: textInputPos.x,
-                    y: textInputPos.y,
-                    text: textInputValue.trim(),
-                    color: currentColorRef.current,
-                    strokeWidth: currentFontSizeRef.current,
-                  };
-                  const currentAnnots = annotationsRef.current;
-                  const newAnnotations = [...currentAnnots, newAnnotation];
-                  saveToHistory(currentAnnots);
-                  onUpdate({ annotations: newAnnotations });
-                }
-                setIsTextInputMode(false);
-                setTextInputValue('');
-              } else if (e.key === 'Escape') {
-                setIsTextInputMode(false);
-                setTextInputValue('');
-              }
-            }}
-            onBlur={() => {
-              // 失焦时确认
-              if (textInputValue.trim()) {
-                const newAnnotation: Annotation = {
-                  id: `ann-${Date.now()}`,
-                  type: 'text',
-                  x: textInputPos.x,
-                  y: textInputPos.y,
-                  text: textInputValue.trim(),
-                  color: currentColorRef.current,
-                  strokeWidth: currentFontSizeRef.current,
-                };
-                const currentAnnots = annotationsRef.current;
-                const newAnnotations = [...currentAnnots, newAnnotation];
-                saveToHistory(currentAnnots);
-                onUpdate({ annotations: newAnnotations });
-              }
-              setIsTextInputMode(false);
-              setTextInputValue('');
-            }}
-            className="absolute bg-white/90 text-black px-2 py-1 rounded text-sm"
-            style={{
-              left: textInputPos.x,
-              top: textInputPos.y - 24,
-              minWidth: '100px',
-              zIndex: 30,
-              fontSize: currentFontSize,
-              color: currentColor,
-              border: `2px solid ${currentColor}`,
-              outline: 'none',
-            }}
-            placeholder="输入文字..."
-          />
-        )}
-      </div>
-
-      {currentTool === 'crop' && sourceImage && (
-        <p className="text-[10px] text-amber-400/90 px-1 shrink-0">
-          {cropPending ? '已框选裁切区域，可点击下方确认或取消' : '在图片上按住拖拽框选裁切区域'}
-        </p>
-      )}
-      {cropPending && (
-        <div className="flex gap-1 shrink-0 px-1">
-          <button
-            type="button"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={confirmCrop}
-            className="flex-1 py-1.5 px-2 rounded text-[10px] bg-amber-600 hover:bg-amber-500 text-white font-medium"
-          >
-            确认裁切并复制图片节点
-          </button>
-          <button
-            type="button"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => {
-              setCropPending(null);
-              cropDragRef.current = null;
-              renderCanvas();
-            }}
-            className="py-1.5 px-2 rounded text-[10px] bg-[#333] hover:bg-[#444] text-gray-300"
-          >
-            取消选区
-          </button>
-        </div>
-      )}
-
-      {/* 工具栏 */}
-      <div className="flex items-center gap-1 flex-wrap shrink-0">
-        <span className="text-[10px] text-gray-400">工具:</span>
-        {(['rect', 'circle', 'fillRect', 'fillCircle', 'arrow', 'pen', 'text', 'crop'] as const).map((tool) => (
-          <button
-            key={tool}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => setCurrentTool(tool)}
-            className={`px-1.5 py-0.5 rounded text-[10px] ${currentTool === tool ? 'bg-blue-600 text-white' : 'bg-[#333] text-gray-400 hover:bg-[#444]'}`}
-          >
-            {tool === 'rect' ? '矩形' : tool === 'circle' ? '圆形' : tool === 'fillRect' ? '填矩形' : tool === 'fillCircle' ? '填椭圆' : tool === 'arrow' ? '箭头' : tool === 'pen' ? '画笔' : tool === 'text' ? '文字' : '裁切'}
-          </button>
-        ))}
-      </div>
-
-      {/* 缩放按钮 */}
-      <div className="flex items-center gap-1 shrink-0">
-        <span className="text-[10px] text-gray-400">缩放:</span>
-        <select
-          value={exportScale}
-          onPointerDown={(e) => e.stopPropagation()}
-          onChange={(e) => setExportScale(Number(e.target.value))}
-          className="rounded border border-[#444] bg-[#333] px-1 py-0.5 text-[10px] text-gray-200 outline-none cursor-pointer"
-        >
-          <option value="100">100%</option>
-          <option value="70">70%</option>
-          <option value="50">50%</option>
-          <option value="25">25%</option>
-          <option value="10">10%</option>
-          <option value="5">5%</option>
-          <option value="2">2%</option>
-        </select>
-      </div>
-
-      {/* 颜色和字体大小 */}
-      <div className="flex items-center gap-2 shrink-0 flex-wrap" style={{ order: 2 }}>
-        {/* 颜色选择 */}
-        <div className="flex items-center gap-1">
-          <span className="text-[10px] text-gray-400">色:</span>
-          <div className="flex gap-0.5">
-            {colors.map((color) => (
-              <button
-                key={color}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={() => setCurrentColor(color)}
-                className={`w-5 h-5 rounded border-2 ${currentColor === color ? 'border-white' : color === '#ffffff' ? 'border-gray-500' : 'border-transparent'}`}
-                style={{ backgroundColor: color }}
-              />
-            ))}
-          </div>
-          <input
-            type="color"
-            value={currentColor.length === 7 ? currentColor : '#ff6b6b'}
-            onPointerDown={(e) => e.stopPropagation()}
-            onChange={(e) => setCurrentColor(e.target.value)}
-            className="w-7 h-5 rounded border border-[#555] cursor-pointer p-0 bg-transparent"
-            title="自选颜色"
-          />
-        </div>
-
-        {(currentTool === 'fillRect' || currentTool === 'fillCircle') && (
-          <div className="flex items-center gap-1">
-            <span className="text-[10px] text-gray-400">不透明度:</span>
-            <input
-              type="range"
-              min={0.1}
-              max={1}
-              step={0.05}
-              value={fillOpacity}
-              onPointerDown={(e) => e.stopPropagation()}
-              onChange={(e) => setFillOpacity(Number(e.target.value))}
-              className="w-20 accent-blue-500"
-            />
-            <span className="text-[10px] text-gray-500 w-7">{Math.round(fillOpacity * 100)}%</span>
-          </div>
-        )}
-
-        {/* 字体大小 (仅文字工具显示) */}
-        {currentTool === 'text' && (
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-gray-400">大小:</span>
-            <select
-              className="bg-[#222222] border border-[#444] rounded px-2 py-1 text-[10px] text-gray-300 outline-none focus:border-blue-500"
-              value={currentFontSize}
-              onPointerDown={(e) => e.stopPropagation()}
-              onChange={(e) => setCurrentFontSize(Number(e.target.value))}
-            >
-              <option value="12">12</option>
-              <option value="16">16</option>
-              <option value="20">20</option>
-              <option value="24">24</option>
-              <option value="32">32</option>
-              <option value="48">48</option>
-            </select>
-          </div>
-        )}
-      </div>
-
-      {/* 操作按钮 */}
-      <div className="flex gap-1 shrink-0" style={{ order: 4 }}>
-        <button
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = 'image/*';
-            input.onchange = (e) => {
-              const file = (e.target as HTMLInputElement).files?.[0];
-              if (file) {
-                const reader = new FileReader();
-                reader.onload = (ev) => {
-                  const base64 = (ev.target?.result as string).split(',')[1];
-                  onUpdate({ sourceImage: base64 });
-                };
-                reader.readAsDataURL(file);
-              }
-            };
-            input.click();
-          }}
-          className="flex-1 py-1 px-2 rounded text-[10px] bg-[#333] hover:bg-[#444] text-gray-300 flex items-center justify-center gap-1"
-        >
-          <ImageIcon size={10} /> 导入
-        </button>
-        <button
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => {
-            saveToHistory(annotations);
-            onUpdate({ annotations: [] });
-            renderCanvas();
-          }}
-          className="py-1 px-2 rounded text-[10px] bg-red-900/50 hover:bg-red-800/50 text-red-300"
-        >
-          清除
-        </button>
-        <button
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={undo}
-          disabled={historyIndexRef.current <= 0}
-          className="py-1 px-2 rounded text-[10px] bg-[#333] hover:bg-[#444] text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
-          title="撤销上一步 (Ctrl+Z)"
-        >
-          撤销
-        </button>
-        <button
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => { if (sourceImage && onFullscreenImage) onFullscreenImage(sourceImage); }}
-          disabled={!sourceImage}
-          className="py-1 px-2 rounded text-[10px] bg-cyan-700 hover:bg-cyan-600 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
-          title={sourceImage ? '最大化查看图片（仅看图，不含标注工具）' : '请先导入图片'}
-        >
-          <FullscreenIcon size={20} /> 最大化
-        </button>
-        <button
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={openFullscreenAnnotation}
-          disabled={!sourceImage}
-          className="py-1 px-2 rounded text-[10px] bg-purple-700 hover:bg-purple-600 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
-          title={sourceImage ? '全屏标注（也可双击上方画布）' : '请先导入图片后再全屏标注'}
-        >
-          <FullscreenIcon size={10} /> 全屏标注
-        </button>
-      </div>
-
-      {/* 确认标注按钮 */}
-      <button
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={confirmAnnotations}
-        disabled={!sourceImage || (exportScale === 100 && annotations.length === 0)}
-        className="w-full py-1 px-2 rounded text-[10px] bg-green-700 hover:bg-green-600 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1 shrink-0"
-      >
-        确认标注 ({annotations.length})
-      </button>
-
-      {/* 标注列表 */}
-      {annotations.length > 0 && (
-        <div className="flex flex-wrap gap-1 max-h-12 overflow-y-auto shrink-0">
-          {annotations.map((ann) => (
-            <button
-              key={ann.id}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => onUpdate({ selectedAnnotationId: ann.id })}
-              className={`px-2 py-0.5 rounded text-[10px] ${selectedId === ann.id ? 'ring-2 ring-white' : ''}`}
-              style={{ backgroundColor: ann.color + '33', color: ann.color }}
-            >
-              {ann.type === 'text'
-                ? ann.text?.slice(0, 10)
-                : ann.type === 'pen'
-                  ? '画笔'
-                  : ann.type === 'fillRect'
-                    ? '填矩形'
-                    : ann.type === 'fillCircle'
-                      ? '填椭圆'
-                      : ann.type}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* 全屏标注模态框（Portal 到 body 以脱离 CSS transform 层，否则 fixed inset-0 会塌陷） */}
-      {isFullscreenAnnotation && createPortal(
-        <div
-          className="fixed inset-0 z-[2000] bg-black/95 flex flex-col"
-          onPointerDown={(e) => e.stopPropagation()}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') closeFullscreenAnnotation();
-            if (e.ctrlKey && e.key === 'z') {
-              e.preventDefault();
-              fsUndo();
-            }
-          }}
-          tabIndex={0}
-        >
-          {/* 全屏工具栏 */}
-          <div className="flex items-center justify-between p-4 bg-[#1a1a1a] border-b border-[#333]">
-            <div className="flex items-center gap-4">
-              <span className="text-white font-medium">全屏标注模式</span>
-              <span className="text-gray-400 text-xs">({fullscreenAnnotations.length} 个标注)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              {/* 工具选择 */}
-              <div className="flex items-center gap-1 flex-wrap">
-                <span className="text-gray-400 text-xs">工具:</span>
-                {(['rect', 'circle', 'fillRect', 'fillCircle', 'arrow', 'pen', 'text'] as const).map((tool) => (
-                  <button
-                    key={tool}
-                    onClick={() => setFullscreenTool(tool)}
-                    className={`px-3 py-1.5 rounded text-xs ${fullscreenTool === tool ? 'bg-blue-600 text-white' : 'bg-[#333] text-gray-300 hover:bg-[#444]'}`}
-                  >
-                    {tool === 'rect' ? '矩形' : tool === 'circle' ? '圆形' : tool === 'fillRect' ? '填矩形' : tool === 'fillCircle' ? '填椭圆' : tool === 'arrow' ? '箭头' : tool === 'pen' ? '画笔' : '文字'}
-                  </button>
-                ))}
-              </div>
-
-              {/* 颜色选择 */}
-              <div className="flex items-center gap-1 ml-4 flex-wrap">
-                <span className="text-gray-400 text-xs">颜色:</span>
-                <div className="flex gap-1">
-                  {colors.map((color) => (
-                    <button
-                      key={color}
-                      onClick={() => setFullscreenColor(color)}
-                      className={`w-6 h-6 rounded border-2 ${fullscreenColor === color ? 'border-white' : color === '#ffffff' ? 'border-gray-500' : 'border-transparent'}`}
-                      style={{ backgroundColor: color }}
-                    />
-                  ))}
-                </div>
-                <input
-                  type="color"
-                  value={fullscreenColor.length === 7 ? fullscreenColor : '#ff6b6b'}
-                  onChange={(e) => setFullscreenColor(e.target.value)}
-                  className="w-8 h-7 rounded border border-gray-500 cursor-pointer"
-                  title="自选颜色"
-                />
-              </div>
-
-              {(fullscreenTool === 'fillRect' || fullscreenTool === 'fillCircle') && (
-                <div className="flex items-center gap-2 ml-4">
-                  <span className="text-gray-400 text-xs">填充不透明度:</span>
-                  <input
-                    type="range"
-                    min={0.1}
-                    max={1}
-                    step={0.05}
-                    value={fullscreenFillOpacity}
-                    onChange={(e) => setFullscreenFillOpacity(Number(e.target.value))}
-                    className="w-28 accent-blue-500"
-                  />
-                  <span className="text-gray-400 text-xs w-8">{Math.round(fullscreenFillOpacity * 100)}%</span>
-                </div>
-              )}
-
-              {/* 字体大小 */}
-              {fullscreenTool === 'text' && (
-                <div className="flex items-center gap-1 ml-4">
-                  <span className="text-gray-400 text-xs">大小:</span>
-                  <select
-                    className="bg-[#333] border border-[#444] rounded px-2 py-1 text-xs text-white"
-                    value={fullscreenFontSize}
-                    onChange={(e) => setFullscreenFontSize(Number(e.target.value))}
-                  >
-                    <option value="16">16</option>
-                    <option value="20">20</option>
-                    <option value="24">24</option>
-                    <option value="32">32</option>
-                    <option value="48">48</option>
-                    <option value="64">64</option>
-                    <option value="80">80</option>
-                  </select>
-                </div>
-              )}
-
-              {/* 操作按钮 */}
-              <button
-                onClick={fsUndo}
-                disabled={fsHistoryIndexRef.current <= 0}
-                className="px-3 py-1.5 rounded text-xs bg-[#333] hover:bg-[#444] text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                title="撤销上一步 (Ctrl+Z)"
-              >
-                撤销
-              </button>
-              <button
-                onClick={() => {
-                  fsSaveToHistory(fullscreenAnnotations);
-                  setFullscreenAnnotations([]);
-                  setFullscreenSelectedId(undefined);
-                  fsAnnotationsRef.current = [];
-                  renderFsCanvas();
-                }}
-                className="ml-2 px-3 py-1.5 rounded text-xs bg-red-900 hover:bg-red-800 text-red-300"
-              >
-                清除全部
-              </button>
-              <button
-                onClick={closeFullscreenAnnotation}
-                className="px-4 py-2 rounded text-sm font-bold bg-green-600 hover:bg-green-500 text-white"
-              >
-                确认标注
-              </button>
-              <button
-                onClick={closeFullscreenAnnotation}
-                className="px-4 py-1.5 rounded text-xs bg-gray-600 hover:bg-gray-500 text-white"
-              >
-                退出全屏
-              </button>
-            </div>
-          </div>
-
-          {/* 全屏画布 */}
-          <div className="flex-1 relative overflow-hidden">
-            <canvas
-              ref={fsCanvasRef}
-              className="cursor-crosshair"
-              style={{ width: '100%', height: '100%' }}
-              onPointerDown={handleFsMouseDown}
-              onPointerMove={handleFsMouseMove}
-              onPointerUp={handleFsMouseUp}
-              onPointerLeave={handleFsMouseUp}
-            />
-
-            {/* 全屏文字输入框 */}
-            {isFsTextInputMode && (
-              <input
-                ref={fsTextInputRef}
-                type="text"
-                value={fsTextInputValue}
-                onChange={(e) => setFsTextInputValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && fsTextInputValue.trim()) {
-                    const newAnn: Annotation = {
-                      id: `fsann-${Date.now()}`,
-                      type: 'text',
-                      x: fsTextInputPos.x,
-                      y: fsTextInputPos.y,
-                      text: fsTextInputValue.trim(),
-                      color: fsColorRef.current,
-                      strokeWidth: fsFontSizeRef.current,
-                    };
-                    const newAnnotations = [...fullscreenAnnotations, newAnn];
-                    setFullscreenAnnotations(newAnnotations);
-                    fsAnnotationsRef.current = newAnnotations;
-                    fsSaveToHistory(newAnnotations);
-                    setIsFsTextInputMode(false);
-                    setFsTextInputValue('');
-                    renderFsCanvas();
-                  } else if (e.key === 'Escape') {
-                    setIsFsTextInputMode(false);
-                    setFsTextInputValue('');
-                  }
-                }}
-                onBlur={() => {
-                  if (fsTextInputValue.trim()) {
-                    const newAnn: Annotation = {
-                      id: `fsann-${Date.now()}`,
-                      type: 'text',
-                      x: fsTextInputPos.x,
-                      y: fsTextInputPos.y,
-                      text: fsTextInputValue.trim(),
-                      color: fsColorRef.current,
-                      strokeWidth: fsFontSizeRef.current,
-                    };
-                    const newAnnotations = [...fullscreenAnnotations, newAnn];
-                    setFullscreenAnnotations(newAnnotations);
-                    fsAnnotationsRef.current = newAnnotations;
-                    fsSaveToHistory(newAnnotations);
-                  }
-                  setIsFsTextInputMode(false);
-                  setFsTextInputValue('');
-                  renderFsCanvas();
-                }}
-                className="absolute bg-white/90 text-black px-3 py-2 rounded-lg text-lg"
-                style={{
-                  left: fsTextInputPos.x,
-                  top: fsTextInputPos.y - 32,
-                  minWidth: '150px',
-                  zIndex: 30,
-                  fontSize: fullscreenFontSize,
-                  color: fullscreenColor,
-                  border: `2px solid ${fullscreenColor}`,
-                  outline: 'none',
-                }}
-                placeholder="输入文字..."
-              />
-            )}
-          </div>
-
-          {/* 全屏标注列表 */}
-          {fullscreenAnnotations.length > 0 && (
-            <div className="p-3 bg-[#1a1a1a] border-t border-[#333] max-h-32 overflow-y-auto">
-              <div className="flex flex-wrap gap-2">
-                {fullscreenAnnotations.map((ann) => (
-                  <div
-                    key={ann.id}
-                    className={`flex items-center gap-1 px-2 py-1 rounded text-xs ${fullscreenSelectedId === ann.id ? 'ring-2 ring-white' : ''}`}
-                    style={{ backgroundColor: ann.color + '33', color: ann.color }}
-                  >
-                    <span>{ann.type === 'text' ? ann.text?.slice(0, 15) : ann.type === 'pen' ? '画笔' : ann.type}</span>
-                    <button
-                      onClick={() => deleteFsAnnotation(ann.id)}
-                      className="ml-1 hover:text-white"
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>,
-        document.body
-      )}
-    </div>
-  );
-}
-
-// 绘制所有标注（用于导出）
-function drawAllAnnotationsExport(
-  ctx: CanvasRenderingContext2D,
-  annotations: Annotation[],
-  selectedId: string | undefined,
-  defaultColor: string
-) {
-  annotations.forEach((ann) => {
-    const isSelected = ann.id === selectedId;
-    ctx.strokeStyle = ann.color;
-    ctx.fillStyle = ann.color;
-    ctx.lineWidth = ann.strokeWidth || 2;
-
-    if (isSelected) {
-      ctx.shadowColor = ann.color;
-      ctx.shadowBlur = 10;
-    }
-
-    switch (ann.type) {
-      case 'rect':
-        ctx.strokeRect(ann.x, ann.y, ann.width || 0, ann.height || 0);
-        break;
-      case 'circle':
-        ctx.beginPath();
-        ctx.ellipse(
-          ann.x + (ann.width || 0) / 2,
-          ann.y + (ann.height || 0) / 2,
-          Math.abs((ann.width || 0) / 2),
-          Math.abs((ann.height || 0) / 2),
-          0, 0, Math.PI * 2
-        );
-        ctx.stroke();
-        break;
-      case 'arrow':
-        drawArrowExport(ctx, ann.x, ann.y, ann.endX ?? ann.x, ann.endY ?? ann.y);
-        break;
-      case 'text':
-        ctx.font = '14px sans-serif';
-        ctx.fillText(ann.text || '', ann.x, ann.y);
-        break;
-      case 'pen':
-        if (ann.points && ann.points.length > 1) {
-          ctx.strokeStyle = ann.color;
-          ctx.lineWidth = ann.strokeWidth || 3;
-          ctx.lineCap = 'round';
-          ctx.lineJoin = 'round';
-          ctx.beginPath();
-          ctx.moveTo(ann.points[0].x, ann.points[0].y);
-          for (let i = 1; i < ann.points.length; i++) {
-            ctx.lineTo(ann.points[i].x, ann.points[i].y);
-          }
-          ctx.stroke();
-        }
-        break;
-    }
-
-    ctx.shadowBlur = 0;
-  });
-}
-
-// 绘制箭头
-function drawArrowExport(ctx: CanvasRenderingContext2D, fromX: number, fromY: number, toX: number, toY: number) {
-  const headLen = 12 * scaleRatio;
-  const angle = Math.atan2(toY - fromY, toX - fromX);
-
-  ctx.beginPath();
-  ctx.moveTo(fromX, fromY);
-  ctx.lineTo(toX, toY);
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.moveTo(toX, toY);
-  ctx.lineTo(toX - headLen * Math.cos(angle - Math.PI / 6), toY - headLen * Math.sin(angle - Math.PI / 6));
-  ctx.lineTo(toX - headLen * Math.cos(angle + Math.PI / 6), toY - headLen * Math.sin(angle + Math.PI / 6));
-  ctx.closePath();
-  ctx.fill();
-}
-
-// 连线组件 - 支持点击删除和长按拖拽取消
-interface EdgePathProps {
-  edgeId: string;
-  startX: number;
-  startY: number;
-  cp1X: number;
-  cp1Y: number;
-  cp2X: number;
-  cp2Y: number;
-  endX: number;
-  endY: number;
-  isActive: boolean;
-  onDelete: (id: string) => void;
-}
-
-function EdgePath({ edgeId, startX, startY, cp1X, cp1Y, cp2X, cp2Y, endX, endY, isActive, onDelete }: EdgePathProps) {
-  const [isDragging, setIsDragging] = useState(false);
-  const [isNearStart, setIsNearStart] = useState(false);
-  const [isNearEnd, setIsNearEnd] = useState(false);
-  const longPressTimerRef = useRef<number | null>(null);
-
-  const handlePointerDown = (e: React.PointerEvent) => {
-    e.stopPropagation();
-
-    // 检查是否靠近起点或终点
-    const rect = (e.target as SVGElement).ownerSVGElement?.getBoundingClientRect();
-    if (!rect) return;
-
-    // 计算鼠标在 SVG 坐标系中的位置
-    const svg = (e.target as SVGElement).ownerSVGElement;
-    const pt = svg.createSVGPoint();
-    pt.x = e.clientX;
-    pt.y = e.clientY;
-    const svgP = pt.matrixTransform(svg.getScreenCTM()?.inverse());
-
-    // 检查是否靠近起点或终点
-    const nearStart = Math.hypot(svgP.x - startX, svgP.y - startY) < 20;
-    const nearEnd = Math.hypot(svgP.x - endX, svgP.y - endY) < 20;
-    setIsNearStart(nearStart);
-    setIsNearEnd(nearEnd);
-
-    // 长按计时器
-    longPressTimerRef.current = window.setTimeout(() => {
-      setIsDragging(true);
-      (e.target as SVGElement).setPointerCapture(e.pointerId);
-    }, 300);
-  };
-
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isDragging) return;
-
-    const svg = (e.target as SVGElement).ownerSVGElement;
-    const pt = svg.createSVGPoint();
-    pt.x = e.clientX;
-    pt.y = e.clientY;
-    const svgP = pt.matrixTransform(svg.getScreenCTM()?.inverse());
-
-    // 拖拽时动态更新终点位置（通过状态传递）
-    // 这里我们发送一个自定义事件来更新
-    window.dispatchEvent(new CustomEvent('edge-drag', {
-      detail: { edgeId, x: svgP.x, y: svgP.y, nearStart: isNearStart, nearEnd: isNearEnd }
-    }));
-  };
-
-  const handlePointerUp = (e: React.PointerEvent) => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
-
-    if (isDragging) {
-      setIsDragging(false);
-      // 拖拽结束时，检查是否远离了节点，如果是则删除连线
-      const svg = (e.target as SVGElement).ownerSVGElement;
-      const pt = svg.createSVGPoint();
-      pt.x = e.clientX;
-      pt.y = e.clientY;
-      const svgP = pt.matrixTransform(svg.getScreenCTM()?.inverse());
-
-      // 如果拖拽到了远离节点的位置，删除连线
-      if (isNearStart) {
-        const distFromStart = Math.hypot(svgP.x - startX, svgP.y - startY);
-        if (distFromStart > 100) {
-          onDelete(edgeId);
-        }
-      } else if (isNearEnd) {
-        const distFromEnd = Math.hypot(svgP.x - endX, svgP.y - endY);
-        if (distFromEnd > 100) {
-          onDelete(edgeId);
-        }
-      }
-
-      // 重置连线位置
-      window.dispatchEvent(new CustomEvent('edge-drag-end', { detail: { edgeId } }));
-    }
-  };
-
-  return (
-    <>
-      {/* 可见的连线 */}
-      <path
-        d={`M ${startX} ${startY} C ${cp1X} ${cp1Y}, ${cp2X} ${cp2Y}, ${endX} ${endY}`}
-        stroke={isActive ? "#60a5fa" : "#4a5568"}
-        strokeWidth={isActive ? "3" : "2"}
-        fill="none"
-        markerEnd={isActive ? "url(#arrowhead-active)" : "url(#arrowhead)"}
-        filter={isActive ? "url(#glow-active)" : undefined}
-        opacity={isActive ? 1 : 0.7}
-        className={`transition-all duration-200 ${isDragging ? 'stroke-red-400' : isActive ? '' : 'hover:stroke-red-400'}`}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        style={{ cursor: 'pointer' }}
-      />
-      {/* 不可见的宽线用于检测 */}
-      <path
-        d={`M ${startX} ${startY} C ${cp1X} ${cp1Y}, ${cp2X} ${cp2Y}, ${endX} ${endY}`}
-        stroke="transparent"
-        strokeWidth="16"
-        fill="none"
-        style={{ cursor: 'pointer', pointerEvents: 'stroke' }}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onDoubleClick={() => onDelete(edgeId)}
-      />
-    </>
   );
 }

@@ -126,8 +126,18 @@ export default defineConfig(({ mode }) => {
           output: {
             /** Vertex 拦截器单独 chunk，避免与 React 同文件压缩产生 TDZ（Cannot access before initialization） */
             manualChunks(id) {
-              if (id.replace(/\\/g, '/').includes('vertex-ai-proxy-interceptor')) {
+              const norm = id.replace(/\\/g, '/');
+              if (norm.includes('vertex-ai-proxy-interceptor')) {
                 return 'vertex-shim';
+              }
+              if (norm.includes('node_modules/three')) {
+                return 'three';
+              }
+              if (norm.includes('node_modules/jszip')) {
+                return 'jszip';
+              }
+              if (norm.includes('node_modules/@google/genai')) {
+                return 'genai';
               }
               return undefined;
             },

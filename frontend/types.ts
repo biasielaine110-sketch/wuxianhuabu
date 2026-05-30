@@ -4,6 +4,7 @@ export type NodeType = 'text' | 'image' | 't2i' | 'i2i' | 'panorama' | 'annotati
 export interface Director3DNode extends CanvasNode {
   type: 'director3d';
   backgroundImage?: string; // 背景全景图 base64
+  backgroundImageAssetId?: string;
   yaw?: number; // 水平视角 (-180 to 180)
   pitch?: number; // 垂直视角 (-90 to 90)
   fov?: number; // 视野角度
@@ -25,6 +26,7 @@ export interface Figure3D {
 export interface PanoramaNode extends CanvasNode {
   type: 'panorama';
   panoramaImage?: string; // 全景图 base64
+  panoramaImageAssetId?: string;
   yaw?: number; // 水平视角 (-180 to 180)
   pitch?: number; // 垂直视角 (-90 to 90)
   fov?: number; // 视野角度
@@ -35,6 +37,7 @@ export interface PanoramaNode extends CanvasNode {
 export interface AnnotationNode extends CanvasNode {
   type: 'annotation';
   sourceImage?: string; // 源图片 base64
+  sourceImageAssetId?: string;
   annotations?: Annotation[];
   isEditing?: boolean;
   selectedAnnotationId?: string;
@@ -78,6 +81,8 @@ export interface CanvasNode {
   height: number;
   prompt: string; // Text content or prompt
   images?: string[]; // Array of Base64 image data
+  /** 与 images[] 对齐；offload 后 images[i] 可为空，显示时从 IDB 读取 */
+  imageAssetIds?: string[];
   isGenerating?: boolean;
   error?: string;
   aspectRatio?: string; // e.g., '1:1', '16:9'
@@ -141,22 +146,27 @@ export interface AuditModeData {
 export interface GridSplitNode extends CanvasNode {
   type: 'gridSplit';
   inputImage?: string;
+  inputImageAssetId?: string;
   gridCount?: 4 | 6 | 9;
   outputImages?: string[];
+  outputImageAssetIds?: string[];
 }
 
 // 宫格合并节点
 export interface GridMergeNode extends CanvasNode {
   type: 'gridMerge';
   inputImages?: string[];
+  inputImageAssetIds?: string[];
   gridCount?: 4 | 6 | 9;
   outputImage?: string;
+  outputImageAssetId?: string;
 }
 
 // 全景图生成节点（21:9 画幅）
 export interface PanoramaT2iNode extends CanvasNode {
   type: 'panoramaT2i';
   panoramaImage?: string;
+  panoramaImageAssetId?: string;
   isGenerating?: boolean;
   error?: string;
   aspectRatio?: string;

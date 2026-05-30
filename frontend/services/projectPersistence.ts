@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import type { CanvasNode, Edge, Transform, AuditModeData } from '../types';
+import { embedProjectAssetsInZip, hydrateProjectAssetsFromZip } from './projectAssetBundle';
 
 /** 与 App 内 CanvasProject 结构一致，单独放在此模块避免循环依赖 */
 export type CanvasProjectSnapshot = {
@@ -187,6 +188,7 @@ export async function buildProjectZipBlob(project: CanvasProjectSnapshot): Promi
   zip.file(ZIP_MANIFEST, JSON.stringify(manifest, null, 2));
   const { diskSaveEstablished: _disk, ...projectForZip } = project;
   zip.file(ZIP_PROJECT, JSON.stringify(projectForZip, null, 2));
+  await embedProjectAssetsInZip(zip, project.nodes);
   return zip.generateAsync({
     type: 'blob',
     compression: 'DEFLATE',
@@ -279,6 +281,7 @@ export async function parseProjectFromZipFile(file: File): Promise<CanvasProject
   if (!imported || !Array.isArray(imported.nodes) || !Array.isArray(imported.edges)) {
     throw new Error('project.json 格式不正确');
   }
+  await hydrateProjectAssetsFromZip(zip);
   return {
     id: (imported.id as string) || `project-${Date.now()}`,
     name: (imported.name as string) || file.name.replace(/\.(wxcanvas\.)?zip$/i, '') || '导入项目',

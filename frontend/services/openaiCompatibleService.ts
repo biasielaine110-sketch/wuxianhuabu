@@ -80,7 +80,7 @@ function openAiCompatFailureHint(status: number, kind: 'generations-json' | 'ima
       : '（404：请检查 Base URL 与路径；开发环境需 Vite 代理 /yunzhi-openai。）';
   }
   if (status === 502 || status === 504) {
-    return '（502/504：多为上游 API（如云智 yunzhi-ai.top）或本站 /yunzhi-openai 转发暂时失败、超时；请稍后重试、检查密钥与上游状态，图生图可尝试缩小参考图。）';
+    return '（502/504：多为上游 API 暂时失败、超时，或生图成功但图片回传失败；codesonline 已自动改用 URL 回传，若仍失败请稍后重试、检查密钥，图生图可缩小参考图。）';
   }
   if (status === 503) {
     return kind === 'generations-json'
@@ -374,10 +374,14 @@ function rewriteKnownImageCdnToSameOrigin(imageUrl: string): string {
   try {
     const u = new URL(imageUrl);
     const { origin } = window.location;
-    if (u.hostname === 'files.toapis.com') {
+    const host = u.hostname.toLowerCase();
+    if (host === 'image.codesonline.dev') {
+      return `${origin}/codesonline-image-api${u.pathname}${u.search}`;
+    }
+    if (host === 'files.toapis.com') {
       return `${origin}/cdn-files-toapis${u.pathname}${u.search}`;
     }
-    if (u.hostname === 'files.dashlyai.cc') {
+    if (host === 'files.dashlyai.cc') {
       return `${origin}/cdn-files-dashlyai${u.pathname}${u.search}`;
     }
   } catch {
@@ -2236,6 +2240,21 @@ function isCodesonlineOpenAiCompatBase(baseNormalized: string): boolean {
   }
 }
 
+/** codesonline 用 b64_json 时上游常报 image_delivery_failed / image index not found，改走 url 由客户端拉取 */
+function preferredImageResponseFormat(baseNormalized: string): 'b64_json' | 'url' {
+  if (isCodesonlineOpenAiCompatBase(baseNormalized)) return 'url';
+  return 'b64_json';
+}
+
+function isImageDeliveryFailedError(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    m.includes('image_delivery_failed') ||
+    m.includes('image index not found') ||
+    m.includes('返回图片数据失败')
+  );
+}
+
 /**
  * 将参考图压为 JPEG，体积不超过 maxBytes（用于图生图 multipart）。
  */
@@ -2533,55 +2552,84 @@ async function generateImagesAtOpenAiCompatibleBase(
     resolvedModel === 'dall-e-3' ||
     resolvedModel === 'gpt-image-2' ||
     resolvedModel === 'gpt-image-1';
+
+  const requestOneImage = async (responseFormat: 'b64_json' | 'url'): Promise<string> => {
+    const body: Record<string, unknown> = {
+      model: resolvedModel,
+      prompt: enhancedPrompt,
+      n: 1,
+      size,
+      response_format: responseFormat,
+    };
+    if (quality && resolvedModel === 'gpt-image-2') {
+      body.quality = quality;
+    }
+    const json = await postJsonAtBase<Record<string, unknown>>(
+      baseNorm,
+      '/images/generations',
+      body,
+      apiKey
+    );
+    return openAiStyleGenerationJsonToBase64(json, signal, apiKey);
+  };
+
+  const requestOneImageWithFallback = async (): Promise<string> => {
+    let format = preferredImageResponseFormat(baseNorm);
+    try {
+      return await requestOneImage(format);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (format === 'b64_json' && isImageDeliveryFailedError(msg)) {
+        return requestOneImage('url');
+      }
+      throw err;
+    }
+  };
+
   if (onePerRequest) {
     for (let i = 0; i < numberOfImages; i++) {
       assertNotAborted(signal);
-      const body: Record<string, unknown> = {
-        model: resolvedModel,
-        prompt: enhancedPrompt,
-        n: 1,
-        size,
-        response_format: 'b64_json',
-      };
-      // GPT Image 2 系列支持 quality 参数
-      if (quality && resolvedModel === 'gpt-image-2') {
-        body.quality = quality;
-      }
-      const json = await postJsonAtBase<Record<string, unknown>>(
-        baseNorm,
-        '/images/generations',
-        body,
-        apiKey
-      );
-      out.push(await openAiStyleGenerationJsonToBase64(json, signal, apiKey));
+      out.push(await requestOneImageWithFallback());
     }
   } else {
     const n = Math.min(Math.max(numberOfImages, 1), 10);
     assertNotAborted(signal);
-    const json = await postJsonAtBase<Record<string, unknown>>(
-      baseNorm,
-      '/images/generations',
-      {
-        model: 'dall-e-2',
-        prompt: enhancedPrompt,
-        n,
-        size,
-        response_format: 'b64_json',
-      },
-      apiKey
-    );
-    const data = json.data;
-    if (!Array.isArray(data) || !data.length) {
-      throw new Error(`文生图接口未返回图片列表。${JSON.stringify(json).slice(0, 400)}`);
+    let format = preferredImageResponseFormat(baseNorm);
+    const runBatch = async (responseFormat: 'b64_json' | 'url') => {
+      const json = await postJsonAtBase<Record<string, unknown>>(
+        baseNorm,
+        '/images/generations',
+        {
+          model: 'dall-e-2',
+          prompt: enhancedPrompt,
+          n,
+          size,
+          response_format: responseFormat,
+        },
+        apiKey
+      );
+      const data = json.data;
+      if (!Array.isArray(data) || !data.length) {
+        throw new Error(`文生图接口未返回图片列表。${JSON.stringify(json).slice(0, 400)}`);
+      }
+      return Promise.all(
+        data.map((d) =>
+          d && typeof d === 'object'
+            ? openAiStyleImagePayloadToBase64(d as Record<string, unknown>, signal, apiKey)
+            : Promise.reject(new Error('文生图接口返回的图片条目格式无效'))
+        )
+      );
+    };
+    try {
+      out.push(...(await runBatch(format)));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (format === 'b64_json' && isImageDeliveryFailedError(msg)) {
+        out.push(...(await runBatch('url')));
+      } else {
+        throw err;
+      }
     }
-    const list = await Promise.all(
-      data.map((d) =>
-        d && typeof d === 'object'
-          ? openAiStyleImagePayloadToBase64(d as Record<string, unknown>, signal, apiKey)
-          : Promise.reject(new Error('文生图接口返回的图片条目格式无效'))
-      )
-    );
-    out.push(...list);
   }
   return out;
 }
@@ -2629,51 +2677,59 @@ async function editImagesAtOpenAiCompatibleBase(
 
   for (let i = 0; i < count; i++) {
     assertNotAborted(signal);
-    const form = new FormData();
-    // dall-e-2 沿用单字段 image；gpt-image-* 等支持多图（多张时使用 image[]）
+
+    const submitEditOnce = async (responseFormat: 'b64_json' | 'url' | null): Promise<string> => {
+      const form = new FormData();
+      if (resolvedEditModel === 'dall-e-2') {
+        form.append('image', imageBlobs[0].blob, imageBlobs[0].filename);
+      } else {
+        for (const { blob, filename } of imageBlobs) {
+          form.append('image[]', blob, filename);
+        }
+      }
+      form.append('prompt', enhancedPrompt);
+      form.append('model', resolvedEditModel);
+      form.append('n', '1');
+      form.append('size', size);
+      if (resolvedEditModel !== 'dall-e-2' && responseFormat) {
+        form.append('response_format', responseFormat);
+      }
+      if (quality && resolvedEditModel === 'gpt-image-2') {
+        form.append('quality', quality);
+      }
+
+      const requestUrl = `${rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm)}/images/edits`;
+      const res = await fetch(requestUrl, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: form,
+        signal,
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        throw new Error(
+          `图生图接口错误 (${res.status})${openAiCompatFailureHint(res.status, 'image-edit')}: ${text.slice(0, 800)}`
+        );
+      }
+      return openAiStyleGenerationJsonToBase64(JSON.parse(text) as unknown, signal, apiKey);
+    };
+
     if (resolvedEditModel === 'dall-e-2') {
-      form.append('image', imageBlobs[0].blob, imageBlobs[0].filename);
-    } else {
-      // 多图参考：发送所有图片
-      for (const { blob, filename } of imageBlobs) {
-        form.append('image[]', blob, filename);
+      results.push(await submitEditOnce(null));
+      continue;
+    }
+
+    let format = preferredImageResponseFormat(baseNorm);
+    try {
+      results.push(await submitEditOnce(format));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (format === 'b64_json' && isImageDeliveryFailedError(msg)) {
+        results.push(await submitEditOnce('url'));
+      } else {
+        throw err;
       }
     }
-    form.append('prompt', enhancedPrompt);
-    form.append('model', resolvedEditModel);
-    form.append('n', '1');
-    form.append('size', size);
-    if (resolvedEditModel !== 'dall-e-2') {
-      form.append('response_format', 'b64_json');
-    }
-    // GPT Image 2 系列支持 quality 参数
-    if (quality && resolvedEditModel === 'gpt-image-2') {
-      form.append('quality', quality);
-    }
-
-    const requestUrl = `${rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm)}/images/edits`;
-    console.log('[DEBUG 编辑请求]', {
-      url: requestUrl,
-      model: resolvedEditModel,
-      prompt: enhancedPrompt.slice(0, 200),
-      imageCount: imageBlobs.length,
-      imageSize: size,
-    });
-
-    const res = await fetch(requestUrl, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: form,
-    });
-    const text = await res.text();
-    console.log('[DEBUG 编辑响应]', res.status, text.slice(0, 500));
-    if (!res.ok) {
-      throw new Error(
-        `图生图接口错误 (${res.status})${openAiCompatFailureHint(res.status, 'image-edit')}: ${text.slice(0, 800)}`
-      );
-    }
-    const json = JSON.parse(text) as unknown;
-    results.push(await openAiStyleGenerationJsonToBase64(json, signal, apiKey));
   }
 
   return results;

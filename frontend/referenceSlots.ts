@@ -1,4 +1,165 @@
 import type { CanvasNode, Edge } from './types';
+import { hasCanvasImagePayload } from './services/canvasAssetResolver';
+
+export type ImageRefPayload = { base64?: string; assetId?: string };
+
+/** 从节点收集可引用的图片（含 IndexedDB offload 后仅 assetId 的情况） */
+export function collectImageRefsFromNode(src: CanvasNode): ImageRefPayload[] {
+  const refs: ImageRefPayload[] = [];
+  const len = Math.max(src.images?.length ?? 0, src.imageAssetIds?.length ?? 0);
+  for (let i = 0; i < len; i++) {
+    const base64 = src.images?.[i];
+    const assetId = src.imageAssetIds?.[i];
+    if (hasCanvasImagePayload(base64, assetId)) {
+      refs.push({
+        base64: base64 && base64.length > 80 ? base64 : undefined,
+        assetId: assetId?.trim() || undefined,
+      });
+    }
+  }
+  if (refs.length > 0) return refs;
+
+  const pn = src as { panoramaImage?: string; panoramaImageAssetId?: string };
+  if (hasCanvasImagePayload(pn.panoramaImage, pn.panoramaImageAssetId)) {
+    return [
+      {
+        base64: pn.panoramaImage && pn.panoramaImage.length > 80 ? pn.panoramaImage : undefined,
+        assetId: pn.panoramaImageAssetId,
+      },
+    ];
+  }
+
+  const an = src as { sourceImage?: string; sourceImageAssetId?: string };
+  if (hasCanvasImagePayload(an.sourceImage, an.sourceImageAssetId)) {
+    return [
+      {
+        base64: an.sourceImage && an.sourceImage.length > 80 ? an.sourceImage : undefined,
+        assetId: an.sourceImageAssetId,
+      },
+    ];
+  }
+
+  const gsn = src as { inputImage?: string; inputImageAssetId?: string };
+  if (hasCanvasImagePayload(gsn.inputImage, gsn.inputImageAssetId)) {
+    return [
+      {
+        base64: gsn.inputImage && gsn.inputImage.length > 80 ? gsn.inputImage : undefined,
+        assetId: gsn.inputImageAssetId,
+      },
+    ];
+  }
+
+  const d3 = src as { backgroundImage?: string; backgroundImageAssetId?: string };
+  if (hasCanvasImagePayload(d3.backgroundImage, d3.backgroundImageAssetId)) {
+    return [
+      {
+        base64: d3.backgroundImage && d3.backgroundImage.length > 80 ? d3.backgroundImage : undefined,
+        assetId: d3.backgroundImageAssetId,
+      },
+    ];
+  }
+
+  const gmn = src as { outputImage?: string; outputImageAssetId?: string };
+  if (hasCanvasImagePayload(gmn.outputImage, gmn.outputImageAssetId)) {
+    return [
+      {
+        base64: gmn.outputImage && gmn.outputImage.length > 80 ? gmn.outputImage : undefined,
+        assetId: gmn.outputImageAssetId,
+      },
+    ];
+  }
+
+  return refs;
+}
+
+/** 连线传递时取源节点当前应展示的一张图（含 offload 后仅 assetId） */
+export function getNodePrimaryImageRef(src: CanvasNode): ImageRefPayload | null {
+  const len = Math.max(src.images?.length ?? 0, src.imageAssetIds?.length ?? 0);
+  if (len > 0) {
+    const idx = Math.min(Math.max(0, src.currentImageIndex ?? 0), len - 1);
+    const base64 = src.images?.[idx];
+    const assetId = src.imageAssetIds?.[idx];
+    if (hasCanvasImagePayload(base64, assetId)) {
+      return {
+        base64: base64 && base64.length > 80 ? base64 : undefined,
+        assetId: assetId?.trim() || undefined,
+      };
+    }
+    return null;
+  }
+  const refs = collectImageRefsFromNode(src);
+  return refs[0] ?? null;
+}
+
+export type SingleImageFieldPayload = { base64: string; assetId?: string };
+
+export function imageRefToSingleImageFields(ref: ImageRefPayload): SingleImageFieldPayload {
+  if (ref.base64 && ref.base64.length > 80) {
+    return { base64: ref.base64 };
+  }
+  if (ref.assetId) {
+    return { base64: '', assetId: ref.assetId };
+  }
+  return { base64: '' };
+}
+
+export function singleImageFieldsMatch(
+  currentBase64: string | undefined,
+  currentAssetId: string | undefined,
+  next: SingleImageFieldPayload
+): boolean {
+  return (currentBase64 ?? '') === next.base64 && (currentAssetId ?? undefined) === (next.assetId ?? undefined);
+}
+
+/** 解析连到消费型节点（全景/标注/导演台等）的上游图片提供方（兼容输入端口拖反方向） */
+export function resolveImageProviderNodes(
+  consumerId: string,
+  nodes: CanvasNode[],
+  edges: Edge[]
+): CanvasNode[] {
+  const providers: CanvasNode[] = [];
+  const seen = new Set<string>();
+
+  for (const edge of edges) {
+    if (edge.targetId !== consumerId && edge.sourceId !== consumerId) continue;
+
+    const candidateId = edge.targetId === consumerId ? edge.sourceId : edge.targetId;
+    if (candidateId === consumerId || seen.has(candidateId)) continue;
+
+    const candidate = nodes.find((n) => n.id === candidateId);
+    if (!candidate || !getNodePrimaryImageRef(candidate)) continue;
+
+    seen.add(candidateId);
+    providers.push(candidate);
+  }
+
+  return providers;
+}
+
+async function resolveImageRefToBase64(ref: ImageRefPayload): Promise<string | null> {
+  if (ref.base64 && ref.base64.length > 80) {
+    return ref.base64.includes(',') ? ref.base64.split(',')[1] : ref.base64;
+  }
+  if (ref.assetId) {
+    const { resolveCanvasImageSource, imageSrcToRawBase64 } = await import(
+      './services/canvasAssetResolver'
+    );
+    const src = await resolveCanvasImageSource(undefined, ref.assetId);
+    if (!src) return null;
+    const raw = await imageSrcToRawBase64(src);
+    return raw?.base64 ?? null;
+  }
+  return null;
+}
+
+function imageRefsForSlot(s: IncomingRefSlot): ImageRefPayload[] {
+  if (s.imageRefs?.length) return s.imageRefs;
+  if (s.imageBase64s?.length) {
+    return s.imageBase64s.map((b) => ({ base64: b }));
+  }
+  if (s.imageBase64) return [{ base64: s.imageBase64 }];
+  return [];
+}
 
 /** 图片压缩：限制最长边为 maxSize，生成 JPEG（压缩率 85%） */
 export async function compressImageBase64(base64: string, maxSize = 2048): Promise<string> {
@@ -52,6 +213,8 @@ export type IncomingRefSlot = {
   label: string;
   imageBase64?: string;
   imageBase64s?: string[]; // 多图模式：返回所有图片
+  /** 与 imageBase64s 对齐；offload 后可能仅有 assetId */
+  imageRefs?: ImageRefPayload[];
   videoUrl?: string;
   /** 语音参考：音频 base64 */
   audioBase64?: string;
@@ -84,22 +247,22 @@ export function buildIncomingRefSlots(
     const src = nodes.find((x) => x.id === edge.sourceId);
     if (!src) continue;
     const prefix = shortSourceLabel(src);
-    /** 多图源节点：返回该连线源节点的所有图片，供图生图多图参考使用 */
-    if (src.images?.length) {
-      // 收集所有非空图片
-      const allImages = src.images.filter(img => img && img !== '');
-      if (allImages.length > 0) {
-        n += 1;
-        slots.push({
-          n,
-          kind: 'image',
-          label: `${prefix}·${allImages.length}张图`,
-          imageBase64: allImages[0], // 保留第一张作为兼容性字段
-          imageBase64s: allImages,    // 新增：返回所有图片数组
-          edgeId: edge.id,
-          sourceNodeId: src.id,
-        });
-      }
+    const imageRefs = collectImageRefsFromNode(src);
+    if (imageRefs.length > 0) {
+      const inlineB64s = imageRefs
+        .map((r) => r.base64)
+        .filter((b): b is string => !!b && b.length > 80);
+      n += 1;
+      slots.push({
+        n,
+        kind: 'image',
+        label: `${prefix}·${imageRefs.length}张图`,
+        imageRefs,
+        imageBase64: inlineB64s[0],
+        imageBase64s: inlineB64s.length > 0 ? inlineB64s : undefined,
+        edgeId: edge.id,
+        sourceNodeId: src.id,
+      });
     }
     if (src.type === 'video' && src.videos?.length) {
       const vidx = Math.min(Math.max(0, src.currentVideoIndex ?? 0), src.videos.length - 1);
@@ -262,14 +425,20 @@ export async function resolveSlotImagesForIndices(
       continue;
     }
     if (s.kind === 'image') {
-      // 优先使用多图数组 imageBase64s
-      if (s.imageBase64s && s.imageBase64s.length > 0) {
-        base64s.push(...s.imageBase64s);
-      } else if (s.imageBase64) {
-        base64s.push(s.imageBase64);
-      } else {
+      const refs = imageRefsForSlot(s);
+      if (refs.length === 0) {
         missing.push(num);
+        continue;
       }
+      let got = 0;
+      for (const ref of refs) {
+        const b = await resolveImageRefToBase64(ref);
+        if (b) {
+          base64s.push(b);
+          got++;
+        }
+      }
+      if (got === 0) missing.push(num);
       continue;
     }
     if (s.kind === 'video' && s.videoUrl) {
@@ -299,15 +468,21 @@ export async function resolveSlotImagesForIndicesWithCompression(
       continue;
     }
     if (s.kind === 'image') {
-      if (s.imageBase64s && s.imageBase64s.length > 0) {
-        const compressed = await compressImageBase64s(s.imageBase64s, maxSize);
-        base64s.push(...compressed);
-      } else if (s.imageBase64) {
-        const compressed = await compressImageBase64(s.imageBase64, maxSize);
-        base64s.push(compressed);
-      } else {
+      const refs = imageRefsForSlot(s);
+      if (refs.length === 0) {
         missing.push(num);
+        continue;
       }
+      let got = 0;
+      for (const ref of refs) {
+        const b = await resolveImageRefToBase64(ref);
+        if (b) {
+          const compressed = await compressImageBase64(b, maxSize);
+          base64s.push(compressed);
+          got++;
+        }
+      }
+      if (got === 0) missing.push(num);
       continue;
     }
     if (s.kind === 'video' && s.videoUrl) {
