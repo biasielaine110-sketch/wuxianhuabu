@@ -102,13 +102,13 @@
     font-size: calc(12px * 1.95 * 1.5 * 1.5) !important;
   }
   .canvas-node-font-195.canvas-node-grid-tool-150 .canvas-node-window-title {
-    font-size: 50px !important;
+    font-size: 100px !important;
     line-height: 1 !important;
   }
 
-  /** 节点悬浮标题：大号透明字体 */
+  /** 节点悬浮标题：大号透明字体（×2） */
   .canvas-node-font-195 .canvas-node-window-title {
-    font-size: 50px !important;
+    font-size: 100px !important;
     line-height: 1 !important;
   }
 
@@ -121,9 +121,9 @@
     font-size: 40px !important;
   }
 
-  /** AI 对话节点悬浮标题 */
+  /** AI 对话节点悬浮标题（×2） */
   .canvas-node-root--chat .canvas-node-window-title {
-    font-size: 50px !important;
+    font-size: 100px !important;
     line-height: 1 !important;
   }
 

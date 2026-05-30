@@ -1,4 +1,4 @@
-import React, { useEffect, useState, type ReactNode } from 'react';
+import React, { Suspense, useEffect, useState, type ReactNode } from 'react';
 import { HeavyNodeFallback } from './HeavyNodeFallback';
 
 /** 首次挂载时再加载 three 模块，避免阻塞首屏 React 渲染 */
@@ -22,5 +22,5 @@ export function ThreeEngineGate({
   }, []);
 
   if (!ready) return <HeavyNodeFallback label={label} />;
-  return <>{children}</>;
+  return <Suspense fallback={<HeavyNodeFallback label={label} />}>{children}</Suspense>;
 }

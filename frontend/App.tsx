@@ -1569,6 +1569,7 @@ function T2iPresetCategorySelect({
 interface FsImageInfoPanelProps {
   imageSrc: string;
   onClose: () => void;
+  onDownload: () => void;
 }
 
 function fullscreenImageDisplaySrc(src: string): string {
@@ -1583,7 +1584,7 @@ function fullscreenImageDisplaySrc(src: string): string {
   return `data:image/jpeg;base64,${src}`;
 }
 
-function FsImageInfoPanel({ imageSrc, onClose }: FsImageInfoPanelProps) {
+function FsImageInfoPanel({ imageSrc, onClose, onDownload }: FsImageInfoPanelProps) {
   const [imgSize, setImgSize] = useState<{ width: number; height: number } | null>(null);
   const [fileSize, setFileSize] = useState<number>(0);
   const [formatLabel, setFormatLabel] = useState('JPEG');
@@ -1649,6 +1650,20 @@ function FsImageInfoPanel({ imageSrc, onClose }: FsImageInfoPanelProps) {
         <InfoItem label="文件大小" value={formatFileSize(fileSize)} />
         <InfoItem label="格式" value={formatLabel} />
         <InfoItem label="颜色空间" value="sRGB" />
+      </div>
+      <div className="shrink-0 border-t border-[#333] p-4">
+        <button
+          type="button"
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            onDownload();
+          }}
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-900/40 transition-colors hover:bg-blue-500"
+          title="下载图片"
+        >
+          <DownloadIcon size={18} />
+          下载图片
+        </button>
       </div>
     </div>
   );
@@ -6294,7 +6309,7 @@ ${text}`,
           <></>
         ) : null}
         {/* Floating title - outside window, transparent */}
-        <div className="absolute -top-14 left-3 z-30 flex items-center gap-1.5 cursor-grab active:cursor-grabbing">
+        <div className="absolute -top-[7rem] left-3 z-30 flex items-center gap-1.5 cursor-grab active:cursor-grabbing">
           {headerIcon}
           <span className="canvas-node-window-title text-white/80 font-medium">{headerTitle}</span>
         </div>
@@ -9247,6 +9262,7 @@ ${text}`,
 
       {/* 看图模式覆盖层 */}
       {canvasMode === 'audit' && (
+        <Suspense fallback={<HeavyNodeFallback label="加载看图模式…" />}>
         <AuditModeCanvas
           auditImages={auditImages}
           setAuditImages={setAuditImages}
@@ -9257,6 +9273,7 @@ ${text}`,
           sharedClipboardImageRef={sharedClipboardImageRef}
           saveCurrentProject={saveCurrentProject}
         />
+        </Suspense>
       )}
 
     {/* Context Menu */}
@@ -11016,6 +11033,7 @@ ${text}`,
           <FsImageInfoPanel
             imageSrc={fullscreenImage}
             onClose={() => { setFullscreenImage(null); setFsContextMenu(null); }}
+            onDownload={() => { void downloadImage(fullscreenImage); }}
           />
           {/* 翻页按钮 */}
           {fullscreenNodeId && (() => {
@@ -11031,29 +11049,13 @@ ${text}`,
                 ><ChevronLeftIcon size={28} /></button>
                 <button onPointerDown={e => { e.stopPropagation(); fsNavigate(1); }}
                   disabled={fullscreenImageIdx >= total - 1}
-                  className="absolute right-6 top-1/2 -translate-y-1/2 p-4 bg-white/10 hover:bg-white/20 disabled:opacity-20 rounded-full text-white transition-colors"
+                  className="absolute right-[17rem] top-1/2 -translate-y-1/2 p-4 bg-white/10 hover:bg-white/20 disabled:opacity-20 rounded-full text-white transition-colors"
                   title="下一张"
                 ><ChevronRightIcon size={28} /></button>
                 <div className="absolute bottom-6 left-1/2 -translate-x-1/2 px-3 py-1.5 bg-black/50 rounded-full text-white text-sm backdrop-blur-sm">{fullscreenImageIdx + 1} / {total}</div>
               </>
             );
           })()}
-          <button
-            type="button"
-            onPointerDown={(e) => { e.stopPropagation(); void downloadImage(fullscreenImage); }}
-            className="absolute top-6 left-6 z-20 flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-white text-sm font-semibold shadow-lg shadow-blue-900/40 transition-colors"
-            title="下载图片"
-          >
-            <DownloadIcon size={18} />
-            下载图片
-          </button>
-          <button
-            onPointerDown={(e) => { e.stopPropagation(); setFullscreenImage(null); setFullscreenNodeId(null); }}
-            className="absolute top-6 right-[17rem] p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors z-20"
-            title="关闭"
-          >
-            <XIcon size={24} />
-          </button>
           {fsContextMenu && (
             <div
               className="fixed z-[110] bg-[#252525] border border-[#444] rounded-lg shadow-2xl py-1 min-w-[140px] overflow-hidden"

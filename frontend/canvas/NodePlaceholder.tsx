@@ -23,7 +23,7 @@ export function NodePlaceholder({ node, isSelected, onPointerDown }: NodePlaceho
       style={{ left: node.x, top: node.y, width: node.width, height: node.height }}
       onPointerDown={(e) => onPointerDown(e, node.id)}
     >
-      <div className="absolute -top-14 left-3 z-30 flex items-center gap-1.5 cursor-grab active:cursor-grabbing">
+      <div className="absolute -top-[7rem] left-3 z-30 flex items-center gap-1.5 cursor-grab active:cursor-grabbing">
         <span className={`w-2 h-2 rounded-full ${meta.dotClass}`} />
         <span className="canvas-node-window-title text-white/60 font-medium">{meta.title}</span>
       </div>
