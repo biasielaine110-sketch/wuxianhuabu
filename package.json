@@ -1,25 +1,17 @@
 {
   "name": "ai",
   "workspaces": [
-    "frontend",
-    "backend"
+    "frontend"
   ],
   "scripts": {
     "build": "npm run build --workspace=ai-frontend",
     "dev-frontend": "npm run dev --prefix frontend",
-    "dev-backend": "npm run dev --prefix backend",
-    "dev": "npm run dev-frontend",
-    "dev:vertex": "concurrently -n web,api -c cyan,green \"npm run dev-frontend\" \"npm run dev-backend\""
+    "dev": "npm run dev-frontend"
   },
   "engines": {
     "node": ">=20"
   },
-  "dependencies": {
-    "google-auth-library": "^10.5.0",
-    "https-proxy-agent": "^7.0.6"
-  },
   "devDependencies": {
-    "concurrently": "latest",
     "vercel": "^54.0.0"
   }
 }

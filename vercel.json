@@ -58,10 +58,6 @@
       "destination": "https://api.aiid.edu.kg/$1"
     },
     {
-      "source": "/api-proxy",
-      "destination": "/api/api-proxy"
-    },
-    {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }

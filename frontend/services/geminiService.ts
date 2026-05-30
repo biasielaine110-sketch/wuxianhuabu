@@ -22,12 +22,7 @@ import {
   toApisCanvasVideoGenerate,
   type ToApisVideoModelId,
 } from './openaiCompatibleService';
-import { isVertexGeminiImageModel, normalizeGcpVertexModelWhenDisabled } from './vertexGeminiModelUtils';
-import {
-  vertexChatWithHistory,
-  vertexEditExistingImage,
-  vertexGenerateNewImage,
-} from './vertexGeminiService';
+import { normalizeGcpVertexModelWhenDisabled } from './vertexGeminiModelUtils';
 import type { ChatCompletionOptions, ChatCompletionResult, ChatCompletionTurn } from './chatCompletionTypes';
 
 export type { ChatCompletionOptions, ChatCompletionResult, ChatCompletionTurn } from './chatCompletionTypes';
@@ -150,9 +145,6 @@ export const generateNewImage = async (
 ): Promise<string[]> => {
   try {
     modelName = normalizeGcpVertexModelWhenDisabled(modelName);
-    if (isVertexGeminiImageModel(modelName)) {
-      return vertexGenerateNewImage(prompt, aspectRatio, numberOfImages, modelName, outputResolution, signal);
-    }
 
     if (getAiProvider() === 'openai-compatible') {
       return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, modelName, outputResolution, quality, signal);
@@ -245,17 +237,6 @@ export const editExistingImage = async (
 ): Promise<string[]> => {
   try {
     modelName = normalizeGcpVertexModelWhenDisabled(modelName);
-    if (isVertexGeminiImageModel(modelName)) {
-      return vertexEditExistingImage(
-        base64Images,
-        prompt,
-        numberOfImages,
-        modelName,
-        aspectRatio,
-        outputResolution,
-        signal
-      );
-    }
 
     if (getAiProvider() === 'openai-compatible') {
       return openAiEditImage(base64Images, prompt, numberOfImages, modelName, aspectRatio, outputResolution, quality, signal);
@@ -339,9 +320,6 @@ export const callGeminiChatWithHistory = async (
 
   try {
     modelName = normalizeGcpVertexModelWhenDisabled(modelName);
-    if (isVertexGeminiImageModel(modelName)) {
-      return vertexChatWithHistory(slice, modelName, opts);
-    }
 
     if (isDeepSeekChatModelId(modelName)) {
       let key = getDeepSeekSavedKey();

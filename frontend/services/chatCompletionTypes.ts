@@ -8,7 +8,7 @@ export type ChatCompletionTurn = {
 
 export type ChatCompletionResult = {
   text: string;
-  /** GCP Vertex 图像模型对话时，模型可在同轮回复中直接返回图片 */
+  /** 对话模型可在同轮回复中直接返回图片 */
   images?: string[];
 };
 

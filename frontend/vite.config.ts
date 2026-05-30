@@ -108,14 +108,6 @@ const toapisFileCdnProxy = {
       return stripped.length ? stripped : '/';
     },
   },
-  /** GCP Vertex：开发时同源 /api-proxy → 本地 Node backend（无需设 VITE_BACKEND_ORIGIN） */
-  '/api-proxy': {
-    target: 'http://127.0.0.1:5000',
-    changeOrigin: true,
-    secure: false,
-    timeout: 600_000,
-    proxyTimeout: 600_000,
-  },
 } as const;
 
 export default defineConfig(({ mode }) => {
@@ -132,12 +124,9 @@ export default defineConfig(({ mode }) => {
       build: {
         rollupOptions: {
           output: {
-            /** Vertex 拦截器单独 chunk，避免与 React 同文件压缩产生 TDZ（Cannot access before initialization） */
+            /** three / genai / jszip 分 chunk，减小主包体积 */
             manualChunks(id) {
               const norm = id.replace(/\\/g, '/');
-              if (norm.includes('vertex-ai-proxy-interceptor')) {
-                return 'vertex-shim';
-              }
               if (norm.includes('node_modules/three')) {
                 return 'three';
               }
@@ -160,7 +149,7 @@ export default defineConfig(({ mode }) => {
         'import.meta.env.VITE_SITE_PASSWORD': JSON.stringify(sitePassword),
       },
       server: {
-        // 纯前端开发：CDN 反代 + /api-proxy → 本地 backend。Vertex 需另开 `npm run dev-backend`。
+        // 纯前端开发：CDN 反代。
         proxy: { ...toapisFileCdnProxy },
       },
       preview: {
