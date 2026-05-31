@@ -2,6 +2,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { AuditImage, Transform } from './types';
 import { AuditMinimap } from './canvas/AuditMinimap';
 import { buildAuditImagesComposite } from './canvas/auditModeComposite';
+import { saveImageDownload } from './services/downloadPathSettings';
 
 /** 根据 base64 魔数字节识别真实的图片 MIME 类型 */
 function sniffImageMimeFromBase64(raw: string): string {
@@ -829,6 +830,8 @@ export default function AuditModeCanvas({
   };
 
   const handleCanvasPointerDown = (e: React.PointerEvent) => {
+    if (e.button === 0) setContextMenu(null);
+
     // 鼠标中键（button === 1）或空格按下时 → 平移画布
     if (e.button === 1 || isSpaceDownRef.current) {
       e.stopPropagation();
@@ -953,7 +956,8 @@ export default function AuditModeCanvas({
       setSelectionBox(null);
 
       if (selectionBox.width < 5 && selectionBox.height < 5) {
-        // 点击空白区域 — 取消所有选中
+        // 点击空白区域 — 关闭菜单并取消所有选中
+        setContextMenu(null);
         if (!e.ctrlKey && !e.metaKey && !e.altKey) {
           setSelectedImageIds([]);
         }
@@ -1072,11 +1076,10 @@ export default function AuditModeCanvas({
   };
 
   const mergeSelectedImages = async () => {
-    const ids = selectedImageIdsRef.current;
-    if (ids.length < 2) return;
-    const selected = ids
-      .map((id) => auditImagesRef.current.find((i) => i.id === id))
-      .filter(Boolean) as AuditImage[];
+    const idSet = new Set(selectedImageIdsRef.current);
+    if (idSet.size < 2) return;
+    // 按 auditImages 叠放顺序（后者在上）合成，与画布显示一致
+    const selected = auditImagesRef.current.filter((img) => idSet.has(img.id));
     if (selected.length < 2) return;
     let maxX = -Infinity;
     let minY = Infinity;
@@ -1087,6 +1090,33 @@ export default function AuditModeCanvas({
     await addCompositeToCanvas(selected, [], { x: maxX + 50, y: minY });
     setContextMenu(null);
   };
+
+  const downloadSelectedImages = useCallback(async () => {
+    const idSet = new Set(selectedImageIdsRef.current);
+    if (idSet.size === 0) return;
+    const selected = auditImagesRef.current.filter((img) => idSet.has(img.id));
+    if (selected.length === 0) return;
+    setContextMenu(null);
+    try {
+      if (selected.length === 1) {
+        const raw = selected[0].base64.replace(/^data:[^;]+;base64,/, '');
+        const mime = sniffImageMimeFromBase64(raw);
+        const r = await saveImageDownload(raw, mime);
+        if (!r.ok && r.message) window.alert(r.message);
+        return;
+      }
+      const result = await buildAuditImagesComposite(selected);
+      if (!result) {
+        window.alert('无法合成下载，请重试。');
+        return;
+      }
+      const r = await saveImageDownload(result.base64, 'image/png');
+      if (!r.ok && r.message) window.alert(r.message);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '下载失败';
+      window.alert(`${msg}。可尝试右键图片另存为。`);
+    }
+  }, []);
 
   // 十六进制颜色转 rgba
   const hexToRgba = (hex: string, opacity: number) => {
@@ -1209,20 +1239,16 @@ export default function AuditModeCanvas({
     [getCanvasCoords, bringImagesToFront]
   );
 
-  // 点击其他地方关闭右键菜单
+  // 点击画布/图片等任意处关闭菜单（捕获阶段，避免画布 stopPropagation 拦截）
   useEffect(() => {
     if (!contextMenu) return;
     const close = (e: PointerEvent) => {
-      // 如果点击在右键菜单内部则不关闭
-      if (contextMenuRef.current && contextMenuRef.current.contains(e.target as Node)) return;
+      if (e.button === 2) return;
+      if (contextMenuRef.current?.contains(e.target as Node)) return;
       setContextMenu(null);
     };
-    // 使用 setTimeout 让事件先完成冒泡再关闭，避免刚打开就被关闭
-    const delayedClose = (e: PointerEvent) => {
-      setTimeout(() => close(e), 0);
-    };
-    window.addEventListener('pointerdown', delayedClose);
-    return () => window.removeEventListener('pointerdown', delayedClose);
+    window.addEventListener('pointerdown', close, true);
+    return () => window.removeEventListener('pointerdown', close, true);
   }, [contextMenu]);
 
   return (
@@ -1426,6 +1452,16 @@ export default function AuditModeCanvas({
             >
               <span className="text-cyan-400 text-[14px]">↑</span>
               置顶{selectedImageIds.length > 1 ? `（${selectedImageIds.length} 张）` : '图片'}
+            </button>
+          )}
+          {selectedImageIds.length >= 1 && (
+            <button
+              className="w-full text-left px-3 py-1.5 text-[12px] text-gray-300 hover:bg-[#333] hover:text-white transition-colors flex items-center gap-2"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => void downloadSelectedImages()}
+            >
+              <span className="text-blue-400 text-[14px]">↓</span>
+              下载{selectedImageIds.length > 1 ? `（${selectedImageIds.length} 张合成）` : '图片'}
             </button>
           )}
           {selectedImageIds.length >= 2 && (

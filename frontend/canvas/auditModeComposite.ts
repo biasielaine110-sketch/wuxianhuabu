@@ -158,7 +158,7 @@ export type AuditCompositeResult = {
   minY: number;
 };
 
-/** 将看图图片（及可选标注）合成为一张 PNG base64 */
+/** 将看图图片（及可选标注）合成为一张 PNG base64；images 须为自下而上叠放顺序（先画底层） */
 export async function buildAuditImagesComposite(
   images: AuditImage[],
   annotations: AuditAnnotationDraw[] = []
