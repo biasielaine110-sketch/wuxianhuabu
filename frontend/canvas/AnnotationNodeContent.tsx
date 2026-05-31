@@ -197,6 +197,9 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
   // 全屏绘制相关的 ref
   const fsCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const fsImageRef = useRef<{img: HTMLImageElement, x: number, y: number, w: number, h: number} | null>(null);
+  /** 全屏初次适配窗口时的显示尺寸，用于滚轮缩放上下限 */
+  const fsFitDisplayRef = useRef<{ w: number; h: number } | null>(null);
+  const [fsZoomPercent, setFsZoomPercent] = useState(100);
   const fsPenPointsRef = useRef<{x: number, y: number}[]>([]);
   const fsIsDrawingRef = useRef(false);
   const fsToolRef = useRef(fullscreenTool);
@@ -214,6 +217,11 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
   const fsAnnMoveRef = useRef<{ id: string; startX: number; startY: number; orig: Annotation } | null>(null);
   const fsAnnMovePreviewRef = useRef<Annotation | null>(null);
   const fsAnnPointerIdRef = useRef<number | null>(null);
+  const fsSpaceDownRef = useRef(false);
+  const fsIsPanningRef = useRef(false);
+  const [isFsPanning, setIsFsPanning] = useState(false);
+  const fsPanLastClientRef = useRef({ x: 0, y: 0 });
+  const fsPanPointerIdRef = useRef<number | null>(null);
 
   // 全屏标注历史记录 — 使用 ref 存储避免闭包陷阱
   const fsAnnotationHistoryRef = useRef<Annotation[][]>([[]]);
@@ -286,6 +294,27 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       canvas.releasePointerCapture(pid);
     }
     fsCropPointerIdRef.current = null;
+  }, []);
+
+  const releaseFsPanPointerCapture = useCallback(() => {
+    const canvas = fsCanvasRef.current;
+    const pid = fsPanPointerIdRef.current;
+    if (canvas && pid != null && canvas.hasPointerCapture(pid)) {
+      canvas.releasePointerCapture(pid);
+    }
+    fsPanPointerIdRef.current = null;
+  }, []);
+
+  const updateFsCanvasCursor = useCallback(() => {
+    const canvas = fsCanvasRef.current;
+    if (!canvas) return;
+    if (fsIsPanningRef.current) {
+      canvas.style.cursor = 'grabbing';
+    } else if (fsSpaceDownRef.current) {
+      canvas.style.cursor = 'grab';
+    } else {
+      canvas.style.cursor = 'crosshair';
+    }
   }, []);
 
   const getFsImageDisplayRect = useCallback(() => {
@@ -472,6 +501,60 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
     },
     []
   );
+
+  type FsImageRect = { x: number; y: number; w: number; h: number };
+
+  const remapFsCanvasRect = (
+    r: { x: number; y: number; w: number; h: number },
+    oldR: FsImageRect,
+    newR: FsImageRect
+  ) => {
+    const sx = newR.w / oldR.w;
+    const sy = newR.h / oldR.h;
+    return {
+      x: newR.x + (r.x - oldR.x) * sx,
+      y: newR.y + (r.y - oldR.y) * sy,
+      w: r.w * sx,
+      h: r.h * sy,
+    };
+  };
+
+  const remapAnnotationInFs = (ann: Annotation, oldR: FsImageRect, newR: FsImageRect): Annotation => {
+    const sx = newR.w / oldR.w;
+    const sy = newR.h / oldR.h;
+    const mp = (px: number, py: number) => ({
+      x: newR.x + (px - oldR.x) * sx,
+      y: newR.y + (py - oldR.y) * sy,
+    });
+    const strokeScale = Math.min(sx, sy);
+    const p0 = mp(ann.x, ann.y);
+    const out: Annotation = {
+      ...ann,
+      x: p0.x,
+      y: p0.y,
+      strokeWidth: Math.max(1, (ann.strokeWidth || 2) * strokeScale),
+    };
+    if (ann.width != null) out.width = ann.width * sx;
+    if (ann.height != null) out.height = ann.height * sy;
+    if (ann.endX != null && ann.endY != null) {
+      const pe = mp(ann.endX, ann.endY);
+      out.endX = pe.x;
+      out.endY = pe.y;
+    }
+    if (ann.points?.length) {
+      out.points = ann.points.map((pt) => mp(pt.x, pt.y));
+    }
+    return out;
+  };
+
+  const remapPartialAnnotationInFs = (
+    ann: Partial<Annotation>,
+    oldR: FsImageRect,
+    newR: FsImageRect
+  ): Partial<Annotation> => {
+    if (ann.x == null || ann.y == null) return ann;
+    return remapAnnotationInFs(ann as Annotation, oldR, newR);
+  };
 
   /** 全屏画布坐标 → 嵌入画布图片区坐标 */
   const mapAnnotationFsToEmb = useCallback(
@@ -1443,6 +1526,120 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
     if (isFullscreenAnnotation) renderFsCanvas();
   }, [fsCropPending, isFullscreenAnnotation]);
 
+  const syncFsImageDisplayRect = useCallback(
+    (oldR: FsImageRect, newR: FsImageRect) => {
+      const cached = fsImageRef.current;
+      if (!cached) return;
+
+      fsImageRef.current = { img: cached.img, ...newR };
+
+      const newAnnots = fsAnnotationsRef.current.map((a) => remapAnnotationInFs(a, oldR, newR));
+      fsAnnotationsRef.current = newAnnots;
+      setFullscreenAnnotations(newAnnots);
+
+      if (fsAnnMovePreviewRef.current) {
+        fsAnnMovePreviewRef.current = remapAnnotationInFs(fsAnnMovePreviewRef.current, oldR, newR);
+      }
+      if (fsTempRef.current) {
+        fsTempRef.current = remapPartialAnnotationInFs(fsTempRef.current, oldR, newR);
+      }
+      if (fsPenPointsRef.current.length > 0) {
+        const sx = newR.w / oldR.w;
+        const sy = newR.h / oldR.h;
+        fsPenPointsRef.current = fsPenPointsRef.current.map((p) => ({
+          x: newR.x + (p.x - oldR.x) * sx,
+          y: newR.y + (p.y - oldR.y) * sy,
+        }));
+      }
+
+      const pending = fsCropPendingRef.current;
+      if (pending) {
+        const next = remapFsCanvasRect(pending, oldR, newR);
+        fsCropPendingRef.current = next;
+        setFsCropPending(next);
+      }
+      const cropDrag = fsCropDragRef.current;
+      if (cropDrag) {
+        const mp = (px: number, py: number) => ({
+          x: newR.x + (px - oldR.x) * (newR.w / oldR.w),
+          y: newR.y + (py - oldR.y) * (newR.h / oldR.h),
+        });
+        const p0 = mp(cropDrag.x, cropDrag.y);
+        const p1 = mp(cropDrag.endX, cropDrag.endY);
+        fsCropDragRef.current = { x: p0.x, y: p0.y, endX: p1.x, endY: p1.y };
+      }
+
+      if (isFsTextInputMode) {
+        setFsTextInputPos((pos) => {
+          const sx = newR.w / oldR.w;
+          const sy = newR.h / oldR.h;
+          return {
+            x: newR.x + (pos.x - oldR.x) * sx,
+            y: newR.y + (pos.y - oldR.y) * sy,
+          };
+        });
+      }
+
+      renderFsCanvas();
+    },
+    [isFsTextInputMode]
+  );
+
+  const applyFsDisplayZoom = useCallback(
+    (deltaY: number, clientX: number, clientY: number) => {
+      const canvas = fsCanvasRef.current;
+      const cached = fsImageRef.current;
+      const fit = fsFitDisplayRef.current;
+      if (!canvas || !cached || !fit) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const mx = (clientX - rect.left) * (canvas.width / rect.width);
+      const my = (clientY - rect.top) * (canvas.height / rect.height);
+
+      const factor = deltaY < 0 ? 1.12 : 1 / 1.12;
+      let newW = cached.w * factor;
+      let newH = cached.h * factor;
+      const minW = fit.w * 0.2;
+      const maxW = fit.w * 12;
+      const minH = fit.h * 0.2;
+      const maxH = fit.h * 12;
+      newW = Math.max(minW, Math.min(maxW, newW));
+      newH = Math.max(minH, Math.min(maxH, newH));
+      if (Math.abs(newW - cached.w) < 0.5 && Math.abs(newH - cached.h) < 0.5) return;
+
+      const relX = cached.w > 0 ? (mx - cached.x) / cached.w : 0.5;
+      const relY = cached.h > 0 ? (my - cached.y) / cached.h : 0.5;
+      const newX = mx - relX * newW;
+      const newY = my - relY * newH;
+
+      const oldR: FsImageRect = { x: cached.x, y: cached.y, w: cached.w, h: cached.h };
+      const newR: FsImageRect = { x: newX, y: newY, w: newW, h: newH };
+      syncFsImageDisplayRect(oldR, newR);
+      setFsZoomPercent(Math.round((newW / fit.w) * 100));
+    },
+    [syncFsImageDisplayRect]
+  );
+
+  const applyFsDisplayPan = useCallback(
+    (dx: number, dy: number) => {
+      const cached = fsImageRef.current;
+      if (!cached || (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01)) return;
+      const oldR: FsImageRect = { x: cached.x, y: cached.y, w: cached.w, h: cached.h };
+      const newR: FsImageRect = { x: cached.x + dx, y: cached.y + dy, w: cached.w, h: cached.h };
+      syncFsImageDisplayRect(oldR, newR);
+    },
+    [syncFsImageDisplayRect]
+  );
+
+  const handleFsWheel = useCallback(
+    (e: React.WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      applyFsDisplayZoom(e.deltaY, e.clientX, e.clientY);
+    },
+    [applyFsDisplayZoom]
+  );
+
   // 打开全屏标注模式（canvas 与坐标在 useEffect 中初始化）
   const openFullscreenAnnotation = () => {
     if (!hasSourceImage) {
@@ -1453,6 +1650,11 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
     setFsCropPending(null);
     fsCropDragRef.current = null;
     fsCropAdjustRef.current = null;
+    fsFitDisplayRef.current = null;
+    fsSpaceDownRef.current = false;
+    fsIsPanningRef.current = false;
+    setIsFsPanning(false);
+    setFsZoomPercent(100);
     setIsFullscreenAnnotation(true);
   };
 
@@ -1491,6 +1693,8 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
           const fx = (rw - w) / 2;
           const fy = (rh - h) / 2;
           fsImageRef.current = { img, x: fx, y: fy, w, h };
+          fsFitDisplayRef.current = { w, h };
+          setFsZoomPercent(100);
 
           const emb = imageCacheRef.current ?? ensureEmbeddedImageLayout();
           const list = annotationsRef.current;
@@ -1517,6 +1721,45 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       cancelAnimationFrame(raf);
     };
   }, [isFullscreenAnnotation, sourceImage, sourceImageAssetId, hasSourceImage, mapAnnotationEmbToFs]);
+
+  // 全屏：空格按住可拖移图片区域；中键拖移
+  useEffect(() => {
+    if (!isFullscreenAnnotation) return;
+
+    const isTypingTarget = (t: EventTarget | null) => {
+      const el = t as HTMLElement | null;
+      if (!el) return false;
+      const tag = el.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' || isTypingTarget(e.target)) return;
+      e.preventDefault();
+      fsSpaceDownRef.current = true;
+      updateFsCanvasCursor();
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code !== 'Space') return;
+      fsSpaceDownRef.current = false;
+      if (fsIsPanningRef.current) {
+        fsIsPanningRef.current = false;
+        setIsFsPanning(false);
+        releaseFsPanPointerCapture();
+      }
+      updateFsCanvasCursor();
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      fsSpaceDownRef.current = false;
+      fsIsPanningRef.current = false;
+      setIsFsPanning(false);
+    };
+  }, [isFullscreenAnnotation, updateFsCanvasCursor, releaseFsPanPointerCapture]);
 
   // 关闭全屏标注模式并应用标注，有标注时导出带标注的图片节点
   const closeFullscreenAnnotation = () => {
@@ -1605,6 +1848,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       })();
     }
     fsImageRef.current = null;
+    fsFitDisplayRef.current = null;
     setFsCropPending(null);
     fsCropDragRef.current = null;
     fsCropAdjustRef.current = null;
@@ -1616,6 +1860,20 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
   const handleFsMouseDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = fsCanvasRef.current;
     if (!canvas) return;
+
+    if (e.button === 1 || fsSpaceDownRef.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!fsImageRef.current) return;
+      fsIsPanningRef.current = true;
+      setIsFsPanning(true);
+      fsPanLastClientRef.current = { x: e.clientX, y: e.clientY };
+      fsPanPointerIdRef.current = e.pointerId;
+      canvas.setPointerCapture(e.pointerId);
+      canvas.style.cursor = 'grabbing';
+      return;
+    }
+
     const { x, y } = fsCanvasPointFromEvent(e);
     const tool = fsToolRef.current;
 
@@ -1689,7 +1947,12 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
 
   const handleFsAnnotationHover = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = fsCanvasRef.current;
-    if (!canvas || fsIsDrawingRef.current || fsToolRef.current === 'crop') return;
+    if (!canvas || fsIsDrawingRef.current || fsIsPanningRef.current) return;
+    if (fsSpaceDownRef.current) {
+      canvas.style.cursor = 'grab';
+      return;
+    }
+    if (fsToolRef.current === 'crop') return;
     const { x, y } = fsCanvasPointFromEvent(e);
     const hit = findAnnotationAtPoint(x, y, fsAnnotationsRef.current);
     canvas.style.cursor = hit ? 'move' : 'crosshair';
@@ -1697,7 +1960,12 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
 
   const handleFsCropHover = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = fsCanvasRef.current;
-    if (!canvas || fsToolRef.current !== 'crop' || fsIsDrawingRef.current) return;
+    if (!canvas || fsIsPanningRef.current) return;
+    if (fsSpaceDownRef.current) {
+      canvas.style.cursor = 'grab';
+      return;
+    }
+    if (fsToolRef.current !== 'crop' || fsIsDrawingRef.current) return;
     const pending = fsCropPendingRef.current;
     const { x, y } = fsCanvasPointFromEvent(e);
     if (!pending) {
@@ -1710,10 +1978,21 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
 
   // 全屏画布鼠标移动
   const handleFsMouseMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = fsCanvasRef.current;
+    if (fsIsPanningRef.current && canvas) {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const dx = (e.clientX - fsPanLastClientRef.current.x) * scaleX;
+      const dy = (e.clientY - fsPanLastClientRef.current.y) * scaleY;
+      fsPanLastClientRef.current = { x: e.clientX, y: e.clientY };
+      applyFsDisplayPan(dx, dy);
+      return;
+    }
+
     handleFsCropHover(e);
     handleFsAnnotationHover(e);
     if (!fsIsDrawingRef.current) return;
-    const canvas = fsCanvasRef.current;
     if (!canvas) return;
     let { x, y } = fsCanvasPointFromEvent(e);
     const imgRect = getFsImageDisplayRect();
@@ -1775,6 +2054,14 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
 
   // 全屏画布鼠标释放
   const handleFsMouseUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (fsIsPanningRef.current) {
+      fsIsPanningRef.current = false;
+      setIsFsPanning(false);
+      releaseFsPanPointerCapture();
+      updateFsCanvasCursor();
+      return;
+    }
+
     if (!fsIsDrawingRef.current) return;
 
     if (fsAnnMoveRef.current && fsAnnMovePreviewRef.current) {
@@ -2653,6 +2940,9 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
             <div className="flex items-center gap-4">
               <span className="text-white font-medium">全屏标注模式</span>
               <span className="text-gray-400 text-xs">({fullscreenAnnotations.length} 个标注)</span>
+              <span className="text-gray-500 text-xs">
+                · 滚轮缩放 {fsZoomPercent}% · 空格/中键拖移
+              </span>
             </div>
             <div className="flex items-center gap-2">
               {/* 工具选择 */}
@@ -2823,11 +3113,18 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
           )}
 
           {/* 全屏画布 */}
-          <div className="flex-1 relative overflow-hidden">
+          <div
+            className="flex-1 relative overflow-hidden"
+            onWheel={handleFsWheel}
+            onMouseDown={(e) => {
+              if (e.button === 1) e.preventDefault();
+            }}
+          >
             <canvas
               ref={fsCanvasRef}
-              className="cursor-crosshair"
+              className={isFsPanning ? 'cursor-grabbing' : 'cursor-crosshair'}
               style={{ width: '100%', height: '100%' }}
+              onWheel={handleFsWheel}
               onPointerDown={handleFsMouseDown}
               onPointerMove={handleFsMouseMove}
               onPointerUp={(e) => handleFsMouseUp(e)}
