@@ -592,6 +592,31 @@ export default function AuditModeCanvas({
 
   // ====== 图片交互 ======
 
+  /** 将指定图片移到叠放顺序最上层（ids 中越靠后的越在上） */
+  const bringImagesToFront = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) return;
+      setAuditImages((prev) => {
+        const idSet = new Set(ids);
+        const front: AuditImage[] = [];
+        for (const id of ids) {
+          const img = prev.find((i) => i.id === id);
+          if (img) front.push(img);
+        }
+        const rest = prev.filter((i) => !idSet.has(i.id));
+        return [...rest, ...front];
+      });
+    },
+    [setAuditImages]
+  );
+
+  const pinSelectedImagesToTop = useCallback(() => {
+    const ids = selectedImageIdsRef.current;
+    if (ids.length === 0) return;
+    bringImagesToFront(ids);
+    setContextMenu(null);
+  }, [bringImagesToFront]);
+
   // 判断图片是否被选中
   const isImageSelected = (imgId: string) => selectedImageIds.includes(imgId);
 
@@ -609,9 +634,10 @@ export default function AuditModeCanvas({
 
     if (e.ctrlKey || e.metaKey) {
       // Ctrl/Cmd: 加选（追加到末尾，即置顶）
-      setSelectedImageIds(prev =>
-        prev.includes(imgId) ? [...prev.filter(id => id !== imgId), imgId] : [...prev, imgId]
+      setSelectedImageIds((prev) =>
+        prev.includes(imgId) ? [...prev.filter((id) => id !== imgId), imgId] : [...prev, imgId]
       );
+      bringImagesToFront([imgId]);
       // Ctrl + 拖拽移动
       const img = auditImages.find(i => i.id === imgId);
       if (!img) return;
@@ -628,10 +654,11 @@ export default function AuditModeCanvas({
       return;
     }
 
-    // 普通点击：单选，点击的图片置顶（移到数组末尾）
-    setSelectedImageIds(prev =>
-      prev.includes(imgId) ? [...prev.filter(id => id !== imgId), imgId] : [imgId]
+    // 普通点击：单选，最后点击的置于最上层
+    setSelectedImageIds((prev) =>
+      prev.includes(imgId) ? [...prev.filter((id) => id !== imgId), imgId] : [imgId]
     );
+    bringImagesToFront([imgId]);
 
     // 检查是否在右下角缩放手柄区域
     const img = auditImages.find(i => i.id === imgId);
@@ -948,22 +975,25 @@ export default function AuditModeCanvas({
         return !(imgRight < boxLeft || img.x > boxRight || imgBottom < boxTop || img.y > boxBottom);
       }).map(img => img.id);
 
-      setSelectedImageIds(prev => {
+      setSelectedImageIds((prev) => {
         if (e.ctrlKey || e.metaKey) {
           // Ctrl: 追加（新选中的放到末尾 = 置顶）
           const set = new Set(prev);
-          const existing = prev.filter(id => set.has(id) && !hitIds.includes(id));
-          const newOnes = hitIds.filter(id => !set.has(id));
-          return [...existing, ...newOnes];
-        } else if (e.altKey) {
+          const existing = prev.filter((id) => set.has(id) && !hitIds.includes(id));
+          const newOnes = hitIds.filter((id) => !set.has(id));
+          const next = [...existing, ...newOnes];
+          if (newOnes.length > 0) bringImagesToFront(newOnes);
+          return next;
+        }
+        if (e.altKey) {
           // Alt: 减去
           const set = new Set(prev);
-          hitIds.forEach(id => set.delete(id));
+          hitIds.forEach((id) => set.delete(id));
           return Array.from(set);
-        } else {
-          // 新框选替换旧选择，最新框选的在末尾
-          return hitIds;
         }
+        // 新框选替换旧选择
+        bringImagesToFront(hitIds);
+        return hitIds;
       });
       return;
     }
@@ -1157,13 +1187,27 @@ export default function AuditModeCanvas({
     setTextImageContent('');
   }, [textImageContent, textImageFontSize, textImageColor, textImageBgColor, textImageBgOpacity, editingTextImageId, setAuditImages]);
 
-  // 右键菜单处理
+  // 右键菜单处理（空白区域）
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     const pos = getCanvasCoords(e.clientX, e.clientY);
     setContextMenu({ x: e.clientX, y: e.clientY, canvasX: pos.x, canvasY: pos.y });
   }, [getCanvasCoords]);
+
+  const handleImageContextMenu = useCallback(
+    (e: React.MouseEvent, imgId: string) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const pos = getCanvasCoords(e.clientX, e.clientY);
+      if (!selectedImageIdsRef.current.includes(imgId)) {
+        setSelectedImageIds([imgId]);
+        bringImagesToFront([imgId]);
+      }
+      setContextMenu({ x: e.clientX, y: e.clientY, canvasX: pos.x, canvasY: pos.y });
+    },
+    [getCanvasCoords, bringImagesToFront]
+  );
 
   // 点击其他地方关闭右键菜单
   useEffect(() => {
@@ -1224,14 +1268,8 @@ export default function AuditModeCanvas({
           transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
         }}
       >
-        {/* 先渲染未选中的图片，再渲染选中的（且按选中顺序，后选中的在上面） */}
-        {(() => {
-          const all = [...auditImages];
-          const selectedSet = new Set(selectedImageIds);
-          const unselected = all.filter(img => !selectedSet.has(img.id));
-          const selected = selectedImageIds.map(id => all.find(img => img.id === id)).filter(Boolean) as AuditImage[];
-          return [...unselected, ...selected];
-        })().map(img => (
+        {/* 叠放顺序与 auditImages 数组一致；选中时 bringImagesToFront 将图片移到末尾 */}
+        {auditImages.map((img) => (
           <div
             key={img.id}
             className={`absolute pointer-events-auto ${
@@ -1245,6 +1283,7 @@ export default function AuditModeCanvas({
               width: img.width * img.scale,
               height: img.height * img.scale,
             }}
+            onContextMenu={(e) => handleImageContextMenu(e, img.id)}
             onPointerDown={(e) => handleImagePointerDown(e, img.id)}
             onDoubleClick={(e) => {
               // 双击文本图片打开编辑器
@@ -1379,6 +1418,16 @@ export default function AuditModeCanvas({
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onPointerDown={(e) => e.stopPropagation()}
         >
+          {selectedImageIds.length >= 1 && (
+            <button
+              className="w-full text-left px-3 py-1.5 text-[12px] text-gray-300 hover:bg-[#333] hover:text-white transition-colors flex items-center gap-2"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={pinSelectedImagesToTop}
+            >
+              <span className="text-cyan-400 text-[14px]">↑</span>
+              置顶{selectedImageIds.length > 1 ? `（${selectedImageIds.length} 张）` : '图片'}
+            </button>
+          )}
           {selectedImageIds.length >= 2 && (
             <button
               className="w-full text-left px-3 py-1.5 text-[12px] text-gray-300 hover:bg-[#333] hover:text-white transition-colors flex items-center gap-2"
