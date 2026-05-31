@@ -1,6 +1,5 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef } from 'react';
-import type { CanvasNode, Transform } from '../types';
-import { nodeLayoutKey } from './edgeUtils';
+import type { AuditImage, Transform } from '../types';
 
 const MINIMAP_W = 168;
 const MINIMAP_H = 126;
@@ -8,53 +7,43 @@ const PADDING = 12;
 
 type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
 
-function computeBounds(nodes: CanvasNode[]): Bounds {
-  if (nodes.length === 0) {
+function computeAuditBounds(images: AuditImage[]): Bounds {
+  if (images.length === 0) {
     return { minX: 0, minY: 0, maxX: 800, maxY: 600 };
   }
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
-  for (const n of nodes) {
-    minX = Math.min(minX, n.x);
-    minY = Math.min(minY, n.y);
-    maxX = Math.max(maxX, n.x + n.width);
-    maxY = Math.max(maxY, n.y + n.height);
+  for (const img of images) {
+    const w = img.width * img.scale;
+    const h = img.height * img.scale;
+    minX = Math.min(minX, img.x);
+    minY = Math.min(minY, img.y);
+    maxX = Math.max(maxX, img.x + w);
+    maxY = Math.max(maxY, img.y + h);
   }
   const padX = Math.max(80, (maxX - minX) * 0.08);
   const padY = Math.max(80, (maxY - minY) * 0.08);
   return { minX: minX - padX, minY: minY - padY, maxX: maxX + padX, maxY: maxY + padY };
 }
 
-const TYPE_FILL: Record<string, string> = {
-  text: '#9ca3af',
-  image: '#4ade80',
-  t2i: '#c084fc',
-  i2i: '#60a5fa',
-  panorama: '#22d3ee',
-  annotation: '#fb923c',
-  gridSplit: '#2dd4bf',
-  gridMerge: '#2dd4bf',
-  panoramaT2i: '#818cf8',
-  director3d: '#f472b6',
-  video: '#fbbf24',
-  audio: '#60a5fa',
-  chat: '#fb7185',
-};
+function auditLayoutKey(images: AuditImage[]): string {
+  return images.map((i) => `${i.id}:${Math.round(i.x)}:${Math.round(i.y)}:${i.scale}`).join('|');
+}
 
-type CanvasMinimapProps = {
-  nodes: CanvasNode[];
+type AuditMinimapProps = {
+  images: AuditImage[];
   transform: Transform;
   viewportSize: { width: number; height: number };
   onNavigate: (canvasX: number, canvasY: number) => void;
 };
 
-function CanvasMinimapInner({ nodes, transform, viewportSize, onNavigate }: CanvasMinimapProps) {
+function AuditMinimapInner({ images, transform, viewportSize, onNavigate }: AuditMinimapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const nodesLayerRef = useRef<HTMLCanvasElement | null>(null);
-  const bounds = useMemo(() => computeBounds(nodes), [nodes]);
-  const nodesLayoutKey = useMemo(() => nodeLayoutKey(nodes), [nodes]);
+  const layerRef = useRef<HTMLCanvasElement | null>(null);
+  const bounds = useMemo(() => computeAuditBounds(images), [images]);
+  const layoutKey = useMemo(() => auditLayoutKey(images), [images]);
 
   const project = useCallback(
     (x: number, y: number) => {
@@ -77,12 +66,12 @@ function CanvasMinimapInner({ nodes, transform, viewportSize, onNavigate }: Canv
   );
 
   useEffect(() => {
-    let off = nodesLayerRef.current;
+    let off = layerRef.current;
     if (!off) {
       off = document.createElement('canvas');
       off.width = MINIMAP_W;
       off.height = MINIMAP_H;
-      nodesLayerRef.current = off;
+      layerRef.current = off;
     }
     const ctx = off.getContext('2d');
     if (!ctx) return;
@@ -91,24 +80,26 @@ function CanvasMinimapInner({ nodes, transform, viewportSize, onNavigate }: Canv
     ctx.fillStyle = '#141414';
     ctx.fillRect(0, 0, MINIMAP_W, MINIMAP_H);
 
-    for (const n of nodes) {
-      const p0 = project(n.x, n.y);
-      const p1 = project(n.x + n.width, n.y + n.height);
-      const w = Math.max(2, p1.px - p0.px);
-      const h = Math.max(2, p1.py - p0.py);
-      ctx.fillStyle = TYPE_FILL[n.type] ?? '#666';
+    for (const img of images) {
+      const w = img.width * img.scale;
+      const h = img.height * img.scale;
+      const p0 = project(img.x, img.y);
+      const p1 = project(img.x + w, img.y + h);
+      const rw = Math.max(2, p1.px - p0.px);
+      const rh = Math.max(2, p1.py - p0.py);
+      ctx.fillStyle = '#4ade80';
       ctx.globalAlpha = 0.85;
-      ctx.fillRect(p0.px, p0.py, w, h);
+      ctx.fillRect(p0.px, p0.py, rw, rh);
       ctx.globalAlpha = 1;
       ctx.strokeStyle = '#555';
       ctx.lineWidth = 0.5;
-      ctx.strokeRect(p0.px, p0.py, w, h);
+      ctx.strokeRect(p0.px, p0.py, rw, rh);
     }
-  }, [nodes, nodesLayoutKey, project]);
+  }, [images, layoutKey, project]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    const off = nodesLayerRef.current;
+    const off = layerRef.current;
     if (!canvas || !off) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -116,8 +107,8 @@ function CanvasMinimapInner({ nodes, transform, viewportSize, onNavigate }: Canv
     ctx.clearRect(0, 0, MINIMAP_W, MINIMAP_H);
     ctx.drawImage(off, 0, 0);
 
-    const vx0 = (-transform.x) / transform.scale;
-    const vy0 = (-transform.y) / transform.scale;
+    const vx0 = -transform.x / transform.scale;
+    const vy0 = -transform.y / transform.scale;
     const vx1 = (viewportSize.width - transform.x) / transform.scale;
     const vy1 = (viewportSize.height - transform.y) / transform.scale;
     const vp0 = project(vx0, vy0);
@@ -127,7 +118,7 @@ function CanvasMinimapInner({ nodes, transform, viewportSize, onNavigate }: Canv
     ctx.strokeRect(vp0.px, vp0.py, vp1.px - vp0.px, vp1.py - vp0.py);
     ctx.fillStyle = 'rgba(96, 165, 250, 0.12)';
     ctx.fillRect(vp0.px, vp0.py, vp1.px - vp0.px, vp1.py - vp0.py);
-  }, [nodesLayoutKey, transform, viewportSize, project]);
+  }, [layoutKey, transform, viewportSize, project]);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.stopPropagation();
@@ -148,11 +139,11 @@ function CanvasMinimapInner({ nodes, transform, viewportSize, onNavigate }: Canv
     onNavigate(canvasX, canvasY);
   };
 
-  if (nodes.length === 0) return null;
+  if (images.length === 0) return null;
 
   return (
     <div
-      className="absolute bottom-4 right-4 z-40 rounded-lg border border-[#333] bg-[#1a1a1a]/95 shadow-xl overflow-hidden pointer-events-auto"
+      className="absolute bottom-4 right-4 z-[60] rounded-lg border border-[#333] bg-[#1a1a1a]/95 shadow-xl overflow-hidden pointer-events-auto"
       title="小地图：点击定位视口"
       onPointerDown={(e) => e.stopPropagation()}
     >
@@ -168,4 +159,4 @@ function CanvasMinimapInner({ nodes, transform, viewportSize, onNavigate }: Canv
   );
 }
 
-export const CanvasMinimap = memo(CanvasMinimapInner);
+export const AuditMinimap = memo(AuditMinimapInner);

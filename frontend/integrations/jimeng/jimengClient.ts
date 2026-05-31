@@ -14,7 +14,12 @@ export async function startJimengLogin() {
   const res = await fetch(`${JIMENG_SERVER}/login/start`, {
     method: "POST"
   });
+  const data = await res.json();
+  return { ...data, ok: data.ok !== false && res.ok };
+}
 
+export async function getJimengLoginCode() {
+  const res = await fetch(`${JIMENG_SERVER}/login/code`);
   return res.json();
 }
 
@@ -44,6 +49,11 @@ export async function installOpencli() {
 
 export async function setupWSL() {
   const res = await fetch(`${JIMENG_SERVER}/setup-wsl`, { method: "POST" });
+  return res.json();
+}
+
+export async function getSetupWSLStatus() {
+  const res = await fetch(`${JIMENG_SERVER}/setup-wsl/status`);
   return res.json();
 }
 

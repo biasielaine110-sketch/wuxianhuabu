@@ -9,10 +9,98 @@ type JimengLoginDialogProps = {
   authInfo: JimengAuthInfo;
 };
 
+function resolveLoginUrls(started: {
+  loginUrl?: string;
+  browserLoginUrl?: string;
+  appLoginUrl?: string;
+  verificationUrl?: string;
+  userCode?: string;
+}) {
+  const code = started.userCode || '';
+  const scanFallback = code
+    ? `https://jimeng.jianying.com/passport/open/scan_user_code/?user_code=${code}`
+    : '';
+  const browserLoginUrl =
+    started.browserLoginUrl ||
+    started.loginUrl ||
+    started.verificationUrl ||
+    scanFallback;
+  const appLoginUrl = started.appLoginUrl || scanFallback;
+  return { browserLoginUrl, appLoginUrl, code };
+}
+
+function isCopyLinkReady(url: string, code: string, mode: 'oauth' | 'browser') {
+  if (mode === 'browser') return !!url;
+  return !!(code || /user_code=/.test(url));
+}
+
 export function JimengLoginDialog(props: JimengLoginDialogProps) {
   const [status, setStatus] = useState('正在获取授权二维码');
-  const [loginUrl, setLoginUrl] = useState('https://jimeng.jianying.com/ai-tool/login');
+  const [loginUrl, setLoginUrl] = useState('');
+  const [browserLoginUrl, setBrowserLoginUrl] = useState('');
+  const [appLoginUrl, setAppLoginUrl] = useState('');
+  const [loginMode, setLoginMode] = useState<'oauth' | 'browser'>('oauth');
   const [userCode, setUserCode] = useState('');
+  const [loginReady, setLoginReady] = useState(false);
+  const [loadingLink, setLoadingLink] = useState(false);
+
+  const applyLoginStart = useCallback((started: Record<string, unknown>) => {
+    const mode = started.mode === 'browser' ? 'browser' : 'oauth';
+    setLoginMode(mode);
+    const { browserLoginUrl: browserUrl, appLoginUrl: appUrl, code } = resolveLoginUrls({
+      loginUrl: typeof started.loginUrl === 'string' ? started.loginUrl : undefined,
+      browserLoginUrl: typeof started.browserLoginUrl === 'string' ? started.browserLoginUrl : undefined,
+      appLoginUrl: typeof started.appLoginUrl === 'string' ? started.appLoginUrl : undefined,
+      verificationUrl: typeof started.verificationUrl === 'string' ? started.verificationUrl : undefined,
+      userCode: typeof started.userCode === 'string' ? started.userCode : undefined,
+    });
+    setBrowserLoginUrl(browserUrl);
+    setAppLoginUrl(appUrl);
+    setLoginUrl(browserUrl);
+    if (code) setUserCode(code);
+    setLoginReady(isCopyLinkReady(browserUrl || appUrl, code, mode));
+    return { mode, browserUrl, appUrl, code };
+  }, []);
+
+  const fetchLoginLink = useCallback(async () => {
+    setLoadingLink(true);
+    try {
+      const { startJimengLogin, getJimengLoginCode } = await import('./jimengClient');
+      const started = await startJimengLogin();
+      if (started.ok) {
+        const { mode, browserUrl, appUrl, code } = applyLoginStart(started);
+        if (!isCopyLinkReady(browserUrl || appUrl, code, mode)) {
+          for (let i = 0; i < 15; i += 1) {
+            await new Promise((r) => setTimeout(r, 1000));
+            const pending = await getJimengLoginCode();
+            if (pending.ok && pending.userCode) {
+              applyLoginStart(pending);
+              break;
+            }
+          }
+        }
+        setStatus(
+          typeof started.message === 'string'
+            ? started.message
+            : mode === 'browser'
+              ? '请在弹出的浏览器窗口中登录即梦'
+              : '请复制链接，用即梦 App 打开并完成授权',
+        );
+        return true;
+      }
+      setStatus(
+        (typeof started.message === 'string' && started.message) ||
+          (typeof started.detail === 'string' && started.detail) ||
+          '获取登录链接失败，请确认即梦后端已启动',
+      );
+      return false;
+    } catch {
+      setStatus('即梦后端服务未启动，请运行 server 后点击「重新获取登录链接」');
+      return false;
+    } finally {
+      setLoadingLink(false);
+    }
+  }, [applyLoginStart]);
 
   useEffect(() => {
     if (!props.open) return;
@@ -23,33 +111,27 @@ export function JimengLoginDialog(props: JimengLoginDialogProps) {
     }
 
     setStatus('正在获取授权二维码');
+    setLoginReady(false);
+    setLoginUrl('');
+    setBrowserLoginUrl('');
+    setAppLoginUrl('');
+    setUserCode('');
 
     let stopped = false;
     let timer: number | undefined;
 
     void (async () => {
-      try {
-        const { startJimengLogin, checkJimengLoginStatus } = await import('./jimengClient');
-        const started = await startJimengLogin();
-        if (stopped) return;
-        if (started.ok) {
-          const url = started.verificationUrl || started.loginUrl || 'https://jimeng.jianying.com/ai-tool/login';
-          setLoginUrl(url);
-          if (started.userCode) setUserCode(started.userCode);
-          setStatus('请使用即梦 App 扫码登录');
-        } else {
-          setStatus(started.message || '获取登录链接失败');
-        }
-      } catch {
-        if (!stopped) setStatus('即梦后端服务未启动');
-      }
+      if (stopped) return;
+      await fetchLoginLink();
+      if (stopped) return;
 
       timer = window.setInterval(async () => {
         if (stopped) return;
         try {
-          const { checkJimengLoginStatus } = await import('./jimengClient');
+          const { checkJimengLoginStatus, checkJimengSession } = await import('./jimengClient');
           const login = await checkJimengLoginStatus();
-          if (login.ok && login.loggedIn) {
+          const session = login.loggedIn ? null : await checkJimengSession().catch(() => null);
+          if ((login.ok && login.loggedIn) || session?.loggedIn) {
             setStatus('✅ 已登录');
             window.clearInterval(timer);
             setTimeout(() => props.onLoggedIn(), 600);
@@ -64,28 +146,52 @@ export function JimengLoginDialog(props: JimengLoginDialogProps) {
       stopped = true;
       if (timer != null) window.clearInterval(timer);
     };
-  }, [props.open, props.authInfo.loggedIn, props.authInfo.credit, props.authInfo.vipLevel, props.onLoggedIn]);
+  }, [props.open, props.authInfo.loggedIn, props.authInfo.credit, props.authInfo.vipLevel, props.onLoggedIn, fetchLoginLink]);
 
-  const handleCopyLink = useCallback(() => {
-    navigator.clipboard.writeText(loginUrl).then(() => {
-      setStatus('链接已复制到剪贴板');
-      setTimeout(() => setStatus('请使用即梦 App 扫码登录'), 1500);
-    });
-  }, [loginUrl]);
+  const copyToClipboard = useCallback((text: string, okMessage: string) => {
+    navigator.clipboard.writeText(text).then(() => setStatus(okMessage));
+  }, []);
+
+  const handleCopyBrowserLink = useCallback(() => {
+    if (!browserLoginUrl || !userCode) {
+      setStatus('浏览器登录链接尚未就绪，请稍候或重新获取');
+      return;
+    }
+    copyToClipboard(browserLoginUrl, '已复制浏览器登录链接，请用 Chrome 打开并完成授权');
+  }, [browserLoginUrl, userCode, copyToClipboard]);
+
+  const handleCopyAppLink = useCallback(() => {
+    if (!appLoginUrl || !userCode) {
+      setStatus('App 登录链接尚未就绪，请稍候或重新获取');
+      return;
+    }
+    copyToClipboard(appLoginUrl, '已复制 App 链接，请在即梦 App 内打开（勿用外部浏览器）');
+  }, [appLoginUrl, userCode, copyToClipboard]);
+
+  const handleCopyLink = handleCopyBrowserLink;
 
   const handleCheckLogin = useCallback(async () => {
     setStatus('正在验证登录状态...');
     try {
-      const { checkJimengLoginStatus } = await import('./jimengClient');
+      const { checkJimengLoginStatus, checkJimengSession } = await import('./jimengClient');
       const login = await checkJimengLoginStatus();
-      if (login.ok && login.loggedIn) {
+      const session = login.loggedIn ? null : await checkJimengSession().catch(() => null);
+      const loggedIn = !!(login.ok && login.loggedIn) || !!(session?.loggedIn);
+
+      if (loggedIn) {
         setStatus('✅ 已登录');
         setTimeout(() => props.onLoggedIn(), 600);
-      } else {
-        setStatus('尚未登录，请先授权');
+        return;
       }
+
+      if (login.pending) {
+        setStatus('仍在等待 App 授权，请完成扫码/确认后再试');
+        return;
+      }
+
+      setStatus(login.detail || login.message || '尚未登录，请重新复制链接并完成授权');
     } catch {
-      setStatus('验证失败，请重试');
+      setStatus('验证失败：即梦后端未启动或网络异常，请确认已运行 server');
     }
   }, [props]);
 
@@ -105,17 +211,68 @@ export function JimengLoginDialog(props: JimengLoginDialogProps) {
   }, []);
 
   const handleSetupWSL = useCallback(async () => {
-    setStatus('正在安装 WSL 环境（需要管理员权限）...');
+    setStatus('正在启动 WSL + 即梦环境安装（可能需要 UAC 管理员确认）...');
     try {
-      const { setupWSL } = await import('./jimengClient');
+      const { setupWSL, getSetupWSLStatus } = await import('./jimengClient');
       const result = await setupWSL();
-      if (result.ok) {
-        setStatus('✅ WSL 环境安装完成！请刷新页面');
-      } else {
-        setStatus('安装失败: ' + (result.detail || result.message));
+
+      if (result.alreadyInstalled || result.wslReady) {
+        setStatus('✅ WSL + dreamina 已就绪，请刷新页面后登录');
+        return;
       }
+
+      const poll = async (attempt = 0): Promise<void> => {
+        if (attempt > 240) {
+          setStatus('安装超时（约 10 分钟）。请确认 UAC 已允许，或手动运行 scripts\\setup-jimeng-dreamina-wsl.ps1');
+          return;
+        }
+        const st = await getSetupWSLStatus();
+        const steps = Array.isArray(st.steps) ? st.steps.slice(-6).join('\n') : '';
+        const phaseMsg = st.message || st.phase || '安装中...';
+
+        if (st.wslReady) {
+          setStatus(`✅ 安装完成！${phaseMsg}\n请刷新页面后使用 App 扫码登录`);
+          return;
+        }
+
+        if (st.status === 'completed' && st.ok) {
+          setStatus(`✅ ${phaseMsg}${st.needReboot ? '（建议重启电脑）' : ''}`);
+          return;
+        }
+
+        if (st.status === 'failed' || st.ok === false) {
+          const guide = Array.isArray(st.manualGuide) ? st.manualGuide.join('\n') : '';
+          setStatus(`安装未完成：${phaseMsg}\n${steps}${guide ? `\n\n手动步骤：\n${guide}` : ''}`);
+          return;
+        }
+
+        if (st.phase === 'reboot_required' || st.needReboot) {
+          setStatus(`⚠️ ${phaseMsg}\n重启后请再次点击「一键安装」完成 dreamina 安装`);
+          return;
+        }
+
+        setStatus(`${phaseMsg}${steps ? `\n${steps}` : ''}`);
+
+        if (st.running || st.status === 'running' || result.polling) {
+          await new Promise((r) => setTimeout(r, 2500));
+          return poll(attempt + 1);
+        }
+
+        if (result.launched) {
+          await new Promise((r) => setTimeout(r, 2500));
+          return poll(attempt + 1);
+        }
+
+        setStatus(result.message || '安装已启动，若长时间无进展请查看是否已确认 UAC 弹窗');
+      };
+
+      await poll();
     } catch (err: unknown) {
-      setStatus('安装失败: ' + ((err as Error)?.message || '未知错误'));
+      setStatus(
+        '安装失败: ' +
+          ((err as Error)?.message || '未知错误') +
+          '\n\n请以管理员打开 PowerShell，在项目 scripts 目录执行：.\\setup-jimeng-dreamina-wsl.ps1',
+      );
     }
   }, []);
 
@@ -188,7 +345,7 @@ export function JimengLoginDialog(props: JimengLoginDialogProps) {
             textAlign: 'center',
           }}
         >
-          <div style={{ fontSize: 14, color: '#c0c0c0', lineHeight: 1.5, maxWidth: 320 }}>{status}</div>
+          <div style={{ fontSize: 14, color: '#c0c0c0', lineHeight: 1.5, maxWidth: 320, whiteSpace: 'pre-wrap', textAlign: 'left' }}>{status}</div>
 
           {userCode && (
             <div
@@ -216,22 +373,111 @@ export function JimengLoginDialog(props: JimengLoginDialogProps) {
               marginTop: 6,
             }}
           >
-            <button
-              type="button"
-              onClick={handleCopyLink}
-              style={{
-                padding: '11px 0',
-                border: '1px solid #8b5cf6',
-                borderRadius: 8,
-                background: 'transparent',
-                color: '#a78bfa',
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              复制登录链接
-            </button>
+            {loginMode === 'oauth' ? (
+              <>
+                <button
+                  type="button"
+                  onClick={handleCopyBrowserLink}
+                  disabled={!loginReady || loadingLink}
+                  style={{
+                    padding: '11px 0',
+                    border: '1px solid #8b5cf6',
+                    borderRadius: 8,
+                    background: 'transparent',
+                    color: loginReady && !loadingLink ? '#a78bfa' : '#555',
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: loginReady && !loadingLink ? 'pointer' : 'not-allowed',
+                    opacity: loginReady && !loadingLink ? 1 : 0.6,
+                  }}
+                >
+                  复制浏览器登录链接（Chrome）
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopyAppLink}
+                  disabled={!loginReady || loadingLink}
+                  style={{
+                    padding: '11px 0',
+                    border: '1px solid #06b6d4',
+                    borderRadius: 8,
+                    background: 'transparent',
+                    color: loginReady && !loadingLink ? '#22d3ee' : '#555',
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: loginReady && !loadingLink ? 'pointer' : 'not-allowed',
+                    opacity: loginReady && !loadingLink ? 1 : 0.6,
+                  }}
+                >
+                  复制 App 登录链接（即梦内打开）
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={handleCopyLink}
+                disabled={!loginReady || loadingLink}
+                style={{
+                  padding: '11px 0',
+                  border: '1px solid #8b5cf6',
+                  borderRadius: 8,
+                  background: 'transparent',
+                  color: loginReady && !loadingLink ? '#a78bfa' : '#555',
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: loginReady && !loadingLink ? 'pointer' : 'not-allowed',
+                  opacity: loginReady && !loadingLink ? 1 : 0.6,
+                }}
+              >
+                复制即梦登录页链接
+              </button>
+            )}
+            {loginMode === 'oauth' && (
+              <button
+                type="button"
+                onClick={() => void fetchLoginLink()}
+                disabled={loadingLink}
+                style={{
+                  padding: '11px 0',
+                  border: '1px solid #6366f1',
+                  borderRadius: 8,
+                  background: 'transparent',
+                  color: loadingLink ? '#555' : '#818cf8',
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: loadingLink ? 'wait' : 'pointer',
+                }}
+              >
+                {loadingLink ? '正在获取登录链接...' : '重新获取登录链接'}
+              </button>
+            )}
+            {loginMode === 'browser' && (
+              <button
+                type="button"
+                onClick={async () => {
+                  setStatus('正在打开浏览器登录...');
+                  try {
+                    const { startJimengLogin } = await import('./jimengClient');
+                    const started = await startJimengLogin();
+                    setStatus(started.message || '请在浏览器中完成登录');
+                  } catch {
+                    setStatus('打开浏览器失败，请检查 opencli 或改用 WSL 安装');
+                  }
+                }}
+                style={{
+                  padding: '11px 0',
+                  border: '1px solid #6366f1',
+                  borderRadius: 8,
+                  background: 'transparent',
+                  color: '#818cf8',
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                重新打开浏览器登录
+              </button>
+            )}
             <button
               type="button"
               onClick={handleCheckLogin}
@@ -283,7 +529,11 @@ export function JimengLoginDialog(props: JimengLoginDialogProps) {
           </div>
 
           <div style={{ fontSize: 11, color: '#555', marginTop: 4, maxWidth: 300, lineHeight: 1.4 }}>
-            复制登录链接 → 用即梦 App 扫码授权 → 点击「验证登录状态」确认
+            {loginMode === 'browser'
+              ? 'opencli 模式：在浏览器登录 → 点击「验证登录状态」。推荐「一键安装 WSL + 即梦环境」后可 App 扫码登录。'
+              : '电脑：复制浏览器链接用 Chrome 打开；手机：复制 App 链接在即梦 App 内打开。若出现「非法应用」，说明 scan 链接被外部浏览器打开。'}
+            <br />
+            一键安装会弹出 UAC 管理员窗口，安装 Ubuntu + dreamina CLI，约需 3–10 分钟。
           </div>
         </div>
 

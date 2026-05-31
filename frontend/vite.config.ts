@@ -15,6 +15,33 @@ function injectSitePasswordPlugin(password: string): Plugin {
   };
 }
 
+/** 浏览器常会请求 /favicon.ico，避免控制台 404 */
+function faviconFallbackPlugin(): Plugin {
+  return {
+    name: 'favicon-fallback',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (req.url === '/favicon.ico') {
+          res.statusCode = 204;
+          res.end();
+          return;
+        }
+        next();
+      });
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (req.url === '/favicon.ico') {
+          res.statusCode = 204;
+          res.end();
+          return;
+        }
+        next();
+      });
+    },
+  };
+}
+
 /** ToAPIs 等返回的图片 CDN 常未对浏览器开放 CORS，经同源路径代理后可正常读图 */
 const toapisFileCdnProxy = {
   '/cdn-files-toapis': {
@@ -161,7 +188,7 @@ export default defineConfig(({ mode }) => {
       preview: {
         proxy: { ...toapisFileCdnProxy },
       },
-      plugins: [react(), injectSitePasswordPlugin(sitePassword)],
+      plugins: [react(), injectSitePasswordPlugin(sitePassword), faviconFallbackPlugin()],
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),

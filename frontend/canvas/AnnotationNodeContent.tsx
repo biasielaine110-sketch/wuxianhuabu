@@ -1,7 +1,7 @@
 ﻿import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Annotation, AnnotationNode, CanvasNode, Edge } from '../types';
-import { EyedropperIcon, FullscreenIcon, ImageIcon } from './canvasIcons';
+import { CopyIcon, EyedropperIcon, FullscreenIcon, ImageIcon } from './canvasIcons';
 import { OptimizedImage } from './OptimizedImage';
 import { getNodePrimaryImageRef } from '../referenceSlots';
 import { findAnnotationAtPoint, translateAnnotation } from './annotationTransform';
@@ -15,10 +15,11 @@ export interface AnnotationNodeContentProps {
   onEyedropperPickLink?: () => void;
   onUpdate: (updates: Partial<AnnotationNode>) => void;
   onCreateImageNode: (images: string[], nodeX: number, nodeY: number) => void;
+  onCopyToImage?: () => void;
   onFullscreenImage?: (base64: string) => void;
   onDeleteEdge?: (edgeId: string) => void;
 }
-export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEyedropperSelect, onEyedropperPickLink, onUpdate, onCreateImageNode, onFullscreenImage, onDeleteEdge }: AnnotationNodeContentProps) {
+export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNodeId, onEyedropperSelect, onEyedropperPickLink, onUpdate, onCreateImageNode, onCopyToImage, onFullscreenImage, onDeleteEdge }: AnnotationNodeContentProps) {
   // 计算链接到该节点的源图片
   const incomingEdges = edges.filter(e => e.targetId === node.id);
   const sourceNodes = incomingEdges
@@ -1990,6 +1991,15 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
     img.src = resolvedSourceUrlRef.current || `data:image/jpeg;base64,${sourceImage}`;
   };
 
+  const copySourceImageToNewNode = useCallback(() => {
+    if (!hasSourceImage) return;
+    if (onCopyToImage) {
+      onCopyToImage();
+      return;
+    }
+    onCreateImageNode([sourceImage], node.x + node.width + 50, node.y);
+  }, [hasSourceImage, onCopyToImage, onCreateImageNode, sourceImage, node.x, node.width, node.y]);
+
   // 确认标注并创建图片节点
   const confirmAnnotations = () => {
     const currentAnnots = annotationsRef.current;
@@ -2552,6 +2562,15 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
           title="撤销上一步 (Ctrl+Z)"
         >
           撤销
+        </button>
+        <button
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => copySourceImageToNewNode()}
+          disabled={!hasSourceImage}
+          className="py-1 px-2 rounded text-[10px] bg-blue-700 hover:bg-blue-600 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+          title="复制图片"
+        >
+          <CopyIcon size={12} />
         </button>
         <button
           onPointerDown={(e) => e.stopPropagation()}

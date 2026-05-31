@@ -100,6 +100,7 @@ function EdgePathInner({ edgeId, startX, startY, cp1X, cp1Y, cp2X, cp2Y, endX, e
     <>
       {/* 可见的连线 */}
       <path
+        data-edge-id={edgeId}
         d={`M ${startX} ${startY} C ${cp1X} ${cp1Y}, ${cp2X} ${cp2Y}, ${endX} ${endY}`}
         stroke={isActive ? "#60a5fa" : "#4a5568"}
         strokeWidth={isActive ? "3" : "2"}
@@ -115,6 +116,7 @@ function EdgePathInner({ edgeId, startX, startY, cp1X, cp1Y, cp2X, cp2Y, endX, e
       />
       {/* 不可见的宽线用于检测 */}
       <path
+        data-edge-id={edgeId}
         d={`M ${startX} ${startY} C ${cp1X} ${cp1Y}, ${cp2X} ${cp2Y}, ${endX} ${endY}`}
         stroke="transparent"
         strokeWidth="16"

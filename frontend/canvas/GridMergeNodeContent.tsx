@@ -315,7 +315,7 @@ export function GridMergeNodeContent({
           <button
             onPointerDown={(e) => e.stopPropagation()}
             onClick={() => void handleExport()}
-            disabled={!outputImage}
+            disabled={!outputImage && !outputImageAssetId}
             className="px-2 py-1 rounded text-[10px] bg-green-600 hover:bg-green-500 text-white disabled:opacity-50"
             title="导出到节点"
           >

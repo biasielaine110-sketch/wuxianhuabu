@@ -1019,21 +1019,14 @@ export function PanoramaNodeContent({
           <button
             onPointerDown={(e) => {
               e.stopPropagation();
-              void (async () => {
-                if (!hasPanoramaMedia) return;
-                if (panoramaImage) {
-                  onCreateImageNode([panoramaImage], node.x + node.width + 50, node.y);
-                  return;
-                }
-                const { resolveCanvasImageSource, imageSrcToRawBase64 } = await import(
-                  '../services/canvasAssetResolver'
-                );
-                const src = await resolveCanvasImageSource(panoramaImage, panoramaImageAssetId);
-                const raw = await imageSrcToRawBase64(src);
-                if (raw?.base64) {
-                  onCreateImageNode([raw.base64], node.x + node.width + 50, node.y);
-                }
-              })();
+              if (onCopyToImage) {
+                onCopyToImage();
+                return;
+              }
+              if (!hasPanoramaMedia) return;
+              if (panoramaImage) {
+                onCreateImageNode([panoramaImage], node.x + node.width + 50, node.y);
+              }
             }}
             disabled={!hasPanoramaMedia}
             className="py-1 px-2 rounded text-[10px] bg-blue-700 hover:bg-blue-600 text-white disabled:opacity-50 disabled:cursor-not-allowed"

@@ -1,5 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { AuditImage, Transform } from './types';
+import { AuditMinimap } from './canvas/AuditMinimap';
+import { buildAuditImagesComposite } from './canvas/auditModeComposite';
 
 /** 根据 base64 魔数字节识别真实的图片 MIME 类型 */
 function sniffImageMimeFromBase64(raw: string): string {
@@ -138,6 +140,11 @@ export default function AuditModeCanvas({
   const imageSizeCacheRef = useRef<Map<string, { w: number; h: number }>>(new Map());
   // 防止 keydown + paste 事件双重触发导致重复粘贴
   const lastPasteTimeRef = useRef(0);
+  const [viewportSize, setViewportSize] = useState({ width: 800, height: 600 });
+  const selectedImageIdsRef = useRef(selectedImageIds);
+  useEffect(() => {
+    selectedImageIdsRef.current = selectedImageIds;
+  }, [selectedImageIds]);
 
   // 鼠标在画布坐标系中的坐标计算
   const getCanvasCoords = useCallback((clientX: number, clientY: number) => {
@@ -148,6 +155,58 @@ export default function AuditModeCanvas({
       y: (clientY - rect.top - transform.y) / transform.scale,
     };
   }, [transform, containerRef]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        setViewportSize({ width: rect.width, height: rect.height });
+      }
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [containerRef]);
+
+  const handleMinimapNavigate = useCallback(
+    (canvasX: number, canvasY: number) => {
+      if (!setTransform || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      setTransform((prev) => ({
+        ...prev,
+        x: rect.width / 2 - canvasX * prev.scale,
+        y: rect.height / 2 - canvasY * prev.scale,
+      }));
+    },
+    [setTransform, containerRef]
+  );
+
+  /** 将合成图添加为看图画布上的新图片 */
+  const addCompositeToCanvas = useCallback(
+    async (images: AuditImage[], annotations: AuditAnnotation[], placeAt?: { x: number; y: number }) => {
+      const result = await buildAuditImagesComposite(images, annotations);
+      if (!result) return;
+      const gap = 50;
+      const placeX = placeAt?.x ?? result.minX + result.width + gap;
+      const placeY = placeAt?.y ?? result.minY;
+      const newId = `audit-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const newImage: AuditImage = {
+        id: newId,
+        base64: result.base64,
+        x: placeX,
+        y: placeY,
+        width: result.width,
+        height: result.height,
+        scale: 1,
+      };
+      setAuditImages((prev) => [...prev, newImage]);
+      setSelectedImageIds([newId]);
+    },
+    [setAuditImages]
+  );
 
   // 渲染标注到 canvas
   const renderAnnotations = useCallback(() => {
@@ -385,11 +444,23 @@ export default function AuditModeCanvas({
         return;
       }
 
-      // Alt+Q 或 Backspace：删除选中图片
-      if ((e.altKey && e.code === 'KeyQ') || (e.code === 'Backspace' && !isInput)) {
-        if (selectedImageIds.length === 0) return;
-        const toDelete = new Set(selectedImageIds);
-        setAuditImages(prev => prev.filter(img => !toDelete.has(img.id)));
+      // Ctrl+A：全选看图图片
+      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyA' && !isInput) {
+        e.preventDefault();
+        const allIds = auditImagesRef.current.map((img) => img.id);
+        setSelectedImageIds(allIds);
+        return;
+      }
+
+      // Alt+Q / Backspace / Delete：删除选中图片
+      if (
+        (e.altKey && e.code === 'KeyQ') ||
+        ((e.code === 'Backspace' || e.code === 'Delete') && !isInput)
+      ) {
+        const sel = selectedImageIdsRef.current;
+        if (sel.length === 0) return;
+        const toDelete = new Set(sel);
+        setAuditImages((prev) => prev.filter((img) => !toDelete.has(img.id)));
         setSelectedImageIds([]);
         e.preventDefault();
         return;
@@ -964,118 +1035,27 @@ export default function AuditModeCanvas({
     setAuditAnnotations([]);
   };
 
-  // ====== 导出功能 ======
+  // ====== 导出 / 合并到画布 ======
   const exportAsImage = async () => {
     if (auditImages.length === 0) return;
-    // 计算所有图片的边界
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const img of auditImages) {
-      const w = img.width * img.scale;
-      const h = img.height * img.scale;
-      minX = Math.min(minX, img.x);
+    await addCompositeToCanvas(auditImages, auditAnnotationsRef.current);
+  };
+
+  const mergeSelectedImages = async () => {
+    const ids = selectedImageIdsRef.current;
+    if (ids.length < 2) return;
+    const selected = ids
+      .map((id) => auditImagesRef.current.find((i) => i.id === id))
+      .filter(Boolean) as AuditImage[];
+    if (selected.length < 2) return;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    for (const img of selected) {
+      maxX = Math.max(maxX, img.x + img.width * img.scale);
       minY = Math.min(minY, img.y);
-      maxX = Math.max(maxX, img.x + w);
-      maxY = Math.max(maxY, img.y + h);
     }
-
-    const exportW = Math.ceil(maxX - minX);
-    const exportH = Math.ceil(maxY - minY);
-    const canvas = document.createElement('canvas');
-    canvas.width = exportW;
-    canvas.height = exportH;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // 绘制所有图片
-    for (const img of auditImages) {
-      const w = img.width * img.scale;
-      const h = img.height * img.scale;
-      const imgEl = new Image();
-      await new Promise<void>((resolve) => {
-        imgEl.onload = () => {
-          ctx!.drawImage(imgEl, img.x - minX, img.y - minY, w, h);
-          resolve();
-        };
-        imgEl.onerror = () => resolve();
-        imgEl.src = base64ToImageDataUrl(img.base64);
-      });
-    }
-
-    // 绘制标注
-    const anns = auditAnnotationsRef.current;
-    if (anns.length > 0) {
-      const annCtx = ctx;
-      anns.forEach(ann => {
-        const adjustedAnn = { ...ann, x: ann.x - minX, y: ann.y - minY };
-        if (ann.endX !== undefined) adjustedAnn.endX = ann.endX - minX;
-        if (ann.endY !== undefined) adjustedAnn.endY = ann.endY - minY;
-        if (ann.points) {
-          adjustedAnn.points = ann.points.map(p => ({ x: p.x - minX, y: p.y - minY }));
-        }
-
-        annCtx.strokeStyle = ann.color;
-        annCtx.fillStyle = ann.color;
-        annCtx.lineWidth = ann.strokeWidth || 2;
-
-        switch (ann.type) {
-          case 'rect':
-            annCtx.strokeRect(adjustedAnn.x, adjustedAnn.y, ann.width || 0, ann.height || 0);
-            break;
-          case 'fillRect':
-            annCtx.globalAlpha = ann.fillOpacity ?? 0.45;
-            annCtx.fillRect(adjustedAnn.x, adjustedAnn.y, ann.width || 0, ann.height || 0);
-            annCtx.strokeRect(adjustedAnn.x, adjustedAnn.y, ann.width || 0, ann.height || 0);
-            annCtx.globalAlpha = 1;
-            break;
-          case 'circle':
-            annCtx.beginPath();
-            annCtx.ellipse(
-              adjustedAnn.x + (ann.width || 0) / 2,
-              adjustedAnn.y + (ann.height || 0) / 2,
-              Math.abs(ann.width || 0) / 2, Math.abs(ann.height || 0) / 2,
-              0, 0, Math.PI * 2
-            );
-            annCtx.stroke();
-            break;
-          case 'fillCircle':
-            annCtx.beginPath();
-            annCtx.ellipse(
-              adjustedAnn.x + (ann.width || 0) / 2,
-              adjustedAnn.y + (ann.height || 0) / 2,
-              Math.abs(ann.width || 0) / 2, Math.abs(ann.height || 0) / 2,
-              0, 0, Math.PI * 2
-            );
-            annCtx.globalAlpha = ann.fillOpacity ?? 0.45;
-            annCtx.fill();
-            annCtx.globalAlpha = 1;
-            annCtx.stroke();
-            break;
-          case 'arrow':
-            drawArrow(annCtx, adjustedAnn.x, adjustedAnn.y, adjustedAnn.endX || 0, adjustedAnn.endY || 0, ann.color, ann.strokeWidth || 2);
-            break;
-          case 'pen':
-            if (adjustedAnn.points && adjustedAnn.points.length > 1) {
-              annCtx.beginPath();
-              annCtx.moveTo(adjustedAnn.points[0].x, adjustedAnn.points[0].y);
-              for (let i = 1; i < adjustedAnn.points.length; i++) {
-                annCtx.lineTo(adjustedAnn.points[i].x, adjustedAnn.points[i].y);
-              }
-              annCtx.stroke();
-            }
-            break;
-          case 'text':
-            annCtx.font = `${ann.fontSize || 16}px sans-serif`;
-            annCtx.fillText(ann.text || '', adjustedAnn.x, adjustedAnn.y);
-            break;
-        }
-      });
-    }
-
-    const exportedBase64 = canvas.toDataURL('image/png');
-    const link = document.createElement('a');
-    link.download = `audit-export-${Date.now()}.png`;
-    link.href = exportedBase64;
-    link.click();
+    await addCompositeToCanvas(selected, [], { x: maxX + 50, y: minY });
+    setContextMenu(null);
   };
 
   // 十六进制颜色转 rgba
@@ -1219,13 +1199,23 @@ export default function AuditModeCanvas({
         <div className="bg-[#1e1e1e]/95 backdrop-blur-md rounded-xl border border-[#333] p-2 shadow-2xl flex flex-col gap-1">
           <button
             onPointerDown={(e) => e.stopPropagation()}
-            onClick={exportAsImage}
+            onClick={() => void exportAsImage()}
             className="w-full py-1.5 px-3 rounded text-[10px] bg-green-700 hover:bg-green-600 text-white flex items-center justify-center gap-1"
+            title="将全部图片与标注合成一张图，并添加到看图画布"
           >
-            导出合成图片
+            导出合成到画布
           </button>
         </div>
       </div>
+
+      {auditImages.length > 0 && setTransform && (
+        <AuditMinimap
+          images={auditImages}
+          transform={transform}
+          viewportSize={viewportSize}
+          onNavigate={handleMinimapNavigate}
+        />
+      )}
 
       {/* 看图图片层 */}
       <div
@@ -1389,6 +1379,16 @@ export default function AuditModeCanvas({
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onPointerDown={(e) => e.stopPropagation()}
         >
+          {selectedImageIds.length >= 2 && (
+            <button
+              className="w-full text-left px-3 py-1.5 text-[12px] text-gray-300 hover:bg-[#333] hover:text-white transition-colors flex items-center gap-2"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => void mergeSelectedImages()}
+            >
+              <span className="text-green-400 text-[14px]">⊞</span>
+              合并图片（{selectedImageIds.length} 张）
+            </button>
+          )}
           <button
             className="w-full text-left px-3 py-1.5 text-[12px] text-gray-300 hover:bg-[#333] hover:text-white transition-colors flex items-center gap-2"
             onPointerDown={(e) => e.stopPropagation()}

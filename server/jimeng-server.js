@@ -4,6 +4,7 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { execa } from "execa";
+import { spawn } from "node:child_process";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -100,34 +101,118 @@ async function execWslDreamina(args, options = {}) {
   return execa(WSL_EXE, ["-d", WSL_DISTRO, "-u", WSL_DREAMINA_USER, "--", "bash", "-c", scriptCmd], options);
 }
 
-async function checkOpencliJimengLogin(timeout = 5000) {
+async function ensureWslDreaminaDetected() {
+  if (!IS_WINDOWS) return false;
+  wslChecked = false;
+  return detectWslDreamina();
+}
+
+async function isOpencliAvailable() {
   try {
-    const r = await execa(
-      OPENCLI_CMD,
-      ["jimeng", "--help", "-f", "json"],
-      { timeout }
-    );
+    const fsSync = await import("node:fs");
+    if (!fsSync.existsSync(OPENCLI_CMD)) return false;
+    const r = await execa(OPENCLI_CMD, ["--version"], { timeout: 5000, reject: false });
+    return r.exitCode === 0;
+  } catch {
+    return false;
+  }
+}
+
+/** opencli 模式：history 成功才视为已登录；失败时返回可读 detail（不抛异常） */
+async function probeOpencliJimengLogin(timeout = 15000) {
+  if (!(await isOpencliAvailable())) {
+    return {
+      ok: false,
+      loggedIn: false,
+      cliAvailable: false,
+      platform: "opencli-windows",
+      detail:
+        "未找到 opencli。Windows 推荐先安装 WSL + dreamina CLI（登录弹窗「一键安装 WSL + 即梦环境」），或在终端执行 npm 全局安装 opencli。",
+      needWsl: true,
+    };
+  }
+
+  const r = await execa(
+    OPENCLI_CMD,
+    ["jimeng", "history", "-f", "json", "--site-session", "persistent", "--window", "background"],
+    { timeout, reject: false },
+  );
+
+  if (r.exitCode === 0) {
+    let data = {};
+    try {
+      data = JSON.parse(r.stdout || "{}");
+    } catch {
+      data = { raw: (r.stdout || "").slice(0, 500) };
+    }
+    return { ok: true, loggedIn: true, cliAvailable: true, data, platform: "opencli-windows" };
+  }
+
+  const errText = [r.stderr, r.stdout].filter(Boolean).join("\n").trim();
+  return {
+    ok: true,
+    loggedIn: false,
+    cliAvailable: true,
+    platform: "opencli-windows",
+    exitCode: r.exitCode,
+    detail:
+      errText ||
+      "opencli 尚未登录。请点击「验证登录状态」前，先在弹出的浏览器窗口完成登录；或改用 WSL dreamina 的复制链接登录。",
+  };
+}
+
+async function startOpencliBrowserLogin() {
+  if (!(await isOpencliAvailable())) {
+    return {
+      ok: false,
+      needWsl: true,
+      platform: "opencli-windows",
+      message: "未检测到 opencli，无法使用浏览器登录",
+      detail: "请先安装 WSL + dreamina CLI，或全局安装 opencli 后重试。",
+    };
+  }
+
+  void execa(
+    OPENCLI_CMD,
+    ["jimeng", "relogin", "-f", "json", "--site-session", "persistent", "--window", "foreground"],
+    { timeout: 5 * 60 * 1000, reject: false },
+  );
+
+  return {
+    ok: true,
+    mode: "browser",
+    platform: "opencli-windows",
+    message: "已尝试打开浏览器，请在新窗口中登录即梦账号，完成后点击「验证登录状态」",
+    verificationUrl: "https://jimeng.jianying.com/ai-tool/login",
+    loginUrl: "https://jimeng.jianying.com/ai-tool/login",
+    userCode: "",
+    polling: true,
+  };
+}
+
+async function checkOpencliJimengLogin(timeout = 5000) {
+  const probe = await probeOpencliJimengLogin(timeout);
+  if (!probe.cliAvailable) return probe;
+  if (probe.loggedIn) return probe;
+  try {
+    const r = await execa(OPENCLI_CMD, ["jimeng", "--help", "-f", "json"], { timeout, reject: false });
+    if (r.exitCode !== 0) return probe;
     const data = r.stdout ? JSON.parse(r.stdout) : {};
     return {
       ok: true,
-      loggedIn: true,
-      data: {
-        session: "persistent-browser-session",
-        verified: false,
-        reason: "opencli browser commands can block while waiting for login; generation will use the persistent browser session.",
-        commands: data.commands?.map(c => c.name),
-      },
+      loggedIn: false,
+      cliAvailable: true,
       platform: "opencli-windows",
+      detail: probe.detail,
+      data: { commands: data.commands?.map((c) => c.name) },
     };
   } catch (error) {
     return {
       ok: true,
       loggedIn: false,
+      cliAvailable: true,
       platform: "opencli-windows",
-      message: "login_required",
-      detail: error.shortMessage || error.message,
-      stdout: error.stdout,
-      stderr: error.stderr,
+      detail: probe.detail || error.shortMessage || error.message,
     };
   }
 }
@@ -197,6 +282,18 @@ const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: "20mb" }));
 app.use("/outputs", express.static(OUTPUT_DIR));
+
+app.get("/", (_req, res) => {
+  res.type("html").send(`<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><title>即梦本地 API</title></head>
+<body style="font-family:system-ui,sans-serif;padding:2rem;line-height:1.6">
+<h1>即梦本地 API 服务</h1>
+<p>这是后端接口（端口 3107），不是画布页面。</p>
+<p>请打开前端：<a href="http://localhost:5173/">http://localhost:5173/</a></p>
+<p>健康检查：<a href="/api/jimeng/health">/api/jimeng/health</a></p>
+</body></html>`);
+});
+app.get("/favicon.ico", (_req, res) => res.status(204).end());
 
 // ============================================================
 //  Codesonline Image API 代理
@@ -327,76 +424,358 @@ app.get("/api/jimeng/health", async (_req, res) => {
 //  Session（检测是否已登录）
 // ============================================================
 app.get("/api/jimeng/session", async (_req, res) => {
-  // 优先尝试 WSL dreamina
-  if (IS_WINDOWS && HAS_WSL_DREAMINA) {
+  const wslReady = IS_WINDOWS ? await ensureWslDreaminaDetected() : false;
+
+  if (IS_WINDOWS && wslReady) {
     try {
       const r = await execWslDreamina(["user_credit"], { timeout: 10000 });
       const data = JSON.parse(r.stdout);
       const loggedIn = data && (data.total_credit !== undefined || data.ok === true || data.credit !== undefined);
       return res.json({ ok: true, loggedIn, data, platform: "wsl-dreamina" });
     } catch (wslErr) {
-      // WSL dreamina 失败，继续尝试 opencli
-      console.log('[session] WSL dreamina failed, trying opencli:', wslErr.shortMessage || wslErr.message);
+      console.log("[session] WSL dreamina failed, trying opencli:", wslErr.shortMessage || wslErr.message);
     }
   }
-  // opencli 降级
-  try {
-    const r = await execa(OPENCLI_CMD, ["jimeng", "history", "-f", "json", "--site-session", "persistent", "--window", "background"], { timeout: 10000 });
-    const data = JSON.parse(r.stdout);
-    return res.json({ ok: true, loggedIn: true, data, platform: "opencli" });
-  } catch (error) {
-    return res.json({ ok: true, loggedIn: false, detail: error.shortMessage || error.message, platform: "none" });
+
+  if (!IS_WINDOWS) {
+    const session = await checkDreaminaLogin({ timeout: 15000 });
+    return res.json({
+      ok: true,
+      loggedIn: session.loggedIn,
+      data: session.data,
+      detail: session.detail,
+      platform: session.platform,
+    });
   }
+
+  const opencli = await probeOpencliJimengLogin();
+  return res.json({
+    ok: opencli.ok !== false,
+    loggedIn: opencli.loggedIn,
+    data: opencli.data,
+    detail: opencli.detail,
+    needWsl: opencli.needWsl,
+    platform: opencli.platform || "opencli-windows",
+  });
 });
 
+// 保存 OAuth device_code，供后台 headless 登录轮询
+const loginDeviceCodes = new Map();
+
+/** @type {null | { child: import('execa').ResultPromise, output: string, verificationUrl: string, userCode: string, deviceCode: string, platform: string, completed: boolean, success: boolean, error: string | null }} */
+let activeHeadlessLogin = null;
+
+const DEFAULT_CLI_AUTH_URL = "https://jimeng.jianying.com/ai-tool/cli-auth";
+
+function parseDreaminaLoginOutput(output) {
+  const verificationMatch = output.match(/verification_uri:\s*(.+)/i);
+  const verificationUrlMatch = output.match(/verification_url:\s*(.+)/i);
+  const loginUrlMatch = output.match(/login_url:\s*(.+)/i);
+  const userCodeMatch = output.match(/user_code:\s*([a-f0-9-]+)/i);
+  const deviceCodeMatch = output.match(/device_code:\s*([a-f0-9-]+)/i);
+  const verificationUri = (
+    verificationMatch?.[1] ||
+    verificationUrlMatch?.[1] ||
+    loginUrlMatch?.[1] ||
+    ""
+  ).trim();
+  return {
+    verificationUri,
+    userCode: (userCodeMatch?.[1] || "").trim(),
+    deviceCode: (deviceCodeMatch?.[1] || "").trim(),
+  };
+}
+
+function buildDreaminaLoginUrls(verificationUri, userCode) {
+  const scanUrl = userCode
+    ? `https://jimeng.jianying.com/passport/open/scan_user_code/?user_code=${encodeURIComponent(userCode)}`
+    : "";
+
+  if (!verificationUri) {
+    return {
+      loginUrl: scanUrl || DEFAULT_CLI_AUTH_URL,
+      browserLoginUrl: scanUrl || DEFAULT_CLI_AUTH_URL,
+      appLoginUrl: scanUrl,
+    };
+  }
+
+  try {
+    const parsed = new URL(verificationUri.trim());
+    const nestedRaw = parsed.searchParams.get("verification_uri");
+    let nestedScan = scanUrl;
+    if (nestedRaw) {
+      try {
+        nestedScan = decodeURIComponent(nestedRaw);
+      } catch {
+        nestedScan = nestedRaw;
+      }
+    }
+
+    const browserLoginUrl = new URL(verificationUri.trim());
+    if (userCode) {
+      if (!browserLoginUrl.searchParams.has("usercode")) {
+        browserLoginUrl.searchParams.set("usercode", userCode);
+      }
+      if (!browserLoginUrl.searchParams.has("user_code")) {
+        browserLoginUrl.searchParams.set("user_code", userCode);
+      }
+      if (nestedRaw) {
+        browserLoginUrl.searchParams.set(
+          "verification_uri",
+          nestedScan.includes("user_code=") ? nestedRaw : encodeURIComponent(scanUrl),
+        );
+      }
+    }
+
+    return {
+      loginUrl: browserLoginUrl.toString(),
+      browserLoginUrl: browserLoginUrl.toString(),
+      appLoginUrl: nestedScan || scanUrl,
+    };
+  } catch {
+    return {
+      loginUrl: verificationUri || scanUrl,
+      browserLoginUrl: verificationUri || scanUrl,
+      appLoginUrl: scanUrl,
+    };
+  }
+}
+
+function canUseDreaminaHeadlessLogin(wslReady = HAS_WSL_DREAMINA) {
+  return !IS_WINDOWS || wslReady;
+}
+
+function stopActiveHeadlessLogin() {
+  if (!activeHeadlessLogin?.child) return;
+  try {
+    activeHeadlessLogin.child.kill();
+  } catch {
+    /* ignore */
+  }
+}
+
+async function readDreaminaTokenSnapshot() {
+  const tokenPaths = [
+    "/root/.local/share/dreamina/byted_cli_user_token.json",
+    "/root/.dreamina_cli/byted_cli_user_token.json",
+    "$HOME/.local/share/dreamina/byted_cli_user_token.json",
+  ];
+
+  for (const tokenPath of tokenPaths) {
+    try {
+      let stdout = "";
+      if (!IS_WINDOWS) {
+        const r = await execa("bash", ["-lc", `cat ${tokenPath}`], { timeout: 5000 });
+        stdout = r.stdout;
+      } else {
+        const r = await execa(
+          WSL_EXE,
+          ["-d", WSL_DISTRO, "-u", WSL_DREAMINA_USER, "--", "bash", "-lc", `cat ${tokenPath}`],
+          { timeout: 5000 },
+        );
+        stdout = r.stdout;
+      }
+      const token = JSON.parse(stdout);
+      const expiresAt = token.token_expires_at || token.expires_at;
+      const hasAccessToken = !!token.access_token;
+      const notExpired =
+        !expiresAt ||
+        expiresAt === "0001-01-01T00:00:00Z" ||
+        Number.isNaN(Date.parse(expiresAt)) ||
+        Date.parse(expiresAt) > Date.now();
+      if (hasAccessToken && notExpired) {
+        return { ok: true, token };
+      }
+    } catch {
+      /* try next path */
+    }
+  }
+  return { ok: false, token: null };
+}
+
+async function spawnDreaminaHeadlessLogin() {
+  stopActiveHeadlessLogin();
+
+  const spawnOptions = {
+    timeout: 5 * 60 * 1000,
+    reject: false,
+    stdout: "pipe",
+    stderr: "pipe",
+  };
+
+  let child;
+  let platform;
+  if (!IS_WINDOWS) {
+    child = execa(DREAMINA_CMD, ["login", "--headless"], spawnOptions);
+    platform = "native";
+  } else {
+    const cmdStr = buildWslCmd(["login", "--headless"]);
+    const scriptCmd = `script -q -c '${cmdStr.replace(/'/g, "'\\''")}' /dev/null`;
+    child = execa(
+      WSL_EXE,
+      ["-d", WSL_DISTRO, "-u", WSL_DREAMINA_USER, "--", "bash", "-c", scriptCmd],
+      spawnOptions,
+    );
+    platform = "wsl-dreamina";
+  }
+
+  const state = {
+    child,
+    output: "",
+    verificationUrl: "",
+    userCode: "",
+    deviceCode: "",
+    platform,
+    completed: false,
+    success: false,
+    error: null,
+  };
+  activeHeadlessLogin = state;
+
+  const onData = (chunk) => {
+    state.output += chunk.toString();
+    const parsed = parseDreaminaLoginOutput(state.output);
+    if (parsed.verificationUri) state.verificationUrl = parsed.verificationUri;
+    if (parsed.userCode) state.userCode = parsed.userCode;
+    if (parsed.deviceCode) {
+      state.deviceCode = parsed.deviceCode;
+      loginDeviceCodes.set(parsed.deviceCode, {
+        userCode: parsed.userCode,
+        expires: Date.now() + 5 * 60 * 1000,
+      });
+    }
+  };
+
+  child.stdout?.on("data", onData);
+  child.stderr?.on("data", onData);
+
+  void child
+    .then((result) => {
+      state.completed = true;
+      state.success = result.exitCode === 0;
+      if (result.stdout) state.output += result.stdout;
+      if (result.stderr) state.output += result.stderr;
+      const parsed = parseDreaminaLoginOutput(state.output);
+      if (parsed.verificationUri) state.verificationUrl = parsed.verificationUri;
+      if (parsed.userCode) state.userCode = parsed.userCode;
+      if (parsed.deviceCode) state.deviceCode = parsed.deviceCode;
+    })
+    .catch((error) => {
+      state.completed = true;
+      state.error = error.shortMessage || error.message || String(error);
+    });
+
+  return state;
+}
+
+async function waitForHeadlessLoginBootstrap(state, maxWaitMs = 35000) {
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    const parsed = parseDreaminaLoginOutput(state.output);
+    if (parsed.verificationUri) state.verificationUrl = parsed.verificationUri;
+    if (parsed.userCode) state.userCode = parsed.userCode;
+    if (parsed.deviceCode) state.deviceCode = parsed.deviceCode;
+    if (state.userCode && (state.verificationUrl || state.deviceCode)) return true;
+    if (state.completed) break;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  const parsed = parseDreaminaLoginOutput(state.output);
+  if (parsed.verificationUri) state.verificationUrl = parsed.verificationUri;
+  if (parsed.userCode) state.userCode = parsed.userCode;
+  if (parsed.deviceCode) state.deviceCode = parsed.deviceCode;
+  return !!(state.userCode && (state.verificationUrl || state.deviceCode));
+}
+
+function getActiveHeadlessLoginPayload() {
+  if (!activeHeadlessLogin) return null;
+  const parsed = parseDreaminaLoginOutput(activeHeadlessLogin.output);
+  const userCode = activeHeadlessLogin.userCode || parsed.userCode || "";
+  const verificationUri =
+    activeHeadlessLogin.verificationUrl || parsed.verificationUri || DEFAULT_CLI_AUTH_URL;
+  const urls = buildDreaminaLoginUrls(verificationUri, userCode);
+  return {
+    ok: !!userCode,
+    loginUrl: urls.loginUrl,
+    browserLoginUrl: urls.browserLoginUrl,
+    appLoginUrl: urls.appLoginUrl,
+    verificationUrl: urls.loginUrl,
+    userCode,
+    deviceCode: activeHeadlessLogin.deviceCode || parsed.deviceCode || "",
+    pending: !activeHeadlessLogin.completed,
+    platform: activeHeadlessLogin.platform,
+  };
+}
+
 // ============================================================
-//  Login Start锛堣幏鍙?OAuth 璁惧鐮侊級
+//  Login Start（获取 OAuth 设备码，后台持续轮询直至授权完成）
 // ============================================================
 app.post("/api/jimeng/login/start", async (_req, res) => {
   try {
-    if (!IS_WINDOWS || HAS_WSL_DREAMINA) {
-      // 鑾峰彇 OAuth device code
-      const r = await execWslDreamina(["login", "--headless"], { timeout: 10000 });
-      const output = r.stdout + r.stderr;
+    const wslReady = IS_WINDOWS ? await ensureWslDreaminaDetected() : false;
 
-      // 瑙ｆ瀽杈撳嚭鑾峰彇 verification_uri, user_code, device_code
-      const verificationMatch = output.match(/verification_uri:\s*(.+)/i);
-      const userCodeMatch = output.match(/user_code:\s*([a-f0-9]+)/i);
-      const deviceCodeMatch = output.match(/device_code:\s*([a-f0-9]+)/i);
+    if (canUseDreaminaHeadlessLogin(wslReady)) {
+      const state = await spawnDreaminaHeadlessLogin();
+      const ready = await waitForHeadlessLoginBootstrap(state);
+      const parsed = parseDreaminaLoginOutput(state.output);
+      const verificationUri =
+        state.verificationUrl || parsed.verificationUri || DEFAULT_CLI_AUTH_URL;
+      const userCode = state.userCode || parsed.userCode || "";
+      const deviceCode = state.deviceCode || parsed.deviceCode || "";
+      const urls = buildDreaminaLoginUrls(verificationUri, userCode);
 
-      const verificationUri = verificationMatch ? verificationMatch[1].trim() : "https://jimeng.jianying.com/ai-tool/cli-auth";
-      const userCode = userCodeMatch ? userCodeMatch[1].trim() : "";
-      const deviceCode = deviceCodeMatch ? deviceCodeMatch[1].trim() : "";
-
-      // 淇濆瓨 device_code 鐢ㄤ簬鍚庣画杞
       if (deviceCode) {
-        loginDeviceCodes.set(deviceCode, { userCode, expires: Date.now() + 5 * 60 * 1000 });
+        loginDeviceCodes.set(deviceCode, {
+          userCode,
+          expires: Date.now() + 5 * 60 * 1000,
+        });
+      }
+
+      if (!ready && !userCode) {
+        const late = getActiveHeadlessLoginPayload();
+        if (late?.userCode) {
+          return res.json({
+            ok: true,
+            message: "电脑请用 Chrome 打开「浏览器登录链接」；手机请在即梦 App 内打开「App 登录链接」",
+            verificationUrl: late.loginUrl,
+            loginUrl: late.loginUrl,
+            browserLoginUrl: late.browserLoginUrl,
+            appLoginUrl: late.appLoginUrl,
+            userCode: late.userCode,
+            deviceCode: late.deviceCode,
+            polling: late.pending,
+            platform: state.platform,
+          });
+        }
+      }
+
+      if (!ready && state.error) {
+        return res.status(500).json({
+          ok: false,
+          message: "获取登录链接失败",
+          detail: state.error,
+          platform: state.platform,
+        });
       }
 
       return res.json({
         ok: true,
-        message: "璇蜂娇鐢ㄦ姈闊?App 鎵爜鐧诲綍",
-        verificationUrl: verificationUri,
-        userCode: userCode,
-        deviceCode: deviceCode,
-        platform: "wsl-dreamina",
+        message: "电脑请用 Chrome 打开「浏览器登录链接」；手机请在即梦 App 内打开「App 登录链接」（勿在外部浏览器打开 scan 链接）",
+        verificationUrl: urls.loginUrl,
+        loginUrl: urls.browserLoginUrl,
+        browserLoginUrl: urls.browserLoginUrl,
+        appLoginUrl: urls.appLoginUrl,
+        userCode,
+        deviceCode,
+        polling: !state.completed,
+        platform: state.platform,
       });
     }
 
-    return res.status(503).json({
-      ok: false,
-      message: "Dreamina CLI (WSL) is not available. Install WSL Ubuntu and run dreamina login first.",
-      platform: "wsl-dreamina",
-    });
-
-    // 鍥為€€锛氳繑鍥為粯璁ょ櫥褰曢〉闈?
-    res.json({
-      ok: true,
-      message: "璇锋壂鐮佹垨鎵撳紑閾炬帴鐧诲綍鍗虫ⅵ",
-      verificationUrl: "https://jimeng.jianying.com/ai-tool/login",
-      userCode: "",
-      platform: IS_WINDOWS && !HAS_WSL_DREAMINA ? "opencli-windows" : "native",
-    });
+    const opencliStart = await startOpencliBrowserLogin();
+    if (!opencliStart.ok) {
+      return res.status(503).json(opencliStart);
+    }
+    return res.json(opencliStart);
   } catch (error) {
     res.status(500).json({
       ok: false,
@@ -406,11 +785,32 @@ app.post("/api/jimeng/login/start", async (_req, res) => {
   }
 });
 
-// 淇濆瓨鐧诲綍 device_code 鐢ㄤ簬杞
-const loginDeviceCodes = new Map();
+app.get("/api/jimeng/login/code", async (_req, res) => {
+  try {
+    const wslReady = IS_WINDOWS ? await ensureWslDreaminaDetected() : false;
+    if (!canUseDreaminaHeadlessLogin(wslReady)) {
+      return res.json({ ok: false, message: "当前非 App 扫码登录模式" });
+    }
+    const payload = getActiveHeadlessLoginPayload();
+    if (!payload?.userCode) {
+      return res.json({
+        ok: false,
+        pending: !!(activeHeadlessLogin && !activeHeadlessLogin.completed),
+        message: "登录码尚未生成，请稍候或点击「重新获取登录链接」",
+      });
+    }
+    return res.json({ ok: true, ...payload });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      message: "获取登录码失败",
+      detail: error.shortMessage || error.message,
+    });
+  }
+});
 
 // ============================================================
-//  Login Screenshot锛圵SL 妯″紡涓嶉渶瑕佹埅鍥撅級
+//  Login Screenshot（WSL 模式不需要截图）
 // ============================================================
 app.get("/api/jimeng/login/screenshot", async (_req, res) => {
   res.json({ ok: true, message: "请查看终端输出或浏览器窗口完成登录" });
@@ -458,47 +858,296 @@ app.post("/api/jimeng/install-opencli", async (_req, res) => {
   }
 });
 
+const WSL_SETUP_SCRIPT = path.join(__dirname, "..", "scripts", "setup-jimeng-dreamina-wsl.ps1");
+const WSL_SETUP_STATUS_FILE = path.join(__dirname, ".jimeng-wsl-setup-status.json");
+
+async function readWslSetupStatus() {
+  try {
+    const raw = await fs.readFile(WSL_SETUP_STATUS_FILE, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function isWindowsAdmin() {
+  if (!IS_WINDOWS) return false;
+  try {
+    const r = await execa(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-Command",
+        "[bool](([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))",
+      ],
+      { timeout: 10000, reject: false },
+    );
+    return (r.stdout || "").trim().toLowerCase() === "true";
+  } catch {
+    return false;
+  }
+}
+
+async function launchWslSetupScript() {
+  try {
+    await fs.access(WSL_SETUP_SCRIPT);
+  } catch {
+    throw new Error(`安装脚本不存在: ${WSL_SETUP_SCRIPT}`);
+  }
+  await fs.writeFile(
+    WSL_SETUP_STATUS_FILE,
+    JSON.stringify({
+      phase: "launching",
+      status: "running",
+      message: "正在启动安装程序...",
+      steps: [],
+      needReboot: false,
+      needAdmin: true,
+      ok: null,
+      updatedAt: new Date().toISOString(),
+    }),
+    "utf8",
+  );
+  const ps = [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    WSL_SETUP_SCRIPT,
+    "-StatusFile",
+    WSL_SETUP_STATUS_FILE,
+  ];
+  spawn("powershell.exe", ps, { detached: true, stdio: "ignore", windowsHide: false }).unref();
+}
+
+async function runExecStep(label, cmd, args, steps, options = {}) {
+  const timeout = options.timeout ?? 120000;
+  steps.push(label);
+  const okExitCodes = options.okExitCodes ?? [0];
+  const r = await execa(cmd, args, { timeout, reject: false });
+  if (okExitCodes.includes(r.exitCode)) return { ok: true, result: r, exitCode: r.exitCode };
+  const detail = [r.stderr, r.stdout].filter(Boolean).join("\n").trim().slice(0, 400);
+  return { ok: false, exitCode: r.exitCode, detail };
+}
+
+async function runWslUpdateWithFallbacks(steps) {
+  const attempts = [
+    { label: "更新 WSL（web-download）...", args: ["--update", "--web-download"] },
+    { label: "更新 WSL（inbox）...", args: ["--update", "--inbox"] },
+    { label: "更新 WSL...", args: ["--update"] },
+  ];
+  for (const attempt of attempts) {
+    const result = await runExecStep(attempt.label, "wsl.exe", attempt.args, steps, { timeout: 180000, okExitCodes: [0] });
+    if (result.ok) {
+      steps.push("WSL 更新完成");
+      return true;
+    }
+    if (result.detail) steps.push(`跳过: ${result.detail}`);
+  }
+  steps.push("WSL 更新未成功（可稍后手动执行 wsl --update，或重启电脑后再试）");
+  return false;
+}
+
+async function installUbuntuDistro(steps) {
+  const list = await runExecStep("检查已安装发行版...", "wsl.exe", ["-l", "-v"], steps, { timeout: 30000 });
+  const listText = list.result?.stdout || "";
+  if (/Ubuntu/i.test(listText)) {
+    steps.push("检测到 Ubuntu 已安装，跳过发行版安装");
+    return true;
+  }
+
+  const attempts = [
+    { label: "安装 Ubuntu（--no-launch）...", args: ["--install", "-d", "Ubuntu", "--no-launch"] },
+    { label: "安装 Ubuntu...", args: ["--install", "-d", "Ubuntu"] },
+    { label: "安装 Ubuntu（web-download）...", args: ["--install", "-d", "Ubuntu", "--web-download"] },
+    { label: "安装默认 Linux 发行版...", args: ["--install"] },
+  ];
+  for (const attempt of attempts) {
+    const result = await runExecStep(attempt.label, "wsl.exe", attempt.args, steps, { timeout: 300000, okExitCodes: [0, 3010] });
+    if (result.ok) {
+      steps.push("Ubuntu 安装命令已执行");
+      return true;
+    }
+    if (result.detail) steps.push(`跳过: ${result.detail}`);
+  }
+  return false;
+}
+
+const WSL_MANUAL_GUIDE = [
+  "1. 右键「开始」→ Windows PowerShell（管理员）",
+  "2. 执行：wsl --install",
+  "3. 重启电脑",
+  "4. 执行：wsl -d Ubuntu -u root -- bash -lc \"curl -fsSL https://jimeng.jianying.com/cli | bash\"",
+  "5. 在 server 目录重启：npm start，然后刷新页面重新登录",
+  "",
+  "若 wsl --install 失败，可从 Microsoft Store 安装「Ubuntu」，或访问 https://aka.ms/wslstore",
+  "内核包：https://aka.ms/wsl2kernel",
+];
+
 // ============================================================
 //  Setup Dreamina WSL Environment (Windows)
 // ============================================================
+app.get("/api/jimeng/setup-wsl/status", async (_req, res) => {
+  if (!IS_WINDOWS) {
+    return res.status(501).json({ ok: false, message: "仅支持 Windows 系统" });
+  }
+
+  const status = await readWslSetupStatus();
+  wslChecked = false;
+  const wslReady = await detectWslDreamina();
+  if (wslReady) {
+    HAS_WSL_DREAMINA = true;
+    return res.json({
+      ok: true,
+      running: false,
+      wslReady: true,
+      phase: "done",
+      status: "completed",
+      message: "WSL + dreamina 已就绪",
+      steps: status?.steps || [],
+    });
+  }
+
+  if (!status) {
+    return res.json({
+      ok: true,
+      running: false,
+      wslReady: false,
+      phase: "idle",
+      status: "idle",
+      message: "尚未开始安装",
+    });
+  }
+
+  const running = status.status === "running";
+  if (status.status === "completed" && status.ok) {
+    HAS_WSL_DREAMINA = wslReady;
+  }
+
+  return res.json({
+    ok: status.ok !== false,
+    running,
+    wslReady,
+    ...status,
+  });
+});
+
 app.post("/api/jimeng/setup-wsl", async (_req, res) => {
   if (!IS_WINDOWS) {
     return res.status(501).json({ ok: false, message: "仅支持 Windows 系统" });
   }
 
+  wslChecked = false;
+  if (await detectWslDreamina()) {
+    HAS_WSL_DREAMINA = true;
+    return res.json({
+      ok: true,
+      alreadyInstalled: true,
+      message: "WSL + dreamina 已安装，可直接刷新页面登录",
+      wslReady: true,
+    });
+  }
+
+  const existing = await readWslSetupStatus();
+  if (existing?.status === "running") {
+    return res.json({
+      ok: true,
+      launched: true,
+      polling: true,
+      message: "安装程序正在运行，请稍候...",
+      phase: existing.phase,
+      steps: existing.steps || [],
+    });
+  }
+
+  const steps = [];
+  const isAdmin = await isWindowsAdmin();
+
   try {
-    const steps = [];
+    if (isAdmin) {
+      const featureWsl = await runExecStep(
+        "启用 WSL 功能...",
+        "dism.exe",
+        ["/online", "/enable-feature", "/featurename:Microsoft-Windows-Subsystem-Linux", "/all", "/norestart"],
+        steps,
+        { okExitCodes: [0, 3010] },
+      );
+      const featureVm = await runExecStep(
+        "启用虚拟机平台...",
+        "dism.exe",
+        ["/online", "/enable-feature", "/featurename:VirtualMachinePlatform", "/all", "/norestart"],
+        steps,
+        { okExitCodes: [0, 3010] },
+      );
+      const needRebootFromFeatures =
+        featureWsl.exitCode === 3010 || featureVm.exitCode === 3010 || !featureWsl.ok || !featureVm.ok;
 
-    // Step 1: Enable WSL
-    steps.push("启用 WSL...");
-    await execa("dism.exe", ["/online", "/enable-feature", "/featurename:Microsoft-Windows-Subsystem-Linux", "/all", "/norestart"], { timeout: 120000 });
+      await runWslUpdateWithFallbacks(steps);
+      const ubuntuReady = await installUbuntuDistro(steps);
 
-    // Step 2: Enable Virtual Machine Platform
-    steps.push("启用虚拟机平台...");
-    await execa("dism.exe", ["/online", "/enable-feature", "/featurename:VirtualMachinePlatform", "/all", "/norestart"], { timeout: 120000 });
+      if (ubuntuReady && !needRebootFromFeatures) {
+        const dreaminaInstall =
+          "set -e; export DEBIAN_FRONTEND=noninteractive; if ! command -v curl >/dev/null 2>&1; then apt-get update -qq && apt-get install -y -qq curl ca-certificates; fi; curl -fsSL https://jimeng.jianying.com/cli | bash; /root/.local/bin/dreamina --version";
+        const dreamina = await runExecStep(
+          "在 Ubuntu 中安装 dreamina...",
+          "wsl.exe",
+          ["-d", "Ubuntu", "-u", "root", "--", "bash", "-lc", dreaminaInstall],
+          steps,
+          { timeout: 180000 },
+        );
 
-    // Step 3: Update WSL
-    steps.push("更新 WSL...");
-    await execa("wsl.exe", ["--update", "--web-download"], { timeout: 60000 });
+        if (dreamina.ok) {
+          wslChecked = false;
+          HAS_WSL_DREAMINA = await detectWslDreamina();
+          steps.push("✅ 安装完成！请刷新页面并重新登录");
+          await fs.writeFile(
+            WSL_SETUP_STATUS_FILE,
+            JSON.stringify({
+              phase: "done",
+              status: "completed",
+              message: steps.join("\n"),
+              steps,
+              needReboot: false,
+              ok: true,
+              updatedAt: new Date().toISOString(),
+            }),
+            "utf8",
+          );
+          return res.json({
+            ok: true,
+            message: steps.join("\n"),
+            steps,
+            needReboot: false,
+            wslReady: HAS_WSL_DREAMINA,
+          });
+        }
+      }
 
-    // Step 4: Install Ubuntu if not exists
-    steps.push("安装 Ubuntu...");
-    try {
-      await execa("wsl.exe", ["--install", "-d", "Ubuntu", "--web-download"], { timeout: 180000 });
-    } catch {}
+      if (needRebootFromFeatures) {
+        steps.push("Windows 功能已变更，可能需要重启后再完成 dreamina 安装");
+      }
+    }
 
-    steps.push("安装 dreamina CLI...");
-    const dreaminaInstall = 'set -e; curl -fsSL https://jimeng.jianying.com/cli | bash';
-    await execa("wsl.exe", ["-d", "Ubuntu", "-u", "root", "--", "bash", "-lc", dreaminaInstall], { timeout: 120000 });
-
-    steps.push("✅ 安装完成！请刷新页面并重新登录");
-    return res.json({ ok: true, message: steps.join("\n"), steps });
-
+    await launchWslSetupScript();
+    return res.json({
+      ok: true,
+      launched: true,
+      polling: true,
+      needAdmin: !isAdmin,
+      message: isAdmin
+        ? "已启动安装脚本（部分步骤需在管理员窗口中完成），请等待..."
+        : "已弹出 UAC 管理员窗口，请点击「是」并等待安装完成",
+      steps,
+      manualGuide: WSL_MANUAL_GUIDE,
+    });
   } catch (error) {
     return res.status(500).json({
       ok: false,
-      message: "WSL 环境安装失败",
+      message: "无法启动 WSL 安装",
       detail: error.shortMessage || error.message,
+      steps,
+      manualGuide: WSL_MANUAL_GUIDE,
+      needReboot: true,
     });
   }
 });
@@ -597,37 +1246,59 @@ app.post("/api/jimeng/image/upscale", async (req, res) => {
 // ============================================================
 app.get("/api/jimeng/login/status", async (_req, res) => {
   try {
-    // 使用 login checklogin 验证 OAuth 是否真正完成
-    if (IS_WINDOWS && HAS_WSL_DREAMINA) {
-      // 通过 WSL 读取 token 文件检查是否有有效 access_token
-      let hasToken = false;
-      let tokenData = "";
-      try {
-        const { stdout } = await execa(WSL_EXE, ["-d", WSL_DISTRO, "-u", WSL_DREAMINA_USER, "--", "bash", "-c", "cat /root/.local/share/dreamina/byted_cli_user_token.json"]);
-        tokenData = stdout;
-        const token = JSON.parse(stdout);
-        // 有 access_token 说明 OAuth 已完成
-        hasToken = !!(token.access_token && token.token_expires_at && token.token_expires_at !== "0001-01-01T00:00:00Z");
-      } catch {}
+    const wslReady = IS_WINDOWS ? await ensureWslDreaminaDetected() : false;
 
-      if (!hasToken) {
-        return res.json({ ok: true, loggedIn: false, detail: "未完成 OAuth 授权" });
+    if (canUseDreaminaHeadlessLogin(wslReady)) {
+      const session = await checkDreaminaLogin({ timeout: 15000 });
+      if (session.loggedIn) {
+        stopActiveHeadlessLogin();
+        activeHeadlessLogin = null;
+        loginDeviceCodes.clear();
+        return res.json({
+          ok: true,
+          loggedIn: true,
+          data: session.data,
+          platform: session.platform,
+        });
       }
 
-      // 用 user_credit 验证登录（需要 TTY）
-      const r = await execWslDreamina(["user_credit"], { timeout: 15000 });
-      const output = r.stdout + r.stderr;
-      let data = {};
-      try {
-        data = JSON.parse(r.stdout);
-      } catch {}
-      const loggedIn = data && (data.total_credit !== undefined || data.ok === true);
-      return res.json({ ok: true, loggedIn, data });
+      const tokenSnapshot = await readDreaminaTokenSnapshot();
+      if (tokenSnapshot.ok) {
+        const retry = await checkDreaminaLogin({ timeout: 15000 });
+        if (retry.loggedIn) {
+          stopActiveHeadlessLogin();
+          activeHeadlessLogin = null;
+          loginDeviceCodes.clear();
+          return res.json({
+            ok: true,
+            loggedIn: true,
+            data: retry.data,
+            platform: retry.platform,
+          });
+        }
+      }
+
+      const pending = !!(activeHeadlessLogin && !activeHeadlessLogin.completed);
+      return res.json({
+        ok: true,
+        loggedIn: false,
+        pending,
+        detail: pending
+          ? "后台正在等待 App 授权，请完成扫码/确认后再次点击「验证登录状态」"
+          : session.detail || "尚未完成登录，请重新复制链接授权",
+        platform: session.platform || (IS_WINDOWS ? "wsl-dreamina" : "native"),
+      });
     }
-    // opencli 模式
-    const r = await execa(OPENCLI_CMD, ["jimeng", "history", "-f", "json", "--site-session", "persistent", "--window", "background"], { timeout: 10000 });
-    const data = JSON.parse(r.stdout);
-    return res.json({ ok: true, loggedIn: true, data });
+
+    const opencli = await probeOpencliJimengLogin();
+    return res.json({
+      ok: opencli.ok !== false,
+      loggedIn: opencli.loggedIn,
+      data: opencli.data,
+      detail: opencli.detail,
+      needWsl: opencli.needWsl,
+      platform: opencli.platform || "opencli-windows",
+    });
   } catch (error) {
     return res.json({ ok: true, loggedIn: false, detail: error.shortMessage || error.message });
   }
@@ -1466,7 +2137,7 @@ function mapDreaminaImageModel(model) {
 
 // 鍦ㄦ湇鍔″惎鍔ㄥ墠妫€娴?WSL dreamina 鍙敤鎬?
 console.log("[detect] Checking WSL dreamina...");
-const HAS_WSL_DREAMINA = await detectWslDreamina();
+let HAS_WSL_DREAMINA = await detectWslDreamina();
 console.log("[detect] HAS_WSL_DREAMINA =", HAS_WSL_DREAMINA);
 
 app.listen(PORT, () => {

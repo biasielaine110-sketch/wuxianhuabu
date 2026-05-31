@@ -1,4 +1,4 @@
-import type { CanvasNode, Edge } from './types';
+import type { CanvasNode, Edge, GridSplitNode } from './types';
 import { hasCanvasImagePayload } from './services/canvasAssetResolver';
 
 export type ImageRefPayload = { base64?: string; assetId?: string };
@@ -70,6 +70,52 @@ export function collectImageRefsFromNode(src: CanvasNode): ImageRefPayload[] {
   }
 
   return refs;
+}
+
+function pushImageSlotRefs(
+  refs: ImageRefPayload[],
+  images: string[] | undefined,
+  assetIds: string[] | undefined
+): void {
+  const len = Math.max(images?.length ?? 0, assetIds?.length ?? 0);
+  for (let i = 0; i < len; i++) {
+    const base64 = images?.[i];
+    const assetId = assetIds?.[i];
+    if (hasCanvasImagePayload(base64, assetId)) {
+      refs.push({
+        base64: base64 && base64.length > 80 ? base64 : undefined,
+        assetId: assetId?.trim() || undefined,
+      });
+    }
+  }
+}
+
+/** 复制为新图片节点时可用的全部图片槽（宫格拆分优先输出格） */
+export function collectCopyableImageRefsFromNode(src: CanvasNode): ImageRefPayload[] {
+  const fromImages: ImageRefPayload[] = [];
+  pushImageSlotRefs(fromImages, src.images, src.imageAssetIds);
+  if (fromImages.length > 0) return fromImages;
+
+  if (src.type === 'gridSplit') {
+    const gs = src as GridSplitNode;
+    const fromOutputs: ImageRefPayload[] = [];
+    pushImageSlotRefs(fromOutputs, gs.outputImages, gs.outputImageAssetIds);
+    if (fromOutputs.length > 0) return fromOutputs;
+  }
+
+  return collectImageRefsFromNode(src);
+}
+
+/** 快捷键 C：单张复制时取哪一格（多图节点用 currentImageIndex） */
+export function getNodePrimaryCopyRef(src: CanvasNode): ImageRefPayload | null {
+  const refs = collectCopyableImageRefsFromNode(src);
+  if (refs.length === 0) return null;
+  const imgLen = Math.max(src.images?.length ?? 0, src.imageAssetIds?.length ?? 0);
+  if (imgLen > 0) {
+    const idx = Math.min(Math.max(0, src.currentImageIndex ?? 0), refs.length - 1);
+    return refs[idx] ?? refs[0];
+  }
+  return refs[0];
 }
 
 /** 连线传递时取源节点当前应展示的一张图（含 offload 后仅 assetId） */

@@ -29,6 +29,9 @@ import { getNodeHeaderMeta } from './canvas/nodeHeaderMeta';
 import { CanvasEdgesLayer } from './canvas/CanvasEdgesLayer';
 import { pickActiveWebGLNodeId, shouldUseNodePlaceholder, nodePlaceholderHint } from './canvas/activeWebGLNode';
 import { computeEdgeBridges, nodeLayoutKey } from './canvas/edgeUtils';
+import type { DragPreview, ResizePreview } from './canvas/canvasEdgeGeometry';
+import { resolveNodeGeometry } from './canvas/canvasEdgeGeometry';
+import { hideDraftEdgePath, showDraftEdgePath } from './canvas/canvasDraftEdgeDom';
 import {
   buildStructuralHistoryKey,
   buildPromptHistoryKey,
@@ -39,6 +42,19 @@ import { CanvasMinimap } from './canvas/CanvasMinimap';
 import { ThreeEngineGate } from './canvas/ThreeEngineGate';
 import { computeVisibleNodeIds } from './canvas/viewportUtils';
 import { applyCanvasTransformDom, patchCanvasViewportRef } from './canvas/canvasTransformDom';
+import {
+  applyNodeDragPreview,
+  applyNodeGeometryPreview,
+  clearNodeDragPreview,
+  clearNodeGeometryPreview,
+  clearAllNodeDragPreviews,
+  clearAllNodeGeometryPreviews,
+} from './canvas/canvasNodeDragDom';
+import {
+  applyEdgeDragPreview,
+  applyEdgeResizePreview,
+  clearEdgeGeometryPreviews,
+} from './canvas/canvasEdgeDragDom';
 import { MemoizedNodePlaceholder } from './canvas/MemoizedNodePlaceholder';
 import { MemoNodeCard } from './canvas/MemoNodeCard';
 import { GenerationTimer } from './canvas/GenerationTimer';
@@ -130,6 +146,8 @@ import {
   resolveSlotImagesForIndices,
   resolveSlotAudios,
   getNodePrimaryImageRef,
+  collectCopyableImageRefsFromNode,
+  getNodePrimaryCopyRef,
   imageRefToSingleImageFields,
   resolveImageProviderNodes,
   singleImageFieldsMatch,
@@ -1686,20 +1704,32 @@ export default function App() {
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: DEFAULT_CANVAS_VIEW_SCALE });
   // 懒加载优化：跟踪视口尺寸和画布容器引用
   const viewportRef = useRef({ width: typeof window !== 'undefined' ? window.innerWidth : 1920, height: typeof window !== 'undefined' ? window.innerHeight : 1080 });
+  const canvasViewportRef = useRef({ x: 0, y: 0, width: 0, height: 0, scale: 1 });
   const [viewportSize, setViewportSize] = useState(() => ({
     width: typeof window !== 'undefined' ? window.innerWidth : 1920,
     height: typeof window !== 'undefined' ? window.innerHeight : 1080,
   }));
-  const canvasContainerRef = useRef<HTMLDivElement | null>(null);
+  const [viewportCullTick, setViewportCullTick] = useState(0);
+  const viewportCullRafRef = useRef<number | null>(null);
   useEffect(() => {
     const updateViewport = () => {
-      const next = { width: window.innerWidth, height: window.innerHeight };
+      const rect = containerRef.current?.getBoundingClientRect();
+      const next = rect
+        ? { width: rect.width, height: rect.height }
+        : { width: window.innerWidth, height: window.innerHeight };
       viewportRef.current = next;
       setViewportSize(next);
+      canvasViewportRef.current.width = next.width;
+      canvasViewportRef.current.height = next.height;
     };
     updateViewport();
+    const obs = new ResizeObserver(updateViewport);
+    if (containerRef.current) obs.observe(containerRef.current);
     window.addEventListener('resize', updateViewport);
-    return () => window.removeEventListener('resize', updateViewport);
+    return () => {
+      obs.disconnect();
+      window.removeEventListener('resize', updateViewport);
+    };
   }, []);
   const { ensureJimengReady, openLogin, authInfo, logout } = useJimengAuth();
   const openLoginRef = useRef(openLogin);
@@ -1717,9 +1747,6 @@ export default function App() {
     setThumbResolutionPct(next);
     setThumbResolutionPercent(next);
     thumbnailCache.clear();
-    startTransition(() => {
-      setNodes((prev) => prev.map((n) => ({ ...n, _thumbTick: Date.now() })));
-    });
   }, []);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
 
@@ -1753,7 +1780,9 @@ export default function App() {
   const nodeDragHistoryStartRef = useRef<Map<string, { x: number; y: number }> | null>(null);
 
   // Connection Drafting
-  const [draftEdge, setDraftEdge] = useState<{ sourceId: string, x: number, y: number } | null>(null);
+  const dragPreviewRef = useRef<DragPreview | null>(null);
+  const resizePreviewRef = useRef<ResizePreview | null>(null);
+  const draftEdgePathRef = useRef<SVGPathElement>(null);
 
   // Pending edge source - for auto-connecting after creating new node
   const [pendingEdgeSourceId, setPendingEdgeSourceId] = useState<string | null>(null);
@@ -1823,6 +1852,7 @@ export default function App() {
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
   const canvasTransformLayerRef = useRef<HTMLDivElement>(null);
+  const edgesSvgRef = useRef<SVGSVGElement>(null);
   const canvasBgRef = useRef<HTMLDivElement>(null);
   const wheelTransformCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const canvasBgStyleRef = useRef<'dots' | 'grid' | 'none'>('dots');
@@ -1841,10 +1871,19 @@ export default function App() {
     setTransform({ ...transformRef.current });
   }, []);
 
+  const bumpViewportCull = useCallback(() => {
+    if (viewportCullRafRef.current != null) return;
+    viewportCullRafRef.current = requestAnimationFrame(() => {
+      viewportCullRafRef.current = null;
+      setViewportCullTick((t) => t + 1);
+    });
+  }, []);
+
   const applyLiveCanvasTransform = useCallback((tf: Transform) => {
     applyCanvasTransformDom(tf, canvasTransformLayerRef.current, canvasBgRef.current, canvasBgStyleRef.current);
     patchCanvasViewportRef(canvasViewportRef, tf);
-  }, []);
+    bumpViewportCull();
+  }, [bumpViewportCull]);
 
   // 同步视口信息（transform + 容器尺寸）到 ref，供离屏节点过滤使用
   useLayoutEffect(() => {
@@ -1858,18 +1897,6 @@ export default function App() {
       scale: transform.scale,
     };
   }, [transform]);
-
-  // 容器尺寸变化时也更新视口 ref
-  useEffect(() => {
-    const obs = new ResizeObserver(() => {
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      canvasViewportRef.current.width = rect.width;
-      canvasViewportRef.current.height = rect.height;
-    });
-    if (containerRef.current) obs.observe(containerRef.current);
-    return () => obs.disconnect();
-  }, []);
 
   useEffect(() => {
     draftDiskModalRef.current = draftDiskModal;
@@ -1977,6 +2004,13 @@ export default function App() {
     grabCanvasY: number;
     minWidth: number;
     minHeight: number;
+  } | null>(null);
+  const nodeResizePreviewRef = useRef<{
+    nodeId: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
   } | null>(null);
   useEffect(() => {
     resizingNodeIdRef.current = resizingNodeId;
@@ -3476,28 +3510,13 @@ export default function App() {
     }
   }, [handleUpdateNode, nodes]);
 
-  // 复制节点生成的图片到新的图片节点
+  // 复制节点上的图片到新的图片节点（多图水平排开）
   const handleCopyToImage = useCallback((nodeId: string) => {
     const node = nodes.find(n => n.id === nodeId);
     if (!node) return;
 
-    const imgLen = Math.max(node.images?.length ?? 0, node.imageAssetIds?.length ?? 0);
-    let newNodes: CanvasNode[] = [];
-
-    if (imgLen > 0) {
-      const items = Array.from({ length: imgLen }, (_, idx) => ({
-        base64: node.images?.[idx],
-        assetId: node.imageAssetIds?.[idx],
-      }));
-      newNodes = buildSpacedImageNodes(items, node.x + node.width + 50, node.y);
-    } else {
-      const pn = node as { panoramaImage?: string; panoramaImageAssetId?: string };
-      newNodes = buildSpacedImageNodes(
-        [{ base64: pn.panoramaImage, assetId: pn.panoramaImageAssetId }],
-        node.x + node.width + 50,
-        node.y
-      );
-    }
+    const items = collectCopyableImageRefsFromNode(node);
+    const newNodes = buildSpacedImageNodes(items, node.x + node.width + 50, node.y);
 
     if (newNodes.length === 0) {
       alert('没有可复制的图片');
@@ -3515,6 +3534,27 @@ export default function App() {
 
   // Refs to hold latest state for global event listeners
   const draftEdgeRef = useRef<{ sourceId: string, x: number, y: number } | null>(null);
+
+  const refreshDraftEdgePath = useCallback(() => {
+    const draft = draftEdgeRef.current;
+    if (!draft?.sourceId) {
+      hideDraftEdgePath(draftEdgePathRef.current);
+      return;
+    }
+    const source = nodesRef.current.find((n) => n.id === draft.sourceId);
+    if (!source) {
+      hideDraftEdgePath(draftEdgePathRef.current);
+      return;
+    }
+    const geom = resolveNodeGeometry(source, dragPreviewRef.current, resizePreviewRef.current);
+    showDraftEdgePath(
+      draftEdgePathRef.current,
+      geom.x + geom.width,
+      geom.y + geom.height / 2,
+      draft.x,
+      draft.y,
+    );
+  }, []);
   const activePointerTypeRef = useRef<'canvas' | 'node' | 'edge' | 'fullscreen' | null>(null);
   const draggingNodeIdRef = useRef<string | null>(null);
   const lastMousePosRef = useRef({ x: 0, y: 0 });
@@ -3529,9 +3569,6 @@ export default function App() {
   const nodeDragAccumRef = useRef<{ nodeIds: string[], deltaX: number, deltaY: number } | null>(null);
   const rafIdRef = useRef<number | null>(null);
 
-  // 视口信息 ref（用于离屏节点虚拟化）
-  const canvasViewportRef = useRef({ x: 0, y: 0, width: 0, height: 0, scale: 1 });
-
   /** Alt + 拖拽：超过阈值后复制选中节点；与复制集相连的边（含外部入边/出边）一并映射到新节点 */
   const altDupPendingRef = useRef(false);
   const altDupDoneRef = useRef(false);
@@ -3539,7 +3576,6 @@ export default function App() {
   const altDragScreenAccumRef = useRef({ x: 0, y: 0 });
   const duplicateNodesSubgraphForAltDragRef = useRef<() => void>(() => {});
 
-  useEffect(() => { draftEdgeRef.current = draftEdge; }, [draftEdge]);
   useEffect(() => { draggingEdgeIdRef.current = draggingEdgeId; }, [draggingEdgeId]);
   
   // selectedIds ref 用于事件处理中获取最新值
@@ -3868,6 +3904,11 @@ export default function App() {
         draggingNodeIdRef.current = null;
         setDraggingNodeId(null);
         if (rafIdRef.current) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
+        if (nodeDragAccumRef.current) {
+          clearNodeDragPreview(canvasTransformLayerRef.current, nodeDragAccumRef.current.nodeIds);
+        }
+        clearEdgeGeometryPreviews(edgesSvgRef.current);
+        dragPreviewRef.current = null;
         nodeDragAccumRef.current = null;
       }
       if (isSelectingRef.current) {
@@ -3938,17 +3979,20 @@ export default function App() {
         nodeDragAccumRef.current = { nodeIds: nodeIdsToMove, deltaX: dx, deltaY: dy };
       }
       
-      // 使用 RAF 批量更新位置
+      // 使用 RAF 批量更新 DOM 预览（pointerup 再 commit 到 state）
       if (!rafIdRef.current) {
         rafIdRef.current = requestAnimationFrame(() => {
-          if (nodeDragAccumRef.current && (nodeDragAccumRef.current.deltaX !== 0 || nodeDragAccumRef.current.deltaY !== 0)) {
-            const { nodeIds, deltaX, deltaY } = nodeDragAccumRef.current;
-            setNodes(prev => prev.map(node =>
-              nodeIds.includes(node.id)
-                ? { ...node, x: node.x + deltaX, y: node.y + deltaY }
-                : node
-            ));
-            nodeDragAccumRef.current = { nodeIds, deltaX: 0, deltaY: 0 };
+          const acc = nodeDragAccumRef.current;
+          if (acc) {
+            applyNodeDragPreview(canvasTransformLayerRef.current, acc.nodeIds, acc.deltaX, acc.deltaY);
+            const preview = { nodeIds: acc.nodeIds, deltaX: acc.deltaX, deltaY: acc.deltaY };
+            dragPreviewRef.current = preview;
+            applyEdgeDragPreview(
+              edgesSvgRef.current,
+              edgesRef.current,
+              new Map(nodesRef.current.map((n) => [n.id, n])),
+              preview,
+            );
           }
           rafIdRef.current = null;
         });
@@ -3960,24 +4004,19 @@ export default function App() {
       const mouseX = (e.clientX - rect.left - transformRef.current.x) / transformRef.current.scale;
       const mouseY = (e.clientY - rect.top - transformRef.current.y) / transformRef.current.scale;
 
-      // 更新连线草稿
+      // 更新连线草稿（DOM 直写，避免每帧 setState）
       if (draftEdgeRef.current) {
-        setDraftEdge(prev => prev ? { ...prev, x: mouseX, y: mouseY } : null);
-      }
-
-      let snappedX = mouseX;
-      let snappedY = mouseY;
-      if (draftEdgeRef.current?.sourceId) {
-        const targetNode = findConnectTargetNode(mouseX, mouseY, draftEdgeRef.current.sourceId);
-        if (targetNode) {
-          snappedX = targetNode.x;
-          snappedY = targetNode.y + targetNode.height / 2;
+        let snappedX = mouseX;
+        let snappedY = mouseY;
+        if (draftEdgeRef.current.sourceId) {
+          const targetNode = findConnectTargetNode(mouseX, mouseY, draftEdgeRef.current.sourceId);
+          if (targetNode) {
+            snappedX = targetNode.x;
+            snappedY = targetNode.y + targetNode.height / 2;
+          }
         }
-      }
-      
-      if (draftEdgeRef.current) {
         draftEdgeRef.current = { ...draftEdgeRef.current, x: snappedX, y: snappedY };
-        setDraftEdge({ ...draftEdgeRef.current });
+        refreshDraftEdgePath();
       }
     } else if (pointerType === 'fullscreen') {
       const dx = e.clientX - lastFsMousePosRef.current.x;
@@ -4003,7 +4042,16 @@ export default function App() {
           sess.minHeight
         );
         const id = sess.nodeId;
-        setNodes((prev) => prev.map((n) => (n.id === id ? { ...n, ...next } : n)));
+        const preview = { nodeId: id, ...next };
+        nodeResizePreviewRef.current = preview;
+        resizePreviewRef.current = preview;
+        applyNodeGeometryPreview(canvasTransformLayerRef.current, id, next);
+        applyEdgeResizePreview(
+          edgesSvgRef.current,
+          edgesRef.current,
+          new Map(nodesRef.current.map((n) => [n.id, n])),
+          preview,
+        );
       }
     }
   };
@@ -4043,10 +4091,15 @@ export default function App() {
         const acc = nodeDragAccumRef.current;
         const dragStartMap = nodeDragHistoryStartRef.current;
         nodeDragHistoryStartRef.current = null;
+        if (acc) {
+          clearNodeDragPreview(canvasTransformLayerRef.current, acc.nodeIds);
+        }
+        clearEdgeGeometryPreviews(edgesSvgRef.current);
+        dragPreviewRef.current = null;
         if (acc && (acc.deltaX !== 0 || acc.deltaY !== 0)) {
           const { nodeIds, deltaX, deltaY } = acc;
           const workingNodes = nodesRef.current.map((node) =>
-            nodeIds.includes(node.id) ? { ...node, x: node.x + deltaX, y: node.y + deltaY } : node
+            nodeIds.includes(node.id) ? { ...node, x: node.x + deltaX, y: node.y + deltaY } : node,
           );
           setNodes(workingNodes);
           if (dragStartMap) {
@@ -4059,6 +4112,20 @@ export default function App() {
 
       // 清理缩放状态
       if (pointerType === 'resize') {
+        const preview = nodeResizePreviewRef.current;
+        if (preview) {
+          setNodes((prev) =>
+            prev.map((n) =>
+              n.id === preview.nodeId
+                ? { ...n, x: preview.x, y: preview.y, width: preview.width, height: preview.height }
+                : n,
+            ),
+          );
+          clearNodeGeometryPreview(canvasTransformLayerRef.current, preview.nodeId);
+          nodeResizePreviewRef.current = null;
+        }
+        clearEdgeGeometryPreviews(edgesSvgRef.current);
+        resizePreviewRef.current = null;
         nodeResizeSessionRef.current = null;
         setResizingNodeId(null);
         resizingNodeIdRef.current = null;
@@ -4119,7 +4186,7 @@ export default function App() {
           setPendingEdgeSourceId(draftEdgeRef.current?.sourceId || null);
           setContextMenu({ x: e.clientX, y: e.clientY, canvasX, canvasY });
         }
-        setDraftEdge(null);
+        hideDraftEdgePath(draftEdgePathRef.current);
         draftEdgeRef.current = null;
       }
     };
@@ -4341,17 +4408,37 @@ export default function App() {
         if (!sid) return;
         const node = nodes.find(n => n.id === sid);
         if (!node) return;
-        const idx = node.currentImageIndex ?? 0;
-        const payload = cloneImageSlotForNewNode(node.images?.[idx], node.imageAssetIds?.[idx]);
-        if (!payload) return;
         const mp = canvasMouseRef.current;
+        const allRefs = collectCopyableImageRefsFromNode(node);
+        if (allRefs.length === 0) return;
+
+        const imgLen = Math.max(node.images?.length ?? 0, node.imageAssetIds?.length ?? 0);
+        const copyAll =
+          node.type === 'gridSplit' && allRefs.length > 1 && imgLen === 0;
+
+        if (copyAll) {
+          const newNodes = buildSpacedImageNodes(
+            allRefs,
+            mp.x - SPAWNED_IMAGE_NODE_WIDTH / 2,
+            mp.y - SPAWNED_IMAGE_NODE_HEIGHT / 2
+          );
+          if (newNodes.length === 0) return;
+          setNodes(prev => [...prev, ...newNodes]);
+          setSelectedIds(newNodes.map(n => n.id));
+          return;
+        }
+
+        const ref = getNodePrimaryCopyRef(node);
+        if (!ref) return;
+        const payload = cloneImageSlotForNewNode(ref.base64, ref.assetId);
+        if (!payload) return;
         const newNode: CanvasNode = {
           id: `image-${Date.now()}`,
           type: 'image',
-          x: mp.x,
-          y: mp.y,
-          width: 720,
-          height: 792,
+          x: mp.x - SPAWNED_IMAGE_NODE_WIDTH / 2,
+          y: mp.y - SPAWNED_IMAGE_NODE_HEIGHT / 2,
+          width: SPAWNED_IMAGE_NODE_WIDTH,
+          height: SPAWNED_IMAGE_NODE_HEIGHT,
           ...payload,
           currentImageIndex: 0,
         };
@@ -4364,6 +4451,12 @@ export default function App() {
         }
         // 清理所有拖拽/框选/缩放状态
         if (draggingNodeIdRef.current) {
+          const acc = nodeDragAccumRef.current;
+          if (acc) {
+            clearNodeDragPreview(canvasTransformLayerRef.current, acc.nodeIds);
+          }
+          clearEdgeGeometryPreviews(edgesSvgRef.current);
+          dragPreviewRef.current = null;
           draggingNodeIdRef.current = null;
           setDraggingNodeId(null);
           if (rafIdRef.current) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
@@ -4378,6 +4471,13 @@ export default function App() {
           pressStartPosRef.current = null;
         }
         if (resizingNodeIdRef.current) {
+          const preview = nodeResizePreviewRef.current;
+          if (preview) {
+            clearNodeGeometryPreview(canvasTransformLayerRef.current, preview.nodeId);
+            nodeResizePreviewRef.current = null;
+          }
+          clearEdgeGeometryPreviews(edgesSvgRef.current);
+          resizePreviewRef.current = null;
           resizingNodeIdRef.current = null;
           setResizingNodeId(null);
           setIsResizing(false);
@@ -4386,7 +4486,11 @@ export default function App() {
         activePointerTypeRef.current = null;
         setSelectedIds([]);
         setContextMenu(null);
-        setDraftEdge(null);
+        hideDraftEdgePath(draftEdgePathRef.current);
+        draftEdgeRef.current = null;
+        dragPreviewRef.current = null;
+        resizePreviewRef.current = null;
+        clearEdgeGeometryPreviews(edgesSvgRef.current);
         setFullscreenImage(null);
         setEyedropperTargetNodeId(null);
       } else if ((e.code === 'Backspace' || e.code === 'Delete') && !isInput && !fullscreenImage) {
@@ -4895,6 +4999,21 @@ export default function App() {
 
     // 处理节点缩放结束
     if (pointerType === 'resize') {
+      const preview = nodeResizePreviewRef.current;
+      if (preview) {
+        setNodes((prev) =>
+          prev.map((n) =>
+            n.id === preview.nodeId
+              ? { ...n, x: preview.x, y: preview.y, width: preview.width, height: preview.height }
+              : n,
+          ),
+        );
+        clearNodeGeometryPreview(canvasTransformLayerRef.current, preview.nodeId);
+        nodeResizePreviewRef.current = null;
+      }
+      clearEdgeGeometryPreviews(edgesSvgRef.current);
+      resizePreviewRef.current = null;
+      setResizePreview(null);
       nodeResizeSessionRef.current = null;
       setResizingNodeId(null);
       resizingNodeIdRef.current = null;
@@ -5018,6 +5137,9 @@ export default function App() {
         cancelAnimationFrame(rafIdRef.current);
         rafIdRef.current = null;
       }
+      if (nodeDragAccumRef.current) {
+        clearNodeDragPreview(canvasTransformLayerRef.current, nodeDragAccumRef.current.nodeIds);
+      }
       nodeDragAccumRef.current = null;
       altDupPendingRef.current = false;
       altDupDoneRef.current = false;
@@ -5096,8 +5218,8 @@ export default function App() {
     const mouseX = (e.clientX - rect.left - transform.x) / transform.scale;
     const mouseY = (e.clientY - rect.top - transform.y) / transform.scale;
     const newDraft = { sourceId: nodeId, x: mouseX, y: mouseY };
-    setDraftEdge(newDraft);
     draftEdgeRef.current = newDraft;
+    refreshDraftEdgePath();
     lastMousePosRef.current = { x: e.clientX, y: e.clientY };
   };
 
@@ -6160,17 +6282,44 @@ ${text}`,
   // --- Canvas render memoization ---
   const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
   const edgeBridges = useMemo(() => computeEdgeBridges(edges, nodeMap), [edges, nodeMap]);
-  const visibleNodeIds = useMemo(
-    () => computeVisibleNodeIds(nodes, transform, viewportSize.width, viewportSize.height, 300),
-    [nodes, transform, viewportSize]
-  );
+  const visibleNodeIds = useMemo(() => {
+    const vp = canvasViewportRef.current;
+    return computeVisibleNodeIds(
+      nodes,
+      { x: vp.x, y: vp.y, scale: vp.scale },
+      vp.width || viewportSize.width,
+      vp.height || viewportSize.height,
+      300,
+    );
+  }, [nodes, transform, viewportSize, viewportCullTick]);
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const edgeRenderNodeIds = useMemo(() => {
     const set = new Set(visibleNodeIds);
     if (draggingNodeId) set.add(draggingNodeId);
     for (const id of selectedIds) set.add(id);
+    if (resizingNodeId) set.add(resizingNodeId);
+    for (const edge of edges) {
+      if (set.has(edge.sourceId)) set.add(edge.targetId);
+      if (set.has(edge.targetId)) set.add(edge.sourceId);
+    }
     return set;
-  }, [visibleNodeIds, draggingNodeId, selectedIds]);
+  }, [visibleNodeIds, draggingNodeId, selectedIds, resizingNodeId, edges]);
+
+  /** 仅挂载视口内 / 选中 / 交互中 / 生成中 / 连线邻接的节点，远距离节点零 DOM */
+  const mountedNodeIds = useMemo(() => {
+    const set = new Set(visibleNodeIds);
+    for (const id of selectedIds) set.add(id);
+    if (draggingNodeId) set.add(draggingNodeId);
+    if (resizingNodeId) set.add(resizingNodeId);
+    for (const n of nodes) {
+      if (n.isGenerating) set.add(n.id);
+    }
+    for (const edge of edges) {
+      if (set.has(edge.sourceId)) set.add(edge.targetId);
+      if (set.has(edge.targetId)) set.add(edge.sourceId);
+    }
+    return set;
+  }, [visibleNodeIds, selectedIds, draggingNodeId, resizingNodeId, nodes, edges]);
 
   const activeWebGLNodeId = useMemo(() => {
     const vp = canvasViewportRef.current;
@@ -6630,10 +6779,10 @@ ${text}`,
                       // 方案2: 回退到原始即梦URL（如果当前是本地URL）
                       else if (originalUrl.includes('localhost:3107')) {
                         // 尝试从节点数据中获取原始URL
-                        const node = nodes.find(n => n.id === nodeId);
-                        if (node?.originalVideoUrl) {
-                          console.log('尝试回退到原始URL:', node.originalVideoUrl);
-                          videoEl.src = node.originalVideoUrl;
+                        const srcNode = nodesRef.current.find((n) => n.id === node.id);
+                        if (srcNode?.originalVideoUrl) {
+                          console.log('尝试回退到原始URL:', srcNode.originalVideoUrl);
+                          videoEl.src = srcNode.originalVideoUrl;
                         }
                       }
                     }}
@@ -6963,6 +7112,7 @@ ${text}`,
                 };
                 setNodes(prev => [...prev, newNode]);
               }}
+              onCopyToImage={() => handleCopyToImage(node.id)}
             />
             </ThreeEngineGate>
           )}
@@ -7028,6 +7178,7 @@ ${text}`,
                 };
                 setNodes(prev => [...prev, newNode]);
               }}
+              onCopyToImage={() => handleCopyToImage(node.id)}
               onFullscreenImage={(base64) => setFullscreenImage(base64)}
               onDeleteEdge={handleDeleteEdge}
             />
@@ -8758,15 +8909,17 @@ ${text}`,
           style={{ transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})` }}
         >
           {/* SVG Connections Layer - Fixed size to cover all possible node positions */}
-          <svg 
-            id="svg-layer" 
-            className="absolute pointer-events-none"
+          <svg
+            ref={edgesSvgRef}
+            id="svg-layer"
+            className="absolute"
             style={{ 
               left: 0, 
               top: 0, 
               width: '50000px', 
               height: '50000px',
-              overflow: 'visible'
+              overflow: 'visible',
+              pointerEvents: 'none',
             }}
           >
             <defs>
@@ -8791,6 +8944,7 @@ ${text}`,
               </marker>
             </defs>
             
+            <g style={{ pointerEvents: 'auto' }}>
             <CanvasEdgesLayer
               edges={edges}
               nodeMap={nodeMap}
@@ -8798,6 +8952,7 @@ ${text}`,
               selectedIdSet={selectedIdSet}
               onDeleteEdge={handleDeleteEdge}
             />
+            </g>
 
             {/* 跃线标记：检测连线交叉点并绘制弧形桥 */}
             {edgeBridges.map((b) => (
@@ -8810,37 +8965,20 @@ ${text}`,
               </g>
             ))}
 
-            {/* Render drafting edge */}
-            {draftEdge && (() => {
-              const source = nodes.find(n => n.id === draftEdge.sourceId);
-              if (!source) return null;
-              const startX = source.x + source.width;
-              const startY = source.y + source.height / 2;
-              const endX = draftEdge.x;
-              const endY = draftEdge.y;
-              
-              const dist = Math.abs(endX - startX);
-              const controlOffset = Math.max(dist / 2, 60);
-
-              const cp1X = startX + controlOffset;
-              const cp1Y = startY;
-              const cp2X = endX - controlOffset;
-              const cp2Y = endY;
-
-              return (
-                <path
-                  d={`M ${startX} ${startY} C ${cp1X} ${cp1Y}, ${cp2X} ${cp2Y}, ${endX} ${endY}`}
-                  stroke="#60a5fa"
-                  strokeWidth="3"
-                  strokeDasharray="8,4"
-                  fill="none"
-                />
-              );
-            })()}
+            {/* 拉线草稿：DOM 直写 path，避免每帧 setState */}
+            <path
+              ref={draftEdgePathRef}
+              stroke="#60a5fa"
+              strokeWidth="3"
+              strokeDasharray="8,4"
+              fill="none"
+              visibility="hidden"
+            />
           </svg>
 
           {/* Nodes Layer */}
           {nodes.map((node) => {
+            if (!mountedNodeIds.has(node.id)) return null;
             const isInViewport = visibleNodeIds.has(node.id);
             const isDragging = draggingNodeId === node.id;
             const isSelected = selectedIdSet.has(node.id);
@@ -8856,8 +8994,12 @@ ${text}`,
                   key={node.id}
                   node={node}
                   isSelected={isSelected}
+                  hasInputPort={INPUT_NODE_TYPES.includes(node.type)}
+                  hasOutputPort
                   hint={nodePlaceholderHint(node, { isInViewport, activeWebGLNodeId })}
                   onPointerDown={handleNodePointerDown}
+                  onPortPointerDown={handlePortPointerDown}
+                  onBeginResize={beginNodeResize}
                 />
               );
             }
@@ -8870,6 +9012,7 @@ ${text}`,
                 isDragging={isDragging}
                 edgesKey={edgesKey}
                 eyedropperTargetNodeId={eyedropperTargetNodeId}
+                thumbResolutionKey={thumbResolutionPct}
                 renderNode={stableRenderNode}
               />
             );

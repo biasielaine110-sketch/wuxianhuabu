@@ -53,6 +53,7 @@ export function CanvasNodeShell({
     <div
       key={node.id}
       data-node-root="true"
+      data-node-id={node.id}
       data-selected={isSelected ? 'true' : 'false'}
       className={rootClass}
       style={{ left: node.x, top: node.y, width: node.width, height: node.height }}

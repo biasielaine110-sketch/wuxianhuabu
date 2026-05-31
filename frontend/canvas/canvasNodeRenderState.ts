@@ -61,9 +61,6 @@ export type CanvasNodeRenderState = {
   eyedropperTargetNodeIdRef: MutableRefObject<string | null>;
   promptPresetDomainOverrides: Record<string, PresetDomainId>;
   promptPresetCategoryOverrides: Record<string, I2iPresetCategoryId>;
-  handleCopyToImage: (nodeId: string) => void;
-  handleOptimizePrompt: (nodeId: string, text: string) => void;
-  openFullscreenFromBase64: (base64: string) => void;
 };
 
 export type CanvasNodeRenderStateRef = MutableRefObject<CanvasNodeRenderState>;

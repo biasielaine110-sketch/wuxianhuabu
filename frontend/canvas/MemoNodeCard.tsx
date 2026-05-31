@@ -8,6 +8,7 @@ export type MemoNodeCardProps = {
   isDragging: boolean;
   edgesKey: string;
   eyedropperTargetNodeId: string | null;
+  thumbResolutionKey: number;
   renderNode: (node: CanvasNode) => React.ReactNode;
 };
 
@@ -33,12 +34,15 @@ function areNodeCardPropsEqual(prev: MemoNodeCardProps, next: MemoNodeCardProps)
     prev.node.type === 'gridMerge' ||
     prev.node.type === 'annotation' ||
     prev.node.type === 'panorama' ||
+    prev.node.type === 'panoramaT2i' ||
     prev.node.type === 'director3d';
 
   if (graphSensitive && prev.edgesKey !== next.edgesKey) return false;
 
   /** 吸管目标变化时需重绘（按钮高亮、预览区拾取连线层等依赖此状态） */
   if (graphSensitive && prev.eyedropperTargetNodeId !== next.eyedropperTargetNodeId) return false;
+
+  if (prev.thumbResolutionKey !== next.thumbResolutionKey) return false;
 
   return true;
 }

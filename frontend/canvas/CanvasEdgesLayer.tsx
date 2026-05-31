@@ -1,6 +1,7 @@
-import React, { memo } from 'react';
+import React, { memo, useRef } from 'react';
 import type { CanvasNode, Edge } from '../types';
 import { EdgePath } from './EdgePath';
+import { buildEdgeBezierPath } from './canvasEdgeGeometry';
 
 type CanvasEdgesLayerProps = {
   edges: Edge[];
@@ -17,6 +18,9 @@ function CanvasEdgesLayerInner({
   selectedIdSet,
   onDeleteEdge,
 }: CanvasEdgesLayerProps) {
+  const onDeleteEdgeRef = useRef(onDeleteEdge);
+  onDeleteEdgeRef.current = onDeleteEdge;
+
   return (
     <>
       {edges.map((edge) => {
@@ -53,12 +57,12 @@ function CanvasEdgesLayerInner({
               endX={endX}
               endY={endY}
               isActive={isActive}
-              onDelete={onDeleteEdge}
+              onDelete={(id) => onDeleteEdgeRef.current(id)}
             />
             <g
               transform={`translate(${(startX + cp2X) / 2}, ${(startY + cp2Y) / 2})`}
               className="opacity-0 group-hover/edge:opacity-100 transition-opacity cursor-pointer"
-              onClick={() => onDeleteEdge(edge.id)}
+              onClick={() => onDeleteEdgeRef.current(edge.id)}
             >
               <circle r="10" fill="#ef4444" stroke="#fff" strokeWidth="1" />
               <line x1="-4" y1="-4" x2="4" y2="4" stroke="#fff" strokeWidth="2" />

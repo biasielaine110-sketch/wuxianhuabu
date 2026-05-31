@@ -9,5 +9,7 @@ export const MemoizedNodePlaceholder = memo(
   (prev, next) =>
     prev.node === next.node &&
     prev.isSelected === next.isSelected &&
-    prev.hint === next.hint
+    prev.hint === next.hint &&
+    prev.hasInputPort === next.hasInputPort &&
+    prev.hasOutputPort === next.hasOutputPort
 );
