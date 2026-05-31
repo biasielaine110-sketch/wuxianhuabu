@@ -5,6 +5,7 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 import type { CanvasNode, Director3DNode, Figure3D } from '../types';
 import {
   DeleteIcon,
+  CopyIcon,
   EyedropperIcon,
   FullscreenIcon,
   ImageIcon,
@@ -20,8 +21,9 @@ export interface Director3DNodeContentProps {
   onEyedropperSelect: () => void;
   onUpdate: (updates: Partial<Director3DNode>) => void;
   onCreateImageNode: (images: string[], nodeX: number, nodeY: number) => void;
+  onCopyToImage?: () => void;
 }
-export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onEyedropperSelect, onUpdate, onCreateImageNode }: Director3DNodeContentProps) {
+export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onEyedropperSelect, onUpdate, onCreateImageNode, onCopyToImage }: Director3DNodeContentProps) {
   const figurePalette = ['#ef4444', '#f59e0b', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899', '#84cc16', '#f97316', '#14b8a6'];
   const buildFigureColor = (index: number) => figurePalette[index % figurePalette.length];
   const buildFigureLabelSprite = (labelText: string, color: string) => {
@@ -957,6 +959,15 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
           className="flex-1 py-1 px-2 rounded text-[10px] bg-[#333] hover:bg-[#444] text-gray-300 flex items-center justify-center gap-1"
         >
           <ImageIcon size={10} /> 导入背景
+        </button>
+        <button
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => onCopyToImage?.()}
+          disabled={!hasBackgroundMedia || !onCopyToImage}
+          className="py-1 px-2 rounded text-[10px] bg-blue-700 hover:bg-blue-600 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+          title="复制背景图为新图片节点"
+        >
+          <CopyIcon size={10} /> 复制
         </button>
         <button
           onPointerDown={(e) => e.stopPropagation()}

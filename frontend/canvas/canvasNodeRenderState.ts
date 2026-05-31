@@ -1,5 +1,6 @@
 import type { MutableRefObject, PointerEvent, ReactNode, Dispatch, SetStateAction } from 'react';
 import type { CanvasNode, Edge, ChatMessage } from '../types';
+import type { CopyToImageLayout, CopyToImageOptions } from './copyToImageOptions';
 
 export type PresetDomainId = 'chat' | 't2i' | 'i2i';
 export type I2iPresetCategoryId = 'character' | 'scene' | 'props' | 'storyboard' | 'other';
@@ -39,7 +40,7 @@ export type CanvasNodeRenderState = {
   handleOptimizePrompt: (nodeId: string, text: string) => void;
   handleClearPreset: (nodeId: string) => void;
   handleTogglePreset: (nodeId: string, presetKey: string) => void;
-  handleCopyToImage: (nodeId: string) => void;
+  handleCopyToImage: (nodeId: string, layoutOrOptions?: CopyToImageLayout | CopyToImageOptions) => void;
   handleResetNodeSize: (nodeId: string) => void;
   handleDeleteNode: (nodeId: string) => void;
   handleCanvasEyedropper: (sourceId: string, targetId: string) => boolean;

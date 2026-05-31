@@ -19,6 +19,7 @@ export interface GridMergeNodeContentProps {
   onEyedropperSelect: () => void;
   onUpdate: (updates: Partial<GridMergeNode>) => void;
   onCreateImageNode: (image: string, nodeX: number, nodeY: number, assetId?: string) => void;
+  onCopyToImage?: () => void;
 }
 
 function slotImage(
@@ -45,6 +46,7 @@ export function GridMergeNodeContent({
   onEyedropperSelect,
   onUpdate,
   onCreateImageNode,
+  onCopyToImage,
 }: GridMergeNodeContentProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const inputImages = node.inputImages ?? [];
@@ -159,6 +161,10 @@ export function GridMergeNodeContent({
   };
 
   const handleExport = () => {
+    if (onCopyToImage) {
+      onCopyToImage();
+      return;
+    }
     if (outputImage) {
       onCreateImageNode(outputImage, node.x + node.width + 50, node.y);
       return;

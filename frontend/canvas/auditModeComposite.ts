@@ -1,4 +1,5 @@
 import type { AuditImage } from '../types';
+import { base64ToImageDataUrl } from './auditImageUtils';
 
 export type AuditAnnotationDraw = {
   type: string;
@@ -15,22 +16,6 @@ export type AuditAnnotationDraw = {
   fontSize?: number;
   fillOpacity?: number;
 };
-
-function base64ToImageDataUrl(raw: string): string {
-  const cleaned = raw.replace(/^data:[^;]+;base64,/, '');
-  let mime = 'image/png';
-  try {
-    const dec = atob(cleaned.slice(0, 48));
-    const a = dec.charCodeAt(0);
-    const b = dec.charCodeAt(1);
-    if (a === 0xff && b === 0xd8) mime = 'image/jpeg';
-    else if (a === 0x89 && b === 0x50) mime = 'image/png';
-    else if (a === 0x47 && b === 0x49) mime = 'image/gif';
-  } catch {
-    /* ignore */
-  }
-  return `data:${mime};base64,${cleaned}`;
-}
 
 function drawArrow(
   ctx: CanvasRenderingContext2D,
@@ -157,6 +142,86 @@ export type AuditCompositeResult = {
   minX: number;
   minY: number;
 };
+
+function annotationBounds(ann: AuditAnnotationDraw): {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+} {
+  if (ann.type === 'pen' && ann.points && ann.points.length > 0) {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const p of ann.points) {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
+    }
+    return { minX, minY, maxX, maxY };
+  }
+  if (ann.type === 'arrow') {
+    return {
+      minX: Math.min(ann.x, ann.endX ?? ann.x),
+      minY: Math.min(ann.y, ann.endY ?? ann.y),
+      maxX: Math.max(ann.x, ann.endX ?? ann.x),
+      maxY: Math.max(ann.y, ann.endY ?? ann.y),
+    };
+  }
+  if (ann.type === 'text') {
+    const fs = ann.fontSize ?? 16;
+    const tw = (ann.text?.length ?? 1) * fs * 0.6;
+    return { minX: ann.x, minY: ann.y - fs, maxX: ann.x + tw, maxY: ann.y };
+  }
+  const w = ann.width ?? 0;
+  const h = ann.height ?? 0;
+  return {
+    minX: Math.min(ann.x, ann.x + w),
+    minY: Math.min(ann.y, ann.y + h),
+    maxX: Math.max(ann.x, ann.x + w),
+    maxY: Math.max(ann.y, ann.y + h),
+  };
+}
+
+function boundsIntersect(
+  a: { minX: number; minY: number; maxX: number; maxY: number },
+  b: { minX: number; minY: number; maxX: number; maxY: number }
+): boolean {
+  return !(a.maxX < b.minX || a.minX > b.maxX || a.maxY < b.minY || a.minY > b.maxY);
+}
+
+/** 计算一组看图图片的外接矩形（含 scale） */
+export function getAuditImagesBounds(images: AuditImage[]): {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+} | null {
+  if (images.length === 0) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const img of images) {
+    const w = img.width * img.scale;
+    const h = img.height * img.scale;
+    minX = Math.min(minX, img.x);
+    minY = Math.min(minY, img.y);
+    maxX = Math.max(maxX, img.x + w);
+    maxY = Math.max(maxY, img.y + h);
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+/** 筛选与给定矩形相交的标注（用于合并/下载选中区域） */
+export function filterAnnotationsInBounds(
+  annotations: AuditAnnotationDraw[],
+  bounds: { minX: number; minY: number; maxX: number; maxY: number }
+): AuditAnnotationDraw[] {
+  return annotations.filter((ann) => boundsIntersect(annotationBounds(ann), bounds));
+}
 
 /** 将看图图片（及可选标注）合成为一张 PNG base64；images 须为自下而上叠放顺序（先画底层） */
 export async function buildAuditImagesComposite(

@@ -1,35 +1,14 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { AuditImage, Transform } from './types';
 import { AuditMinimap } from './canvas/AuditMinimap';
-import { buildAuditImagesComposite } from './canvas/auditModeComposite';
+import { AuditAnnotationToolbar, type AuditAnnotationTool } from './canvas/AuditAnnotationToolbar';
+import {
+  buildAuditImagesComposite,
+  filterAnnotationsInBounds,
+  getAuditImagesBounds,
+} from './canvas/auditModeComposite';
+import { base64ToImageDataUrl, sniffImageMimeFromBase64 } from './canvas/auditImageUtils';
 import { saveImageDownload } from './services/downloadPathSettings';
-
-/** 根据 base64 魔数字节识别真实的图片 MIME 类型 */
-function sniffImageMimeFromBase64(raw: string): string {
-  if (!raw || raw.length < 8) return 'image/png';
-  // 清理可能的前缀
-  const cleaned = raw.replace(/^data:[^;]+;base64,/, '');
-  try {
-    const dec = atob(cleaned.slice(0, 48));
-    const a = dec.charCodeAt(0);
-    const b = dec.charCodeAt(1);
-    if (a === 0xff && b === 0xd8) return 'image/jpeg';
-    if (a === 0x89 && b === 0x50) return 'image/png';
-    if (a === 0x47 && b === 0x49) return 'image/gif';
-    if (a === 0x52 && b === 0x49 && dec.startsWith('RIFF')) return 'image/webp';
-  } catch {
-    /* ignore */
-  }
-  return 'image/png';
-}
-
-/** 将纯 base64 转换为带正确 MIME 类型的 data URL */
-function base64ToImageDataUrl(raw: string): string {
-  const cleaned = raw.replace(/^data:[^;]+;base64,/, '');
-  return `data:${sniffImageMimeFromBase64(cleaned)};base64,${cleaned}`;
-}
-
-const colors = ['#ffffff', '#000000', '#ff6b6b', '#feca57', '#48dbfb', '#1dd1a1', '#ff9ff3', '#54a0ff'];
 
 interface AuditModeCanvasProps {
   auditImages: AuditImage[];
@@ -42,7 +21,7 @@ interface AuditModeCanvasProps {
   saveCurrentProject?: () => void;
 }
 
-type AnnotationTool = 'rect' | 'circle' | 'arrow' | 'pen' | 'text' | 'fillRect' | 'fillCircle' | 'select';
+type AnnotationTool = AuditAnnotationTool;
 
 interface AuditAnnotation {
   id: string;
@@ -116,6 +95,10 @@ export default function AuditModeCanvas({
   // 历史记录（最多保留1步撤销）
   const [annotationHistory, setAnnotationHistory] = useState<AuditAnnotation[][]>([[]]);
   const [historyIndex, setHistoryIndex] = useState(0);
+  const annotationHistoryRef = useRef(annotationHistory);
+  useEffect(() => {
+    annotationHistoryRef.current = annotationHistory;
+  }, [annotationHistory]);
 
   // ref（避免闭包陷阱）
   const currentToolRef = useRef(currentTool);
@@ -217,6 +200,8 @@ export default function AuditModeCanvas({
     if (!ctx) return;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.setTransform(transform.scale, 0, 0, transform.scale, transform.x, transform.y);
 
     const annotationsToDraw = [...auditAnnotationsRef.current];
     if (tempAnnotation) {
@@ -282,7 +267,8 @@ export default function AuditModeCanvas({
           break;
       }
     });
-  }, [tempAnnotation]);
+    ctx.restore();
+  }, [tempAnnotation, transform]);
 
   // 绘制箭头
   const drawArrow = (ctx: CanvasRenderingContext2D, x1: number, y1: number, x2: number, y2: number, color: string, width: number) => {
@@ -303,8 +289,13 @@ export default function AuditModeCanvas({
 
   // 重新渲染标注（对外暴露）
   useEffect(() => {
+    const canvas = canvasRef.current;
+    if (canvas) {
+      canvas.width = viewportSize.width;
+      canvas.height = viewportSize.height;
+    }
     renderAnnotations();
-  }, [auditAnnotations, tempAnnotation, renderAnnotations]);
+  }, [auditAnnotations, tempAnnotation, renderAnnotations, viewportSize, transform]);
 
   // ====== 图片处理 ======
 
@@ -618,9 +609,6 @@ export default function AuditModeCanvas({
     setContextMenu(null);
   }, [bringImagesToFront]);
 
-  // 判断图片是否被选中
-  const isImageSelected = (imgId: string) => selectedImageIds.includes(imgId);
-
   // 选中图片（支持 Ctrl 加选、Alt 减选）
   const handleImagePointerDown = (e: React.PointerEvent, imgId: string) => {
     e.stopPropagation();
@@ -703,42 +691,6 @@ export default function AuditModeCanvas({
       y: e.clientY - imgScreenY,
     };
   };
-
-  // 拖拽移动（所有选中图片一起移动）
-  const dragStartPositionsRef = useRef<Map<string, {x: number, y: number}>>(new Map());
-
-  const handlePointerMove = useCallback((e: React.PointerEvent) => {
-    if (!draggingImageId || !containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    // 记录所有选中图片的起始位置（只记一次）
-    if (dragStartPositionsRef.current.size === 0) {
-      setAuditImages(prev => {
-        dragStartPositionsRef.current = new Map();
-        prev.forEach(img => {
-          if (selectedImageIds.includes(img.id)) {
-            dragStartPositionsRef.current.set(img.id, { x: img.x, y: img.y });
-          }
-        });
-        return prev;
-      });
-    }
-    setAuditImages(prev => prev.map(img => {
-      if (!selectedImageIds.includes(img.id)) return img;
-      const start = dragStartPositionsRef.current.get(img.id);
-      if (!start) return img;
-      const newScreenX = e.clientX - dragOffsetRef.current.x;
-      const newScreenY = e.clientY - dragOffsetRef.current.y;
-      const newCanvasX = (newScreenX - rect.left - transform.x) / transform.scale;
-      const newCanvasY = (newScreenY - rect.top - transform.y) / transform.scale;
-      return { ...img, x: newCanvasX, y: newCanvasY };
-    }));
-  }, [draggingImageId, containerRef, transform, selectedImageIds, setAuditImages]);
-
-  // 停止拖拽
-  const handlePointerUp = useCallback(() => {
-    setDraggingImageId(null);
-    dragStartPositionsRef.current = new Map();
-  }, []);
 
   // 注册全局移动/释放事件
   useEffect(() => {
@@ -1045,23 +997,46 @@ export default function AuditModeCanvas({
     setTextInputValue('');
   };
 
-  // 撤销
-  const undo = () => {
-    if (historyIndex > 0) {
-      const newIndex = historyIndex - 1;
-      setHistoryIndex(newIndex);
-      setAuditAnnotations([...annotationHistory[newIndex]]);
-    }
-  };
+  // 撤销 / 重做（标注历史）
+  const undoAnnotation = useCallback(() => {
+    setHistoryIndex((idx) => {
+      if (idx <= 0) return idx;
+      const newIndex = idx - 1;
+      setAuditAnnotations([...annotationHistoryRef.current[newIndex]]);
+      return newIndex;
+    });
+  }, []);
 
-  // 重做
-  const redo = () => {
-    if (historyIndex < annotationHistory.length - 1) {
-      const newIndex = historyIndex + 1;
-      setHistoryIndex(newIndex);
-      setAuditAnnotations([...annotationHistory[newIndex]]);
-    }
-  };
+  const redoAnnotation = useCallback(() => {
+    setHistoryIndex((idx) => {
+      const hist = annotationHistoryRef.current;
+      if (idx >= hist.length - 1) return idx;
+      const newIndex = idx + 1;
+      setAuditAnnotations([...hist[newIndex]]);
+      return newIndex;
+    });
+  }, []);
+
+  const undoAnnotationRef = useRef(undoAnnotation);
+  const redoAnnotationRef = useRef(redoAnnotation);
+  useEffect(() => {
+    undoAnnotationRef.current = undoAnnotation;
+    redoAnnotationRef.current = redoAnnotation;
+  }, [undoAnnotation, redoAnnotation]);
+
+  // 注册标注撤销/重做快捷键
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const isInput = !!(e.target as HTMLElement).closest('input, textarea, select');
+      if (isInput) return;
+      if (!(e.ctrlKey || e.metaKey) || e.code !== 'KeyZ') return;
+      e.preventDefault();
+      if (e.shiftKey) redoAnnotationRef.current();
+      else undoAnnotationRef.current();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   // 清除所有标注
   const clearAnnotations = () => {
@@ -1075,6 +1050,13 @@ export default function AuditModeCanvas({
     await addCompositeToCanvas(auditImages, auditAnnotationsRef.current);
   };
 
+  /** 选中图片区域上重叠的标注 */
+  const getAnnotationsForImages = useCallback((images: AuditImage[]) => {
+    const bounds = getAuditImagesBounds(images);
+    if (!bounds) return [];
+    return filterAnnotationsInBounds(auditAnnotationsRef.current, bounds);
+  }, []);
+
   const mergeSelectedImages = async () => {
     const idSet = new Set(selectedImageIdsRef.current);
     if (idSet.size < 2) return;
@@ -1087,7 +1069,8 @@ export default function AuditModeCanvas({
       maxX = Math.max(maxX, img.x + img.width * img.scale);
       minY = Math.min(minY, img.y);
     }
-    await addCompositeToCanvas(selected, [], { x: maxX + 50, y: minY });
+    const anns = getAnnotationsForImages(selected);
+    await addCompositeToCanvas(selected, anns, { x: maxX + 50, y: minY });
     setContextMenu(null);
   };
 
@@ -1105,7 +1088,8 @@ export default function AuditModeCanvas({
         if (!r.ok && r.message) window.alert(r.message);
         return;
       }
-      const result = await buildAuditImagesComposite(selected);
+      const anns = getAnnotationsForImages(selected);
+      const result = await buildAuditImagesComposite(selected, anns);
       if (!result) {
         window.alert('无法合成下载，请重试。');
         return;
@@ -1116,7 +1100,7 @@ export default function AuditModeCanvas({
       const msg = e instanceof Error ? e.message : '下载失败';
       window.alert(`${msg}。可尝试右键图片另存为。`);
     }
-  }, []);
+  }, [getAnnotationsForImages]);
 
   // 十六进制颜色转 rgba
   const hexToRgba = (hex: string, opacity: number) => {
@@ -1261,8 +1245,25 @@ export default function AuditModeCanvas({
       onPointerDown={handleCanvasPointerDown}
       onPointerMove={handleCanvasPointerMove}
       onPointerUp={handleCanvasPointerUp}
-      style={{ touchAction: 'none' }}
+      style={{
+        touchAction: 'none',
+        cursor: isPanning ? 'grabbing' : currentTool !== 'select' ? 'crosshair' : undefined,
+      }}
     >
+      <AuditAnnotationToolbar
+        currentTool={currentTool}
+        currentColor={currentColor}
+        currentFontSize={currentFontSize}
+        canUndo={historyIndex > 0}
+        canRedo={historyIndex < annotationHistory.length - 1}
+        onToolChange={setCurrentTool}
+        onColorChange={setCurrentColor}
+        onFontSizeChange={setCurrentFontSize}
+        onUndo={undoAnnotation}
+        onRedo={redoAnnotation}
+        onClear={clearAnnotations}
+      />
+
       {/* 工具栏 — 右上角 */}
       <div className="absolute top-4 right-4 z-[60] flex flex-col gap-2">
         {/* 操作按钮（仅保留导出合成图片和右键菜单触发的文本图片创建） */}
@@ -1376,8 +1377,8 @@ export default function AuditModeCanvas({
       <canvas
         ref={canvasRef}
         className="absolute top-0 left-0 w-full h-full pointer-events-none"
-        width={window.innerWidth}
-        height={window.innerHeight}
+        width={viewportSize.width}
+        height={viewportSize.height}
       />
 
       {/* 框选指示器 */}

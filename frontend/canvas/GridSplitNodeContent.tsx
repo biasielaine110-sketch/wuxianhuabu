@@ -19,6 +19,7 @@ export interface GridSplitNodeContentProps {
   onEyedropperSelect: () => void;
   onUpdate: (updates: Partial<GridSplitNode>) => void;
   onCreateImageNode: (images: string[], nodeX: number, nodeY: number) => void;
+  onCopyToImage?: () => void;
 }
 
 function hasResolvedImage(img?: ResolvedGridImage): boolean {
@@ -33,6 +34,7 @@ export function GridSplitNodeContent({
   onEyedropperSelect,
   onUpdate,
   onCreateImageNode,
+  onCopyToImage,
 }: GridSplitNodeContentProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const inputImage = node.inputImage ?? '';
@@ -135,6 +137,10 @@ export function GridSplitNodeContent({
   };
 
   const handleExport = () => {
+    if (onCopyToImage) {
+      onCopyToImage();
+      return;
+    }
     const assetIds = node.outputImageAssetIds;
     const len = Math.max(outputImages.length, assetIds?.length ?? 0);
     if (len === 0) return;

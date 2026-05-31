@@ -1,3 +1,5 @@
+import type { CanvasNode } from '../types';
+
 /** 视频节点 Veo：当前存 `veo3.1-fast`；旧工程可能仍为 `veo3.1-fast-official` */
 export function isVeo31FastVideoModel(m?: string): boolean {
   return m === 'veo3.1-fast' || m === 'veo3.1-fast-official';
@@ -46,4 +48,71 @@ export function isJimengImageModel(model?: string): boolean {
   if (!model) return false;
   const m = model.toLowerCase();
   return m.startsWith('jimeng-image-') || m.startsWith('jimeng-') || m.includes('jimeng');
+}
+
+export function isVideoDoubaoFamilyModel(vm: string): boolean {
+  return vm === 'doubao-seedance-1-5-pro' || vm === 'doubao-seedance-2-0-260128' || vm === 'doubao-seedance-2-0-fast-260128';
+}
+
+export function isVideoDoubaoSeedance2Model(vm: string): boolean {
+  return vm === 'doubao-seedance-2-0-260128' || vm === 'doubao-seedance-2-0-fast-260128';
+}
+
+/** 切换视频模型时同步时长、分辨率、画幅等默认值 */
+export function getVideoModelSwitchUpdates(m: string, node: CanvasNode): Partial<CanvasNode> {
+  const updates: Partial<CanvasNode> = { model: m };
+  if (m === 'sora-2-vvip') {
+    updates.videoResolution = '720p';
+    const d = node.videoDuration ?? 10;
+    updates.videoDuration = d === 4 || d === 8 || d === 12 ? d : 8;
+    const ar = node.aspectRatio || '16:9';
+    if (ar !== '16:9' && ar !== '9:16') updates.aspectRatio = '16:9';
+  } else if (m === 'veo3.1-fast') {
+    updates.videoDuration = 8;
+    updates.videoResolution =
+      node.videoResolution === '1080p' || node.videoResolution === '4k'
+        ? node.videoResolution
+        : '720p';
+    const ar = node.aspectRatio || '16:9';
+    if (!['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].includes(ar)) updates.aspectRatio = '16:9';
+  } else if (m === 'doubao-seedance-1-5-pro') {
+    const d = node.videoDuration ?? 8;
+    updates.videoDuration = [4, 5, 8, 10, 12, 15].includes(d) ? d : 8;
+    updates.videoResolution =
+      node.videoResolution === '480p' || node.videoResolution === '1080p'
+        ? node.videoResolution
+        : '720p';
+  } else if (m === 'seedance-2') {
+    const d = node.videoDuration ?? 8;
+    updates.videoDuration = [4, 5, 8, 10, 12, 15].includes(d) ? d : 8;
+    updates.videoResolution = node.videoResolution === '1080p' ? '1080p' : '720p';
+    const ar = node.aspectRatio || '16:9';
+    if (!['16:9', '9:16', '1:1'].includes(ar)) updates.aspectRatio = '16:9';
+  } else if (m === 'seedance-2-fast') {
+    const d = node.videoDuration ?? 8;
+    updates.videoDuration = [4, 5, 8, 10, 12].includes(d) ? d : 8;
+    updates.videoResolution = '720p';
+    const ar = node.aspectRatio || '16:9';
+    if (!['16:9', '9:16', '1:1'].includes(ar)) updates.aspectRatio = '16:9';
+  } else if (m === 'gemini-omni-flash') {
+    const d = node.videoDuration ?? 6;
+    updates.videoDuration = [6, 10].includes(d) ? d : 6;
+    updates.videoResolution = '720p';
+  } else if (m === 'doubao-seedance-2-0-260128' || m === 'doubao-seedance-2-0-fast-260128') {
+    const d = node.videoDuration ?? 8;
+    updates.videoDuration = [4, 6, 8, 10, 12, 15].includes(d) ? d : 8;
+    updates.videoResolution =
+      node.videoResolution === '480p' || node.videoResolution === '1080p'
+        ? node.videoResolution
+        : '720p';
+    const ar = node.aspectRatio || '16:9';
+    if (!['16:9', '9:16', '1:1', '4:3', '3:4'].includes(ar)) updates.aspectRatio = '16:9';
+  } else {
+    const d = node.videoDuration ?? 8;
+    if (d === 4 || d === 8 || d === 12) updates.videoDuration = 10;
+    if (node.videoResolution === '1080p' || node.videoResolution === '4k') {
+      updates.videoResolution = '720p';
+    }
+  }
+  return updates;
 }

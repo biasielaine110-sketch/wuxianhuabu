@@ -15,6 +15,18 @@ const Director3DNodeContent = lazy(() =>
 const AnnotationNodeContent = lazy(() =>
   import('./canvas/AnnotationNodeContent').then((m) => ({ default: m.AnnotationNodeContent }))
 );
+const CanvasImageGenArea = lazy(() =>
+  import('./canvas/CanvasImageGenArea').then((m) => ({ default: m.CanvasImageGenArea }))
+);
+const VideoNodeContent = lazy(() =>
+  import('./canvas/VideoNodeContent').then((m) => ({ default: m.VideoNodeContent }))
+);
+const AudioNodeContent = lazy(() =>
+  import('./canvas/AudioNodeContent').then((m) => ({ default: m.AudioNodeContent }))
+);
+const VideoNodeSettingsPanel = lazy(() =>
+  import('./canvas/VideoNodeSettingsPanel').then((m) => ({ default: m.VideoNodeSettingsPanel }))
+);
 import { OptimizedImage } from './canvas/OptimizedImage';
 import { clearCanvasThumbnailCache, thumbnailCache, THUMB_MAX_CACHE } from './canvas/thumbnailCache';
 import { getThumbResolutionPercent, setThumbResolutionPercent } from './canvas/thumbResolution';
@@ -23,6 +35,8 @@ import { EyedropperIcon, FullscreenIcon } from './canvas/canvasIcons';
 import { defaultCanvasImageModel } from './canvas/canvasModelUtils';
 import { ChatNodeContent } from './canvas/ChatNodeContent';
 import { RefPickBar } from './canvas/RefPickBar';
+import { I2iRefBar } from './canvas/I2iRefBar';
+import { NodeGenerateBar } from './canvas/NodeGenerateBar';
 import { CHAT_NODE_DEFAULT_PIXEL_HEIGHT, CHAT_PANEL_FONT_SCALE } from './canvas/chatNodeUtils';
 import { loadChatPromptPresets } from './canvas/loadChatPromptPresets';
 import { getNodeHeaderMeta } from './canvas/nodeHeaderMeta';
@@ -58,7 +72,8 @@ import {
 import { MemoizedNodePlaceholder } from './canvas/MemoizedNodePlaceholder';
 import { MemoNodeCard } from './canvas/MemoNodeCard';
 import { GenerationTimer } from './canvas/GenerationTimer';
-import { buildSpacedImageNodes, buildSpacedImageNodesFromLists, buildStackedImageNodesFromLists, collectImageFilesFromClipboardData, collectImageFilesFromDataTransfer, readBlobsAsBase64, readFilesAsBase64, SPAWNED_IMAGE_NODE_HEIGHT, SPAWNED_IMAGE_NODE_WIDTH } from './canvas/spawnImageNodes';
+import { buildSpacedImageNodes, buildSpacedImageNodesFromLists, buildStackedImageNodes, buildStackedImageNodesFromLists, collectImageFilesFromClipboardData, collectImageFilesFromDataTransfer, readBlobsAsBase64, readFilesAsBase64, SPAWNED_IMAGE_NODE_HEIGHT, SPAWNED_IMAGE_NODE_WIDTH } from './canvas/spawnImageNodes';
+import { resolveCopyToImageOptions, type CopyToImageLayout, type CopyToImageOptions } from './canvas/copyToImageOptions';
 import {
   stripImagesFromNodes,
   mergeHistoryNodesWithCurrentImages,
@@ -119,7 +134,6 @@ import {
 } from './services/projectBackupHandleStore';
 import type { CanvasProjectSnapshot } from './services/projectPersistence';
 import { useJimengAuth } from './integrations/jimeng/jimengAuthContext';
-import { GenerationHoloOverlay } from './canvas/GenerationHoloOverlay';
 import { CanvasNodeShell } from './canvas/CanvasNodeShell';
 import { CanvasNodeFooterActions } from './canvas/CanvasNodeFooterActions';
 import type { CanvasNodeRenderState } from './canvas/canvasNodeRenderState';
@@ -127,9 +141,6 @@ import {
   isJimengVideoModel,
   isJimengImageModel,
   isVeo31FastVideoModel,
-  isVideoVeoStyleModel,
-  isVideoSoraStyleModel,
-  isVideoGrokDurationStyleModel,
 } from './canvas/videoModelUtils';
 import {
   callGeminiChatWithHistory,
@@ -663,82 +674,6 @@ function LazyOptimizedImage({
   }
 
   return <img src={src} className={className} alt={alt} onClick={onClick} onDoubleClick={onDoubleClick} draggable={draggable} />;
-}
-
-/** 响应式图片预览组件：根据容器尺寸自动缩放图片 */
-function ResponsiveImagePreview({
-  base64,
-  assetId,
-  className,
-  alt,
-  quality = 0.62,
-  onClick,
-  onDoubleClick,
-  draggable = false,
-  fill = 'contain',
-  isInViewport = true,
-}: {
-  base64?: string;
-  assetId?: string;
-  className?: string;
-  alt?: string;
-  quality?: number;
-  onClick?: React.MouseEventHandler<HTMLImageElement>;
-  onDoubleClick?: React.MouseEventHandler<HTMLImageElement>;
-  draggable?: boolean;
-  /** 图片填充方式：'contain' | 'cover' */
-  fill?: 'contain' | 'cover';
-  /** 懒加载优化：是否在视口内，不在视口内时显示占位符 */
-  isInViewport?: boolean;
-}) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const updateDimensions = () => {
-      const rect = container.getBoundingClientRect();
-      setDimensions({ width: rect.width, height: rect.height });
-    };
-
-    updateDimensions();
-    const observer = new ResizeObserver(() => {
-      requestAnimationFrame(updateDimensions);
-    });
-    observer.observe(container);
-    return () => observer.disconnect();
-  }, []);
-
-  const maxSide = Math.max(dimensions.width, dimensions.height, 100);
-  const hasSource = (!!base64 && base64.length > 80) || !!assetId;
-
-  // 懒加载优化：不在视口内时显示占位背景，不加载图片
-  if (!isInViewport || !hasSource) {
-    return (
-      <div
-        ref={containerRef}
-        className={`w-full h-full bg-[#2a2a2a] ${className || ''}`}
-      />
-    );
-  }
-
-  return (
-    <div ref={containerRef} className={`w-full h-full ${className || ''}`}>
-      <OptimizedImage
-        base64={base64}
-        assetId={assetId}
-        maxSide={maxSide}
-        quality={quality}
-        className={`w-full h-full object-${fill}`}
-        onClick={onClick}
-        onDoubleClick={onDoubleClick}
-        draggable={draggable}
-        alt={alt}
-      />
-    </div>
-  );
 }
 
 const INPUT_NODE_TYPES: NodeType[] = ['t2i', 'i2i', 'image', 'panorama', 'annotation', 'gridSplit', 'gridMerge', 'panoramaT2i', 'director3d', 'chat', 'video', 'audio'];
@@ -3510,13 +3445,24 @@ export default function App() {
     }
   }, [handleUpdateNode, nodes]);
 
-  // 复制节点上的图片到新的图片节点（多图水平排开）
-  const handleCopyToImage = useCallback((nodeId: string) => {
+  // 复制节点上的图片到新的图片节点（多图水平排开；stacked 为叠压式导出）
+  const handleCopyToImage = useCallback((
+    nodeId: string,
+    layoutOrOptions: CopyToImageLayout | CopyToImageOptions = 'spaced'
+  ) => {
     const node = nodes.find(n => n.id === nodeId);
     if (!node) return;
 
-    const items = collectCopyableImageRefsFromNode(node);
-    const newNodes = buildSpacedImageNodes(items, node.x + node.width + 50, node.y);
+    const opts = resolveCopyToImageOptions(layoutOrOptions);
+    const items = opts.primaryOnly
+      ? ((ref) => (ref ? [ref] : []))(getNodePrimaryCopyRef(node))
+      : collectCopyableImageRefsFromNode(node);
+    const startX = node.x + node.width + 50;
+    const startY = node.y;
+    const newNodes =
+      opts.layout === 'stacked'
+        ? buildStackedImageNodes(items, startX, startY)
+        : buildSpacedImageNodes(items, startX, startY);
 
     if (newNodes.length === 0) {
       alert('没有可复制的图片');
@@ -6422,662 +6368,58 @@ ${text}`,
       >
           {/* Image Area */}
           {(node.type === 't2i' || node.type === 'i2i' || node.type === 'image' || node.type === 'panoramaT2i') && (
-            <div
-              className={`w-full bg-[#2a2a2a] relative border-b border-[#333] overflow-hidden group flex flex-col min-h-0 ${
-                node.type === 'image'
-                  ? 'flex-1 min-h-[160px]'
-                  : 'flex-[5] min-h-[240px] basis-0 min-w-0'
-              }`}
-            >
-              {node.isGenerating && <GenerationHoloOverlay />}
-              {hasDisplayableImages ? (
-                <>
-                  {/* Top right controls */}
-                  <div className={`absolute top-2 right-2 z-10 flex gap-1 transition-opacity ${node.type === 'image' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                    {/* 吸管按钮 - 图生图与图片节点显示 */}
-                    {(node.type === 'i2i' || node.type === 'image') && (
-                      <button
-                        onPointerDown={(e) => { e.stopPropagation(); setEyedropperTargetNodeId(node.id); }}
-                        className={`p-1.5 rounded text-white backdrop-blur-sm ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600 hover:bg-cyan-500' : 'bg-black/60 hover:bg-black/80'}`}
-                        title={eyedropperTargetNodeId === node.id ? "取消吸取" : "吸取图片"}
-                      >
-                        <EyedropperIcon size={25} />
-                      </button>
-                    )}
-                    {viewMode === 'single' && (
-                      <button
-                        onPointerDown={(e) => { e.stopPropagation(); openFullscreenImage(node.id, images[currentIndex], currentIndex); }}
-                        className="p-1.5 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
-                        title="放大查看"
-                      >
-                        <MaximizeIcon size={50}/>
-                      </button>
-                    )}
-                    <button
-                      onPointerDown={(e) => {
-                        e.stopPropagation();
-                        const payload = cloneImageSlotForNewNode(
-                          images[currentIndex],
-                          imageAssetIds?.[currentIndex]
-                        );
-                        if (!payload) return;
-                        const newNodeId = `image-${Date.now()}`;
-                        const newNode: CanvasNode = {
-                          id: newNodeId,
-                          type: 'image',
-                          x: node.x + 525,
-                          y: node.y,
-                          width: 480,
-                          height: 528,
-                          ...payload,
-                          currentImageIndex: 0,
-                        };
-                        setNodes(prev => [...prev, newNode]);
-                      }}
-                      className="p-1.5 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
-                      title="复制图片 (C)"
-                    >
-                      <CopyIcon size={25}/>
-                    </button>
-                    <button
-                      onPointerDown={(e) => { e.stopPropagation(); handleUpdateNode(node.id, { viewMode: viewMode === 'grid' ? 'single' : 'grid' }); }}
-                      className="p-1.5 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
-                      title="切换视图"
-                    >
-                      {viewMode === 'grid' ? <SingleIcon size={25}/> : <GridIcon size={25}/>}
-                    </button>
-                    {/* 智能超清按钮 - 所有图片节点可用 */}
-                    {hasDisplayableImages && (
-                      <div className="relative">
-                        <button
-                          onPointerDown={async (e) => {
-                            e.stopPropagation();
-                            const scale = window.prompt('请输入超清倍数 (2 或 4):', '2');
-                            if (!scale) return;
-                            const scaleNum = parseInt(scale, 10);
-                            if (![2, 4].includes(scaleNum)) {
-                              alert('仅支持 2x 或 4x 超清');
-                              return;
-                            }
-                            const imgData = images[currentIndex];
-                            if (!imgData) return;
-                            try {
-                              const { upscaleJimengImage } = await import('./integrations/jimeng/jimengClient');
-                              const result = await upscaleJimengImage(imgData, scaleNum);
-                              const newImages = [...(node.images || []), result.imageUrl];
-                              handleUpdateNode(node.id, { images: newImages });
-                            } catch (err: any) {
-                              alert('智能超清失败: ' + err.message);
-                            }
-                          }}
-                          className="p-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg text-white backdrop-blur-sm shadow-lg flex items-center justify-center"
-                          title="智能超清 (2x/4x)"
-                          style={{ minWidth: '48px', minHeight: '48px' }}
-                        >
-                          <SparklesIcon size={30}/>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {viewMode === 'grid' ? (
-                    <div className="grid min-h-0 flex-1 grid-cols-2 gap-1 overflow-y-auto p-1 content-start">
-                      {images.map((img, idx) => {
-                        const slotAssetId = imageAssetIds?.[idx];
-                        if (!hasCanvasImagePayload(img, slotAssetId)) return null;
-                        return (
-                        <div key={idx} className="relative w-full group/item" style={{ aspectRatio: '1' }}>
-                          <ResponsiveImagePreview
-                            key={`thumb-${thumbResolutionPct}-${node._thumbTick ?? 0}-${idx}`}
-                            base64={img}
-                            assetId={slotAssetId}
-                            quality={0.58}
-                            fill="contain"
-                            className="bg-[#3A3A3A] rounded transition-opacity"
-                            isInViewport={nodeInViewport}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (eyedropperTargetNodeId) {
-                                handleCanvasEyedropper(node.id, eyedropperTargetNodeIdRef.current!);
-                              } else {
-                                handleUpdateNode(node.id, { viewMode: 'single', currentImageIndex: idx });
-                              }
-                            }}
-                            draggable={false}
-                            alt={`Generated ${idx}`}
-                          />
-                          <button 
-                            onPointerDown={(e) => { e.stopPropagation(); openFullscreenImage(node.id, img, idx); }} 
-                            className="absolute inset-0 m-auto w-8 h-8 flex items-center justify-center bg-black/60 hover:bg-black/80 rounded-full text-white backdrop-blur-sm opacity-0 group-hover/item:opacity-100 transition-opacity"
-                            title="放大查看"
-                          >
-                            <MaximizeIcon size={50}/>
-                          </button>
-                        </div>
-                      );})}
-                    </div>
-                  ) : (
-                    <div className="relative w-full h-full flex items-center justify-center group/single">
-                      <ResponsiveImagePreview
-                        key={`thumb-${thumbResolutionPct}-${node._thumbTick ?? 0}-single`}
-                        base64={images[currentIndex]}
-                        assetId={imageAssetIds?.[currentIndex]}
-                        quality={0.6}
-                        fill="contain"
-                        className={eyedropperTargetNodeId ? 'cursor-cyan-400' : ''}
-                        isInViewport={nodeInViewport}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (eyedropperTargetNodeId) {
-                            handleCanvasEyedropper(node.id, eyedropperTargetNodeIdRef.current!);
-                          }
-                        }}
-                        onDoubleClick={(e) => {
-                          e.stopPropagation();
-                          if (!eyedropperTargetNodeId) {
-                            openFullscreenImage(node.id, images[currentIndex], currentIndex);
-                          }
-                        }}
-                        draggable={false}
-                        alt="Generated"
-                      />
-                      
-                      <button 
-                        onPointerDown={(e) => { e.stopPropagation(); openFullscreenImage(node.id, images[currentIndex], currentIndex); }} 
-                        className="absolute inset-0 m-auto w-10 h-10 flex items-center justify-center bg-black/60 hover:bg-black/80 rounded-full text-white backdrop-blur-sm opacity-0 group-hover/single:opacity-100 transition-opacity"
-                        title="放大查看"
-                      >
-                        <MaximizeIcon size={50}/>
-                      </button>
-
-                      {/* Pagination Controls */}
-                      {images.length > 1 && (
-                        <>
-                          <button 
-                            onPointerDown={(e) => { e.stopPropagation(); handleUpdateNode(node.id, { currentImageIndex: Math.max(0, currentIndex - 1) }); }} 
-                            disabled={currentIndex === 0}
-                            className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 bg-black/60 hover:bg-black/80 rounded-full text-white backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-30"
-                          >
-                            <ChevronLeftIcon size={75}/>
-                          </button>
-                          <button
-                            onPointerDown={(e) => { e.stopPropagation(); handleUpdateNode(node.id, { currentImageIndex: Math.min(images.length - 1, currentIndex + 1) }); }}
-                            disabled={currentIndex === images.length - 1}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-black/60 hover:bg-black/80 rounded-full text-white backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-30"
-                          >
-                            <ChevronRightIcon size={75}/>
-                          </button>
-                          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 px-2 py-1 bg-black/60 rounded-full text-[10px] text-white backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity">
-                            {currentIndex + 1} / {images.length}
-                          </div>
-                        </>
-                      )}
-
-                      {/* Text Overlays on Image */}
-                      {(node.textOverlays || []).map((overlay) => (
-                        <div
-                          key={overlay.id}
-                          className="absolute group/overlay"
-                          style={{
-                            left: `${overlay.x}%`,
-                            top: `${overlay.y}%`,
-                            transform: 'translate(-50%, -50%)',
-                            fontSize: overlay.fontSize || 16,
-                            color: overlay.color || '#ffffff',
-                            backgroundColor: overlay.backgroundColor || 'rgba(0,0,0,0.5)',
-                            padding: '4px 8px',
-                            borderRadius: '4px',
-                            cursor: 'move',
-                            whiteSpace: 'nowrap',
-                          }}
-                          onPointerDown={(e) => e.stopPropagation()}
-                        >
-                          {overlay.text}
-                          <button
-                            onPointerDown={(e) => {
-                              e.stopPropagation();
-                              const newOverlays = (node.textOverlays || []).filter(o => o.id !== overlay.id);
-                              handleUpdateNode(node.id, { textOverlays: newOverlays });
-                            }}
-                            className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 rounded-full text-white text-xs opacity-0 group-hover/overlay:opacity-100 transition-opacity flex items-center justify-center"
-                          >
-                            ×
-                          </button>
-                        </div>
-                      ))}
-
-                      {/* Add Text Overlay Button */}
-                      {hasDisplayableImages && (
-                        <button
-                          onPointerDown={(e) => {
-                            e.stopPropagation();
-                            const text = prompt('输入要添加的文字:');
-                            if (text) {
-                              const newOverlay = {
-                                id: `text-overlay-${Date.now()}`,
-                                text,
-                                x: 50,
-                                y: 50,
-                                fontSize: 24,
-                                color: '#ffffff',
-                                backgroundColor: 'rgba(0,0,0,0.7)',
-                              };
-                              handleUpdateNode(node.id, {
-                                textOverlays: [...(node.textOverlays || []), newOverlay]
-                              });
-                            }
-                          }}
-                          className="absolute bottom-2 right-2 p-1.5 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm opacity-0 group-hover/single:opacity-100 transition-opacity"
-                          title="添加文字"
-                        >
-                          <TextIcon size={14}/>
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="absolute inset-0 flex items-center justify-center text-gray-600 text-sm">
-                  {eyedropperTargetNodeId && eyedropperTargetNodeId !== node.id ? (
-                    <div
-                      className="absolute inset-0 z-[1] cursor-crosshair bg-transparent"
-                      title="点击连接上游节点"
-                      onPointerDown={(e) => {
-                        e.stopPropagation();
-                        const t = eyedropperTargetNodeIdRef.current;
-                        if (t) handleCanvasEyedropper(node.id, t);
-                      }}
-                    />
-                  ) : null}
-                  {node.isGenerating ? (
-                    <div className="relative z-[2] flex flex-col items-center gap-1.5 text-gray-400">
-                      <div className="absolute inset-0 noise-overlay pointer-events-none" />
-                      <LoaderIcon size={24} />
-                      {genStart != null ? (
-                        <GenerationTimer
-                          startedAt={genStart}
-                          prefix="已用时"
-                          className="text-xs tabular-nums tracking-tight"
-                          showSeconds
-                          secondsClassName="text-[10px] text-gray-500"
-                        />
-                      ) : null}
-                    </div>
-                  ) : (
-                    node.type === 'image' ? (
-                      <div className="relative z-[2] flex flex-col items-center gap-2">
-                        <button 
-                          onPointerDown={(e) => {
-                            e.stopPropagation();
-                            setImportTargetNodeId(node.id);
-                            fileInputRef.current?.click();
-                          }}
-                          className="w-16 h-16 rounded-full bg-[#333] hover:bg-blue-600 flex items-center justify-center text-white transition-colors shadow-lg"
-                          title="从本地读取图片"
-                        >
-                          <PlusIcon size={32} />
-                        </button>
-                        <div className="flex items-center gap-2 text-[10px] text-gray-500">
-                        </div>
-                        <button
-                          onPointerDown={(e) => {
-                            e.stopPropagation();
-                            setEyedropperTargetNodeId(node.id);
-                          }}
-                          className={`px-2 py-1 rounded text-[10px] flex items-center gap-1 ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600 text-white' : 'bg-[#333] hover:bg-[#444] text-gray-300'}`}
-                          title={
-                            eyedropperTargetNodeId === node.id
-                              ? '取消吸取（快捷键 X）'
-                              : '吸取画布内图片（快捷键 X）'
-                          }
-                        >
-                          <EyedropperIcon size={10} /> 吸管
-                        </button>
-                      </div>
-                    ) : (
-                      <span className="relative z-[2]" />
-                    )
-                  )}
-                </div>
-              )}
-            </div>
+            <Suspense fallback={<HeavyNodeFallback label="加载图片区…" />}>
+              <CanvasImageGenArea
+                node={node}
+                nodeInViewport={nodeInViewport}
+                images={images}
+                imageAssetIds={imageAssetIds}
+                hasDisplayableImages={hasDisplayableImages}
+                viewMode={viewMode}
+                currentIndex={currentIndex}
+                thumbResolutionPct={thumbResolutionPct}
+                generationStartedAt={node.isGenerating ? genStart : undefined}
+                eyedropperTargetNodeId={eyedropperTargetNodeId}
+                eyedropperTargetNodeIdRef={eyedropperTargetNodeIdRef}
+                onUpdateNode={handleUpdateNode}
+                onCopyToImage={handleCopyToImage}
+                onCanvasEyedropper={handleCanvasEyedropper}
+                openFullscreenImage={openFullscreenImage}
+                setEyedropperTargetNodeId={setEyedropperTargetNodeId}
+                onImportImage={(nodeId) => {
+                  setImportTargetNodeId(nodeId);
+                  fileInputRef.current?.click();
+                }}
+              />
+            </Suspense>
           )}
 
           {node.type === 'video' && (
-            <div className={`w-full ${!isSelected && videoUrls.length > 0 ? 'flex-1 min-h-0' : 'h-[680px] shrink-0'} relative border-b border-[#333] overflow-hidden group ${isSelected ? 'bg-[#2a2a2a]' : 'bg-[#1a1a1a]'}`}>
-              {videoUrls.length > 0 ? (
-                <>
-                <div className="relative w-full h-full">
-                  <video
-                    key={videoUrls[currentVideoIdx] || 'v'}
-                    src={videoUrls[currentVideoIdx]}
-                    controls={false}
-                    autoPlay={false}
-                    preload="metadata"
-                    crossOrigin="anonymous"
-                    ref={(el) => {
-                      if (el) (el as any).videoRef = el;
-                    }}
-                    onError={(e) => {
-                      console.error('视频加载错误:', e);
-                      console.log('视频URL:', videoUrls[currentVideoIdx]);
-                      const videoEl = e.target as HTMLVideoElement;
-                      const error = videoEl.error;
-                      console.error('视频错误详情:', {
-                        code: error?.code,
-                        message: error?.message,
-                        mediaError: error
-                      });
-                      
-                      // 尝试修复方案
-                      const originalUrl = videoUrls[currentVideoIdx];
-                      
-                      // 方案1: 添加缓存避免
-                      if (originalUrl.includes('localhost')) {
-                        videoEl.src = originalUrl + '?t=' + Date.now();
-                      }
-                      // 方案2: 回退到原始即梦URL（如果当前是本地URL）
-                      else if (originalUrl.includes('localhost:3107')) {
-                        // 尝试从节点数据中获取原始URL
-                        const srcNode = nodesRef.current.find((n) => n.id === node.id);
-                        if (srcNode?.originalVideoUrl) {
-                          console.log('尝试回退到原始URL:', srcNode.originalVideoUrl);
-                          videoEl.src = srcNode.originalVideoUrl;
-                        }
-                      }
-                    }}
-                    onLoadedData={(e) => {
-                      console.log('视频已加载:', videoUrls[currentVideoIdx]);
-                      console.log('视频信息:', {
-                        duration: e.target.duration,
-                        videoWidth: e.target.videoWidth,
-                        videoHeight: e.target.videoHeight,
-                        readyState: e.target.readyState
-                      });
-                    }}
-                    className={`w-full h-full object-contain bg-black ${isSelected ? '' : 'pointer-events-none'}`}
-                  />
-                  {/* 调试信息 */}
-                  <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded opacity-50 hover:opacity-100">
-                    {videoUrls[currentVideoIdx]?.includes('localhost:3107') ? '本地' : '远程'}
-                  </div>
-                </div>
-                  <div className="absolute top-2 right-2 z-10 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    {videoUrls.length > 1 && (
-                      <>
-                        <button
-                          type="button"
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const next = (currentVideoIdx - 1 + videoUrls.length) % videoUrls.length;
-                            handleUpdateNode(node.id, { currentVideoIndex: next });
-                          }}
-                          className="p-2 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
-                          title="上一条"
-                        >
-                          <ChevronLeftIcon size={20} />
-                        </button>
-                        <button
-                          type="button"
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const next = (currentVideoIdx + 1) % videoUrls.length;
-                            handleUpdateNode(node.id, { currentVideoIndex: next });
-                          }}
-                          className="p-2 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
-                          title="下一条"
-                        >
-                          <ChevronRightIcon size={20} />
-                        </button>
-                      </>
-                    )}
-                    <button
-                      type="button"
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const u = videoUrls[currentVideoIdx];
-                        if (u) downloadVideoFromUrl(u);
-                      }}
-                      className="p-2 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
-                      title="下载当前视频"
-                    >
-                      <DownloadIcon size={20} />
-                    </button>
-                  </div>
-                  <div className="absolute bottom-2 left-2 text-[10px] text-gray-400 bg-black/50 px-2 py-0.5 rounded">
-                    {currentVideoIdx + 1} / {videoUrls.length}
-                  </div>
-                  {/* 自定义视频控制按钮 */}
-                  <div className="absolute bottom-2 right-2 z-10 flex gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      type="button"
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const videoEl = e.currentTarget.closest('.relative')?.querySelector('video') as HTMLVideoElement;
-                        if (videoEl) {
-                          if (videoEl.paused) {
-                            videoEl.play();
-                          } else {
-                            videoEl.pause();
-                          }
-                        }
-                      }}
-                      className="p-4 bg-black/70 hover:bg-black/90 rounded-xl text-white backdrop-blur-sm shadow-lg"
-                      title="播放/暂停"
-                    >
-                      <VideoIcon size={40} />
-                    </button>
-                    <button
-                      type="button"
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const videoEl = e.currentTarget.closest('.relative')?.querySelector('video') as HTMLVideoElement;
-                        if (videoEl) {
-                          if (videoEl.requestFullscreen) {
-                            videoEl.requestFullscreen();
-                          }
-                        }
-                      }}
-                      className="p-4 bg-black/70 hover:bg-black/90 rounded-xl text-white backdrop-blur-sm shadow-lg"
-                      title="最大化"
-                    >
-                      <MaximizeIcon size={40} />
-                    </button>
-                    <button
-                      type="button"
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const videoEl = e.currentTarget.closest('.relative')?.querySelector('video') as HTMLVideoElement;
-                        if (videoEl) {
-                          videoEl.muted = !videoEl.muted;
-                        }
-                      }}
-                      className="p-4 bg-black/70 hover:bg-black/90 rounded-xl text-white backdrop-blur-sm shadow-lg"
-                      title="静音/取消静音"
-                    >
-                      <AudioIcon size={40} />
-                    </button>
-                    <button
-                      type="button"
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const u = videoUrls[currentVideoIdx];
-                        if (u) downloadVideoFromUrl(u);
-                      }}
-                      className="p-4 bg-black/70 hover:bg-black/90 rounded-xl text-white backdrop-blur-sm shadow-lg"
-                      title="下载当前视频"
-                    >
-                      <DownloadIcon size={40} />
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <div className="absolute inset-0 flex items-center justify-center text-gray-600 text-sm">
-                  {eyedropperTargetNodeId && eyedropperTargetNodeId !== node.id ? (
-                    <div
-                      className="absolute inset-0 z-[1] cursor-crosshair bg-transparent"
-                      title="点击连接上游节点"
-                      onPointerDown={(e) => {
-                        e.stopPropagation();
-                        const t = eyedropperTargetNodeIdRef.current;
-                        if (t) handleCanvasEyedropper(node.id, t);
-                      }}
-                    />
-                  ) : null}
-                  {node.isGenerating ? (
-                    <div className="relative z-[2] flex flex-col items-center gap-1.5">
-                      {/* 琥珀色能量场背景 */}
-                      <div className="absolute inset-0 -m-8" style={{
-                        background: 'radial-gradient(ellipse at 50% 50%, rgba(255,170,0,0.2) 0%, rgba(255,100,0,0.1) 40%, transparent 70%)',
-                        animation: 'videoGenPulse 2s ease-in-out infinite',
-                      }} />
-                      
-                      {/* 能量环 */}
-                      <div className="relative w-16 h-16">
-                        <div style={{
-                          position: 'absolute', inset: 0,
-                          border: '3px solid transparent',
-                          borderTopColor: '#ffaa00',
-                          borderRightColor: '#ff6600',
-                          borderRadius: '50%',
-                          animation: 'videoEnergySpin 1s linear infinite',
-                          boxShadow: '0 0 15px rgba(255,170,0,0.5), inset 0 0 15px rgba(255,170,0,0.3)',
-                        }} />
-                        <div style={{
-                          position: 'absolute', inset: '4px',
-                          border: '2px solid transparent',
-                          borderBottomColor: '#ff8800',
-                          borderLeftColor: '#ff4400',
-                          borderRadius: '50%',
-                          animation: 'videoEnergySpin 0.8s linear reverse infinite',
-                          boxShadow: '0 0 10px rgba(255,136,0,0.4)',
-                        }} />
-                        <div style={{
-                          position: 'absolute', inset: '8px',
-                          background: 'radial-gradient(circle, rgba(255,170,0,0.8) 0%, rgba(255,100,0,0.4) 50%, transparent 70%)',
-                          borderRadius: '50%',
-                          animation: 'videoCorePulse 1s ease-in-out infinite',
-                        }} />
-                      </div>
-                      
-                      {/* 文字 */}
-                      {genStart != null ? (
-                        <GenerationTimer
-                          startedAt={genStart}
-                          prefix="已用时"
-                          className="relative text-amber-400 text-xs tabular-nums tracking-tight"
-                          showSeconds
-                          secondsClassName="relative text-amber-500/70 text-[10px]"
-                          glitch="amber"
-                        />
-                      ) : null}
-                      
-                      {/* 粒子 */}
-                      {[...Array(8)].map((_, i) => (
-                        <div key={i} style={{
-                          position: 'absolute',
-                          width: i % 2 === 0 ? '4px' : '3px',
-                          height: i % 2 === 0 ? '4px' : '3px',
-                          borderRadius: '50%',
-                          background: i % 3 === 0 ? '#ffaa00' : i % 3 === 1 ? '#ff6600' : '#ff8800',
-                          boxShadow: `0 0 6px ${i % 3 === 0 ? '#ffaa00' : i % 3 === 1 ? '#ff6600' : '#ff8800'}`,
-                          left: `${15 + i * 10}%`,
-                          top: `${20 + (i % 4) * 15}%`,
-                          animation: `videoParticleFloat ${1.5 + i * 0.1}s ease-in-out ${i * 0.1}s infinite`,
-                        }} />
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="relative z-[2]">生成后在此预览（链接约 24 小时内有效）</span>
-                  )}
-                </div>
-              )}
-            </div>
+            <Suspense fallback={<HeavyNodeFallback label="加载视频预览…" />}>
+              <VideoNodeContent
+                node={node}
+                isSelected={isSelected}
+                videoUrls={videoUrls}
+                currentVideoIdx={currentVideoIdx}
+                generationStartedAt={node.isGenerating ? genStart : undefined}
+                eyedropperTargetNodeId={eyedropperTargetNodeId}
+                eyedropperTargetNodeIdRef={eyedropperTargetNodeIdRef}
+                nodesRef={nodesRef}
+                onUpdateNode={handleUpdateNode}
+                onCanvasEyedropper={handleCanvasEyedropper}
+                onDownloadVideo={downloadVideoFromUrl}
+              />
+            </Suspense>
           )}
 
           {/* 语音节点内容 */}
           {node.type === 'audio' && (
-            <div className="flex flex-col gap-2 p-3 bg-[#1a1a1a] shrink-0">
-              {node.audio ? (
-                <div className="flex flex-col gap-2">
-                  <audio
-                    src={node.audio}
-                    controls
-                    className="w-full h-8"
-                  />
-                  <div className="flex items-center justify-between text-[10px] text-gray-400">
-                    <span>{node.audioName || '音频文件'}</span>
-                    {node.audioDuration && (
-                      <span>{Math.floor(node.audioDuration / 60)}:{String(Math.floor(node.audioDuration % 60)).padStart(2, '0')}</span>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={() => {
-                      if (confirm('确定要删除音频吗？')) {
-                        handleUpdateNode(node.id, { audio: undefined, audioDuration: undefined, audioName: undefined });
-                      }
-                    }}
-                    className="text-xs text-red-400 hover:text-red-300 px-2 py-1 border border-red-600/30 rounded hover:bg-red-900/20"
-                  >
-                    删除音频
-                  </button>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  <div className="text-[10px] text-gray-500 text-center py-2">
-                    上传或录制音频作为视频生成的语音参考
-                  </div>
-                  <input
-                    type="file"
-                    accept="audio/*"
-                    id={`audio-upload-${node.id}`}
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        const reader = new FileReader();
-                        reader.onload = (ev) => {
-                          const base64 = ev.target?.result as string;
-                          // 获取音频时长
-                          const audio = new Audio();
-                          audio.onloadedmetadata = () => {
-                            handleUpdateNode(node.id, {
-                              audio: base64,
-                              audioDuration: audio.duration,
-                              audioName: file.name,
-                            });
-                          };
-                          audio.src = base64;
-                        };
-                        reader.readAsDataURL(file);
-                      }
-                      e.target.value = '';
-                    }}
-                  />
-                  <label
-                    htmlFor={`audio-upload-${node.id}`}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    className="flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded cursor-pointer"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                      <polyline points="17 8 12 3 7 8"/>
-                      <line x1="12" x2="12" y1="3" y2="15"/>
-                    </svg>
-                    上传音频
-                  </label>
-                </div>
-              )}
-            </div>
+            <Suspense fallback={<HeavyNodeFallback label="加载语音节点…" />}>
+              <AudioNodeContent
+                node={node}
+                onUpdate={(updates) => handleUpdateNode(node.id, updates)}
+              />
+            </Suspense>
           )}
 
           {/* 360° 全景图节点内容 */}
@@ -7141,6 +6483,7 @@ ${text}`,
                 };
                 setNodes(prev => [...prev, newNode]);
               }}
+              onCopyToImage={() => handleCopyToImage(node.id)}
             />
             </ThreeEngineGate>
           )}
@@ -7205,6 +6548,7 @@ ${text}`,
                 if (newNodes.length === 0) return;
                 setNodes((prev) => [...prev, ...newNodes]);
               }}
+              onCopyToImage={() => handleCopyToImage(node.id, 'stacked')}
             />
           )}
 
@@ -7234,6 +6578,7 @@ ${text}`,
                 };
                 setNodes(prev => [...prev, newNode]);
               }}
+              onCopyToImage={() => handleCopyToImage(node.id, { primaryOnly: true })}
             />
           )}
 
@@ -7350,489 +6695,30 @@ ${text}`,
           />
         </div>
 
-                {node.type === 'video' && (() => {
-          const vm = node.model || '';
-          const modelSelectValue = node.model || '';
-          const isSora = isVideoSoraStyleModel(vm);
-          const isVeo = isVideoVeoStyleModel(vm);
-          const isGroDur = isVideoGrokDurationStyleModel(vm);
-          const isDoubao = vm === 'doubao-seedance-1-5-pro' || vm === 'doubao-seedance-2-0-260128' || vm === 'doubao-seedance-2-0-fast-260128';
-          const isSeedance2 = vm === 'seedance-2';
-          const isSeedance2Fast = vm === 'seedance-2-fast';
-          const isGemini = vm === 'gemini-omni-flash';
-          const isDoubaoSeedance2 = vm === 'doubao-seedance-2-0-260128' || vm === 'doubao-seedance-2-0-fast-260128';
-          const vSlots = buildIncomingRefSlots(node.id, edges, nodes);
-          const imageSlots = vSlots.filter((s) => s.kind === 'image');
-          const videoSlots = vSlots.filter((s) => s.kind === 'video');
-          const audioSlots = vSlots.filter((s) => s.kind === 'audio');
-          return (
-          <div className="flex flex-col gap-3 p-3 bg-[#252525] border-b border-[#333] text-xs shrink-0">
-            {(() => {
-              return (
-                <div className="flex items-center gap-3 px-3 py-2 bg-[#1a1a1a] rounded-lg text-xs">
-                  <span className="text-gray-400 shrink-0 font-medium">参考素材:</span>
-                  <span className="text-green-400 font-semibold shrink-0">
-                    {imageSlots.length} 图
-                    {videoSlots.length > 0 && (
-                      <span className="text-amber-400"> · {videoSlots.length} 视频</span>
-                    )}
-                    {audioSlots.length > 0 && (
-                      <span className="text-blue-400"> · {audioSlots.length} 语音</span>
-                    )}
-                  </span>
-                  <div className="flex gap-2 ml-2 flex-wrap">
-                    {vSlots.slice(0, 12).map((slot) => (
-                      <div key={`${node.id}-vslot-${slot.n}`} className="relative group">
-                        <div className="absolute -top-1 left-0 z-[1] rounded bg-black/70 px-1 text-[8px] font-bold leading-none text-cyan-300">
-                          R{slot.n}
-                        </div>
-                        {slot.kind === 'image' && slot.imageBase64 ? (
-                          <OptimizedImage
-                            base64={slot.imageBase64}
-                            maxSide={80}
-                            quality={0.72}
-                            alt={slot.label}
-                            className="w-9 h-9 rounded border border-[#444] object-cover"
-                          />
-                        ) : slot.kind === 'video' && slot.videoUrl ? (
-                          <video
-                            src={slot.videoUrl}
-                            className="w-9 h-9 rounded border border-[#444] object-cover"
-                            muted
-                            playsInline
-                            preload="metadata"
-                          />
-                        ) : slot.kind === 'audio' ? (
-                          <div className="w-9 h-9 rounded border border-[#444] bg-[#333] flex items-center justify-center" title={slot.label}>
-                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
-                              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                              <line x1="12" x2="12" y1="19" y2="22"/>
-                            </svg>
-                          </div>
-                        ) : (
-                          <div className="w-9 h-9 rounded border border-[#444] bg-[#333]" title={slot.label} />
-                        )}
-                        <button
-                          onPointerDown={(e) => {
-                            e.stopPropagation();
-                          }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteEdge(slot.edgeId);
-                          }}
-                          className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-600 hover:bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                          title="取消引用"
-                        >
-                          <svg viewBox="0 0 10 10" className="w-2.5 h-2.5 fill-white"><path d="M1 1L9 9M9 1L1 9" stroke="white" strokeWidth="1.5" strokeLinecap="round" /></svg>
-                        </button>
-                      </div>
-                    ))}
-                    {vSlots.length > 12 && (
-                      <span className="flex items-center text-gray-500">+{vSlots.length - 12}</span>
-                    )}
-                  </div>
-                  <button
-                    onPointerDown={(e) => {
-                      e.stopPropagation();
-                      setEyedropperTargetNodeId(node.id);
-                    }}
-                    className={`ml-auto shrink-0 rounded-lg px-3 py-1.5 text-white text-xs font-medium ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
-                    title={eyedropperTargetNodeId === node.id ? '取消吸取' : '吸取参考（图片 / 视频 / 语音节点）'}
-                  >
-                    <EyedropperIcon size={14} />
-                  </button>
-                </div>
-              );
-            })()}
-            <div className="text-xs text-gray-500 px-1 leading-relaxed">
-              需 OpenAI 兼容 + ToAPIs Base URL。最多 3 张参考图（视频将截取关键帧）{audioSlots.length > 0 && <span className="text-blue-400 font-medium">· 已连接语音参考</span>}。
-              {isVeo
-                ? ' · Veo：固定 8 秒；画幅 16:9 或 9:16；720p/1080p/4k'
-                : isSora
-                  ? ' · Sora 系：4/8/12 秒、16:9 或 9:16、720p'
-                  : isGroDur
-                    ? ' · Grok：多档秒数与画幅'
-                    : isDoubao
-                      ? ' · Seedance 2：5-10 秒；画幅 16:9/9:16/1:1'
-                      : ''}
-            </div>
-            {!isSora && !isVeo && isGroDur && (
-              <div className="text-[9px] text-amber-600/95 px-1 leading-snug">
-                分辨率：Grok 系路径已随请求发送 resolution；若成品仍为 480p，多为上游默认。
-              </div>
-            )}
-            <div className="flex flex-wrap items-center gap-3">
-            <select
-                className="nodemodel-select bg-[#222222] border border-[#444] rounded-lg px-3 py-2 text-gray-300 outline-none focus:border-amber-500 min-w-[160px] text-sm"
-                value={modelSelectValue}
-                onChange={(e) => {
-                  const m = e.target.value;
-                  const updates: Partial<CanvasNode> = { model: m };
-                  if (m === 'sora-2-vvip') {
-                    updates.videoResolution = '720p';
-                    const d = node.videoDuration ?? 10;
-                    updates.videoDuration = d === 4 || d === 8 || d === 12 ? d : 8;
-                    const ar = node.aspectRatio || '16:9';
-                    if (ar !== '16:9' && ar !== '9:16') updates.aspectRatio = '16:9';
-                  } else if (m === 'veo3.1-fast') {
-                    updates.videoDuration = 8;
-                    updates.videoResolution =
-                      node.videoResolution === '1080p' || node.videoResolution === '4k'
-                        ? node.videoResolution
-                        : '720p';
-                    const ar = node.aspectRatio || '16:9';
-                    if (!['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].includes(ar)) updates.aspectRatio = '16:9';
-                  } else if (m === 'doubao-seedance-1-5-pro') {
-                    const d = node.videoDuration ?? 8;
-                    updates.videoDuration = [4, 5, 8, 10, 12, 15].includes(d) ? d : 8;
-                    updates.videoResolution =
-                      node.videoResolution === '480p' || node.videoResolution === '1080p'
-                        ? node.videoResolution
-                        : '720p';
-                  } else if (m === 'seedance-2') {
-                    const d = node.videoDuration ?? 8;
-                    updates.videoDuration = [4, 5, 8, 10, 12, 15].includes(d) ? d : 8;
-                    updates.videoResolution = node.videoResolution === '1080p' ? '1080p' : '720p';
-                    const ar = node.aspectRatio || '16:9';
-                    if (!['16:9', '9:16', '1:1'].includes(ar)) updates.aspectRatio = '16:9';
-                  } else if (m === 'seedance-2-fast') {
-                    const d = node.videoDuration ?? 8;
-                    updates.videoDuration = [4, 5, 8, 10, 12].includes(d) ? d : 8;
-                    updates.videoResolution = '720p';
-                    const ar = node.aspectRatio || '16:9';
-                    if (!['16:9', '9:16', '1:1'].includes(ar)) updates.aspectRatio = '16:9';
-                  } else if (m === 'gemini-omni-flash') {
-                    const d = node.videoDuration ?? 6;
-                    updates.videoDuration = [6, 10].includes(d) ? d : 6;
-                    updates.videoResolution = '720p';
-                  } else if (m === 'doubao-seedance-2-0-260128' || m === 'doubao-seedance-2-0-fast-260128') {
-                    const d = node.videoDuration ?? 8;
-                    updates.videoDuration = [4, 6, 8, 10, 12, 15].includes(d) ? d : 8;
-                    updates.videoResolution =
-                      node.videoResolution === '480p' || node.videoResolution === '1080p'
-                        ? node.videoResolution
-                        : '720p';
-                    const ar = node.aspectRatio || '16:9';
-                    if (!['16:9', '9:16', '1:1', '4:3', '3:4'].includes(ar)) updates.aspectRatio = '16:9';
-                  } else {
-                    const d = node.videoDuration ?? 8;
-                    if (d === 4 || d === 8 || d === 12) updates.videoDuration = 10;
-                    if (node.videoResolution === '1080p' || node.videoResolution === '4k') {
-                      updates.videoResolution = '720p';
-                    }
-                  }
-                  handleUpdateNode(node.id, updates);
-                }}
-              onPointerDown={e => e.stopPropagation()}
-            >
-                <optgroup label="ToAPIs">
-                  <option value="veo3.1-fast">Veo 3.1 Fast</option>
-                  <option value="grok-video-3">Grok Video 3</option>
-                  <option value="sora-2-vvip">Sora2 VVIP</option>
-                  <option value="doubao-seedance-1-5-pro">Doubao SeeDance 1.5 Pro</option>
-                  <option value="seedance-2">Seedance 2</option>
-                  <option value="seedance-2-fast">Seedance 2 Fast</option>
-                  <option value="gemini-omni-flash">Gemini Omni Flash</option>
-                </optgroup>
-                <optgroup label="AIID (豆包Seedance2.0)">
-                  <option value="doubao-seedance-2-0-260128">Doubao Seedance 2.0</option>
-                  <option value="doubao-seedance-2-0-fast-260128">Doubao Seedance 2.0 Fast</option>
-                </optgroup>
-                <optgroup label="即梦 (Dreamina)">
-                  <option value="jimeng-seedance2.0fast">即梦 Seedance 2.0 (Fast)</option>
-                  <option value="jimeng-seedance2.0">即梦 Seedance 2.0</option>
-                  <option value="jimeng-seedance2.0fast-vip">即梦 Seedance 2.0 Fast (VIP)</option>
-                  <option value="jimeng-seedance2.0-vip">即梦 Seedance 2.0 (VIP)</option>
-                </optgroup>
-            </select>
-              {isJimengVideoModel(node.model) && (
-                <select
-                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-blue-500"
-                  value={node.videoMode || 'image2video'}
-                  onChange={(e) => handleUpdateNode(node.id, { videoMode: e.target.value as any })}
-                  onPointerDown={e => e.stopPropagation()}
-                >
-                  <option value="image2video">图生视频</option>
-                  <option value="frames2video">首尾帧</option>
-                  <option value="multiframe2video">智能多帧</option>
-                  <option value="multimodal2video">全能参考</option>
-                </select>
-              )}
-              <div className="nodemeta-skip-scale flex flex-wrap items-center gap-1.5">
-              {isVeo ? (
-                <span className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-400 text-xs whitespace-nowrap">
-                  8 秒（固定）
-                </span>
-              ) : isSora ? (
-            <select
-                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={[4, 8, 12].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 8}
-              onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
-              onPointerDown={e => e.stopPropagation()}
-            >
-                  <option value={4}>4 秒 (7毛)</option>
-                  <option value={8}>8 秒 (1元)</option>
-                  <option value={12}>12 秒 (1.3元)</option>
-            </select>
-              ) : isDoubao ? (
-            <select
-                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={[4, 5, 8, 10, 12, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 8}
-                  onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
-                  onPointerDown={e => e.stopPropagation()}
-                >
-                  <option value={4}>4 秒</option>
-                  <option value={5}>5 秒</option>
-                  <option value={8}>8 秒</option>
-                  <option value={10}>10 秒</option>
-                  <option value={12}>12 秒</option>
-                  <option value={15}>15 秒</option>
-                </select>
-              ) : isDoubaoSeedance2 ? (
-            <select
-                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={[4, 6, 8, 10, 12, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 8}
-                  onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
-                  onPointerDown={e => e.stopPropagation()}
-                >
-                  <option value={4}>4 秒</option>
-                  <option value={6}>6 秒</option>
-                  <option value={8}>8 秒</option>
-                  <option value={10}>10 秒</option>
-                  <option value={12}>12 秒</option>
-                  <option value={15}>15 秒</option>
-                </select>
-              ) : isSeedance2 ? (
-            <select
-                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={[4, 5, 8, 10, 12, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 8}
-                  onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
-                  onPointerDown={e => e.stopPropagation()}
-                >
-                  <option value={4}>4 秒</option>
-                  <option value={5}>5 秒</option>
-                  <option value={8}>8 秒</option>
-                  <option value={10}>10 秒</option>
-                  <option value={12}>12 秒</option>
-                  <option value={15}>15 秒</option>
-                </select>
-              ) : isSeedance2Fast ? (
-            <select
-                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={[4, 5, 8, 10, 12].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 8}
-                  onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
-                  onPointerDown={e => e.stopPropagation()}
-                >
-                  <option value={4}>4 秒</option>
-                  <option value={5}>5 秒</option>
-                  <option value={8}>8 秒</option>
-                  <option value={10}>10 秒</option>
-                  <option value={12}>12 秒</option>
-                </select>
-              ) : isGemini ? (
-                <select
-                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={[6, 10].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 6}
-                  onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
-                  onPointerDown={e => e.stopPropagation()}
-                >
-                  <option value={6}>6 秒 (1元)</option>
-                  <option value={10}>10 秒 (1.4元)</option>
-                </select>
-              ) : isJimengVideoModel(node.model) ? (
-            <select
-                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={[4, 5, 7, 8, 10, 12, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 8}
-                  onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
-                  onPointerDown={e => e.stopPropagation()}
-                >
-                  <option value={4}>4 秒</option>
-                  <option value={5}>5 秒</option>
-                  <option value={7}>7 秒</option>
-                  <option value={8}>8 秒</option>
-                  <option value={10}>10 秒</option>
-                  <option value={12}>12 秒</option>
-                  <option value={15}>15 秒</option>
-                </select>
-              ) : (
-            <select
-                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={node.videoDuration ?? 10}
-                  onChange={(e) => handleUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
-                  onPointerDown={e => e.stopPropagation()}
-                >
-                  <option value={5}>5 秒（API 提交为 6 秒）</option>
-                  <option value={10}>10 秒</option>
-                  <option value={15}>15 秒</option>
-                  <option value={20}>20 秒</option>
-                  <option value={25}>25 秒</option>
-                  <option value={30}>30 秒</option>
-                </select>
-              )}
-              {isVeo ? (
-                <select
-                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-              value={node.aspectRatio || '16:9'}
-              onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })}
-              onPointerDown={e => e.stopPropagation()}
-            >
-              <option value="16:9">16:9</option>
-              <option value="9:16">9:16</option>
-                  <option value="1:1">1:1（按 16:9 提交）</option>
-                  <option value="4:3">4:3（按 16:9 提交）</option>
-                  <option value="3:4">3:4（按 16:9 提交）</option>
-                  <option value="3:2">3:2（按 16:9 提交）</option>
-                  <option value="2:3">2:3（按 16:9 提交）</option>
-                </select>
-              ) : isSora ? (
-                <select
-                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={node.aspectRatio === '9:16' ? '9:16' : '16:9'}
-                  onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })}
-                  onPointerDown={e => e.stopPropagation()}
-                >
-                  <option value="16:9">16:9</option>
-                  <option value="9:16">9:16</option>
-                </select>
-              ) : isDoubao ? (
-                <select
-                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={node.aspectRatio || '16:9'}
-                  onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })}
-                  onPointerDown={e => e.stopPropagation()}
-                >
-                  <option value="16:9">16:9</option>
-                  <option value="9:16">9:16</option>
-                  <option value="1:1">1:1</option>
-                  <option value="4:3">4:3</option>
-                  <option value="3:4">3:4</option>
-                  <option value="21:9">21:9</option>
-                </select>
-              ) : (
-                <select
-                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={node.aspectRatio || '16:9'}
-                  onChange={(e) => handleUpdateNode(node.id, { aspectRatio: e.target.value })}
-                  onPointerDown={e => e.stopPropagation()}
-                >
-                  <option value="16:9">16:9</option>
-                  <option value="9:16">9:16</option>
-                  <option value="3:2">3:2</option>
-                  <option value="2:3">2:3</option>
-              <option value="1:1">1:1</option>
-              <option value="4:3">4:3</option>
-              <option value="3:4">3:4</option>
-            </select>
-              )}
-              {isSora ? (
-                <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p</span>
-              ) : isVeo ? (
-                <select
-                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={
-                    node.videoResolution === '4k'
-                      ? node.videoResolution
-                      : '1080p'
-                  }
-                  onChange={(e) =>
-                    handleUpdateNode(node.id, {
-                      videoResolution: e.target.value as '1080p' | '4k',
-                    })
-                  }
-                  onPointerDown={e => e.stopPropagation()}
-                >
-                  <option value="1080p">1080p (6毛/次)</option>
-                  <option value="4k">4K (1.5元/次)</option>
-                </select>
-              ) : isDoubao ? (
-                <select
-                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={node.videoResolution === '480p' || node.videoResolution === '1080p' ? node.videoResolution : '720p'}
-                  onChange={(e) =>
-                    handleUpdateNode(node.id, { videoResolution: e.target.value as '480p' | '720p' | '1080p' })
-                  }
-                  onPointerDown={e => e.stopPropagation()}
-                >
-                  <option value="480p">480p (1.4毛/秒)</option>
-                  <option value="720p">720p (2.9毛/秒)</option>
-                  <option value="1080p">1080p (7.5毛/秒)</option>
-                </select>
-              ) : isSeedance2 ? (
-                <select
-                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={node.videoResolution === '1080p' ? '1080p' : '720p'}
-                  onChange={(e) =>
-                    handleUpdateNode(node.id, { videoResolution: e.target.value as '720p' | '1080p' })
-                  }
-                  onPointerDown={e => e.stopPropagation()}
-                >
-                  <option value="720p">720p (1元/秒)</option>
-                  <option value="1080p">1080p (2.5元/秒)</option>
-                </select>
-              ) : isSeedance2Fast ? (
-                <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p (8毛/秒)</span>
-              ) : isGemini ? (
-                <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p</span>
-              ) : (
-                <select
-                  className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-                  value={node.videoResolution === '480p' ? '480p' : '720p'}
-                  onChange={(e) => handleUpdateNode(node.id, { videoResolution: e.target.value as '480p' | '720p' })}
-                  onPointerDown={e => e.stopPropagation()}
-                >
-                  <option value="480p">480p</option>
-                  <option value="720p">720p</option>
-                </select>
-              )}
-              </div>
-            </div>
-          </div>
-          );
-        })()}
+        {node.type === 'video' && (
+          <Suspense fallback={<HeavyNodeFallback label="加载视频参数…" />}>
+            <VideoNodeSettingsPanel
+              node={node}
+              nodes={nodes}
+              edges={edges}
+              eyedropperTargetNodeId={eyedropperTargetNodeId}
+              onUpdateNode={handleUpdateNode}
+              onDeleteEdge={handleDeleteEdge}
+              setEyedropperTargetNodeId={setEyedropperTargetNodeId}
+            />
+          </Suspense>
+        )}
 
-        {/* i2i reference bar */}
-          {(node.type === 'i2i' || node.type === 'panoramaT2i') && (() => {
-            const i2iIncomingEdges = edges.filter(e => e.targetId === node.id);
-            const i2iSourceNodes = i2iIncomingEdges
-              .map(e => nodes.find(n => n.id === e.sourceId))
-              .filter(Boolean) as CanvasNode[];
-            return i2iIncomingEdges.length > 0 ? (
-              <div className="flex items-center gap-1 px-2 py-0.5 bg-[#1e1e1e] border-b border-[#333] text-[10px] shrink-0">
-                <span className="text-gray-500">参考:</span>
-                <span className="text-green-400 font-medium">{i2iIncomingEdges.length}张</span>
-                <div className="flex gap-0.5 ml-1 flex-wrap">
-                  {i2iIncomingEdges.slice(0, 12).map((edge, idx) => {
-                    const srcNode = i2iSourceNodes[idx];
-                    const img = srcNode?.images?.[0];
-                    const imgAssetId = srcNode?.imageAssetIds?.[0];
-                    if (!hasCanvasImagePayload(img, imgAssetId)) return null;
-                    return (
-                      <div key={edge.id} className="relative group">
-                        <OptimizedImage base64={img} assetId={imgAssetId} maxSide={64} quality={0.72} alt={`R${idx+1}`} className="w-9 h-9 object-cover rounded border border-[#444]" />
-                        <button
-                          onPointerDown={(e) => { e.stopPropagation(); }}
-                          onClick={(e) => { e.stopPropagation(); handleDeleteEdge(edge.id); }}
-                          className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-600 hover:bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                          title="取消参考"
-                        >
-                          <svg viewBox="0 0 10 10" className="w-2.5 h-2.5 fill-white"><path d="M1 1L9 9M9 1L1 9" stroke="white" strokeWidth="1.5" strokeLinecap="round" /></svg>
-                        </button>
-                      </div>
-                    );
-                  })}
-                  {i2iIncomingEdges.length > 12 && <span className="text-gray-600">+{i2iIncomingEdges.length-12}</span>}
-                </div>
-                <button
-                  onPointerDown={(e) => { e.stopPropagation(); setEyedropperTargetNodeId(node.id); }}
-                  className={`ml-auto px-1.5 py-0.5 rounded text-[10px] text-white ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
-                  title={eyedropperTargetNodeId === node.id ? "取消吸取" : "吸取图片"}
-                >
-                  <EyedropperIcon size={10} />
-                </button>
-              </div>
-            ) : null;
-          })()}
+        {(node.type === 'i2i' || node.type === 'panoramaT2i') && (
+          <I2iRefBar
+            nodeId={node.id}
+            nodes={nodes}
+            edges={edges}
+            eyedropperTargetNodeId={eyedropperTargetNodeId}
+            onDeleteEdge={handleDeleteEdge}
+            setEyedropperTargetNodeId={setEyedropperTargetNodeId}
+          />
+        )}
           {/* Text Area - panoramaT2i 使用内置提示词，不显示输入框；视频节点未选中且有视频时隐藏 */}
           {(node.type === 't2i' || node.type === 'i2i' || node.type === 'text' || (node.type === 'video' && isSelected)) && (
             <div
@@ -7971,136 +6857,25 @@ ${text}`,
                 )}
               </div>
               {(node.type === 't2i' || node.type === 'i2i') && (
-                <div className="flex gap-2 w-full shrink-0">
-                  <div className={`relative flex-1 min-w-0 ${node.isGenerating ? 'gen-btn-generating' : 'gen-btn-holo'}`}>
-                    {/* 角落装饰 - 仅非生成状态显示 */}
-                    {!node.isGenerating && (
-                      <>
-                        <span className="gen-btn-cyber-corner top-left" />
-                        <span className="gen-btn-cyber-corner top-right" />
-                        <span className="gen-btn-cyber-corner bottom-left" />
-                        <span className="gen-btn-cyber-corner bottom-right" />
-                      </>
-                    )}
-                    {/* 神经网络粒子 - 仅非生成状态显示 */}
-                    {!node.isGenerating && <span className="holo-particles" />}
-                    <button
-                      type="button"
-                      onPointerDown={(e) => { e.stopPropagation(); handleGenerate(node.id); }}
-                      disabled={node.isGenerating}
-                      className={`relative w-full py-2 rounded-lg text-sm font-bold flex justify-center items-center gap-2 transition-all
-                        ${node.isGenerating ? 'text-cyan-400 cursor-wait' : 'text-white hover:brightness-110'}`}
-                    >
-                      {node.isGenerating ? (
-                        <span className="flex items-center gap-2">
-                          {/* 环形进度能量球 */}
-                          <div className="gen-progress-orb">
-                            <div className="gen-progress-orb-ring" />
-                            <div className="gen-progress-orb-core">
-                              <svg className="w-3 h-3 text-cyan-400" viewBox="0 0 24 24" fill="none">
-                                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                              </svg>
-                            </div>
-                          </div>
-                          {genStart != null ? (
-                            <GenerationTimer
-                              startedAt={genStart}
-                              className="gen-text-glitch tabular-nums text-[11px] opacity-90"
-                              showSeconds
-                              secondsClassName="text-[10px] opacity-75 text-cyan-300/70"
-                              glitch
-                            />
-                          ) : null}
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-2">
-                          {/* 全息图标 */}
-                          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
-                            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
-                          <span className="gen-text-holo">生成图片</span>
-                        </span>
-                      )}
-                    </button>
-                  </div>
-                  {node.isGenerating && (
-                    <button
-                      type="button"
-                      title="仅在点击「生成图片」后出现，用于中断 ToAPIs 轮询"
-                      onPointerDown={(e) => { e.stopPropagation(); handleCancelGeneration(node.id); }}
-                      className="shrink-0 px-3 py-2 rounded-lg text-sm font-medium gen-btn-cancel text-cyan-400 hover:text-cyan-300"
-                    >
-                      取消
-                    </button>
-                  )}
-                </div>
+                <NodeGenerateBar
+                  nodeId={node.id}
+                  variant="image"
+                  isGenerating={!!node.isGenerating}
+                  generationStartedAt={node.isGenerating ? genStart : undefined}
+                  onGenerate={handleGenerate}
+                  onCancel={handleCancelGeneration}
+                />
               )}
               {node.type === 'video' && (
-                <div className={`flex gap-2 w-full shrink-0${isSelected ? '' : ' hidden'}`}>
-                  <div className={`relative flex-1 min-w-0 ${node.isGenerating ? 'gen-btn-generating' : 'gen-btn-video-core'}`}>
-                    <button
-                      type="button"
-                      onPointerDown={(e) => { e.stopPropagation(); handleGenerateVideo(node.id); }}
-                      disabled={node.isGenerating}
-                      className={`relative w-full py-2 rounded-lg text-sm font-bold flex justify-center items-center gap-2 transition-all
-                        ${node.isGenerating ? 'text-amber-400 cursor-wait' : 'text-white hover:brightness-110'}`}
-                    >
-                      {node.isGenerating ? (
-                        <span className="flex items-center gap-2">
-                          {/* 环形进度能量球 - 琥珀色 */}
-                          <div className="gen-progress-orb">
-                            <div className="gen-progress-orb-ring" style={{
-                              background: 'conic-gradient(from 0deg, #ffaa00 0deg, #ff6600 180deg, #ffaa00 360deg)',
-                              filter: 'drop-shadow(0 0 6px rgba(255, 170, 0, 0.8))'
-                            }} />
-                            <div className="gen-progress-orb-core" style={{
-                              borderColor: 'rgba(255, 170, 0, 0.4)',
-                              animationName: 'corePulseAmber'
-                            }}>
-                              <svg className="w-3 h-3 text-amber-400" viewBox="0 0 24 24" fill="none">
-                                <path d="M23 7l-7 5 7 5V7zM1 5h15a2 2 0 012 2v10a2 2 0 01-2 2H1V5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                              </svg>
-                            </div>
-                          </div>
-                          {genStart != null ? (
-                            <GenerationTimer
-                              startedAt={genStart}
-                              className="gen-text-glitch-amber tabular-nums text-[11px] opacity-90"
-                              showSeconds
-                              secondsClassName="text-[10px] opacity-75 text-amber-300/70"
-                              glitch="amber"
-                            />
-                          ) : null}
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-2">
-                          {/* 能量核心图标 */}
-                          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
-                            <path d="M23 7l-7 5 7 5V7zM1 5h15a2 2 0 012 2v10a2 2 0 01-2 2H1V5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
-                          <span style={{
-                            background: 'linear-gradient(90deg, #ffaa00 0%, #ffffff 25%, #ff6600 50%, #ffffff 75%, #ffaa00 100%)',
-                            backgroundSize: '200% 100%',
-                            WebkitBackgroundClip: 'text',
-                            backgroundClip: 'text',
-                            WebkitTextFillColor: 'transparent',
-                            filter: 'drop-shadow(0 0 8px rgba(255, 170, 0, 0.6))'
-                          }}>生成视频</span>
-                        </span>
-                      )}
-                    </button>
-                  </div>
-                  {node.isGenerating && (
-                    <button
-                      type="button"
-                      title="仅在点击「生成视频」后出现，用于中断 ToAPIs 轮询"
-                      onPointerDown={(e) => { e.stopPropagation(); handleCancelGeneration(node.id); }}
-                      className="shrink-0 px-3 py-2 rounded-lg text-sm font-medium gen-btn-cancel gen-btn-cancel-video text-amber-400 hover:text-amber-300"
-                    >
-                      取消
-                    </button>
-                  )}
-                </div>
+                <NodeGenerateBar
+                  nodeId={node.id}
+                  variant="video"
+                  isGenerating={!!node.isGenerating}
+                  generationStartedAt={node.isGenerating ? genStart : undefined}
+                  visible={isSelected}
+                  onGenerate={handleGenerateVideo}
+                  onCancel={handleCancelGeneration}
+                />
               )}
               
               {renderNodeErrorPanel(node)}
