@@ -26,6 +26,9 @@ export function rewriteImageUrlForBrowserDisplay(imageUrl: string): string {
     if (host === 'files.dashlyai.cc') {
       return `${origin}/cdn-files-dashlyai${u.pathname}${u.search}`;
     }
+    if (host === 'manxueapi.com' || host.endsWith('.manxueapi.com')) {
+      return `${origin}/manxue-api${u.pathname}${u.search}`;
+    }
   } catch {
     /* ignore */
   }

@@ -116,6 +116,29 @@ const toapisFileCdnProxy = {
     secure: true,
     rewrite: (p: string) => p.replace(/^\/codesonline-chat-api/, ''),
   },
+  /** 满 e（manxueapi.com）未开放 CORS；图生图 multipart 经同源转发 */
+  '/manxue-api': {
+    target: 'https://manxueapi.com',
+    changeOrigin: true,
+    secure: true,
+    timeout: 1_800_000,
+    proxyTimeout: 1_800_000,
+    configure(proxy) {
+      proxy.on('error', (err, _req, res) => {
+        console.error('[vite proxy /manxue-api]', err);
+        const r = res as { headersSent?: boolean; writeHead?: (c: number, h?: unknown) => void; end?: (s?: string) => void };
+        if (r && !r.headersSent && typeof r.writeHead === 'function') {
+          r.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
+          r.end?.(`满 e 代理错误: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      });
+    },
+    rewrite: (p: string) => {
+      const path = p.startsWith('/') ? p : `/${p}`;
+      const stripped = path.replace(/^\/manxue-api(?=\/|$)/, '');
+      return stripped.length ? stripped : '/';
+    },
+  },
   '/api/jimeng': {
     target: 'http://localhost:3107',
     changeOrigin: true,
