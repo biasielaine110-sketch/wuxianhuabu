@@ -1,6 +1,10 @@
-import JSZip from 'jszip';
 import type { CanvasNode, Edge, Transform, AuditModeData } from '../types';
 import { embedProjectAssetsInZip, hydrateProjectAssetsFromZip } from './projectAssetBundle';
+
+async function loadJSZip() {
+  const mod = await import('jszip');
+  return mod.default;
+}
 
 /** 与 App 内 CanvasProject 结构一致，单独放在此模块避免循环依赖 */
 export type CanvasProjectSnapshot = {
@@ -179,6 +183,7 @@ export function sanitizeFilename(name: string): string {
 }
 
 export async function buildProjectZipBlob(project: CanvasProjectSnapshot): Promise<Blob> {
+  const JSZip = await loadJSZip();
   const zip = new JSZip();
   const manifest: ZipManifest = {
     format: 'wxcanvas-v1',
@@ -266,6 +271,7 @@ export async function overwriteProjectZipFileHandle(
 
 /** 从 .wxcanvas.zip 或普通 .zip（内含 project.json）解析项目 */
 export async function parseProjectFromZipFile(file: File): Promise<CanvasProjectSnapshot> {
+  const JSZip = await loadJSZip();
   const buf = await file.arrayBuffer();
   const zip = await JSZip.loadAsync(buf);
   let projectFile = zip.file(ZIP_PROJECT);

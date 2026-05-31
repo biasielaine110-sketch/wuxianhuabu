@@ -102,14 +102,16 @@
     font-size: calc(12px * 1.95 * 1.5 * 1.5) !important;
   }
   .canvas-node-font-195.canvas-node-grid-tool-150 .canvas-node-window-title {
-    font-size: 100px !important;
+    font-size: 70px !important;
     line-height: 1 !important;
+    color: rgba(163, 163, 163, 0.6) !important;
   }
 
-  /** 节点悬浮标题：大号透明字体（×2） */
+  /** 节点悬浮标题：大号透明字体（×2，标题为基准 70%） */
   .canvas-node-font-195 .canvas-node-window-title {
-    font-size: 100px !important;
+    font-size: 70px !important;
     line-height: 1 !important;
+    color: rgba(163, 163, 163, 0.6) !important;
   }
 
   /** 文生图/图生图/360/文本节点 文字输入框字体 40px */
@@ -121,10 +123,11 @@
     font-size: 40px !important;
   }
 
-  /** AI 对话节点悬浮标题（×2） */
+  /** AI 对话节点悬浮标题（×2，标题为基准 70%） */
   .canvas-node-root--chat .canvas-node-window-title {
-    font-size: 100px !important;
+    font-size: 70px !important;
     line-height: 1 !important;
+    color: rgba(163, 163, 163, 0.6) !important;
   }
 
   /** 生成中蓝色雪花噪点动态效果 */

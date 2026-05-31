@@ -6,5 +6,8 @@ export const MemoizedNodePlaceholder = memo(
   function MemoizedNodePlaceholder(props: NodePlaceholderProps) {
     return <NodePlaceholder {...props} />;
   },
-  (prev, next) => prev.node === next.node && prev.isSelected === next.isSelected
+  (prev, next) =>
+    prev.node === next.node &&
+    prev.isSelected === next.isSelected &&
+    prev.hint === next.hint
 );

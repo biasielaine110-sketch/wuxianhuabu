@@ -1,6 +1,17 @@
 import type { MutableRefObject, PointerEvent, ReactNode, Dispatch, SetStateAction } from 'react';
 import type { CanvasNode, Edge, ChatMessage } from '../types';
 
+export type PresetDomainId = 'chat' | 't2i' | 'i2i';
+export type I2iPresetCategoryId = 'character' | 'scene' | 'props' | 'storyboard' | 'other';
+
+export type CanvasViewportSnapshot = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  scale: number;
+};
+
 /** renderNode 运行时从 ref 读取的快照，避免 renderNode 闭包导致 MemoNodeCard 失效 */
 export type CanvasNodeRenderState = {
   selectedIdSet: Set<string>;
@@ -45,6 +56,14 @@ export type CanvasNodeRenderState = {
   setShowSettingsModal: Dispatch<SetStateAction<boolean>>;
   setSettingsTab: Dispatch<SetStateAction<'api' | 'presets' | 'downloads' | 'credits' | 'appearance'>>;
   setFullscreenImage: Dispatch<SetStateAction<string | null>>;
+  canvasViewportRef: MutableRefObject<CanvasViewportSnapshot>;
+  beginNodeResize: (e: PointerEvent, nodeId: string, direction: string) => void;
+  eyedropperTargetNodeIdRef: MutableRefObject<string | null>;
+  promptPresetDomainOverrides: Record<string, PresetDomainId>;
+  promptPresetCategoryOverrides: Record<string, I2iPresetCategoryId>;
+  handleCopyToImage: (nodeId: string) => void;
+  handleOptimizePrompt: (nodeId: string, text: string) => void;
+  openFullscreenFromBase64: (base64: string) => void;
 };
 
 export type CanvasNodeRenderStateRef = MutableRefObject<CanvasNodeRenderState>;

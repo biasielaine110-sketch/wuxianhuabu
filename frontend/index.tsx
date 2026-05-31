@@ -1,10 +1,9 @@
 import './index.css';
-import './styles/jimeng.css';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import SiteAccessGate from './SiteAccessGate';
-import { JimengAuthProvider } from './integrations/jimeng/JimengAuthProvider';
+import { JimengAuthRoot } from './integrations/jimeng/JimengAuthRoot';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -15,9 +14,9 @@ const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
     <SiteAccessGate>
-      <JimengAuthProvider>
+      <JimengAuthRoot>
         <App />
-      </JimengAuthProvider>
+      </JimengAuthRoot>
     </SiteAccessGate>
   </React.StrictMode>
 );

@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { memo, useRef, useState } from 'react';
 // 连线组件 - 支持点击删除和长按拖拽取消
 export interface EdgePathProps {
   edgeId: string;
@@ -14,7 +14,7 @@ export interface EdgePathProps {
   onDelete: (id: string) => void;
 }
 
-export function EdgePath({ edgeId, startX, startY, cp1X, cp1Y, cp2X, cp2Y, endX, endY, isActive, onDelete }: EdgePathProps) {
+function EdgePathInner({ edgeId, startX, startY, cp1X, cp1Y, cp2X, cp2Y, endX, endY, isActive, onDelete }: EdgePathProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isNearStart, setIsNearStart] = useState(false);
   const [isNearEnd, setIsNearEnd] = useState(false);
@@ -128,3 +128,5 @@ export function EdgePath({ edgeId, startX, startY, cp1X, cp1Y, cp2X, cp2Y, endX,
     </>
   );
 }
+
+export const EdgePath = memo(EdgePathInner);

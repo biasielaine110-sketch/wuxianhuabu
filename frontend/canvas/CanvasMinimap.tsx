@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { CanvasNode, Transform } from '../types';
 
 const MINIMAP_W = 168;
@@ -49,7 +49,7 @@ type CanvasMinimapProps = {
   onNavigate: (canvasX: number, canvasY: number) => void;
 };
 
-export function CanvasMinimap({ nodes, transform, viewportSize, onNavigate }: CanvasMinimapProps) {
+function CanvasMinimapInner({ nodes, transform, viewportSize, onNavigate }: CanvasMinimapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const bounds = useMemo(() => computeBounds(nodes), [nodes]);
 
@@ -148,3 +148,5 @@ export function CanvasMinimap({ nodes, transform, viewportSize, onNavigate }: Ca
     </div>
   );
 }
+
+export const CanvasMinimap = memo(CanvasMinimapInner);

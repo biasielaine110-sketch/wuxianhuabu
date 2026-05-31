@@ -244,3 +244,38 @@ export function nodeNeedsMediaOffload(node: CanvasNode): boolean {
 export function nodeNeedsImageOffload(node: CanvasNode): boolean {
   return nodeNeedsMediaOffload(node);
 }
+
+/** 仅含媒体字段的签名，position 变化时不触发 offload 扫描 */
+export function nodeMediaOffloadSignature(node: CanvasNode): string {
+  const pn = node as PanoramaNode;
+  const ptn = node as PanoramaT2iNode;
+  const an = node as AnnotationNode;
+  const dn = node as Director3DNode;
+  const gsn = node as GridSplitNode;
+  const gmn = node as GridMergeNode;
+  const imgPart = (node.images ?? [])
+    .map((im, i) => `${im?.length ?? 0}|${node.imageAssetIds?.[i] ?? ''}`)
+    .join(',');
+  const gridOut = (gsn.outputImages ?? [])
+    .map((im, i) => `${im?.length ?? 0}|${gsn.outputImageAssetIds?.[i] ?? ''}`)
+    .join(',');
+  const gridIn = (gmn.inputImages ?? [])
+    .map((im, i) => `${im?.length ?? 0}|${gmn.inputImageAssetIds?.[i] ?? ''}`)
+    .join(',');
+  return [
+    node.id,
+    imgPart,
+    `${pn.panoramaImage?.length ?? 0}|${pn.panoramaImageAssetId ?? ''}`,
+    `${ptn.panoramaImage?.length ?? 0}|${ptn.panoramaImageAssetId ?? ''}`,
+    `${an.sourceImage?.length ?? 0}|${an.sourceImageAssetId ?? ''}`,
+    `${dn.backgroundImage?.length ?? 0}|${dn.backgroundImageAssetId ?? ''}`,
+    `${gsn.inputImage?.length ?? 0}|${gsn.inputImageAssetId ?? ''}`,
+    gridOut,
+    gridIn,
+    `${gmn.outputImage?.length ?? 0}|${gmn.outputImageAssetId ?? ''}`,
+  ].join(':');
+}
+
+export function buildMediaOffloadScanKey(nodes: CanvasNode[]): string {
+  return nodes.map(nodeMediaOffloadSignature).join('\x1e');
+}

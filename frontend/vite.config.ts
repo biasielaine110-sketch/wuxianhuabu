@@ -127,6 +127,9 @@ export default defineConfig(({ mode }) => {
             /** three / genai / jszip 分 chunk，减小主包体积 */
             manualChunks(id) {
               const norm = id.replace(/\\/g, '/');
+              if (norm.includes('chatPromptTemplates')) {
+                return 'chat-prompts';
+              }
               if (norm.includes('node_modules/three')) {
                 return 'three';
               }
@@ -135,6 +138,9 @@ export default defineConfig(({ mode }) => {
               }
               if (norm.includes('node_modules/@google/genai')) {
                 return 'genai';
+              }
+              if (norm.includes('/integrations/jimeng/')) {
+                return 'jimeng';
               }
               return undefined;
             },

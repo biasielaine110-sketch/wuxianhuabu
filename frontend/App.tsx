@@ -1,4 +1,4 @@
-﻿import React, { lazy, Suspense, useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
+import React, { lazy, Suspense, useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, startTransition } from 'react';
 import { createPortal } from 'react-dom';
 import { CanvasNode, Edge, Transform, Tool, NodeType, Annotation, AnnotationNode, PanoramaNode, GridSplitNode, GridMergeNode, PanoramaT2iNode, Director3DNode, Figure3D, ChatNode, ChatMessage, CanvasMode, AuditImage, AuditModeData } from './types';
 import { GridSplitNodeContent } from './canvas/GridSplitNodeContent';
@@ -17,13 +17,17 @@ const AnnotationNodeContent = lazy(() =>
 );
 import { OptimizedImage } from './canvas/OptimizedImage';
 import { clearCanvasThumbnailCache, thumbnailCache, THUMB_MAX_CACHE } from './canvas/thumbnailCache';
+import { getThumbResolutionPercent, setThumbResolutionPercent } from './canvas/thumbResolution';
+import { ThumbResolutionControl } from './canvas/ThumbResolutionControl';
 import { EyedropperIcon, FullscreenIcon } from './canvas/canvasIcons';
 import { defaultCanvasImageModel } from './canvas/canvasModelUtils';
 import { ChatNodeContent } from './canvas/ChatNodeContent';
 import { RefPickBar } from './canvas/RefPickBar';
-import { EdgePath } from './canvas/EdgePath';
 import { CHAT_NODE_DEFAULT_PIXEL_HEIGHT, CHAT_PANEL_FONT_SCALE } from './canvas/chatNodeUtils';
-import { INITIAL_CHAT_PROMPT_PRESETS } from './canvas/chatPromptTemplates';
+import { loadChatPromptPresets } from './canvas/loadChatPromptPresets';
+import { getNodeHeaderMeta } from './canvas/nodeHeaderMeta';
+import { CanvasEdgesLayer } from './canvas/CanvasEdgesLayer';
+import { pickActiveWebGLNodeId, shouldUseNodePlaceholder, nodePlaceholderHint } from './canvas/activeWebGLNode';
 import { computeEdgeBridges, nodeLayoutKey } from './canvas/edgeUtils';
 import {
   buildStructuralHistoryKey,
@@ -34,6 +38,7 @@ import {
 import { CanvasMinimap } from './canvas/CanvasMinimap';
 import { ThreeEngineGate } from './canvas/ThreeEngineGate';
 import { computeVisibleNodeIds } from './canvas/viewportUtils';
+import { applyCanvasTransformDom, patchCanvasViewportRef } from './canvas/canvasTransformDom';
 import { MemoizedNodePlaceholder } from './canvas/MemoizedNodePlaceholder';
 import { MemoNodeCard } from './canvas/MemoNodeCard';
 import { GenerationTimer } from './canvas/GenerationTimer';
@@ -43,7 +48,7 @@ import {
   mergeHistoryNodesWithCurrentImages,
   type CanvasHistoryEntry,
 } from './canvas/canvasHistoryUtils';
-import { buildNodeMediaOffloadPatch, nodeNeedsMediaOffload } from './services/canvasAssetSync';
+import { buildNodeMediaOffloadPatch, buildMediaOffloadScanKey, nodeNeedsMediaOffload } from './services/canvasAssetSync';
 import { revokeNodeCanvasAssets } from './services/canvasAssetCleanup';
 import {
   cloneImageSlotForNewNode,
@@ -97,8 +102,19 @@ import {
   removeProjectBackupFileHandle,
 } from './services/projectBackupHandleStore';
 import type { CanvasProjectSnapshot } from './services/projectPersistence';
-import { useJimengAuth } from './integrations/jimeng/JimengAuthProvider';
-import { generateJimengVideo, queryJimengTask, upscaleJimengImage } from './integrations/jimeng/jimengClient';
+import { useJimengAuth } from './integrations/jimeng/jimengAuthContext';
+import { GenerationHoloOverlay } from './canvas/GenerationHoloOverlay';
+import { CanvasNodeShell } from './canvas/CanvasNodeShell';
+import { CanvasNodeFooterActions } from './canvas/CanvasNodeFooterActions';
+import type { CanvasNodeRenderState } from './canvas/canvasNodeRenderState';
+import {
+  isJimengVideoModel,
+  isJimengImageModel,
+  isVeo31FastVideoModel,
+  isVideoVeoStyleModel,
+  isVideoSoraStyleModel,
+  isVideoGrokDurationStyleModel,
+} from './canvas/videoModelUtils';
 import {
   callGeminiChatWithHistory,
   editExistingImage,
@@ -221,61 +237,6 @@ function videoNodeModelToToApis(m?: string): ToApisVideoModelId {
   if (vm === 'gemini-omni-flash') return 'gemini-omni-flash';
   if (vm === 'jimeng-video-v3' || vm === 'jimeng-image-to-video') return vm as ToApisVideoModelId;
   return 'grok-video-3';
-}
-
-/**
- * 判断当前选择的模型是否为即梦模型。
- * 兼容多种字段命名（model / selectedModel / provider / id / value）。
- */
-function isJimengVideoModel(modelOrConfig: unknown): boolean {
-  if (!modelOrConfig) return false;
-
-  if (typeof modelOrConfig === 'string') {
-    return modelOrConfig.startsWith('jimeng-') || modelOrConfig.includes('jimeng');
-  }
-
-  if (typeof modelOrConfig === 'object' && modelOrConfig !== null) {
-    const obj = modelOrConfig as Record<string, unknown>;
-    return (
-      obj.provider === 'jimeng' ||
-      obj.providerId === 'jimeng' ||
-      typeof obj.id === 'string' && (obj.id as string).startsWith('jimeng-') ||
-      typeof obj.model === 'string' && (obj.model as string).startsWith('jimeng-') ||
-      typeof obj.value === 'string' && (obj.value as string).startsWith('jimeng-')
-    );
-  }
-
-  return false;
-}
-
-/** 判断是否为即梦生图模型 */
-function isJimengImageModel(model?: string): boolean {
-  if (!model) return false;
-  const m = model.toLowerCase();
-  return m.startsWith('jimeng-image-') ||
-         m.startsWith('jimeng-') ||
-         m.includes('jimeng');
-}
-
-/** 视频节点 Veo：当前存 `veo3.1-fast`；旧工程可能仍为 `veo3.1-fast-official` */
-function isVeo31FastVideoModel(m?: string): boolean {
-  return m === 'veo3.1-fast' || m === 'veo3.1-fast-official';
-}
-
-/** 视频节点 Veo */
-function isVideoVeoStyleModel(m?: string): boolean {
-  return isVeo31FastVideoModel(m);
-}
-
-/** 视频节点 Sora */
-function isVideoSoraStyleModel(m?: string): boolean {
-  return m === 'sora-2-vvip';
-}
-
-/** 视频节点 Grok 秒数档 */
-function isVideoGrokDurationStyleModel(m?: string): boolean {
-  const x = (m || '').trim();
-  return !x || x === 'grok-video-3';
 }
 
 function base64ToImageDataUrl(raw: string): string {
@@ -416,9 +377,7 @@ function canvasHistoryMaxSteps(payloadChars: number): number {
   return 10;
 }
 
-/** 预览区缩略图分辨率比例（5/10/20/50/70/100%）默认5%最低档大幅减少内存占用 */
-const thumbResolutionRef = { v: 5 };
-
+/** 预览区缩略图分辨率比例（5/10/20/50/70/100%），默认 10% 降低内存占用 */
 function useLazyImageLoad(base64: string, maxSide: number, quality: number) {
   const [src, setSrc] = useState('');
   const [loaded, setLoaded] = useState(false);
@@ -1075,7 +1034,7 @@ function t2iPresetListForCategory(
     }));
 }
 
-/** 首次加载时的图生图侧预设（不含 AI 对话模板，对话模板在文件后部与 CHAT_PROMPT_* 合并为 INITIAL_PROMPT_PRESETS_ALL） */
+/** 首次加载时的图生图侧预设（AI 对话模板通过 loadChatPromptPresets 异步合并） */
 const INITIAL_I2I_PROMPT_PRESETS: Record<string, string> = {
   '角色4视图':
     '电影级古风写实摄影、ARRI Alexa 65实拍、中式古典美学、真实物理材质、自然光影，一张2x2的四宫格人物设定图。左上角：从头到脚完整全身的正面站立；右上角：从头到脚完整全身的侧面站立；左下角：从头到脚完整全身的背面站立；右下角：面部特写。所有视角的人物发型、服装细节和配饰必须保持绝对一致。纯白背景，无多余杂物。皮肤毛孔细节、胶片颗粒感、非CG、Raw photo、极致高清8K。 --ar 9:16',
@@ -1192,10 +1151,9 @@ const INITIAL_T2I_PROMPT_PRESETS: Record<string, string> = {
     '赛博朋克科幻写实风格，参考导演美学：Ridley Scott ，雨夜霓虹，高楼压迫感，冷峻未来城市，全息广告，机械义体，真实电影摄影,背景有全息广告、飞行汽车和湿润路面反光，冷暖对比光，电影级科幻摄影，超写实细节。',
 };
 
-const INITIAL_PROMPT_PRESETS_ALL: Record<string, string> = {
+const INITIAL_PROMPT_PRESETS_BASE: Record<string, string> = {
   ...INITIAL_T2I_PROMPT_PRESETS,
   ...INITIAL_I2I_PROMPT_PRESETS,
-  ...INITIAL_CHAT_PROMPT_PRESETS,
 };
 
 const PRESET_SETTINGS_GUARD_PASSWORD = 'zhangbiwen666';
@@ -1754,6 +1712,15 @@ export default function App() {
   // 跨模式共享剪贴板：两个画布模式下最后一次复制的图片
   const sharedClipboardImageRef = useRef<AuditImage | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]); // 多选支持
+  const [thumbResolutionPct, setThumbResolutionPct] = useState(() => getThumbResolutionPercent());
+  const handleThumbResolutionChange = useCallback((next: number) => {
+    setThumbResolutionPct(next);
+    setThumbResolutionPercent(next);
+    thumbnailCache.clear();
+    startTransition(() => {
+      setNodes((prev) => prev.map((n) => ({ ...n, _thumbTick: Date.now() })));
+    });
+  }, []);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
 
   // Selection Box State
@@ -1855,6 +1822,10 @@ export default function App() {
   const transformRef = useRef(transform);
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
+  const canvasTransformLayerRef = useRef<HTMLDivElement>(null);
+  const canvasBgRef = useRef<HTMLDivElement>(null);
+  const wheelTransformCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const canvasBgStyleRef = useRef<'dots' | 'grid' | 'none'>('dots');
   useEffect(() => { activeProjectIdRef.current = activeProjectId; }, [activeProjectId]);
   useEffect(() => { projectsRef.current = projects; }, [projects]);
   /** 绘制前同步，避免新建节点后立刻拖缩放时 ref 仍为上一轮渲染（useEffect 晚一拍会导致 origin/grab 错位跳一下） */
@@ -1865,6 +1836,15 @@ export default function App() {
     nodesRef.current = nodes;
   }, [nodes]);
   useEffect(() => { edgesRef.current = edges; }, [edges]);
+
+  const commitTransformFromRef = useCallback(() => {
+    setTransform({ ...transformRef.current });
+  }, []);
+
+  const applyLiveCanvasTransform = useCallback((tf: Transform) => {
+    applyCanvasTransformDom(tf, canvasTransformLayerRef.current, canvasBgRef.current, canvasBgStyleRef.current);
+    patchCanvasViewportRef(canvasViewportRef, tf);
+  }, []);
 
   // 同步视口信息（transform + 容器尺寸）到 ref，供离屏节点过滤使用
   useLayoutEffect(() => {
@@ -1978,6 +1958,9 @@ export default function App() {
   // 画布背景样式 'dots' | 'grid' | 'none'
   const [canvasBgStyle, setCanvasBgStyle] = useState<'dots' | 'grid' | 'none'>('dots');
   const [canvasBgColor, setCanvasBgColor] = useState<'dark' | 'black'>('dark');
+  useEffect(() => {
+    canvasBgStyleRef.current = canvasBgStyle;
+  }, [canvasBgStyle]);
 
   // 节点缩放状态
   const [resizingNodeId, setResizingNodeId] = useState<string | null>(null);
@@ -3291,8 +3274,14 @@ export default function App() {
   // 画布编辑不自动写盘；显式「保存当前项目」与列表操作会写入 IndexedDB 草稿库
 
   const [promptPresets, setPromptPresets] = useState<Record<string, string>>(() => ({
-    ...INITIAL_PROMPT_PRESETS_ALL,
+    ...INITIAL_PROMPT_PRESETS_BASE,
   }));
+
+  useEffect(() => {
+    void loadChatPromptPresets().then((chatPresets) => {
+      setPromptPresets((prev) => ({ ...prev, ...chatPresets }));
+    });
+  }, []);
 
   /** 设置里对预设「角色/场景/道具/其他」的手动覆盖（键为预设名） */
   const [promptPresetCategoryOverrides, setPromptPresetCategoryOverrides] = useState<
@@ -3872,6 +3861,9 @@ export default function App() {
     const handleGlobalPointerMove = (e: PointerEvent) => {
     // 安全兜底：鼠标按键已释放但未收到 pointerup 时，强制清理拖拽状态
     if (e.buttons === 0 && activePointerTypeRef.current) {
+      if (activePointerTypeRef.current === 'canvas') {
+        commitTransformFromRef();
+      }
       if (draggingNodeIdRef.current) {
         draggingNodeIdRef.current = null;
         setDraggingNodeId(null);
@@ -3905,7 +3897,10 @@ export default function App() {
     if (pointerType === 'canvas') {
       const dx = e.clientX - lastMousePosRef.current.x;
       const dy = e.clientY - lastMousePosRef.current.y;
-      setTransform(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
+      const tf = transformRef.current;
+      const next = { ...tf, x: tf.x + dx, y: tf.y + dy };
+      transformRef.current = next;
+      applyLiveCanvasTransform(next);
       lastMousePosRef.current = { x: e.clientX, y: e.clientY };
     } else if (pointerType === 'node') {
       const ddx = e.clientX - lastMousePosRef.current.x;
@@ -4015,6 +4010,11 @@ export default function App() {
 
     const handleGlobalPointerUp = (e: PointerEvent) => {
       const pointerType = activePointerTypeRef.current;
+
+      if (pointerType === 'canvas') {
+        commitTransformFromRef();
+      }
+
       activePointerTypeRef.current = null;
 
       // 清除长按计时器
@@ -4177,8 +4177,12 @@ export default function App() {
       window.removeEventListener('pointerup', handleGlobalPointerUp);
       window.removeEventListener('edge-drag', handleEdgeDrag);
       window.removeEventListener('edge-drag-end', handleEdgeDragEnd);
+      if (wheelTransformCommitTimerRef.current) {
+        clearTimeout(wheelTransformCommitTimerRef.current);
+        wheelTransformCommitTimerRef.current = null;
+      }
     };
-  }, []);
+  }, [applyLiveCanvasTransform, commitTransformFromRef]);
 
   const createImageNodesFromBase64List = useCallback((base64List: string[]) => {
     const list = base64List.filter((b) => b && b.length > 80);
@@ -4781,18 +4785,29 @@ export default function App() {
 
     const zoomSensitivity = 0.001;
     const delta = -e.deltaY * zoomSensitivity;
-    const newScale = Math.min(Math.max(0.05, transform.scale * (1 + delta)), 5);
+    const tf = transformRef.current;
+    const newScale = Math.min(Math.max(0.05, tf.scale * (1 + delta)), 5);
 
     const rect = containerRef.current.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    const scaleRatio = newScale / transform.scale;
-    const newX = mouseX - (mouseX - transform.x) * scaleRatio;
-    const newY = mouseY - (mouseY - transform.y) * scaleRatio;
+    const scaleRatio = newScale / tf.scale;
+    const newX = mouseX - (mouseX - tf.x) * scaleRatio;
+    const newY = mouseY - (mouseY - tf.y) * scaleRatio;
 
-    setTransform({ x: newX, y: newY, scale: newScale });
-  }, [transform, fullscreenImage]);
+    const next = { x: newX, y: newY, scale: newScale };
+    transformRef.current = next;
+    applyLiveCanvasTransform(next);
+
+    if (wheelTransformCommitTimerRef.current) {
+      clearTimeout(wheelTransformCommitTimerRef.current);
+    }
+    wheelTransformCommitTimerRef.current = setTimeout(() => {
+      wheelTransformCommitTimerRef.current = null;
+      commitTransformFromRef();
+    }, 120);
+  }, [fullscreenImage, applyLiveCanvasTransform, commitTransformFromRef]);
 
   const handleCanvasPointerDown = useCallback((e: React.PointerEvent) => {
     if (e.button === 2 || fullscreenImage) return;
@@ -5906,6 +5921,7 @@ ${text}`,
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise(r => setTimeout(r, 5000));
       try {
+        const { queryJimengTask } = await import('./integrations/jimeng/jimengClient');
         const res = await queryJimengTask(submitId);
         if (res.ok && res.data) {
           const data = res.data;
@@ -5995,6 +6011,7 @@ ${text}`,
           imageUrl = imageInputs[0];
         }
 
+        const { generateJimengVideo } = await import('./integrations/jimeng/jimengClient');
         const result = await generateJimengVideo({
           prompt: combinedPrompt,
           model: node.model || 'jimeng-video-v3',
@@ -6155,6 +6172,11 @@ ${text}`,
     return set;
   }, [visibleNodeIds, draggingNodeId, selectedIds]);
 
+  const activeWebGLNodeId = useMemo(() => {
+    const vp = canvasViewportRef.current;
+    return pickActiveWebGLNodeId(nodes, visibleNodeIds, selectedIds, draggingNodeId, vp);
+  }, [nodes, visibleNodeIds, selectedIds, draggingNodeId, transform, viewportSize]);
+
   const handleMinimapNavigate = useCallback((canvasX: number, canvasY: number) => {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -6164,6 +6186,8 @@ ${text}`,
       y: rect.height / 2 - canvasY * prev.scale,
     }));
   }, []);
+
+  const mediaOffloadScanKey = buildMediaOffloadScanKey(nodes);
 
   useEffect(() => {
     let cancelled = false;
@@ -6187,17 +6211,17 @@ ${text}`,
     return () => {
       cancelled = true;
     };
-  }, [nodes]);
+  }, [mediaOffloadScanKey]);
 
   // --- Render Helpers ---
+  const renderCanvasNodeStateRef = useRef<CanvasNodeRenderState>(null!);
   const renderNodeRef = useRef<(node: CanvasNode) => React.ReactNode>(() => null);
   const renderNode = (node: CanvasNode) => {
     const genStart = generationStartedAtRef.current.get(node.id);
 
-    // 懒加载优化：预计算节点是否在视口内
+    const vp = canvasViewportRef.current;
     const nodeInViewport = (() => {
-      const vp = viewportRef.current;
-      const t = transform;
+      const t = { x: vp.x, y: vp.y, scale: vp.scale };
       const screenLeft = node.x * t.scale + t.x;
       const screenTop = node.y * t.scale + t.y;
       const screenRight = screenLeft + node.width * t.scale;
@@ -6206,77 +6230,11 @@ ${text}`,
       return !(screenRight < -margin || screenLeft > vp.width + margin || screenBottom < -margin || screenTop > vp.height + margin);
     })();
 
-    const isSelected = selectedIds.includes(node.id);
+    const isSelected = selectedIdSet.has(node.id);
     const hasInputPort = canReceiveConnection(node);
     const hasOutputPort = true;
 
-    let headerIcon, headerTitle, borderColor, shadowColor;
-    if (node.type === 'text') {
-      headerIcon = <TextIcon size={14} className="text-gray-400" />;
-      headerTitle = '文本节点';
-      borderColor = isSelected ? 'border-gray-400' : 'border-[#333]';
-      shadowColor = isSelected ? 'shadow-gray-500/20' : '';
-    } else if (node.type === 'image') {
-      headerIcon = <ImageIcon size={14} className="text-green-400" />;
-      headerTitle = '图片节点';
-      borderColor = isSelected ? 'border-green-500' : 'border-[#333]';
-      shadowColor = isSelected ? 'shadow-green-900/30' : '';
-    } else if (node.type === 't2i') {
-      headerIcon = <ImageIcon size={14} className="text-purple-400" />;
-      headerTitle = '文生图';
-      borderColor = isSelected ? 'border-purple-500' : 'border-[#333]';
-      shadowColor = isSelected ? 'shadow-purple-900/30' : '';
-    } else if (node.type === 'panorama') {
-      headerIcon = <PanoramaIcon size={14} className="text-cyan-400" />;
-      headerTitle = '360° 全景图';
-      borderColor = isSelected ? 'border-cyan-500' : 'border-[#333]';
-      shadowColor = isSelected ? 'shadow-cyan-900/30' : '';
-    } else if (node.type === 'annotation') {
-      headerIcon = <AnnotationIcon size={14} className="text-orange-400" />;
-      headerTitle = '图片标注';
-      borderColor = isSelected ? 'border-orange-500' : 'border-[#333]';
-      shadowColor = isSelected ? 'shadow-orange-900/30' : '';
-    } else if (node.type === 'gridSplit') {
-      headerIcon = <GridIcon size={21} className="text-teal-400" />;
-      headerTitle = '宫格拆分';
-      borderColor = isSelected ? 'border-teal-500' : 'border-[#333]';
-      shadowColor = isSelected ? 'shadow-teal-900/30' : '';
-    } else if (node.type === 'gridMerge') {
-      headerIcon = <GridMergeIcon size={21} className="text-teal-400" />;
-      headerTitle = '宫格合并';
-      borderColor = isSelected ? 'border-teal-500' : 'border-[#333]';
-      shadowColor = isSelected ? 'shadow-teal-900/30' : '';
-    } else if (node.type === 'panoramaT2i') {
-      headerIcon = <WidePanoramaIcon size={14} className="text-indigo-400" />;
-      headerTitle = '全景图生成';
-      borderColor = isSelected ? 'border-indigo-500' : 'border-[#333]';
-      shadowColor = isSelected ? 'shadow-indigo-900/30' : '';
-    } else if (node.type === 'director3d') {
-      headerIcon = <Director3DIcon size={14} className="text-pink-400" />;
-      headerTitle = '3D导演台';
-      borderColor = isSelected ? 'border-pink-500' : 'border-[#333]';
-      shadowColor = isSelected ? 'shadow-pink-900/30' : '';
-    } else if (node.type === 'video') {
-      headerIcon = <VideoIcon size={14} className="text-amber-400" />;
-      headerTitle = '视频生成';
-      borderColor = isSelected ? 'border-amber-500' : 'border-[#333]';
-      shadowColor = isSelected ? 'shadow-amber-900/30' : '';
-    } else if (node.type === 'audio') {
-      headerIcon = <AudioIcon size={14} className="text-blue-400" />;
-      headerTitle = '语音节点';
-      borderColor = isSelected ? 'border-blue-500' : 'border-[#333]';
-      shadowColor = isSelected ? 'shadow-blue-900/30' : '';
-    } else if (node.type === 'chat') {
-      headerIcon = <MessageIcon size={14} className="text-rose-400" />;
-      headerTitle = 'AI对话';
-      borderColor = isSelected ? 'border-rose-500' : 'border-[#333]';
-      shadowColor = isSelected ? 'shadow-rose-900/30' : '';
-    } else {
-      headerIcon = <WandIcon size={14} className="text-blue-400" />;
-      headerTitle = '图生图';
-      borderColor = isSelected ? 'border-blue-500' : 'border-[#333]';
-      shadowColor = isSelected ? 'shadow-blue-900/30' : '';
-    }
+    const { headerIcon, headerTitle, borderColor, shadowColor } = getNodeHeaderMeta(node.type, isSelected);
 
     const images = node.images || [];
     const imageAssetIds = node.imageAssetIds;
@@ -6287,140 +6245,32 @@ ${text}`,
     const currentVideoIdx = node.currentVideoIndex ?? 0;
 
     return (
-      <div
-        key={node.id}
-        data-node-root="true"
-        data-selected={isSelected ? 'true' : 'false'}
-        className={`absolute flex flex-col bg-[#1e1e1e] rounded-[20px] border-8 shadow-2xl transition-shadow ${borderColor} ${shadowColor} ${isSelected ? 'z-20' : 'z-10 hover:border-[#555]'} ${node.type === 'chat' ? 'canvas-node-root--chat' : 'canvas-node-font-195'}${node.type === 'annotation' ? ' canvas-node-annotation' : ''}${node.type === 'gridSplit' || node.type === 'gridMerge' ? ' canvas-node-grid-tool-150' : ''}`}
-        style={{ left: node.x, top: node.y, width: node.width, height: node.height }}
+      <CanvasNodeShell
+        node={node}
+        isSelected={isSelected}
+        borderColor={borderColor}
+        shadowColor={shadowColor}
+        headerIcon={headerIcon}
+        headerTitle={headerTitle}
+        hasInputPort={hasInputPort}
+        hasOutputPort={hasOutputPort}
+        eyedropperTargetNodeId={eyedropperTargetNodeId}
         onPointerDown={(e) => handleNodePointerDown(e, node.id)}
         onDoubleClick={() => {
           if (!isSelected && (node.type === 'chat' || node.type === 'text')) {
             setSelectedIds([node.id]);
           }
           if (node.type === 'text') {
-            setEditingTextNodeIds(prev => { const next = new Set(prev); next.add(node.id); return next; });
+            setEditingTextNodeIds((prev) => {
+              const next = new Set(prev);
+              next.add(node.id);
+              return next;
+            });
           }
         }}
+        onPortPointerDown={handlePortPointerDown}
+        onBeginResize={beginNodeResize}
       >
-        {/* 文本节点取消选中时退出编辑 */}
-        {node.type === 'text' && !isSelected && editingTextNodeIds.has(node.id) ? (
-          <></>
-        ) : null}
-        {/* Floating title - outside window, transparent */}
-        <div className="absolute -top-[7rem] left-3 z-30 flex items-center gap-1.5 cursor-grab active:cursor-grabbing">
-          {headerIcon}
-          <span className="canvas-node-window-title text-white/80 font-medium">{headerTitle}</span>
-        </div>
-        {/* Input Port (Left) */}
-        {hasInputPort && (
-          <div 
-            className="absolute left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-[#333] border-2 border-[#666] rounded-full z-30 group/port hover:border-green-400 hover:bg-green-500 transition-all cursor-crosshair"
-            onPointerDown={(e) => { e.stopPropagation(); handlePortPointerDown(e, node.id); }}
-            title={
-              node.type === 'gridSplit'
-                ? '输入端口 (连接图片节点)'
-                : node.type === 'gridMerge'
-                  ? '输入端口 (连接图片节点)'
-                  : node.type === 'panorama'
-                    ? '输入端口 (连接图片节点输入全景图)'
-                    : node.type === 'annotation'
-                      ? '输入端口 (连接图片节点)'
-                      : node.type === 'panoramaT2i'
-                        ? '输入端口 (连接图片节点)'
-                        : node.type === 'director3d'
-                          ? '输入端口 (连接图片节点作为背景)'
-                          : node.type === 'chat'
-                            ? '输入端口 (文本 / 图片 / 视频节点作为参考)'
-                            : node.type === 'video'
-                              ? '输入端口 (文本；参考图片或视频节点)'
-                              : '输入端口 (连接文本或图片)'
-            }
-          />
-        )}
-        
-        {/* Output Port (Right) */}
-        {hasOutputPort && (
-          <div 
-            className="absolute right-0 top-1/2 translate-x-1/2 -translate-y-1/2 w-5 h-5 bg-[#555] border-2 border-[#888] hover:border-blue-400 hover:bg-blue-500 hover:scale-150 transition-all rounded-full cursor-crosshair z-30 group/port"
-            onPointerDown={(e) => handlePortPointerDown(e, node.id)}
-            title="拖拽连线到其他节点"
-          >
-            <div className="absolute inset-0 rounded-full bg-blue-400 opacity-0 group-hover/port:opacity-50 animate-ping" />
-          </div>
-        )}
-
-        {/* Resize Handles - 仅选中节点时显示 */}
-        {isSelected && (
-          <>
-            {/* 四个角的缩放手柄 */}
-            <div
-              className="absolute top-0 left-0 -translate-x-1/2 -translate-y-1/2 w-4 h-4 cursor-nw-resize z-40 group/resize"
-              data-resize-handle
-              onPointerDown={(e) => beginNodeResize(e, node.id, 'nw')}
-            >
-              <div className="w-full h-full rounded-full bg-gray-600 group-hover/resize:bg-gray-400 transition-colors" />
-            </div>
-            <div
-              className="absolute top-0 right-0 translate-x-1/2 -translate-y-1/2 w-4 h-4 cursor-ne-resize z-40 group/resize"
-              data-resize-handle
-              onPointerDown={(e) => beginNodeResize(e, node.id, 'ne')}
-            >
-              <div className="w-full h-full rounded-full bg-gray-600 group-hover/resize:bg-gray-400 transition-colors" />
-            </div>
-            <div
-              className="absolute bottom-0 left-0 -translate-x-1/2 translate-y-1/2 w-4 h-4 cursor-sw-resize z-40 group/resize"
-              data-resize-handle
-              onPointerDown={(e) => beginNodeResize(e, node.id, 'sw')}
-            >
-              <div className="w-full h-full rounded-full bg-gray-600 group-hover/resize:bg-gray-400 transition-colors" />
-            </div>
-            <div
-              className="absolute bottom-0 right-0 translate-x-1/2 translate-y-1/2 w-4 h-4 cursor-se-resize z-40 group/resize"
-              data-resize-handle
-              onPointerDown={(e) => beginNodeResize(e, node.id, 'se')}
-            >
-              <div className="w-full h-full rounded-full bg-gray-600 group-hover/resize:bg-gray-400 transition-colors" />
-            </div>
-
-            {/* 四条边的缩放手柄 */}
-            <div
-              className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 w-6 h-3 cursor-n-resize z-40 group/resize"
-              data-resize-handle
-              onPointerDown={(e) => beginNodeResize(e, node.id, 'n')}
-            >
-              <div className="w-full h-full rounded-full bg-gray-600 group-hover/resize:bg-gray-400 transition-colors" />
-            </div>
-            <div
-              className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2 w-6 h-3 cursor-s-resize z-40 group/resize"
-              data-resize-handle
-              onPointerDown={(e) => beginNodeResize(e, node.id, 's')}
-            >
-              <div className="w-full h-full rounded-full bg-gray-600 group-hover/resize:bg-gray-400 transition-colors" />
-            </div>
-            <div
-              className="absolute left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-6 cursor-w-resize z-40 group/resize"
-              data-resize-handle
-              onPointerDown={(e) => beginNodeResize(e, node.id, 'w')}
-            >
-              <div className="w-full h-full rounded-full bg-gray-600 group-hover/resize:bg-gray-400 transition-colors" />
-            </div>
-            <div
-              className="absolute right-0 top-1/2 translate-x-1/2 -translate-y-1/2 w-3 h-6 cursor-e-resize z-40 group/resize"
-              data-resize-handle
-              onPointerDown={(e) => beginNodeResize(e, node.id, 'e')}
-            >
-              <div className="w-full h-full rounded-full bg-gray-600 group-hover/resize:bg-gray-400 transition-colors" />
-            </div>
-          </>
-        )}
-
-        {/* Content (Merged Window Layout) */}
-        <div 
-          className={`flex-1 flex flex-col relative rounded-b-xl min-h-0 overflow-hidden ${eyedropperTargetNodeId ? 'cursor-crosshair' : 'bg-[#1a1a1a]'}`}
-          style={{ backgroundColor: eyedropperTargetNodeId ? undefined : '#1a1a1a' }}
-        >
-          
           {/* Image Area */}
           {(node.type === 't2i' || node.type === 'i2i' || node.type === 'image' || node.type === 'panoramaT2i') && (
             <div
@@ -6430,212 +6280,7 @@ ${text}`,
                   : 'flex-[5] min-h-[240px] basis-0 min-w-0'
               }`}
             >
-              {node.isGenerating && (
-                <div className="absolute inset-0 z-[3] pointer-events-none" style={{ 
-                  background: 'radial-gradient(ellipse at 50% 30%, rgba(0,245,255,0.15) 0%, rgba(102,126,234,0.10) 30%, rgba(168,85,247,0.08) 60%, transparent 80%)',
-                  overflow: 'hidden'
-                }}>
-                  {/* 全息扫描背景 */}
-                  <div style={{
-                    position: 'absolute', inset: 0,
-                    background: `
-                      repeating-linear-gradient(
-                        0deg,
-                        transparent,
-                        transparent 2px,
-                        rgba(0,245,255,0.03) 2px,
-                        rgba(0,245,255,0.03) 4px
-                      )
-                    `,
-                    animation: 'hologramScan 0.5s linear infinite',
-                  }} />
-                  
-                  {/* 主扫描线 - 青色 */}
-                  <div style={{
-                    position: 'absolute', left: 0, right: 0, height: '4px',
-                    background: 'linear-gradient(90deg, transparent 0%, rgba(0,245,255,0.3) 10%, rgba(0,245,255,0.9) 50%, rgba(0,245,255,0.3) 90%, transparent 100%)',
-                    boxShadow: '0 0 20px rgba(0,245,255,0.8), 0 0 40px rgba(0,245,255,0.4), 0 0 80px rgba(0,245,255,0.2)',
-                    animation: 'genScanDown 2s ease-in-out infinite',
-                  }} />
-                  
-                  {/* 次扫描线 - 紫色 */}
-                  <div style={{
-                    position: 'absolute', left: 0, right: 0, height: '3px',
-                    background: 'linear-gradient(90deg, transparent 0%, rgba(168,85,247,0.3) 10%, rgba(168,85,247,0.9) 50%, rgba(168,85,247,0.3) 90%, transparent 100%)',
-                    boxShadow: '0 0 15px rgba(168,85,247,0.8), 0 0 30px rgba(168,85,247,0.4)',
-                    animation: 'genScanDown 2s ease-in-out 1s infinite',
-                  }} />
-                  
-                  {/* 第三扫描线 - 白色高光 */}
-                  <div style={{
-                    position: 'absolute', left: 0, right: 0, height: '2px',
-                    background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.5) 50%, transparent 100%)',
-                    boxShadow: '0 0 10px rgba(255,255,255,0.6)',
-                    animation: 'genScanDown 2s ease-in-out 0.5s infinite',
-                  }} />
-                  
-                  {/* 神经网络连接线 */}
-                  <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0.6 }}>
-                    <defs>
-                      <linearGradient id="neuralGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                        <stop offset="0%" stopColor="rgba(0,245,255,0)" />
-                        <stop offset="50%" stopColor="rgba(0,245,255,1)" />
-                        <stop offset="100%" stopColor="rgba(168,85,247,0)" />
-                      </linearGradient>
-                    </defs>
-                    {[...Array(8)].map((_, i) => (
-                      <line
-                        key={i}
-                        x1={`${10 + i * 12}%`}
-                        y1="20%"
-                        x2={`${15 + i * 10}%`}
-                        y2="80%"
-                        stroke="url(#neuralGrad)"
-                        strokeWidth="1"
-                        style={{
-                          animation: `neuralPulse ${1.5 + i * 0.2}s ease-in-out ${i * 0.15}s infinite`,
-                        }}
-                      />
-                    ))}
-                  </svg>
-                  
-                  {/* 浮动粒子群 - 第一层 */}
-                  {[...Array(15)].map((_, i) => (
-                    <div key={`p1-${i}`} style={{
-                      position: 'absolute',
-                      width: i % 3 === 0 ? '5px' : i % 3 === 1 ? '3px' : '4px',
-                      height: i % 3 === 0 ? '5px' : i % 3 === 1 ? '3px' : '4px',
-                      borderRadius: '50%',
-                      background: i % 4 === 0 ? '#00f5ff' : i % 4 === 1 ? '#667eea' : i % 4 === 2 ? '#a855f7' : '#60a5fa',
-                      boxShadow: `0 0 8px ${i % 4 === 0 ? '#00f5ff' : i % 4 === 1 ? '#667eea' : i % 4 === 2 ? '#a855f7' : '#60a5fa'}, 0 0 16px ${i % 4 === 0 ? 'rgba(0,245,255,0.5)' : i % 4 === 1 ? 'rgba(102,126,234,0.5)' : i % 4 === 2 ? 'rgba(168,85,247,0.5)' : 'rgba(96,165,250,0.5)'}`,
-                      left: `${5 + i * 6.5}%`,
-                      top: `${15 + (i % 5) * 18}%`,
-                      animation: `genParticleFloat ${1.8 + i * 0.15}s ease-in-out ${i * 0.12}s infinite`,
-                    }} />
-                  ))}
-                  
-                  {/* 浮动粒子群 - 第二层（大粒子） */}
-                  {[...Array(6)].map((_, i) => (
-                    <div key={`p2-${i}`} style={{
-                      position: 'absolute',
-                      width: '6px',
-                      height: '6px',
-                      borderRadius: '50%',
-                      background: 'radial-gradient(circle, rgba(0,245,255,1) 0%, rgba(0,245,255,0) 70%)',
-                      boxShadow: '0 0 15px #00f5ff, 0 0 30px rgba(0,245,255,0.5)',
-                      left: `${8 + i * 15}%`,
-                      top: `${10 + (i % 3) * 30}%`,
-                      animation: `genParticleBreathe ${2.5 + i * 0.3}s ease-in-out ${i * 0.2}s infinite`,
-                    }} />
-                  ))}
-                  
-                  {/* 能量波纹 */}
-                  <div style={{
-                    position: 'absolute',
-                    left: '50%',
-                    top: '50%',
-                    width: '20px',
-                    height: '20px',
-                    transform: 'translate(-50%, -50%)',
-                    border: '2px solid rgba(0,245,255,0.5)',
-                    borderRadius: '50%',
-                    animation: 'genEnergyWave 2s ease-out infinite',
-                  }} />
-                  <div style={{
-                    position: 'absolute',
-                    left: '50%',
-                    top: '50%',
-                    width: '20px',
-                    height: '20px',
-                    transform: 'translate(-50%, -50%)',
-                    border: '1px solid rgba(168,85,247,0.4)',
-                    borderRadius: '50%',
-                    animation: 'genEnergyWave 2s ease-out 0.7s infinite',
-                  }} />
-                  <div style={{
-                    position: 'absolute',
-                    left: '50%',
-                    top: '50%',
-                    width: '20px',
-                    height: '20px',
-                    transform: 'translate(-50%, -50%)',
-                    border: '1px solid rgba(102,126,234,0.3)',
-                    borderRadius: '50%',
-                    animation: 'genEnergyWave 2s ease-out 1.4s infinite',
-                  }} />
-                  
-                  {/* 网格 - 赛博朋克风格 */}
-                  <div style={{
-                    position: 'absolute', inset: 0,
-                    backgroundImage: `
-                      linear-gradient(rgba(0,245,255,0.15) 1px, transparent 1px),
-                      linear-gradient(90deg, rgba(0,245,255,0.15) 1px, transparent 1px),
-                      linear-gradient(rgba(168,85,247,0.08) 1px, transparent 1px),
-                      linear-gradient(90deg, rgba(168,85,247,0.08) 1px, transparent 1px)
-                    `,
-                    backgroundSize: '60px 60px, 60px 60px, 30px 30px, 30px 30px',
-                    backgroundPosition: '0 0, 0 0, 30px 30px, 30px 30px',
-                    animation: 'genGridPulse 3s ease-in-out infinite',
-                  }} />
-                  
-                  {/* 扫描光栅 */}
-                  <div style={{
-                    position: 'absolute', inset: 0,
-                    background: `repeating-linear-gradient(
-                      90deg,
-                      transparent,
-                      transparent 20px,
-                      rgba(0,245,255,0.02) 20px,
-                      rgba(0,245,255,0.02) 21px
-                    )`,
-                    animation: 'genRasterScan 4s linear infinite',
-                  }} />
-                  
-                  {/* 角落装饰 */}
-                  <div style={{
-                    position: 'absolute', top: '8px', left: '8px',
-                    width: '30px', height: '30px',
-                    borderTop: '2px solid rgba(0,245,255,0.8)',
-                    borderLeft: '2px solid rgba(0,245,255,0.8)',
-                    boxShadow: '0 0 10px rgba(0,245,255,0.5)',
-                  }} />
-                  <div style={{
-                    position: 'absolute', top: '8px', right: '8px',
-                    width: '30px', height: '30px',
-                    borderTop: '2px solid rgba(0,245,255,0.8)',
-                    borderRight: '2px solid rgba(0,245,255,0.8)',
-                    boxShadow: '0 0 10px rgba(0,245,255,0.5)',
-                  }} />
-                  <div style={{
-                    position: 'absolute', bottom: '8px', left: '8px',
-                    width: '30px', height: '30px',
-                    borderBottom: '2px solid rgba(168,85,247,0.8)',
-                    borderLeft: '2px solid rgba(168,85,247,0.8)',
-                    boxShadow: '0 0 10px rgba(168,85,247,0.5)',
-                  }} />
-                  <div style={{
-                    position: 'absolute', bottom: '8px', right: '8px',
-                    width: '30px', height: '30px',
-                    borderBottom: '2px solid rgba(168,85,247,0.8)',
-                    borderRight: '2px solid rgba(168,85,247,0.8)',
-                    boxShadow: '0 0 10px rgba(168,85,247,0.5)',
-                  }} />
-                  
-                  {/* 加载文字 */}
-                  <div style={{
-                    position: 'absolute', bottom: '15px', left: '50%',
-                    transform: 'translateX(-50%)',
-                    fontSize: '11px',
-                    color: 'rgba(0,245,255,0.9)',
-                    textShadow: '0 0 10px rgba(0,245,255,0.8)',
-                    fontFamily: 'monospace',
-                    letterSpacing: '2px',
-                    animation: 'genTextBlink 1s ease-in-out infinite',
-                  }}>
-                    ◉ PROCESSING ◈
-                  </div>
-                </div>
-              )}
+              {node.isGenerating && <GenerationHoloOverlay />}
               {hasDisplayableImages ? (
                 <>
                   {/* Top right controls */}
@@ -6708,6 +6353,7 @@ ${text}`,
                             const imgData = images[currentIndex];
                             if (!imgData) return;
                             try {
+                              const { upscaleJimengImage } = await import('./integrations/jimeng/jimengClient');
                               const result = await upscaleJimengImage(imgData, scaleNum);
                               const newImages = [...(node.images || []), result.imageUrl];
                               handleUpdateNode(node.id, { images: newImages });
@@ -6733,6 +6379,7 @@ ${text}`,
                         return (
                         <div key={idx} className="relative w-full group/item" style={{ aspectRatio: '1' }}>
                           <ResponsiveImagePreview
+                            key={`thumb-${thumbResolutionPct}-${node._thumbTick ?? 0}-${idx}`}
                             base64={img}
                             assetId={slotAssetId}
                             quality={0.58}
@@ -6763,6 +6410,7 @@ ${text}`,
                   ) : (
                     <div className="relative w-full h-full flex items-center justify-center group/single">
                       <ResponsiveImagePreview
+                        key={`thumb-${thumbResolutionPct}-${node._thumbTick ?? 0}-single`}
                         base64={images[currentIndex]}
                         assetId={imageAssetIds?.[currentIndex]}
                         quality={0.6}
@@ -7544,31 +7192,11 @@ ${text}`,
               </div>
             </>
           )}
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                handleResetNodeSize(node.id);
-              }}
-              className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] text-gray-400 transition-colors hover:bg-[#333] hover:text-blue-400"
-              title="恢复为默认宽高"
-            >
-              <MaximizeIcon size={node.type === 'gridSplit' || node.type === 'gridMerge' ? 15 : 12} />
-              <span className="whitespace-nowrap">重置大小</span>
-            </button>
-            <button
-              type="button"
-              title="删除节点（Alt+Q）"
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                handleDeleteNode(node.id);
-              }}
-              className="text-gray-500 hover:text-red-400 transition-colors p-1"
-            >
-              <TrashIcon size={node.type === 'gridSplit' || node.type === 'gridMerge' ? 21 : 14} />
-            </button>
-          </div>
+          <CanvasNodeFooterActions
+            node={node}
+            onResetSize={handleResetNodeSize}
+            onDelete={handleDeleteNode}
+          />
         </div>
 
                 {node.type === 'video' && (() => {
@@ -8385,7 +8013,7 @@ ${text}`,
                           <OptimizedImage
                             base64={img}
                             assetId={slotAssetId}
-                            maxSide={Math.round(160 * thumbResolutionRef.v / 100)}
+                            maxSide={160}
                             quality={0.72}
                             alt={`图${idx + 1}`}
                             className="w-full h-full object-cover"
@@ -8499,8 +8127,7 @@ ${text}`,
               )}
             </div>
           )}
-        </div>
-      </div>
+      </CanvasNodeShell>
     );
   };
   renderNodeRef.current = renderNode;
@@ -8585,6 +8212,57 @@ ${text}`,
   const [allProjectsList, setAllProjectsList] = useState<CanvasProjectSnapshot[]>([]);
   const [editingTextNodeIds, setEditingTextNodeIds] = useState<Set<string>>(new Set());
   const [textNodeFontSize, setTextNodeFontSize] = useState(40);
+
+  renderCanvasNodeStateRef.current = {
+    selectedIdSet,
+    visibleNodeIds,
+    eyedropperTargetNodeId,
+    editingTextNodeIds,
+    promptPresets,
+    textNodeFontSize,
+    importTargetNodeId,
+    nodes,
+    edges,
+    edgesKey,
+    generationStartedAtRef,
+    fileInputRef,
+    bigEditorLastClickRef,
+    canReceiveConnection,
+    handleUpdateNode,
+    handleNodePointerDown,
+    handlePortPointerDown,
+    handleDeleteEdge,
+    handleGenerate,
+    handleGenerateVideo,
+    handleCancelGeneration,
+    handleSendMessage,
+    handleOptimizePrompt,
+    handleClearPreset,
+    handleTogglePreset,
+    handleCopyToImage,
+    handleResetNodeSize,
+    handleDeleteNode,
+    handleCanvasEyedropper,
+    openBigEditor,
+    openFullscreenImage,
+    openFullscreenFromBase64,
+    renderNodeErrorPanel,
+    setSelectedIds,
+    setNodes,
+    setEyedropperTargetNodeId,
+    setEditingTextNodeIds,
+    setImportTargetNodeId,
+    setTextNodeFontSize,
+    setShowSettingsModal,
+    setSettingsTab,
+    setFullscreenImage,
+    canvasViewportRef,
+    beginNodeResize,
+    eyedropperTargetNodeIdRef,
+    promptPresetDomainOverrides,
+    promptPresetCategoryOverrides,
+  };
+
   const [renameTarget, setRenameTarget] = useState<CanvasProjectSnapshot | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<CanvasProjectSnapshot | null>(null);
@@ -9060,6 +8738,7 @@ ${text}`,
         {/* Canvas Background */}
         <div
           className="absolute inset-0 pointer-events-none"
+          ref={canvasBgRef}
           style={{
             backgroundSize: canvasBgStyle === 'grid' ? `${32 * transform.scale}px ${32 * transform.scale}px` : canvasBgStyle === 'dots' ? `${48 * transform.scale}px ${48 * transform.scale}px` : '0',
             backgroundImage: canvasBgStyle === 'grid'
@@ -9074,6 +8753,7 @@ ${text}`,
 
         {/* Transform Layer */}
         <div 
+          ref={canvasTransformLayerRef}
           className="absolute top-0 left-0 origin-top-left"
           style={{ transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})` }}
         >
@@ -9111,57 +8791,13 @@ ${text}`,
               </marker>
             </defs>
             
-            {/* Render existing edges */}
-            {edges.map(edge => {
-              const source = nodes.find(n => n.id === edge.sourceId);
-              const target = nodes.find(n => n.id === edge.targetId);
-              if (!source || !target) return null;
-              if (!edgeRenderNodeIds.has(source.id) || !edgeRenderNodeIds.has(target.id)) return null;
-
-              const startX = source.x + source.width;
-              const startY = source.y + source.height / 2;
-              const endX = target.x;
-              const endY = target.y + target.height / 2;
-
-              const dist = Math.abs(endX - startX);
-              const controlOffset = Math.max(dist / 2, 60);
-
-              const cp1X = startX + controlOffset;
-              const cp1Y = startY;
-              const cp2X = endX - controlOffset;
-              const cp2Y = endY;
-
-              const isActive = selectedIds.includes(source.id) || selectedIds.includes(target.id);
-
-              return (
-                <g key={edge.id} className="group/edge">
-                  {/* Main edge path with drag and delete support */}
-                  <EdgePath
-                    edgeId={edge.id}
-                    startX={startX}
-                    startY={startY}
-                    cp1X={cp1X}
-                    cp1Y={cp1Y}
-                    cp2X={cp2X}
-                    cp2Y={cp2Y}
-                    endX={endX}
-                    endY={endY}
-                    isActive={isActive}
-                    onDelete={handleDeleteEdge}
-                  />
-                  {/* Hover delete button */}
-                  <g
-                    transform={`translate(${(startX + cp2X) / 2}, ${(startY + cp2Y) / 2})`}
-                    className="opacity-0 group-hover/edge:opacity-100 transition-opacity cursor-pointer"
-                    onClick={() => handleDeleteEdge(edge.id)}
-                  >
-                    <circle r="10" fill="#ef4444" stroke="#fff" strokeWidth="1" />
-                    <line x1="-4" y1="-4" x2="4" y2="4" stroke="#fff" strokeWidth="2" />
-                    <line x1="4" y1="-4" x2="-4" y2="4" stroke="#fff" strokeWidth="2" />
-                  </g>
-                </g>
-              );
-            })}
+            <CanvasEdgesLayer
+              edges={edges}
+              nodeMap={nodeMap}
+              edgeRenderNodeIds={edgeRenderNodeIds}
+              selectedIdSet={selectedIdSet}
+              onDeleteEdge={handleDeleteEdge}
+            />
 
             {/* 跃线标记：检测连线交叉点并绘制弧形桥 */}
             {edgeBridges.map((b) => (
@@ -9208,16 +8844,19 @@ ${text}`,
             const isInViewport = visibleNodeIds.has(node.id);
             const isDragging = draggingNodeId === node.id;
             const isSelected = selectedIdSet.has(node.id);
-            const isHeavyWebGL = node.type === 'panorama' || node.type === 'director3d';
-            const usePlaceholder =
-              (!isInViewport && !isDragging && !isSelected) ||
-              (isHeavyWebGL && !isInViewport && !isDragging);
+            const usePlaceholder = shouldUseNodePlaceholder(node, {
+              isInViewport,
+              isDragging,
+              isSelected,
+              activeWebGLNodeId,
+            });
             if (usePlaceholder) {
               return (
                 <MemoizedNodePlaceholder
                   key={node.id}
                   node={node}
                   isSelected={isSelected}
+                  hint={nodePlaceholderHint(node, { isInViewport, activeWebGLNodeId })}
                   onPointerDown={handleNodePointerDown}
                 />
               );
@@ -11195,30 +10834,17 @@ ${text}`,
         >1:1</button>
       </div>
 
-      {/* 预览图分辨率调节（右下角） */}
-      <div
-        className={`absolute bottom-6 right-6 z-30 flex items-center gap-1 bg-[#1e1e1e]/90 backdrop-blur-md rounded-xl border border-[#333] px-2 py-1.5 shadow-lg ${canvasMode === 'audit' ? 'hidden' : ''}`}
-        onPointerDown={(e) => e.stopPropagation()}
-      >
-        <span className="text-[10px] text-gray-400 select-none">预览</span>
-        <select
-          value={thumbResolutionRef.v}
-          onChange={(e) => {
-            thumbResolutionRef.v = Number(e.target.value);
-            thumbnailCache.clear();
-            // 强制刷新所有节点的 images 属性（创建新对象触发重渲染）
-            setNodes(prev => prev.map(n => ({ ...n, _thumbTick: Date.now() })));
-          }}
-          className="rounded border border-[#444] bg-[#333] px-1 py-0.5 text-[10px] text-gray-200 outline-none cursor-pointer"
-          title="预览图分辨率（影响所有缩略图质量）"
-        >
-          <option value="10">10%</option>
-          <option value="20">20%</option>
-          <option value="50">50%</option>
-          <option value="70">70%</option>
-          <option value="100">100%</option>
-        </select>
-      </div>
+      <ThumbResolutionControl
+        value={thumbResolutionPct}
+        onChange={handleThumbResolutionChange}
+        hidden={
+          canvasMode === 'audit' ||
+          !!fullscreenImage ||
+          bigEditorOpen ||
+          showSettingsModal ||
+          showProjectModal
+        }
+      />
       {canvasMode !== 'audit' && bigEditorPortal}
 
     </div>

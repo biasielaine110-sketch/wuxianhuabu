@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { THUMB_MAX_CACHE, thumbnailCache } from './thumbnailCache';
-
+import { getThumbResolutionPercent, scaleThumbMaxSide } from './thumbResolution';
 function sniffMimeFromBase64(raw: string): string {
   const cleaned = raw.replace(/^data:[^;]+;base64,/, '').replace(/\s/g, '');
   if (!cleaned || cleaned.length < 8) return 'image/jpeg';
@@ -42,14 +42,9 @@ export function OptimizedImage({
   containerRef?: React.RefObject<HTMLDivElement | null>;
 }) {
   const [src, setSrc] = useState('');
-  const [dynamicMaxSide, setDynamicMaxSide] = useState(maxSide);
-  const maxSideRef = useRef(maxSide);
-  maxSideRef.current = maxSide;
+  const thumbPct = getThumbResolutionPercent();
+  const effectiveMaxSide = scaleThumbMaxSide(maxSide);
   void containerRef;
-
-  useEffect(() => {
-    setDynamicMaxSide(maxSide);
-  }, [maxSide]);
 
   useEffect(() => {
     let cancelled = false;
@@ -66,9 +61,8 @@ export function OptimizedImage({
           return;
         }
 
-        const currentMaxSide = Math.max(32, dynamicMaxSide);
-        const cachedKey = `${resolved.slice(0, 48)}|${resolved.slice(-48)}|${resolved.length}|${currentMaxSide}|${quality}|${assetId ?? ''}`;
-        const cached = thumbnailCache.get(cachedKey);
+        const currentMaxSide = effectiveMaxSide;
+        const cachedKey = `${resolved.slice(0, 48)}|${resolved.slice(-48)}|${resolved.length}|${currentMaxSide}|${quality}|${assetId ?? ''}|${thumbPct}`;        const cached = thumbnailCache.get(cachedKey);
         if (cached) {
           setSrc(cached);
           return;
@@ -153,8 +147,7 @@ export function OptimizedImage({
     return () => {
       cancelled = true;
     };
-  }, [base64, assetId, dynamicMaxSide, quality]);
-
+  }, [base64, assetId, effectiveMaxSide, quality, thumbPct]);
   if (!src) {
     return (
       <div

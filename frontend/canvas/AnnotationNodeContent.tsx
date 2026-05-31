@@ -35,6 +35,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
   const [fillOpacity, setFillOpacity] = useState(0.45);
   const fillOpacityRef = useRef(0.45);
   const [currentFontSize, setCurrentFontSize] = useState(16);
+  const [currentPenSize, setCurrentPenSize] = useState(8);
   /** 裁切选区（画布坐标），等待确认 */
   const [cropPending, setCropPending] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const cropPendingRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -182,6 +183,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
   const [fullscreenFillOpacity, setFullscreenFillOpacity] = useState(0.45);
   const fullscreenFillOpacityRef = useRef(0.45);
   const [fullscreenFontSize, setFullscreenFontSize] = useState(24);
+  const [fullscreenPenSize, setFullscreenPenSize] = useState(8);
   const [fullscreenAnnotations, setFullscreenAnnotations] = useState<Annotation[]>([]);
   const [fullscreenSelectedId, setFullscreenSelectedId] = useState<string | undefined>(undefined);
   const [isFsDrawing, setIsFsDrawing] = useState(false);
@@ -199,6 +201,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
   const fsToolRef = useRef(fullscreenTool);
   const fsColorRef = useRef(fullscreenColor);
   const fsFontSizeRef = useRef(fullscreenFontSize);
+  const fsPenSizeRef = useRef(fullscreenPenSize);
   const fsTempRef = useRef<Partial<Annotation> | null>(null);
   const fsAnnotationsRef = useRef<Annotation[]>([]);
   /** 全屏裁切选区（全屏画布坐标） */
@@ -249,6 +252,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
   useEffect(() => { fsToolRef.current = fullscreenTool; }, [fullscreenTool]);
   useEffect(() => { fsColorRef.current = fullscreenColor; }, [fullscreenColor]);
   useEffect(() => { fsFontSizeRef.current = fullscreenFontSize; }, [fullscreenFontSize]);
+  useEffect(() => { fsPenSizeRef.current = fullscreenPenSize; }, [fullscreenPenSize]);
   useEffect(() => { fullscreenFillOpacityRef.current = fullscreenFillOpacity; }, [fullscreenFillOpacity]);
   useEffect(() => { fsAnnotationsRef.current = fullscreenAnnotations; }, [fullscreenAnnotations]);
   useEffect(() => {
@@ -312,6 +316,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
   const currentToolRef = useRef(currentTool);
   const currentColorRef = useRef(currentColor);
   const currentFontSizeRef = useRef(currentFontSize);
+  const currentPenSizeRef = useRef(currentPenSize);
   const tempAnnotationRef = useRef<Partial<Annotation> | null>(null);
   const penPointsRef = useRef<{x: number, y: number}[]>([]);
 
@@ -401,6 +406,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
   useEffect(() => { currentToolRef.current = currentTool; }, [currentTool]);
   useEffect(() => { currentColorRef.current = currentColor; }, [currentColor]);
   useEffect(() => { currentFontSizeRef.current = currentFontSize; }, [currentFontSize]);
+  useEffect(() => { currentPenSizeRef.current = currentPenSize; }, [currentPenSize]);
   useEffect(() => { fillOpacityRef.current = fillOpacity; }, [fillOpacity]);
   useEffect(() => { tempAnnotationRef.current = tempAnnotation; }, [tempAnnotation]);
   useEffect(() => { isDrawingRef.current = isDrawing; }, [isDrawing]);
@@ -556,17 +562,25 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
         ctx.fillText(ann.text || '', ann.x, ann.y);
         break;
       case 'pen':
-        if (ann.points && ann.points.length > 1) {
+        if (ann.points && ann.points.length > 0) {
+          const sw = ann.strokeWidth || 8;
           ctx.strokeStyle = ann.color;
-          ctx.lineWidth = ann.strokeWidth || 3;
+          ctx.fillStyle = ann.color;
+          ctx.lineWidth = sw;
           ctx.lineCap = 'round';
           ctx.lineJoin = 'round';
-          ctx.beginPath();
-          ctx.moveTo(ann.points[0].x, ann.points[0].y);
-          for (let i = 1; i < ann.points.length; i++) {
-            ctx.lineTo(ann.points[i].x, ann.points[i].y);
+          if (ann.points.length === 1) {
+            ctx.beginPath();
+            ctx.arc(ann.points[0].x, ann.points[0].y, sw / 2, 0, Math.PI * 2);
+            ctx.fill();
+          } else {
+            ctx.beginPath();
+            ctx.moveTo(ann.points[0].x, ann.points[0].y);
+            for (let i = 1; i < ann.points.length; i++) {
+              ctx.lineTo(ann.points[i].x, ann.points[i].y);
+            }
+            ctx.stroke();
           }
-          ctx.stroke();
         }
         break;
       case 'fillRect': {
@@ -798,17 +812,25 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
 
     // 绘制画笔轨迹
     const points = penPointsRef.current;
-    if (points.length > 1) {
+    if (points.length > 0) {
+      const penSize = currentPenSizeRef.current;
       ctx.strokeStyle = currentColorRef.current;
-      ctx.lineWidth = 3;
+      ctx.fillStyle = currentColorRef.current;
+      ctx.lineWidth = penSize;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      ctx.beginPath();
-      ctx.moveTo(points[0].x, points[0].y);
-      for (let i = 1; i < points.length; i++) {
-        ctx.lineTo(points[i].x, points[i].y);
+      if (points.length === 1) {
+        ctx.beginPath();
+        ctx.arc(points[0].x, points[0].y, penSize / 2, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+          ctx.lineTo(points[i].x, points[i].y);
+        }
+        ctx.stroke();
       }
-      ctx.stroke();
     }
   };
 
@@ -967,14 +989,14 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
     if (currentToolRef.current === 'pen') {
       isDrawingRef.current = true;
       penPointsRef.current = [{ x, y }];
-      // 直接画一个点
+      const penSize = currentPenSizeRef.current;
       const canvas = canvasRef.current;
       if (canvas) {
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.fillStyle = currentColorRef.current;
           ctx.beginPath();
-          ctx.arc(x, y, 2, 0, Math.PI * 2);
+          ctx.arc(x, y, penSize / 2, 0, Math.PI * 2);
           ctx.fill();
         }
       }
@@ -1067,12 +1089,13 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
     // 画笔 - 直接累加绘制
     if (currentToolRef.current === 'pen') {
       const points = penPointsRef.current;
+      const penSize = currentPenSizeRef.current;
       if (points.length > 0) {
         const lastPoint = points[points.length - 1];
         const ctx = canvas?.getContext('2d');
         if (ctx) {
           ctx.strokeStyle = currentColorRef.current;
-          ctx.lineWidth = 3;
+          ctx.lineWidth = penSize;
           ctx.lineCap = 'round';
           ctx.lineJoin = 'round';
           ctx.beginPath();
@@ -1144,7 +1167,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
     // 画笔
     if (currentToolRef.current === 'pen') {
       const points = penPointsRef.current;
-      if (points.length > 1) {
+      if (points.length >= 1) {
         const newAnnotation: Annotation = {
           id: `ann-${Date.now()}`,
           type: 'pen',
@@ -1152,7 +1175,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
           y: points[0].y,
           points: [...points],
           color: currentColorRef.current,
-          strokeWidth: 3,
+          strokeWidth: currentPenSizeRef.current,
         };
         const currentAnnots = annotationsRef.current;
         const newAnnotations = [...currentAnnots, newAnnotation];
@@ -1275,17 +1298,25 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
         ctx.fillText(ann.text || '', ann.x, ann.y);
         break;
       case 'pen':
-        if (ann.points && ann.points.length > 1) {
+        if (ann.points && ann.points.length > 0) {
+          const sw = ann.strokeWidth || 8;
           ctx.strokeStyle = ann.color;
-          ctx.lineWidth = ann.strokeWidth || 4;
+          ctx.fillStyle = ann.color;
+          ctx.lineWidth = sw;
           ctx.lineCap = 'round';
           ctx.lineJoin = 'round';
-          ctx.beginPath();
-          ctx.moveTo(ann.points[0].x, ann.points[0].y);
-          for (let i = 1; i < ann.points.length; i++) {
-            ctx.lineTo(ann.points[i].x, ann.points[i].y);
+          if (ann.points.length === 1) {
+            ctx.beginPath();
+            ctx.arc(ann.points[0].x, ann.points[0].y, sw / 2, 0, Math.PI * 2);
+            ctx.fill();
+          } else {
+            ctx.beginPath();
+            ctx.moveTo(ann.points[0].x, ann.points[0].y);
+            for (let i = 1; i < ann.points.length; i++) {
+              ctx.lineTo(ann.points[i].x, ann.points[i].y);
+            }
+            ctx.stroke();
           }
-          ctx.stroke();
         }
         break;
       case 'fillRect': {
@@ -1648,7 +1679,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       x,
       y,
       color: fsColorRef.current,
-      strokeWidth: tool === 'text' ? fsFontSizeRef.current : 3,
+      strokeWidth: tool === 'text' ? fsFontSizeRef.current : tool === 'pen' ? fsPenSizeRef.current : 3,
       points: tool === 'pen' ? [{ x, y }] : undefined
     };
     setFsTempAnnotation(newAnn);
@@ -1799,7 +1830,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       let toAdd: Annotation | null = null;
       if (tool === 'pen') {
         const pts = fsPenPointsRef.current;
-        if (pts.length > 1) {
+        if (pts.length >= 1) {
           toAdd = {
             id: current.id || `fsann-${Date.now()}`,
             type: 'pen',
@@ -1807,7 +1838,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
             y: pts[0].y,
             points: [...pts],
             color: fsColorRef.current,
-            strokeWidth: 4,
+            strokeWidth: fsPenSizeRef.current,
           };
         }
       } else if (tool === 'rect' || tool === 'circle' || tool === 'fillRect' || tool === 'fillCircle') {
@@ -2429,6 +2460,33 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
           </div>
         )}
 
+        {/* 笔刷粗细 (仅画笔工具显示) */}
+        {currentTool === 'pen' && (
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-gray-400">粗细:</span>
+            <input
+              type="range"
+              min={1}
+              max={48}
+              step={1}
+              value={currentPenSize}
+              onPointerDown={(e) => e.stopPropagation()}
+              onChange={(e) => setCurrentPenSize(Number(e.target.value))}
+              className="w-20 accent-blue-500"
+            />
+            <span className="text-[10px] text-gray-500 w-5">{currentPenSize}</span>
+            <span
+              className="rounded-full shrink-0 border border-[#555]"
+              style={{
+                width: Math.min(currentPenSize, 24),
+                height: Math.min(currentPenSize, 24),
+                backgroundColor: currentColor,
+              }}
+              title="笔刷预览"
+            />
+          </div>
+        )}
+
         {/* 字体大小 (仅文字工具显示) */}
         {currentTool === 'text' && (
           <div className="flex items-center gap-2">
@@ -2627,6 +2685,32 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
                     className="w-28 accent-blue-500"
                   />
                   <span className="text-gray-400 text-xs w-8">{Math.round(fullscreenFillOpacity * 100)}%</span>
+                </div>
+              )}
+
+              {/* 笔刷粗细 */}
+              {fullscreenTool === 'pen' && (
+                <div className="flex items-center gap-1 ml-4">
+                  <span className="text-gray-400 text-xs">粗细:</span>
+                  <input
+                    type="range"
+                    min={1}
+                    max={48}
+                    step={1}
+                    value={fullscreenPenSize}
+                    onChange={(e) => setFullscreenPenSize(Number(e.target.value))}
+                    className="w-28 accent-blue-500"
+                  />
+                  <span className="text-gray-400 text-xs w-6">{fullscreenPenSize}</span>
+                  <span
+                    className="rounded-full shrink-0 border border-[#555]"
+                    style={{
+                      width: Math.min(fullscreenPenSize, 28),
+                      height: Math.min(fullscreenPenSize, 28),
+                      backgroundColor: fullscreenColor,
+                    }}
+                    title="笔刷预览"
+                  />
                 </div>
               )}
 
