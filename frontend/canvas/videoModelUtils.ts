@@ -1,4 +1,5 @@
 import type { CanvasNode } from '../types';
+import type { ToApisVideoModelId } from '../services/openaiCompatibleService';
 
 /** 视频节点 Veo：当前存 `veo3.1-fast`；旧工程可能仍为 `veo3.1-fast-official` */
 export function isVeo31FastVideoModel(m?: string): boolean {
@@ -115,4 +116,17 @@ export function getVideoModelSwitchUpdates(m: string, node: CanvasNode): Partial
     }
   }
   return updates;
+}
+
+/** 视频节点模型 → ToAPIs 模型 */
+export function videoNodeModelToToApis(m?: string): ToApisVideoModelId {
+  const vm = (m || '').trim();
+  if (vm === 'sora-2-vvip') return 'sora-2-vvip';
+  if (isVeo31FastVideoModel(vm)) return 'veo3.1-fast';
+  if (vm === 'doubao-seedance-1-5-pro') return 'doubao-seedance-1-5-pro';
+  if (vm === 'doubao-seedance-2-0-260128' || vm === 'doubao-seedance-2-0-fast-260128') return vm as ToApisVideoModelId;
+  if (vm === 'seedance-2' || vm === 'seedance-2-fast') return vm as ToApisVideoModelId;
+  if (vm === 'gemini-omni-flash') return 'gemini-omni-flash';
+  if (vm === 'jimeng-video-v3' || vm === 'jimeng-image-to-video') return vm as ToApisVideoModelId;
+  return 'grok-video-3';
 }

@@ -24,6 +24,8 @@ export type CanvasNodeRenderState = {
   importTargetNodeId: string | null;
   nodes: CanvasNode[];
   edges: Edge[];
+  nodesRef: MutableRefObject<CanvasNode[]>;
+  edgesRef: MutableRefObject<Edge[]>;
   edgesKey: string;
   generationStartedAtRef: MutableRefObject<Map<string, number>>;
   fileInputRef: MutableRefObject<HTMLInputElement | null>;
@@ -53,7 +55,7 @@ export type CanvasNodeRenderState = {
   setEyedropperTargetNodeId: Dispatch<SetStateAction<string | null>>;
   setEditingTextNodeIds: Dispatch<SetStateAction<Set<string>>>;
   setImportTargetNodeId: Dispatch<SetStateAction<string | null>>;
-  setTextNodeFontSize: Dispatch<SetStateAction<number>>;
+  setTextNodeFontSize: (size: number) => void;
   setShowSettingsModal: Dispatch<SetStateAction<boolean>>;
   setSettingsTab: Dispatch<SetStateAction<'api' | 'presets' | 'downloads' | 'credits' | 'appearance'>>;
   setFullscreenImage: Dispatch<SetStateAction<string | null>>;
@@ -62,6 +64,12 @@ export type CanvasNodeRenderState = {
   eyedropperTargetNodeIdRef: MutableRefObject<string | null>;
   promptPresetDomainOverrides: Record<string, PresetDomainId>;
   promptPresetCategoryOverrides: Record<string, I2iPresetCategoryId>;
+  thumbResolutionPct: number;
+  downloadVideoFromUrl: (url: string, filename?: string) => void;
+  appendNodesWithUndo: (
+    newNodes: CanvasNode[],
+    options?: { edges?: Edge[]; selectIds?: string[] }
+  ) => void;
 };
 
 export type CanvasNodeRenderStateRef = MutableRefObject<CanvasNodeRenderState>;

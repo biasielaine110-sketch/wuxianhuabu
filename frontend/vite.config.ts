@@ -143,6 +143,16 @@ const toapisFileCdnProxy = {
     target: 'http://localhost:3107',
     changeOrigin: true,
     secure: false,
+    configure(proxy) {
+      proxy.on('error', (err, _req, res) => {
+        console.warn('[vite proxy /api/jimeng] 即梦后端未启动 (npm start --prefix server):', err instanceof Error ? err.message : err);
+        const r = res as { headersSent?: boolean; writeHead?: (c: number, h?: unknown) => void; end?: (s?: string) => void };
+        if (r && !r.headersSent && typeof r.writeHead === 'function') {
+          r.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          r.end?.(JSON.stringify({ loggedIn: false }));
+        }
+      });
+    },
     rewrite: (p: string) => p.replace(/^\/api\/jimeng/, '/api/jimeng'),
   },
   /** AIID (api.aiid.edu.kg) 视频生成 API 代理，解决 CORS 跨域问题 */
@@ -191,6 +201,18 @@ export default defineConfig(({ mode }) => {
               }
               if (norm.includes('/integrations/jimeng/')) {
                 return 'jimeng';
+              }
+              if (norm.includes('AnnotationNodeContent')) {
+                return 'annotation';
+              }
+              if (norm.includes('openaiCompatibleService')) {
+                return 'ai-service';
+              }
+              if (norm.includes('CanvasApp')) {
+                return 'canvas-app';
+              }
+              if (norm.includes('AuditModeCanvas')) {
+                return 'audit';
               }
               return undefined;
             },

@@ -59,6 +59,10 @@ export function shouldUseNodePlaceholder(
     activeWebGLNodeId: string | null;
   },
 ): boolean {
+  /** 离屏生成中节点用轻量占位，避免挂载 Chat/Annotation 等重型 DOM */
+  if (node.isGenerating && !opts.isInViewport && !opts.isDragging && !opts.isSelected) {
+    return true;
+  }
   const heavy = isHeavyWebGLNodeType(node.type);
   if (heavy) {
     if (opts.isDragging) return false;

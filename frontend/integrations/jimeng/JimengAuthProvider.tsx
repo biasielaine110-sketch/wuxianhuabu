@@ -22,6 +22,10 @@ export function JimengAuthProvider(props: { children: React.ReactNode }) {
   const refreshAuthInfo = useCallback(async () => {
     try {
       const r = await fetch('/api/jimeng/session');
+      if (!r.ok) {
+        setAuthInfo(DEFAULT_AUTH_INFO);
+        return;
+      }
       const session = await r.json();
       if (session?.loggedIn) {
         const d = session.data || {};

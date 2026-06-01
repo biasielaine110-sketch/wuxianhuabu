@@ -53,6 +53,10 @@ function manxueFetchBase(): string {
   return rewriteManxueBaseForBrowserCors(normalizeBaseUrl(getManxueBaseUrl()));
 }
 
+function codesonlineFetchBase(): string {
+  return rewriteRemoteOpenAiCompatBaseForBrowserCors(normalizeBaseUrl(getCodesonlineBaseUrl()));
+}
+
 function manxueGeminiModelsBase(): string {
   if (typeof window === 'undefined') return 'https://manxueapi.com/v1beta/models';
   return `${window.location.origin}/manxue-api/v1beta/models`;
@@ -429,7 +433,15 @@ function rewriteYunzhiAssetUrlToSameOriginProxy(imageUrl: string): string {
 }
 
 async function fetchUrlAsBase64(imageUrl: string, signal?: AbortSignal, bearerToken?: string): Promise<string> {
-  let fetchUrl = rewriteYunzhiAssetUrlToSameOriginProxy(imageUrl);
+  let absoluteUrl = imageUrl.trim();
+  if (absoluteUrl.startsWith('/')) {
+    try {
+      absoluteUrl = new URL(absoluteUrl, 'https://image.codesonline.dev').href;
+    } catch {
+      /* keep */
+    }
+  }
+  let fetchUrl = rewriteYunzhiAssetUrlToSameOriginProxy(absoluteUrl);
   fetchUrl = rewriteKnownImageCdnToSameOrigin(fetchUrl);
   const headers: Record<string, string> = {};
   if (bearerToken?.trim()) {
@@ -442,7 +454,7 @@ async function fetchUrlAsBase64(imageUrl: string, signal?: AbortSignal, bearerTo
         (fetchUrl !== imageUrl
           ? '同源代理拉取失败：若为云智等网关，生成图 URL 常需携带与文生图相同的 Bearer Token（已自动附带）；仍 502 时请检查密钥权限或上游服务。原始链接：'
           : '若为跨域限制，请直接打开链接保存：') +
-        imageUrl.slice(0, 200)
+        absoluteUrl.slice(0, 200)
     );
   }
   const blob = await res.blob();
@@ -474,6 +486,26 @@ function sniffMimeFromBase64(raw: string): string {
     /* ignore */
   }
   return 'image/jpeg';
+}
+
+/** 过滤网关返回的占位/错误字符串，避免写入节点后预览空白 */
+function isPlausibleImageBase64(raw: string): boolean {
+  const cleaned = raw.replace(/^data:[^;]+;base64,/, '').replace(/\s/g, '');
+  if (cleaned.length < 200) return false;
+  if (cleaned.startsWith('http://') || cleaned.startsWith('https://')) return false;
+  try {
+    const head = atob(cleaned.slice(0, 48));
+    const a = head.charCodeAt(0);
+    const b = head.charCodeAt(1);
+    return (
+      (a === 0xff && b === 0xd8) ||
+      (a === 0x89 && b === 0x50) ||
+      (a === 0x47 && b === 0x49) ||
+      (a === 0x52 && b === 0x49)
+    );
+  } catch {
+    return false;
+  }
 }
 
 function parseBase64ImageInput(input: string): { raw: string; mime: string } {
@@ -835,10 +867,20 @@ async function manxueSubmitGeneration(
   if (!res.ok) {
     throw new Error(`满 eAPI 提交任务失败 (${res.status}): ${text.slice(0, 800)}`);
   }
-  const json = JSON.parse(text) as { id?: string; error?: { message?: string }; b64_json?: string; data?: unknown[] };
+  const json = JSON.parse(text) as {
+    id?: string;
+    task_id?: string;
+    error?: { message?: string };
+    b64_json?: string;
+    data?: unknown[];
+  };
   if (json.error?.message) throw new Error(`满 eAPI: ${json.error.message}`);
-  // 满 eAPI 可能直接返回图片（同步模式）或返回 id（异步模式）
-  return { id: json.id, b64_json: json.b64_json, data: json.data };
+  // 满 e / codesonline 等：同步返回 data[]，或异步返回 id / task_id
+  const taskId =
+    (typeof json.id === 'string' && json.id.trim()) ||
+    (typeof json.task_id === 'string' && json.task_id.trim()) ||
+    undefined;
+  return { id: taskId, b64_json: json.b64_json, data: json.data };
 }
 
 /** 满 eAPI 提交图片编辑任务（multipart /images/edits） */
@@ -858,70 +900,242 @@ async function manxueSubmitEdit(
   if (!res.ok) {
     throw new Error(`满 eAPI 图生图失败 (${res.status}): ${text.slice(0, 800)}`);
   }
-  const json = JSON.parse(text) as { id?: string; error?: { message?: string }; b64_json?: string; data?: unknown[] };
+  const json = JSON.parse(text) as {
+    id?: string;
+    task_id?: string;
+    error?: { message?: string };
+    b64_json?: string;
+    data?: unknown[];
+  };
   if (json.error?.message) throw new Error(`满 eAPI: ${json.error.message}`);
-  return { id: json.id, b64_json: json.b64_json, data: json.data };
+  const taskId =
+    (typeof json.id === 'string' && json.id.trim()) ||
+    (typeof json.task_id === 'string' && json.task_id.trim()) ||
+    undefined;
+  return { id: taskId, b64_json: json.b64_json, data: json.data };
 }
 
-/** 解析满 eAPI 图生/图编响应为 base64 */
-async function manxueGenerationResultToBase64(
+/** codesonline 文档：data[].url / fallback_url / urls.mx|direct；见 image.codesonline.dev/personal/docs */
+function pickImageUrlFromPayload(item: Record<string, unknown>): string {
+  const urlVal = typeof item.url === 'string' ? item.url.trim() : '';
+  if (urlVal) return urlVal;
+  const urls = item.urls;
+  if (urls && typeof urls === 'object') {
+    const u = urls as Record<string, unknown>;
+    const mx = typeof u.mx === 'string' ? u.mx.trim() : '';
+    if (mx) return mx;
+    const direct = typeof u.direct === 'string' ? u.direct.trim() : '';
+    if (direct) return direct;
+  }
+  const fallback = typeof item.fallback_url === 'string' ? item.fallback_url.trim() : '';
+  return fallback;
+}
+
+function extractTaskIdFromJson(json: unknown): string | undefined {
+  if (!json || typeof json !== 'object') return undefined;
+  const rec = json as Record<string, unknown>;
+  for (const key of ['id', 'task_id', 'taskId'] as const) {
+    const v = rec[key];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  const item = firstOpenAiImageGenerationItem(json);
+  if (!item) return undefined;
+  for (const key of ['task_id', 'id', 'taskId'] as const) {
+    const v = item[key];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  const st = String(item.status ?? '').toLowerCase();
+  if (st === 'submitted' || st === 'processing' || st === 'queued' || st === 'dispatched') {
+    const tid = item.task_id ?? item.id;
+    if (typeof tid === 'string' && tid.trim()) return tid.trim();
+  }
+  return undefined;
+}
+
+function imageTaskPollUrl(base: string, taskId: string): string {
+  /** codesonline 异步任务：GET /v1/images/tasks/{id}（非 /images/generations/{id}） */
+  if (isCodesonlineOpenAiCompatBase(base)) {
+    return `${base}/images/tasks/${encodeURIComponent(taskId)}`;
+  }
+  return `${base}/images/generations/${encodeURIComponent(taskId)}`;
+}
+
+function isImageTaskDoneStatus(status: string): boolean {
+  const s = status.toLowerCase();
+  return s === 'completed' || s === 'succeeded' || s === 'success';
+}
+
+function isImageTaskFailedStatus(status: string): boolean {
+  const s = status.toLowerCase();
+  return s === 'failed' || s === 'error';
+}
+
+function extractImageUrlsFromTaskPayload(data: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const push = (u: unknown) => {
+    if (typeof u === 'string' && u.trim()) out.push(u.trim());
+  };
+  push(data.url);
+  if (Array.isArray(data.image_urls)) data.image_urls.forEach(push);
+  if (Array.isArray(data.result_urls_parsed)) data.result_urls_parsed.forEach(push);
+  const output = data.output;
+  if (output && typeof output === 'object') {
+    const o = output as Record<string, unknown>;
+    if (Array.isArray(o.image_urls)) o.image_urls.forEach(push);
+  }
+  const result = data.result;
+  if (result && typeof result === 'object') {
+    const r = result as Record<string, unknown>;
+    const imgs = r.images;
+    if (Array.isArray(imgs)) {
+      for (const im of imgs) {
+        if (!im || typeof im !== 'object') continue;
+        const rec = im as Record<string, unknown>;
+        if (Array.isArray(rec.url)) rec.url.forEach(push);
+        else push(rec.url);
+      }
+    }
+    const rdata = r.data;
+    if (Array.isArray(rdata)) {
+      for (const item of rdata) {
+        if (item && typeof item === 'object') push(pickImageUrlFromPayload(item as Record<string, unknown>));
+      }
+    }
+  }
+  const dataArr = data.data;
+  if (Array.isArray(dataArr)) {
+    for (const item of dataArr) {
+      if (item && typeof item === 'object') {
+        const url = pickImageUrlFromPayload(item as Record<string, unknown>);
+        if (url) out.push(url);
+      }
+    }
+  }
+  return out;
+}
+
+function formatImageTaskPollStatus(status: string): string {
+  const s = status.toLowerCase();
+  if (s === 'queued' || s === 'dispatched') return '任务已提交，等待 codesonline 分配生图账号…';
+  if (s === 'running' || s === 'processing' || s === 'pending') return 'codesonline 正在生成图片…';
+  return '正在查询生图任务状态…';
+}
+
+/** OpenAI 兼容网关（满 e / codesonline 等）轮询异步生图任务直到完成 */
+async function pollOpenAiCompatImageTaskToBase64(
   base: string,
   apiKey: string,
-  result: { id?: string; b64_json?: string; data?: unknown[] },
-  signal?: AbortSignal
+  taskId: string,
+  signal?: AbortSignal,
+  onStatus?: (message: string) => void
 ): Promise<string> {
-  if (result.b64_json) return result.b64_json;
-  if (result.data && Array.isArray(result.data) && result.data.length > 0) {
-    const first = result.data[0] as { b64_json?: string; url?: string };
-    if (first.b64_json) return first.b64_json;
-    if (first.url) return fetchUrlAsBase64(first.url, signal, apiKey);
-    throw new Error('满 eAPI 图生图响应中未找到图片数据');
+  const deadline = Date.now() + MANXUE_TASK_MAX_WAIT_MS;
+  await sleepInterruptible(2000, signal);
+  const pollUrl = imageTaskPollUrl(base, taskId);
+  const isCodesonline = isCodesonlineOpenAiCompatBase(base);
+
+  while (Date.now() < deadline) {
+    assertNotAborted(signal);
+    let res: Response;
+    let text: string;
+    try {
+      res = await fetch(pollUrl, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal,
+      });
+      text = await res.text();
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') throw err;
+      throw new Error(
+        `查询生图任务失败：${err instanceof Error ? err.message : String(err)}` +
+          (isCodesonline ? '（codesonline 轮询 GET /v1/images/tasks/{id}）' : '')
+      );
+    }
+    if (!res.ok) {
+      throw new Error(
+        `查询生图任务失败 (${res.status})${isCodesonline ? '，codesonline 请确认 task_id 有效' : ''}: ${text.slice(0, 500)}`
+      );
+    }
+    let data: Record<string, unknown>;
+    try {
+      data = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      throw new Error(`生图任务响应非 JSON：${text.slice(0, 300)}`);
+    }
+
+    const status = String(data.status ?? '').toLowerCase();
+    if (status && !isImageTaskDoneStatus(status) && !isImageTaskFailedStatus(status)) {
+      onStatus?.(formatImageTaskPollStatus(status));
+    }
+
+    if (isImageTaskDoneStatus(status)) {
+      const topB64 = data.b64_json;
+      if (typeof topB64 === 'string' && isPlausibleImageBase64(topB64)) return topB64;
+      const urls = extractImageUrlsFromTaskPayload(data);
+      if (urls.length) return fetchUrlAsBase64(urls[0], signal, apiKey);
+      const first = Array.isArray(data.data) ? data.data[0] : undefined;
+      if (first && typeof first === 'object') {
+        return openAiStyleImagePayloadToBase64(first as Record<string, unknown>, signal, apiKey);
+      }
+      throw new Error('生图任务已完成但未返回图片链接，请稍后重试或在 codesonline 控制台查看任务记录。');
+    }
+    if (isImageTaskFailedStatus(status)) {
+      const errObj = data.error;
+      const msg =
+        (errObj && typeof errObj === 'object' && typeof (errObj as { message?: string }).message === 'string'
+          ? (errObj as { message?: string }).message
+          : undefined) ||
+        (typeof data.error === 'string' ? data.error : undefined) ||
+        JSON.stringify(data.error ?? data);
+      throw new Error(`生图失败: ${msg}`);
+    }
+    await sleepInterruptible(3000, signal);
   }
-  if (result.id) return manxuePollTaskToBase64(base, apiKey, result.id, signal);
-  throw new Error('满 eAPI 图生图未返回任务 id 也无图片数据');
+  throw new Error(
+    `生图任务超时（已等待超过 ${MANXUE_TASK_MAX_WAIT_MS / 60_000} 分钟）` +
+      (isCodesonline ? '；可在 codesonline 控制台「在线体验」查看历史任务。' : '，请稍后重试。')
+  );
 }
 
-/** 满 eAPI 轮询任务直到完成 */
+/** @deprecated 别名：请使用 pollOpenAiCompatImageTaskToBase64 */
 async function manxuePollTaskToBase64(
   base: string,
   apiKey: string,
   taskId: string,
   signal?: AbortSignal
 ): Promise<string> {
-  const deadline = Date.now() + MANXUE_TASK_MAX_WAIT_MS;
-  await sleepInterruptible(2000, signal);
+  return pollOpenAiCompatImageTaskToBase64(base, apiKey, taskId, signal);
+}
 
-  while (Date.now() < deadline) {
-    assertNotAborted(signal);
-    const res = await fetch(`${base}/images/generations/${encodeURIComponent(taskId)}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal,
-    });
-    const text = await res.text();
-    if (!res.ok) {
-      throw new Error(`满 eAPI 查询任务失败 (${res.status}): ${text.slice(0, 500)}`);
-    }
-    const data = JSON.parse(text) as {
-      status?: string;
-      url?: string;
-      result?: { data?: { url?: string }[] };
-      b64_json?: string;
-      error?: { message?: string };
-    };
-
-    if (data.status === 'completed') {
-      // 优先返回 b64_json
-      if (data.b64_json) return data.b64_json;
-      const url = data.url || data.result?.data?.[0]?.url;
-      if (!url) throw new Error('满 eAPI 任务完成但未返回图片。');
-      return fetchUrlAsBase64(url, signal, apiKey);
-    }
-    if (data.status === 'failed') {
-      throw new Error(`满 eAPI 生成失败: ${data.error?.message || JSON.stringify(data.error)}`);
-    }
-    await sleepInterruptible(3000, signal);
+/** 解析 OpenAI 兼容网关（满 e / codesonline 等）图生/图编响应为 base64 */
+async function manxueGenerationResultToBase64(
+  base: string,
+  apiKey: string,
+  result: { id?: string; b64_json?: string; data?: unknown[] },
+  signal?: AbortSignal
+): Promise<string> {
+  if (result.b64_json && isPlausibleImageBase64(result.b64_json)) return result.b64_json;
+  if (result.data && Array.isArray(result.data) && result.data.length > 0) {
+    const first = result.data[0] as Record<string, unknown>;
+    const b64 = typeof first.b64_json === 'string' ? first.b64_json : '';
+    if (b64 && isPlausibleImageBase64(b64)) return b64;
+    const url = pickImageUrlFromPayload(first);
+    if (url) return fetchUrlAsBase64(url, signal, apiKey);
+    const nestedTaskId =
+      (typeof first.task_id === 'string' && first.task_id.trim()) ||
+      (typeof first.id === 'string' && first.id.trim()) ||
+      undefined;
+    if (nestedTaskId) return pollOpenAiCompatImageTaskToBase64(base, apiKey, nestedTaskId, signal);
+    throw new Error('图生图响应中未找到图片数据或 task_id');
   }
-  throw new Error(`满 eAPI 任务超时（已等待超过 ${MANXUE_TASK_MAX_WAIT_MS / 60_000} 分钟），请稍后重试。`);
+  if (result.id) return pollOpenAiCompatImageTaskToBase64(base, apiKey, result.id, signal);
+  if (result.b64_json) {
+    if (result.b64_json.startsWith('http://') || result.b64_json.startsWith('https://')) {
+      return fetchUrlAsBase64(result.b64_json, signal, apiKey);
+    }
+    throw new Error('图生图返回的 base64 无效，请稍后重试或换用 url 回传格式');
+  }
+  throw new Error('图生图未返回任务 id 也无图片数据');
 }
 
 /** 从满 eAPI SSE 流式响应中提取图片 URL */
@@ -2040,6 +2254,64 @@ async function manxueEditImage(
   return out;
 }
 
+/** codesonline GPT Image 2 文生图：POST /v1/images/generations，异步轮询 GET /v1/images/tasks/{id} */
+async function codesonlineGenerateNewImage(
+  prompt: string,
+  aspectRatio: string,
+  numberOfImages: number,
+  nodeResolution?: string,
+  quality?: string,
+  signal?: AbortSignal
+): Promise<string[]> {
+  const apiKey = getCodesonlineSavedKey().trim();
+  if (!apiKey) {
+    throw new Error(
+      '未配置 codesonline 图像通道。请在「设置 → API」填写「codesonline（GPT Image 2）」API Key。'
+    );
+  }
+  return generateImagesAtOpenAiCompatibleBase(
+    codesonlineFetchBase(),
+    apiKey,
+    prompt,
+    aspectRatio,
+    numberOfImages,
+    'gpt-image-2',
+    nodeResolution,
+    quality,
+    signal
+  );
+}
+
+/** codesonline GPT Image 2 图生图：POST /v1/images/edits + 任务轮询 */
+async function codesonlineEditImage(
+  base64Images: string[],
+  prompt: string,
+  numberOfImages: number,
+  aspectRatio: string,
+  nodeResolution?: string,
+  quality?: string,
+  signal?: AbortSignal
+): Promise<string[]> {
+  if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
+  const apiKey = getCodesonlineSavedKey().trim();
+  if (!apiKey) {
+    throw new Error(
+      '未配置 codesonline 图像通道。请在「设置 → API」填写「codesonline（GPT Image 2）」API Key。'
+    );
+  }
+  return editImagesAtOpenAiCompatibleBase(
+    codesonlineFetchBase(),
+    apiKey,
+    base64Images,
+    prompt,
+    numberOfImages,
+    'gpt-image-2',
+    aspectRatio,
+    quality,
+    signal
+  );
+}
+
 /** 满 eAPI Gemini 图生图：使用 Vertex AI 风格的 generateContent 接口 */
 async function manxueGeminiEditImage(
   base64Images: string[],
@@ -2545,26 +2817,54 @@ async function openAiStyleImagePayloadToBase64(
   bearerToken?: string
 ): Promise<string> {
   if (!item) throw new Error('接口未返回图片条目。');
-  const b64Candidate = item.b64_json ?? item.b64 ?? item.image;
-  if (typeof b64Candidate === 'string' && b64Candidate.trim()) return b64Candidate.trim();
-  const urlVal = item.url;
-  if (typeof urlVal === 'string' && urlVal.trim()) {
-    return fetchUrlAsBase64(urlVal.trim(), signal, bearerToken);
+  const urlVal = pickImageUrlFromPayload(item);
+  const b64Raw = [item.b64_json, item.b64, item.image].find(
+    (v) => typeof v === 'string' && (v as string).trim()
+  ) as string | undefined;
+  const b64 = b64Raw?.trim() ?? '';
+
+  /** codesonline 等网关常同时返回无效 b64_json 与有效 url；URL 字段也可能误写入 b64_json */
+  if (b64.startsWith('http://') || b64.startsWith('https://')) {
+    return fetchUrlAsBase64(b64, signal, bearerToken);
   }
-  throw new Error('接口未返回可用图片（缺少 b64_json / url）。');
+  const minValidB64Len = 200;
+  if (urlVal && (!b64 || b64.length < minValidB64Len)) {
+    return fetchUrlAsBase64(urlVal, signal, bearerToken);
+  }
+  if (b64.length >= minValidB64Len && isPlausibleImageBase64(b64)) return b64;
+  if (urlVal) return fetchUrlAsBase64(urlVal, signal, bearerToken);
+  throw new Error('接口未返回可用图片（缺少 b64_json / url / fallback_url）。');
 }
 
 async function openAiStyleGenerationJsonToBase64(
   json: unknown,
   signal?: AbortSignal,
-  bearerToken?: string
+  bearerToken?: string,
+  baseNorm?: string
 ): Promise<string> {
   const item = firstOpenAiImageGenerationItem(json);
-  if (item) return openAiStyleImagePayloadToBase64(item, signal, bearerToken);
+  if (item) {
+    const itemTaskId =
+      (typeof item.task_id === 'string' && item.task_id.trim()) ||
+      (typeof item.id === 'string' && item.id.trim()) ||
+      undefined;
+    const hasImagePayload =
+      pickImageUrlFromPayload(item).length > 0 ||
+      (typeof item.b64_json === 'string' && isPlausibleImageBase64(item.b64_json));
+    if (!hasImagePayload && itemTaskId && baseNorm && bearerToken) {
+      return pollOpenAiCompatImageTaskToBase64(baseNorm, bearerToken, itemTaskId, signal);
+    }
+    return openAiStyleImagePayloadToBase64(item, signal, bearerToken);
+  }
   if (json && typeof json === 'object') {
-    const urlTop = (json as Record<string, unknown>).url;
+    const rec = json as Record<string, unknown>;
+    const urlTop = rec.url;
     if (typeof urlTop === 'string' && urlTop.trim()) {
       return fetchUrlAsBase64(urlTop.trim(), signal, bearerToken);
+    }
+    const taskId = extractTaskIdFromJson(json);
+    if (taskId && baseNorm && bearerToken) {
+      return pollOpenAiCompatImageTaskToBase64(baseNorm, bearerToken, taskId, signal);
     }
   }
   let snippet = '';
@@ -2574,6 +2874,30 @@ async function openAiStyleGenerationJsonToBase64(
     snippet = String(json).slice(0, 400);
   }
   throw new Error(`接口未返回图片数据。响应片段：${snippet}`);
+}
+
+/** 生图结果写入节点前：远程 URL / data URL 统一转为 raw base64，避免预览区无法显示 */
+export async function normalizeCanvasGenerationImage(
+  raw: string,
+  opts?: { signal?: AbortSignal; bearerToken?: string }
+): Promise<string> {
+  const s = raw.trim();
+  if (!s) return s;
+  if (s.startsWith('data:')) {
+    const i = s.indexOf(',');
+    return i >= 0 ? s.slice(i + 1).trim() : s;
+  }
+  if (s.startsWith('http://') || s.startsWith('https://')) {
+    return fetchUrlAsBase64(s, opts?.signal, opts?.bearerToken);
+  }
+  return s;
+}
+
+export async function normalizeCanvasGenerationImages(
+  images: string[],
+  opts?: { signal?: AbortSignal; bearerToken?: string }
+): Promise<string[]> {
+  return Promise.all(images.map((im) => normalizeCanvasGenerationImage(im, opts)));
 }
 
 async function generateImagesAtOpenAiCompatibleBase(
@@ -2612,7 +2936,7 @@ async function generateImagesAtOpenAiCompatibleBase(
       body,
       apiKey
     );
-    return openAiStyleGenerationJsonToBase64(json, signal, apiKey);
+    return openAiStyleGenerationJsonToBase64(json, signal, apiKey, baseNorm);
   };
 
   const requestOneImageWithFallback = async (): Promise<string> => {
@@ -2753,7 +3077,7 @@ async function editImagesAtOpenAiCompatibleBase(
           `图生图接口错误 (${res.status})${openAiCompatFailureHint(res.status, 'image-edit')}: ${text.slice(0, 800)}`
         );
       }
-      return openAiStyleGenerationJsonToBase64(JSON.parse(text) as unknown, signal, apiKey);
+      return openAiStyleGenerationJsonToBase64(JSON.parse(text) as unknown, signal, apiKey, baseNorm);
     };
 
     if (resolvedEditModel === 'dall-e-2') {
@@ -2826,14 +3150,10 @@ export async function openAiGenerateNewImage(
         '未配置 codesonline 图像通道。请在「设置 → API」填写「codesonline（GPT Image 2）」API Key；文档：https://image.codesonline.dev/personal/docs'
       );
     }
-    const coBase = normalizeBaseUrl(getCodesonlineBaseUrl());
-    return generateImagesAtOpenAiCompatibleBase(
-      coBase,
-      coKey,
+    return codesonlineGenerateNewImage(
       prompt,
       aspectRatio,
       numberOfImages,
-      'gpt-image-2',
       nodeResolution,
       quality,
       signal
@@ -2915,16 +3235,12 @@ export async function openAiEditImage(
         '未配置 codesonline 图像通道。请在「设置 → API」填写「codesonline（GPT Image 2）」API Key；文档：https://image.codesonline.dev/personal/docs'
       );
     }
-    const coBase = normalizeBaseUrl(getCodesonlineBaseUrl());
-    console.log('[DEBUG codesonline编辑] base:', coBase, 'key长度:', coKey.length, '参考图数量:', base64Images.length, 'prompt前100:', prompt.slice(0, 100));
-    return editImagesAtOpenAiCompatibleBase(
-      coBase,
-      coKey,
+    return codesonlineEditImage(
       base64Images,
       prompt,
       numberOfImages,
-      'gpt-image-2',
       aspectRatio,
+      nodeResolution,
       quality,
       signal
     );

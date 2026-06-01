@@ -1,0 +1,22 @@
+/** 画布主界面快捷键说明（与 window keydown / paste 逻辑一致） */
+export const CANVAS_SHORTCUT_HELP_ROWS: readonly { combo: string; detail: string }[] = [
+  { combo: 'V', detail: '选择工具' },
+  { combo: 'B', detail: '框选工具' },
+  { combo: '空格（按住）', detail: '临时切换到平移；松开后恢复选择工具' },
+  { combo: 'Q', detail: '在视图中心新建「AI 对话」节点（无 Ctrl / ⌘ / Alt；不在输入框内）' },
+  { combo: 'W', detail: '新建「文生图」节点' },
+  { combo: 'E', detail: '新建「图生图」节点' },
+  { combo: 'R', detail: '新建「文本」节点' },
+  { combo: 'X', detail: '将当前选中节点设为吸管目标；无选中则取消吸管' },
+  { combo: 'C', detail: '将选中节点的当前图片复制为新图片节点（节点须包含图片）' },
+  { combo: 'Esc', detail: '关闭本快捷键窗口（若已打开）；否则取消选中、关闭菜单与草稿连线、退出全屏图、取消吸管' },
+  { combo: 'Delete / Backspace', detail: '删除当前选中的节点（非全屏预览图时）' },
+  { combo: 'Alt + Q', detail: '删除当前选中的节点（同上）' },
+  { combo: 'Ctrl + C / ⌘ + C', detail: '复制节点（仅当选中恰好 1 个节点时）' },
+  { combo: 'Ctrl + V / ⌘ + V', detail: '粘贴（输入框外；支持一次粘贴多张图片为新节点，否则粘贴已复制节点）' },
+  { combo: 'Ctrl + S / ⌘ + S', detail: '保存当前项目' },
+  { combo: 'Ctrl + Alt + S / ⌘ + ⌥ + S', detail: '另存 JSON 草稿（不改变当前 Ctrl+S 绑定）' },
+  { combo: 'Ctrl + Z / ⌘ + Z', detail: '撤销画布操作' },
+  { combo: 'Ctrl + A / ⌘ + A', detail: '全选画布上的节点' },
+  { combo: 'F', detail: '视口缩放并居中到当前选中节点（需先选中；非输入框）' },
+];

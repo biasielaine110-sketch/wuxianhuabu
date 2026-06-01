@@ -1,16 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useCanvasStore } from '../stores/canvasStore';
 
 const OPTIONS = [5, 10, 20, 50, 70, 100] as const;
 
-export function ThumbResolutionControl({
-  value,
-  onChange,
-  hidden = false,
-}: {
-  value: number;
-  onChange: (percent: number) => void;
-  hidden?: boolean;
-}) {
+/** 预览分辨率控件：内部订阅 store，避免 App 因缩略图设置重渲染 */
+export function ThumbResolutionControl({ hidden = false }: { hidden?: boolean }) {
+  const value = useCanvasStore((s) => s.thumbResolutionPct);
+  const setThumbResolutionPct = useCanvasStore((s) => s.setThumbResolutionPct);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -73,7 +69,7 @@ export function ThumbResolutionControl({
                 onClick={(e) => {
                   e.stopPropagation();
                   setOpen(false);
-                  if (pct !== value) onChange(pct);
+                  if (pct !== value) setThumbResolutionPct(pct);
                 }}
               >
                 {pct}%

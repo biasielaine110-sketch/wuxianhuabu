@@ -3,7 +3,9 @@ export default {
   content: [
     './index.html',
     './*.{ts,tsx}',
+    './components/**/*.{ts,tsx}',
     './canvas/**/*.{ts,tsx}',
+    './stores/**/*.{ts,tsx}',
     './services/**/*.{ts,tsx}',
     './integrations/**/*.{ts,tsx}',
   ],

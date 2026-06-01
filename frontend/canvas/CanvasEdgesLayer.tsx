@@ -4,9 +4,9 @@ import { EdgePath } from './EdgePath';
 import { buildEdgeBezierPath } from './canvasEdgeGeometry';
 
 type CanvasEdgesLayerProps = {
+  /** 调用方预过滤可见边，避免层内全量遍历 */
   edges: Edge[];
   nodeMap: Map<string, CanvasNode>;
-  edgeRenderNodeIds: Set<string>;
   selectedIdSet: Set<string>;
   onDeleteEdge: (id: string) => void;
 };
@@ -14,7 +14,6 @@ type CanvasEdgesLayerProps = {
 function CanvasEdgesLayerInner({
   edges,
   nodeMap,
-  edgeRenderNodeIds,
   selectedIdSet,
   onDeleteEdge,
 }: CanvasEdgesLayerProps) {
@@ -27,7 +26,6 @@ function CanvasEdgesLayerInner({
         const source = nodeMap.get(edge.sourceId);
         const target = nodeMap.get(edge.targetId);
         if (!source || !target) return null;
-        if (!edgeRenderNodeIds.has(source.id) || !edgeRenderNodeIds.has(target.id)) return null;
 
         const startX = source.x + source.width;
         const startY = source.y + source.height / 2;

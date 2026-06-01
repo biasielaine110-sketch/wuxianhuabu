@@ -1,4 +1,5 @@
 import { getCanvasAssetBlobUrl } from './canvasAssetStore';
+import { getCodesonlineSavedKey } from './aiSettings';
 
 const urlCache = new Map<string, string>();
 const pending = new Map<string, Promise<string | null>>();
@@ -78,7 +79,19 @@ export async function imageSrcToRawBase64(
   if (src.startsWith('blob:') || src.startsWith('http://') || src.startsWith('https://')) {
     try {
       const fetchUrl = src.startsWith('http') ? rewriteImageUrlForBrowserDisplay(src) : src;
-      const resp = await fetch(fetchUrl);
+      const headers: Record<string, string> = {};
+      if (src.startsWith('http')) {
+        try {
+          const host = new URL(src).hostname.toLowerCase();
+          if (host === 'image.codesonline.dev') {
+            const key = getCodesonlineSavedKey().trim();
+            if (key) headers.Authorization = `Bearer ${key}`;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      const resp = await fetch(fetchUrl, { headers });
       const blob = await resp.blob();
       const mime = blob.type || 'image/jpeg';
       const buffer = await blob.arrayBuffer();

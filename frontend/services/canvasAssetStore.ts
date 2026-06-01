@@ -66,9 +66,16 @@ export async function putCanvasAssetRecord(
   db.close();
 }
 
-/** base64 data URL → 存 IDB，返回 assetId */
+/** base64 data URL → 存 IDB，返回 assetId；远程 URL 先下载再存 */
 export async function putCanvasAssetFromBase64(base64: string): Promise<string> {
-  const match = /^data:([^;]+);base64,(.+)$/.exec(base64);
+  const trimmed = base64.trim();
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    const { imageSrcToRawBase64 } = await import('./canvasAssetResolver');
+    const raw = await imageSrcToRawBase64(trimmed);
+    if (!raw?.base64) throw new Error('无法下载远程图片用于本地存储');
+    return putCanvasAssetFromBase64(raw.base64);
+  }
+  const match = /^data:([^;]+);base64,(.+)$/.exec(trimmed);
   const mime = match?.[1] ?? 'image/png';
   const raw = (match?.[2] ?? base64).replace(/\s/g, '');
   const binary = atob(raw);

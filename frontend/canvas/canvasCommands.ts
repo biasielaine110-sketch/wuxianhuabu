@@ -16,7 +16,25 @@ export type DeleteEdgeCommand = {
   edge: Edge;
 };
 
-export type CanvasCommand = MoveNodesCommand | AddEdgeCommand | DeleteEdgeCommand;
+export type DeleteNodeCommand = {
+  type: 'deleteNode';
+  node: CanvasNode;
+  edges: Edge[];
+};
+
+export type AddNodesCommand = {
+  type: 'addNodes';
+  nodes: CanvasNode[];
+  edges: Edge[];
+  previousSelectedIds: string[];
+};
+
+export type CanvasCommand =
+  | MoveNodesCommand
+  | AddEdgeCommand
+  | DeleteEdgeCommand
+  | DeleteNodeCommand
+  | AddNodesCommand;
 
 /** 命令栈最大深度，防止连续拖拽/连线占用过多内存 */
 export const CANVAS_COMMAND_STACK_MAX = 64;
@@ -37,12 +55,14 @@ export function buildMoveNodesCommand(
 
 type SetNodes = Dispatch<SetStateAction<CanvasNode[]>>;
 type SetEdges = Dispatch<SetStateAction<Edge[]>>;
+type SetSelectedIds = Dispatch<SetStateAction<string[]>>;
 
 /** 撤销单条命令（就地反向执行） */
 export function reverseCanvasCommand(
   cmd: CanvasCommand,
   setNodes: SetNodes,
-  setEdges: SetEdges
+  setEdges: SetEdges,
+  setSelectedIds?: SetSelectedIds,
 ): void {
   switch (cmd.type) {
     case 'moveNodes':
@@ -63,5 +83,24 @@ export function reverseCanvasCommand(
         return [...prev, cmd.edge];
       });
       break;
+    case 'deleteNode':
+      setNodes((prev) => {
+        if (prev.some((n) => n.id === cmd.node.id)) return prev;
+        return [...prev, cmd.node];
+      });
+      setEdges((prev) => {
+        const existing = new Set(prev.map((e) => e.id));
+        const restored = cmd.edges.filter((e) => !existing.has(e.id));
+        return restored.length ? [...prev, ...restored] : prev;
+      });
+      break;
+    case 'addNodes': {
+      const nodeIds = new Set(cmd.nodes.map((n) => n.id));
+      const edgeIds = new Set(cmd.edges.map((e) => e.id));
+      setNodes((prev) => prev.filter((n) => !nodeIds.has(n.id)));
+      setEdges((prev) => prev.filter((e) => !edgeIds.has(e.id)));
+      setSelectedIds?.(cmd.previousSelectedIds);
+      break;
+    }
   }
 }
