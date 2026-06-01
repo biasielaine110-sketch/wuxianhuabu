@@ -104,6 +104,18 @@ const toapisFileCdnProxy = {
       return stripped.length ? stripped : '/';
     },
   },
+  '/api/codesonline-image-proxy': {
+    target: 'https://image.codesonline.dev',
+    changeOrigin: true,
+    secure: true,
+    timeout: 1_800_000,
+    proxyTimeout: 1_800_000,
+    rewrite: (p: string) => {
+      const path = p.startsWith('/') ? p : `/${p}`;
+      const stripped = path.replace(/^\/api\/codesonline-image-proxy(?=\/|$)/, '');
+      return stripped.length ? stripped : '/';
+    },
+  },
   '/codesonline-image-api': {
     target: 'https://image.codesonline.dev',
     changeOrigin: true,

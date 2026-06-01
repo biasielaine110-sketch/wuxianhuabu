@@ -1,5 +1,5 @@
 /**
- * codesonline 图像 API 代理（与根目录 api/codesonline-image-proxy 逻辑一致）
+ * codesonline 图像 API 同源代理；与仓库根 `api/_lib/codesonline-image-proxy-handler.cjs` 一致。
  */
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';

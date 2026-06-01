@@ -37,6 +37,14 @@ function yunzhiSameOriginProxyPathPrefix(): '/api/yunzhi-proxy' | '/yunzhi-opena
   return '/yunzhi-openai';
 }
 
+/** 生产构建直接请求 /api/codesonline-image-proxy，与 yunzhi 同理避免 rewrite 404 */
+function codesonlineImageProxyPathPrefix(): '/api/codesonline-image-proxy' | '/codesonline-image-api' {
+  if (typeof import.meta !== 'undefined' && import.meta.env?.PROD) {
+    return '/api/codesonline-image-proxy';
+  }
+  return '/codesonline-image-api';
+}
+
 /** manxueapi.com 未开放 CORS；生产走 Vercel rewrite、开发走 Vite 同源代理 /manxue-api */
 function rewriteManxueBaseForBrowserCors(baseNormalized: string): string {
   if (typeof window === 'undefined') return baseNormalized;
@@ -69,7 +77,7 @@ function rewriteCodesonlineImageBaseForBrowserCors(baseNormalized: string): stri
     const u = new URL(baseNormalized);
     if (u.hostname.toLowerCase() !== 'image.codesonline.dev') return baseNormalized;
     const pathname = u.pathname.replace(/\/+$/, '') || '/v1';
-    return `${window.location.origin}/codesonline-image-api${pathname}`;
+    return `${window.location.origin}${codesonlineImageProxyPathPrefix()}${pathname}`;
   } catch {
     return baseNormalized;
   }
@@ -101,8 +109,8 @@ function rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNormalized: string): st
 function openAiCompatFailureHint(status: number, kind: 'generations-json' | 'image-edit'): string {
   if (status === 404) {
     return kind === 'image-edit'
-      ? '（404：请确认请求为 POST multipart；开发环境须在 frontend 目录启动 Vite 以启用 /yunzhi-openai 代理；若直连云智正常而此处 404，多为路径未正确转发或上游未开放该路由。）'
-      : '（404：请检查 Base URL 与路径；开发环境需 Vite 代理 /yunzhi-openai。）';
+      ? '（404：请确认请求为 POST multipart；开发环境须在 frontend 目录启动 Vite；生产环境需已部署 api/codesonline-image-proxy/v1/images/edits 等显式路由。云智请用 /api/yunzhi-proxy。若出现 NOT_FOUND，多为 Vercel 未匹配到 API 函数，请重新部署。）'
+      : '（404：请检查 Base URL 与路径；开发环境需 Vite 代理 /yunzhi-openai 或 /codesonline-image-api。）';
   }
   if (status === 502 || status === 504) {
     return '（502/504：多为上游 API 暂时失败、超时，或生图成功但图片回传失败；codesonline 已自动改用 URL 回传，若仍失败请稍后重试、检查密钥，图生图可缩小参考图。若出现 ROUTER_EXTERNAL_TARGET_ERROR，请重新部署以启用图像 API 函数代理。）';
@@ -401,7 +409,7 @@ function rewriteKnownImageCdnToSameOrigin(imageUrl: string): string {
     const { origin } = window.location;
     const host = u.hostname.toLowerCase();
     if (host === 'image.codesonline.dev') {
-      return `${origin}/codesonline-image-api${u.pathname}${u.search}`;
+      return `${origin}${codesonlineImageProxyPathPrefix()}${u.pathname}${u.search}`;
     }
     if (host === 'files.toapis.com') {
       return `${origin}/cdn-files-toapis${u.pathname}${u.search}`;
