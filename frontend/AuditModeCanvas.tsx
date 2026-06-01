@@ -23,6 +23,29 @@ import {
   translateAnnotation,
   type ResizeHandleId,
 } from './canvas/auditAnnotationEdit';
+import { AuditInpaintPanel } from './canvas/AuditInpaintPanel';
+import {
+  cropAuditImageRegion,
+  compositePatchOntoAuditImage,
+  findBestAuditImageForRegion,
+} from './canvas/auditImageCrop';
+import {
+  clampRegionToImage,
+  getInpaintRegionHandles,
+  hitTestInpaintHandle,
+  moveInpaintRegion,
+  normalizeCanvasRect,
+  pointInInpaintRegion,
+  resizeInpaintRegion,
+  type CanvasRect,
+  type InpaintHandleId,
+} from './canvas/auditInpaintRegion';
+import { runAuditInpaintGeneration } from './canvas/auditInpaintGenerate';
+import {
+  createInpaintSession,
+  type AuditInpaintSession,
+  type InpaintRegionState,
+} from './canvas/auditInpaintSession';
 import { saveImageDownload } from './services/downloadPathSettings';
 
 interface AuditModeCanvasProps {
@@ -33,13 +56,14 @@ interface AuditModeCanvasProps {
   onWheel?: (e: React.WheelEvent) => void;
   sharedClipboardImageRef: React.MutableRefObject<AuditImage | null>;
   saveCurrentProject?: () => void;
+  openBigEditor?: (current: string, onSave: (v: string) => void) => void;
 }
 
 type AnnotationTool = AuditAnnotationTool;
 
 interface AuditAnnotation {
   id: string;
-  type: Exclude<AnnotationTool, 'select'>;
+  type: Exclude<AnnotationTool, 'select' | 'inpaint'>;
   x: number;
   y: number;
   width?: number;
@@ -63,6 +87,7 @@ export default function AuditModeCanvas({
   onWheel,
   sharedClipboardImageRef,
   saveCurrentProject,
+  openBigEditor,
 }: AuditModeCanvasProps) {
   /** 看图层可见根节点；勿用被 hidden 的 canvas-container，否则 getBoundingClientRect 为 0 导致标注偏移 */
   const auditRootRef = useRef<HTMLDivElement>(null);
@@ -137,6 +162,25 @@ export default function AuditModeCanvas({
   const textImageMetaRef = useRef<Map<string, { content: string; fontSize: number; color: string; bgColor: string; bgOpacity: number }>>(new Map());
   // 当前正在编辑的文本图片id
   const [editingTextImageId, setEditingTextImageId] = useState<string | null>(null);
+
+  // 局部重绘（支持同图多区域并行）
+  const [inpaintSessions, setInpaintSessions] = useState<AuditInpaintSession[]>([]);
+  const [activeInpaintSessionId, setActiveInpaintSessionId] = useState<string | null>(null);
+  const inpaintSessionsRef = useRef(inpaintSessions);
+  useEffect(() => {
+    inpaintSessionsRef.current = inpaintSessions;
+  }, [inpaintSessions]);
+  const isInpaintSelectingRef = useRef(false);
+  const inpaintSelectingSessionIdRef = useRef<string | null>(null);
+  const inpaintStartRef = useRef({ x: 0, y: 0 });
+  const inpaintAbortRefs = useRef<Map<string, AbortController>>(new Map());
+  const inpaintRegionEditRef = useRef<{
+    sessionId: string;
+    mode: 'move' | 'resize';
+    handle?: InpaintHandleId;
+    startPointer: { x: number; y: number };
+    startRegion: InpaintRegionState;
+  } | null>(null);
 
   // 图片的原始尺寸映射
   const imageSizeCacheRef = useRef<Map<string, { w: number; h: number }>>(new Map());
@@ -893,6 +937,176 @@ export default function AuditModeCanvas({
     annotationEditRef.current = null;
   };
 
+  const patchInpaintSession = useCallback((sessionId: string, patch: Partial<AuditInpaintSession>) => {
+    setInpaintSessions((prev) =>
+      prev.map((s) => (s.id === sessionId ? { ...s, ...patch } : s))
+    );
+  }, []);
+
+  const removeInpaintSession = useCallback((sessionId: string) => {
+    inpaintAbortRefs.current.get(sessionId)?.abort();
+    inpaintAbortRefs.current.delete(sessionId);
+    if (inpaintRegionEditRef.current?.sessionId === sessionId) {
+      inpaintRegionEditRef.current = null;
+    }
+    if (inpaintSelectingSessionIdRef.current === sessionId) {
+      isInpaintSelectingRef.current = false;
+      inpaintSelectingSessionIdRef.current = null;
+    }
+    setInpaintSessions((prev) => prev.filter((s) => s.id !== sessionId));
+    setActiveInpaintSessionId((prev) => (prev === sessionId ? null : prev));
+  }, []);
+
+  const reopenInpaintRegionAdjust = useCallback((sessionId: string) => {
+    patchInpaintSession(sessionId, {
+      regionConfirmed: false,
+      crop: null,
+      error: null,
+    });
+  }, [patchInpaintSession]);
+
+  const beginInpaintRegion = useCallback((sessionId: string, region: CanvasRect) => {
+    if (Math.abs(region.width) < 4 && Math.abs(region.height) < 4) {
+      removeInpaintSession(sessionId);
+      return;
+    }
+    setInpaintSessions((prev) => {
+      const session = prev.find((s) => s.id === sessionId);
+      if (!session) return prev;
+      const target = findBestAuditImageForRegion(
+        auditImagesRef.current,
+        region,
+        session.sourceImageId || null
+      );
+      if (!target) {
+        window.alert('请在图片上框选需要重绘的区域。');
+        return prev.filter((s) => s.id !== sessionId);
+      }
+      const clamped = clampRegionToImage(region, target);
+      return prev.map((s) =>
+        s.id === sessionId
+          ? {
+              ...s,
+              sourceImageId: target.id,
+              region: { ...clamped, sourceImageId: target.id },
+              regionBox: null,
+              regionConfirmed: false,
+              crop: null,
+              error: null,
+            }
+          : s
+      );
+    });
+  }, [removeInpaintSession]);
+
+  const confirmInpaintRegion = useCallback(async (sessionId: string) => {
+    const session = inpaintSessionsRef.current.find((s) => s.id === sessionId);
+    if (!session?.region || session.regionConfirmed) return;
+    const source = auditImagesRef.current.find((i) => i.id === session.region!.sourceImageId);
+    if (!source) return;
+    try {
+      const cropped = await cropAuditImageRegion(source, session.region);
+      if (!cropped) {
+        window.alert('选区过小或无效，请调整选区后重试。');
+        return;
+      }
+      patchInpaintSession(sessionId, {
+        crop: { ...cropped, sourceImageId: source.id },
+        regionConfirmed: true,
+        panelVisible: true,
+        error: null,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '裁剪选区失败';
+      window.alert(msg);
+    }
+  }, [patchInpaintSession]);
+
+  const applyInpaintRegionEdit = useCallback((pointer: { x: number; y: number }) => {
+    const edit = inpaintRegionEditRef.current;
+    if (!edit) return;
+    const source = auditImagesRef.current.find((i) => i.id === edit.startRegion.sourceImageId);
+    if (!source) return;
+    const dx = pointer.x - edit.startPointer.x;
+    const dy = pointer.y - edit.startPointer.y;
+    let next: CanvasRect;
+    if (edit.mode === 'move') {
+      next = moveInpaintRegion(edit.startRegion, dx, dy, source);
+    } else if (edit.handle) {
+      next = resizeInpaintRegion(edit.startRegion, edit.handle, pointer, source);
+    } else {
+      return;
+    }
+    patchInpaintSession(edit.sessionId, {
+      region: { ...next, sourceImageId: edit.startRegion.sourceImageId },
+    });
+  }, [patchInpaintSession]);
+
+  const finishInpaintRegionEdit = useCallback(() => {
+    inpaintRegionEditRef.current = null;
+  }, []);
+
+  const cancelInpaintGenerate = useCallback((sessionId: string) => {
+    inpaintAbortRefs.current.get(sessionId)?.abort();
+    inpaintAbortRefs.current.delete(sessionId);
+    patchInpaintSession(sessionId, { isGenerating: false, error: null });
+  }, [patchInpaintSession]);
+
+  const handleInpaintGenerate = useCallback(async (sessionId: string) => {
+    const session = inpaintSessionsRef.current.find((s) => s.id === sessionId);
+    if (!session?.crop || !session.regionConfirmed || !session.prompt.trim()) return;
+
+    inpaintAbortRefs.current.get(sessionId)?.abort();
+    const ac = new AbortController();
+    inpaintAbortRefs.current.set(sessionId, ac);
+    patchInpaintSession(sessionId, { isGenerating: true, error: null });
+
+    const { crop, prompt, model, aspectRatio, resolution, quality } = session;
+    try {
+      const results = await runAuditInpaintGeneration({
+        cropBase64: crop.base64,
+        prompt,
+        model,
+        aspectRatio,
+        resolution,
+        quality,
+        cropWidth: crop.width,
+        cropHeight: crop.height,
+        signal: ac.signal,
+      });
+      const resultBase64 = results[0]?.replace(/^data:[^;]+;base64,/, '');
+      if (!resultBase64) throw new Error('未收到生成图片');
+
+      const source = auditImagesRef.current.find((i) => i.id === crop.sourceImageId);
+      if (!source) throw new Error('原图不存在');
+
+      const mergedBase64 = await compositePatchOntoAuditImage(source, crop, resultBase64);
+      if (!mergedBase64) throw new Error('无法将生成结果贴回原图');
+
+      setAuditImages((prev) =>
+        prev.map((img) =>
+          img.id === source.id ? { ...img, base64: mergedBase64 } : img
+        )
+      );
+      setSelectedImageIds([source.id]);
+      saveCurrentProject?.();
+      removeInpaintSession(sessionId);
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') return;
+      patchInpaintSession(sessionId, {
+        error: err instanceof Error ? err.message : '局部重绘失败',
+        isGenerating: false,
+      });
+    } finally {
+      inpaintAbortRefs.current.delete(sessionId);
+      setInpaintSessions((prev) =>
+        prev.map((s) =>
+          s.id === sessionId && s.isGenerating ? { ...s, isGenerating: false } : s
+        )
+      );
+    }
+  }, [patchInpaintSession, removeInpaintSession, setAuditImages, saveCurrentProject]);
+
   const handleCanvasPointerDown = (e: React.PointerEvent) => {
     if (e.button === 0) setContextMenu(null);
 
@@ -902,6 +1116,72 @@ export default function AuditModeCanvas({
       setIsPanning(true);
       panStartRef.current = { x: e.clientX, y: e.clientY };
       panTransformRef.current = { x: transform.x, y: transform.y };
+      return;
+    }
+
+    // 局部重绘：调整已有选区，或在空白处新建选区
+    if (currentTool === 'inpaint') {
+      e.stopPropagation();
+      const pos = getCanvasCoords(e.clientX, e.clientY);
+      const handleRadius = 10 / transform.scale;
+
+      for (let i = inpaintSessionsRef.current.length - 1; i >= 0; i--) {
+        const session = inpaintSessionsRef.current[i];
+        if (!session.region) continue;
+        setActiveInpaintSessionId(session.id);
+
+        const handle = hitTestInpaintHandle(session.region, pos.x, pos.y, handleRadius);
+        if (handle) {
+          if (session.regionConfirmed) reopenInpaintRegionAdjust(session.id);
+          inpaintRegionEditRef.current = {
+            sessionId: session.id,
+            mode: 'resize',
+            handle,
+            startPointer: pos,
+            startRegion: { ...session.region },
+          };
+          return;
+        }
+        if (pointInInpaintRegion(session.region, pos.x, pos.y)) {
+          if (session.regionConfirmed) reopenInpaintRegionAdjust(session.id);
+          inpaintRegionEditRef.current = {
+            sessionId: session.id,
+            mode: 'move',
+            startPointer: pos,
+            startRegion: { ...session.region },
+          };
+          return;
+        }
+      }
+
+      if (auditImagesRef.current.length === 0) {
+        window.alert('请先添加图片后再使用局部重绘。');
+        return;
+      }
+
+      const activeSession = activeInpaintSessionId
+        ? inpaintSessionsRef.current.find((s) => s.id === activeInpaintSessionId)
+        : null;
+      const pendingSession =
+        activeSession && !activeSession.region && !activeSession.regionBox
+          ? activeSession
+          : null;
+
+      let sessionForSelect: AuditInpaintSession;
+      if (pendingSession) {
+        sessionForSelect = pendingSession;
+      } else {
+        sessionForSelect = createInpaintSession();
+        setInpaintSessions((prev) => [...prev, sessionForSelect]);
+        setActiveInpaintSessionId(sessionForSelect.id);
+      }
+
+      patchInpaintSession(sessionForSelect.id, {
+        regionBox: { x: pos.x, y: pos.y, width: 0, height: 0 },
+      });
+      isInpaintSelectingRef.current = true;
+      inpaintSelectingSessionIdRef.current = sessionForSelect.id;
+      inpaintStartRef.current = pos;
       return;
     }
 
@@ -1027,6 +1307,25 @@ export default function AuditModeCanvas({
       return;
     }
 
+    if (inpaintRegionEditRef.current) {
+      applyInpaintRegionEdit(canvasPos);
+      return;
+    }
+
+    if (isInpaintSelectingRef.current && inpaintSelectingSessionIdRef.current) {
+      const start = inpaintStartRef.current;
+      const sessionId = inpaintSelectingSessionIdRef.current;
+      patchInpaintSession(sessionId, {
+        regionBox: {
+          x: start.x,
+          y: start.y,
+          width: canvasPos.x - start.x,
+          height: canvasPos.y - start.y,
+        },
+      });
+      return;
+    }
+
     // 框选
     if (isBoxSelectingRef.current) {
       const rect = auditRootRef.current?.getBoundingClientRect();
@@ -1069,6 +1368,27 @@ export default function AuditModeCanvas({
 
     if (annotationEditRef.current) {
       finishAnnotationEdit();
+      return;
+    }
+
+    if (inpaintRegionEditRef.current) {
+      finishInpaintRegionEdit();
+      return;
+    }
+
+    if (isInpaintSelectingRef.current && inpaintSelectingSessionIdRef.current) {
+      const sessionId = inpaintSelectingSessionIdRef.current;
+      isInpaintSelectingRef.current = false;
+      inpaintSelectingSessionIdRef.current = null;
+      const end = getCanvasCoords(e.clientX, e.clientY);
+      const region = {
+        x: inpaintStartRef.current.x,
+        y: inpaintStartRef.current.y,
+        width: end.x - inpaintStartRef.current.x,
+        height: end.y - inpaintStartRef.current.y,
+      };
+      patchInpaintSession(sessionId, { regionBox: null });
+      beginInpaintRegion(sessionId, region);
       return;
     }
 
@@ -1447,8 +1767,7 @@ export default function AuditModeCanvas({
       />
 
       {/* 工具栏 — 右上角 */}
-      <div className="absolute top-4 right-4 z-[60] flex flex-col gap-2">
-        {/* 操作按钮（仅保留导出合成图片和右键菜单触发的文本图片创建） */}
+      <div className="absolute top-4 right-4 z-[60] flex flex-col gap-2 items-end">
         <div className="bg-[#1e1e1e]/95 backdrop-blur-md rounded-xl border border-[#333] p-2 shadow-2xl flex flex-col gap-1">
           <button
             onPointerDown={(e) => e.stopPropagation()}
@@ -1555,6 +1874,102 @@ export default function AuditModeCanvas({
             )}
           </div>
         ))}
+
+        {inpaintSessions.map((session) => {
+          const rect = session.region ?? session.regionBox;
+          if (!rect) return null;
+          const { top, right } = normalizeCanvasRect(rect);
+          const gap = 4;
+          return (
+            <div
+              key={`${session.id}-actions`}
+              className="absolute pointer-events-auto z-[58]"
+              style={{
+                left: right + gap,
+                top,
+                transform: 'scale(3)',
+                transformOrigin: 'top left',
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <div className="bg-[#1e1e1e]/95 backdrop-blur-md rounded-xl border border-purple-500/30 p-2 shadow-2xl flex flex-row gap-1.5 whitespace-nowrap">
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => removeInpaintSession(session.id)}
+                  disabled={session.isGenerating}
+                  className="py-1.5 px-3 rounded text-[11px] bg-[#333] hover:bg-[#444] text-gray-300 disabled:opacity-40"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => void confirmInpaintRegion(session.id)}
+                  disabled={!session.region || session.regionConfirmed || session.isGenerating}
+                  className="py-1.5 px-3 rounded text-[11px] bg-purple-800 hover:bg-purple-700 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  确认
+                </button>
+                {session.regionConfirmed && (
+                  <button
+                    type="button"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={() => reopenInpaintRegionAdjust(session.id)}
+                    disabled={session.isGenerating}
+                    className="py-1.5 px-3 rounded text-[11px] bg-[#333] hover:bg-[#444] text-purple-200 border border-purple-500/40 disabled:opacity-40"
+                  >
+                    重新调整
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+
+        {inpaintSessions.map((session, sessionIndex) => {
+          if (!session.panelVisible || !session.region) return null;
+          const { left, top, bottom, width: regionW } = normalizeCanvasRect(session.region);
+          const gap = 4;
+          const panelBaseWidth = Math.round(Math.max(280, regionW) / 3);
+          return (
+            <div
+              key={`${session.id}-panel`}
+              className="absolute pointer-events-auto origin-top-left"
+              style={{
+                left,
+                top: bottom + gap,
+                width: panelBaseWidth,
+                transform: 'scale(3)',
+                transformOrigin: 'top left',
+                zIndex: 57 + sessionIndex,
+              }}
+            >
+              <AuditInpaintPanel
+                prompt={session.prompt}
+                onPromptChange={(value) => patchInpaintSession(session.id, { prompt: value })}
+                onOpenBigEditor={openBigEditor}
+                onGenerate={() => void handleInpaintGenerate(session.id)}
+                onCancelGenerate={() => cancelInpaintGenerate(session.id)}
+                regionConfirmed={session.regionConfirmed}
+                model={session.model}
+                onModelChange={(value) => patchInpaintSession(session.id, { model: value })}
+                aspectRatio={session.aspectRatio}
+                onAspectRatioChange={(value) => patchInpaintSession(session.id, { aspectRatio: value })}
+                resolution={session.resolution}
+                onResolutionChange={(value) => patchInpaintSession(session.id, { resolution: value })}
+                quality={session.quality}
+                onQualityChange={(value) => patchInpaintSession(session.id, { quality: value })}
+                previewBase64={session.crop?.base64}
+                cropWidth={session.crop?.width}
+                cropHeight={session.crop?.height}
+                needsReconfirm={!session.regionConfirmed}
+                isGenerating={session.isGenerating}
+                error={session.error}
+              />
+            </div>
+          );
+        })}
       </div>
 
       {/* 标注 Canvas 层 */}
@@ -1576,6 +1991,73 @@ export default function AuditModeCanvas({
             height: selectionBox.height,
           }}
         />
+      )}
+
+      {inpaintSessions.some((s) => s.regionBox && !s.region) && (
+        <div
+          className="absolute top-0 left-0 origin-top-left pointer-events-none z-[56]"
+          style={{
+            transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
+          }}
+        >
+          {inpaintSessions.map((session) => {
+            if (!session.regionBox || session.region) return null;
+            const box = session.regionBox;
+            return (
+              <div
+                key={`${session.id}-draft`}
+                className="absolute border-8 border-dashed border-purple-400 bg-purple-500/10"
+                style={{
+                  left: Math.min(box.x, box.x + box.width),
+                  top: Math.min(box.y, box.y + box.height),
+                  width: Math.abs(box.width),
+                  height: Math.abs(box.height),
+                }}
+              />
+            );
+          })}
+        </div>
+      )}
+
+      {inpaintSessions.some((s) => s.region) && (
+        <div
+          className="absolute top-0 left-0 origin-top-left pointer-events-none z-[56]"
+          style={{
+            transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
+          }}
+        >
+          {inpaintSessions.map((session) => {
+            if (!session.region) return null;
+            const { left, top, width, height } = normalizeCanvasRect(session.region);
+            const handleSize = 8 / transform.scale;
+            const isActive = session.id === activeInpaintSessionId;
+            return (
+              <React.Fragment key={`${session.id}-overlay`}>
+                <div
+                  className={`absolute border-8 ${
+                    session.regionConfirmed
+                      ? 'border-solid border-cyan-400/80 bg-cyan-400/5'
+                      : 'border-dashed border-purple-400 bg-purple-500/10'
+                  } ${isActive ? 'ring-2 ring-purple-300/40' : ''}`}
+                  style={{ left, top, width, height }}
+                />
+                {!session.regionConfirmed &&
+                  getInpaintRegionHandles(session.region).map((handle) => (
+                    <div
+                      key={`${session.id}-${handle.id}`}
+                      className="absolute bg-purple-400 border border-white rounded-sm shadow"
+                      style={{
+                        left: handle.x - handleSize / 2,
+                        top: handle.y - handleSize / 2,
+                        width: handleSize,
+                        height: handleSize,
+                      }}
+                    />
+                  ))}
+              </React.Fragment>
+            );
+          })}
+        </div>
       )}
 
       {/* 清空画布按钮（左上角） */}
@@ -1668,6 +2150,23 @@ export default function AuditModeCanvas({
             >
               <span className="text-green-400 text-[14px]">⊞</span>
               合并图片（{selectedImageIds.length} 张）
+            </button>
+          )}
+          {selectedImageIds.length === 1 && (
+            <button
+              className="w-full text-left px-3 py-1.5 text-[12px] text-gray-300 hover:bg-[#333] hover:text-white transition-colors flex items-center gap-2"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => {
+                const targetId = selectedImageIds[0];
+                const session = createInpaintSession(targetId);
+                setInpaintSessions((prev) => [...prev, session]);
+                setActiveInpaintSessionId(session.id);
+                setCurrentTool('inpaint');
+                setContextMenu(null);
+              }}
+            >
+              <span className="text-purple-400 text-[14px]">✦</span>
+              局部重绘
             </button>
           )}
           <button

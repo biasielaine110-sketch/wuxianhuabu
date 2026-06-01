@@ -2,6 +2,7 @@ import React from 'react';
 
 export type AuditAnnotationTool =
   | 'select'
+  | 'inpaint'
   | 'rect'
   | 'circle'
   | 'arrow'
@@ -25,6 +26,7 @@ const LINE_WIDTH_PRESETS = [1, 2, 3, 4, 6, 8, 12, 16, 24];
 
 const TOOLS: { id: AuditAnnotationTool; label: string; title: string }[] = [
   { id: 'select', label: '↖', title: '选择标注 / 框选图片' },
+  { id: 'inpaint', label: '✦', title: '局部重绘（框选区域）' },
   { id: 'rect', label: '□', title: '矩形框' },
   { id: 'fillRect', label: '▣', title: '填充矩形' },
   { id: 'circle', label: '○', title: '椭圆框' },
@@ -69,7 +71,7 @@ export function AuditAnnotationToolbar({
   onRedo,
   onClear,
 }: AuditAnnotationToolbarProps) {
-  const showDrawOptions = currentTool !== 'select';
+  const showDrawOptions = currentTool !== 'select' && currentTool !== 'inpaint';
 
   return (
     <div className="absolute top-4 left-4 z-[60] flex flex-col gap-2 max-w-[180px]">
@@ -205,7 +207,9 @@ export function AuditAnnotationToolbar({
         </button>
 
         <div className="text-[9px] text-gray-600 leading-snug px-0.5">
-          选择工具：拖动平移标注 · 角点缩放形状 · 空格/中键拖移画布
+          {currentTool === 'inpaint'
+            ? '拖拽框选 · 可拖动/缩放选区 · 确认后可「重新调整」'
+            : '选择工具：拖动平移标注 · 角点缩放形状 · 空格/中键拖移画布'}
         </div>
       </div>
     </div>

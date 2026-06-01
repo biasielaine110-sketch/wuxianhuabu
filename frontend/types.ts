@@ -85,7 +85,7 @@ export interface CanvasNode {
   imageAssetIds?: string[];
   isGenerating?: boolean;
   error?: string;
-  aspectRatio?: string; // e.g., '1:1', '16:9'
+  aspectRatio?: string; // e.g., '1:1', '16:9', 'original'（图生图：按第一张参考图画幅）
   resolution?: string; // '1k', '2k', '4k'
   quality?: string; // 'low', 'medium', 'high', 'auto' — GPT Image 2 等模型画质
   imageCount?: number; // 1, 2, or 4

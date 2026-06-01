@@ -12,6 +12,7 @@ type AuditModeCanvasHostProps = {
   onWheel: (e: React.WheelEvent) => void;
   sharedClipboardImageRef: React.MutableRefObject<AuditImage | null>;
   saveCurrentProject: () => void | Promise<void>;
+  openBigEditor?: (current: string, onSave: (v: string) => void) => void;
 };
 
 /** 看图模式：内部订阅 transform，避免 App 因画布平移重渲染 */

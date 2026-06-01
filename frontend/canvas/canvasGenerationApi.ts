@@ -26,6 +26,11 @@ import {
   resolveSlotImagesForIndices,
   resolveSlotAudios,
 } from '../referenceSlots';
+import {
+  isOriginalAspectRatio,
+  loadImageDimensionsFromBase64,
+  resolveI2iGenerationAspectRatio,
+} from './i2iAspectRatio';
 import { useCanvasStore } from '../stores/canvasStore';
 
 export type UseCanvasGenerationOptions = {
@@ -117,18 +122,29 @@ export function createCanvasGenerationApi(
 
         // 图生图：取第一张参考图
         let imageUrl: string | undefined;
+        let jimengI2iAspect = node.aspectRatio || '16:9';
+        let jimengWidth: number | undefined;
+        let jimengHeight: number | undefined;
         if (isI2i) {
           const slots = buildIncomingRefSlots(nodeId, edgesRef.current, nodesRef.current);
           const pickIndices = parseRefPickIndices(combined);
           const { base64s: imageInputs } = await resolveSlotImagesForIndices(slots, pickIndices);
           if (imageInputs.length > 0) imageUrl = imageInputs[0];
+          jimengI2iAspect = await resolveI2iGenerationAspectRatio(node.aspectRatio, imageInputs[0]);
+          if (isOriginalAspectRatio(node.aspectRatio) && imageInputs[0]) {
+            const dims = await loadImageDimensionsFromBase64(imageInputs[0]);
+            jimengWidth = dims.width;
+            jimengHeight = dims.height;
+          }
         }
 
         const result = await generateJimengImage({
           prompt,
           model: imageModel,
           imageUrl,
-          ratio: node.aspectRatio || '16:9',
+          ratio: jimengI2iAspect,
+          width: jimengWidth,
+          height: jimengHeight,
           resolution: node.resolution || '4k',
           nodeId,
         });
@@ -190,8 +206,10 @@ export function createCanvasGenerationApi(
         const promptForModel = stripRefMarkers(finalPrompt2) || finalPrompt2;
         if (imageInputs.length === 0) throw new Error("请连接参考图片或视频节点，或使用 @R 引用有效参考槽位");
         if (!promptForModel) throw new Error("请输入编辑指令或连接文本节点");
-        // 全景图生成使用节点配置的画幅
-        const aspectRatio = node.aspectRatio || '2:1';
+        const aspectRatio =
+          node.type === 'i2i'
+            ? await resolveI2iGenerationAspectRatio(node.aspectRatio, imageInputs[0])
+            : node.aspectRatio || '2:1';
         base64DataArray = await editExistingImage(
           imageInputs,
           promptForModel,

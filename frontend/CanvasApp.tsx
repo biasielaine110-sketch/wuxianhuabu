@@ -1932,6 +1932,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
           onWheel={handleWheel}
           sharedClipboardImageRef={sharedClipboardImageRef}
           saveCurrentProject={saveCurrentProject}
+          openBigEditor={openBigEditor}
         /></Suspense>
       )}
 
@@ -2374,7 +2375,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
           showProjectModal
         }
       />
-      {canvasMode !== 'audit' && bigEditorPortal}
+      {bigEditorPortal}
 
     </div>
   );
