@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { JimengAuthInfo } from './jimengAuthContext';
+import { JimengBackendError } from './jimengClient';
 
 type JimengLoginDialogProps = {
   open: boolean;
@@ -32,6 +33,12 @@ function resolveLoginUrls(started: {
 function isCopyLinkReady(url: string, code: string, mode: 'oauth' | 'browser') {
   if (mode === 'browser') return !!url;
   return !!(code || /user_code=/.test(url));
+}
+
+function formatJimengError(err: unknown, fallback: string): string {
+  if (err instanceof JimengBackendError) return err.message;
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
 }
 
 export function JimengLoginDialog(props: JimengLoginDialogProps) {
@@ -94,8 +101,8 @@ export function JimengLoginDialog(props: JimengLoginDialogProps) {
           '获取登录链接失败，请确认即梦后端已启动',
       );
       return false;
-    } catch {
-      setStatus('即梦后端服务未启动，请运行 server 后点击「重新获取登录链接」');
+    } catch (err) {
+      setStatus(formatJimengError(err, '即梦后端服务未启动，请运行 server 后点击「重新获取登录链接」'));
       return false;
     } finally {
       setLoadingLink(false);
@@ -190,8 +197,8 @@ export function JimengLoginDialog(props: JimengLoginDialogProps) {
       }
 
       setStatus(login.detail || login.message || '尚未登录，请重新复制链接并完成授权');
-    } catch {
-      setStatus('验证失败：即梦后端未启动或网络异常，请确认已运行 server');
+    } catch (err) {
+      setStatus(formatJimengError(err, '验证失败：即梦后端未启动或网络异常，请确认已运行 server'));
     }
   }, [props]);
 
@@ -206,7 +213,7 @@ export function JimengLoginDialog(props: JimengLoginDialogProps) {
         setStatus('安装失败: ' + (result.detail || result.message));
       }
     } catch (err: unknown) {
-      setStatus('安装失败: ' + ((err as Error)?.message || '未知错误'));
+      setStatus('安装失败: ' + formatJimengError(err, '未知错误'));
     }
   }, []);
 
@@ -269,8 +276,7 @@ export function JimengLoginDialog(props: JimengLoginDialogProps) {
       await poll();
     } catch (err: unknown) {
       setStatus(
-        '安装失败: ' +
-          ((err as Error)?.message || '未知错误') +
+        formatJimengError(err, '未知错误') +
           '\n\n请以管理员打开 PowerShell，在项目 scripts 目录执行：.\\setup-jimeng-dreamina-wsl.ps1',
       );
     }

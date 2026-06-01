@@ -136,6 +136,8 @@ export interface AuditImage {
   width: number;  // 原始宽度（像素）
   height: number; // 原始高度（像素）
   scale: number;   // 缩放比例（初始为 1）
+  /** 置顶后始终叠放在未置顶图片之上，直至取消置顶 */
+  pinned?: boolean;
 }
 
 export interface AuditModeData {

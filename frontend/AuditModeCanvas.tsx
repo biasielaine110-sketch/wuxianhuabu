@@ -8,6 +8,21 @@ import {
   getAuditImagesBounds,
 } from './canvas/auditModeComposite';
 import { base64ToImageDataUrl, sniffImageMimeFromBase64 } from './canvas/auditImageUtils';
+import {
+  appendAuditImages,
+  bringAuditImagesToFront,
+  unpinAuditImages,
+} from './canvas/auditImageStack';
+import {
+  cloneAnnotation,
+  getAnnotationBounds,
+  getResizeHandles,
+  hitTestResizeHandle,
+  hitTestTopmostAnnotation,
+  resizeAnnotationFromSnapshot,
+  translateAnnotation,
+  type ResizeHandleId,
+} from './canvas/auditAnnotationEdit';
 import { saveImageDownload } from './services/downloadPathSettings';
 
 interface AuditModeCanvasProps {
@@ -15,7 +30,6 @@ interface AuditModeCanvasProps {
   setAuditImages: React.Dispatch<React.SetStateAction<AuditImage[]>>;
   transform: Transform;
   setTransform?: React.Dispatch<React.SetStateAction<Transform>>;
-  containerRef: React.RefObject<HTMLDivElement | null>;
   onWheel?: (e: React.WheelEvent) => void;
   sharedClipboardImageRef: React.MutableRefObject<AuditImage | null>;
   saveCurrentProject?: () => void;
@@ -46,12 +60,14 @@ export default function AuditModeCanvas({
   setAuditImages,
   transform,
   setTransform,
-  containerRef,
   onWheel,
   sharedClipboardImageRef,
   saveCurrentProject,
 }: AuditModeCanvasProps) {
+  /** 看图层可见根节点；勿用被 hidden 的 canvas-container，否则 getBoundingClientRect 为 0 导致标注偏移 */
+  const auditRootRef = useRef<HTMLDivElement>(null);
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
+  const [selectedAnnotationIds, setSelectedAnnotationIds] = useState<string[]>([]);
   const [draggingImageId, setDraggingImageId] = useState<string | null>(null);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
   const dragMouseCanvasStartRef = useRef({ x: 0, y: 0 }); // 拖拽开始时鼠标的画布坐标
@@ -70,7 +86,9 @@ export default function AuditModeCanvas({
   // 标注相关状态
   const [currentTool, setCurrentTool] = useState<AnnotationTool>('select');
   const [currentColor, setCurrentColor] = useState('#ff6b6b');
-  const [currentFontSize, setCurrentFontSize] = useState(16);
+  const [currentFontSize, setCurrentFontSize] = useState(50);
+  const [currentPenWidth, setCurrentPenWidth] = useState(24);
+  const [currentStrokeWidth, setCurrentStrokeWidth] = useState(24);
   const [auditAnnotations, setAuditAnnotations] = useState<AuditAnnotation[]>([]);
   const [isDrawing, setIsDrawing] = useState(false);
   const [tempAnnotation, setTempAnnotation] = useState<Partial<AuditAnnotation> | null>(null);
@@ -129,19 +147,38 @@ export default function AuditModeCanvas({
   useEffect(() => {
     selectedImageIdsRef.current = selectedImageIds;
   }, [selectedImageIds]);
+  const selectedAnnotationIdsRef = useRef(selectedAnnotationIds);
+  useEffect(() => {
+    selectedAnnotationIdsRef.current = selectedAnnotationIds;
+  }, [selectedAnnotationIds]);
+  const annotationEditRef = useRef<{
+    mode: 'move' | 'resize';
+    handle?: ResizeHandleId;
+    startPointer: { x: number; y: number };
+    snapshots: Map<string, AuditAnnotation>;
+    ids: string[];
+  } | null>(null);
+
+  useEffect(() => {
+    if (!isTextInputMode) return;
+    const id = requestAnimationFrame(() => {
+      textInputRef.current?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [isTextInputMode, textInputPos]);
 
   // 鼠标在画布坐标系中的坐标计算
   const getCanvasCoords = useCallback((clientX: number, clientY: number) => {
-    if (!containerRef.current) return { x: 0, y: 0 };
-    const rect = containerRef.current.getBoundingClientRect();
+    if (!auditRootRef.current) return { x: 0, y: 0 };
+    const rect = auditRootRef.current.getBoundingClientRect();
     return {
       x: (clientX - rect.left - transform.x) / transform.scale,
       y: (clientY - rect.top - transform.y) / transform.scale,
     };
-  }, [transform, containerRef]);
+  }, [transform]);
 
   useEffect(() => {
-    const el = containerRef.current;
+    const el = auditRootRef.current;
     if (!el) return;
     const update = () => {
       const rect = el.getBoundingClientRect();
@@ -153,19 +190,19 @@ export default function AuditModeCanvas({
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [containerRef]);
+  }, []);
 
   const handleMinimapNavigate = useCallback(
     (canvasX: number, canvasY: number) => {
-      if (!setTransform || !containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
+      if (!setTransform || !auditRootRef.current) return;
+      const rect = auditRootRef.current.getBoundingClientRect();
       setTransform((prev) => ({
         ...prev,
         x: rect.width / 2 - canvasX * prev.scale,
         y: rect.height / 2 - canvasY * prev.scale,
       }));
     },
-    [setTransform, containerRef]
+    [setTransform]
   );
 
   /** 将合成图添加为看图画布上的新图片 */
@@ -186,7 +223,7 @@ export default function AuditModeCanvas({
         height: result.height,
         scale: 1,
       };
-      setAuditImages((prev) => [...prev, newImage]);
+      setAuditImages((prev) => appendAuditImages(prev, newImage));
       setSelectedImageIds([newId]);
     },
     [setAuditImages]
@@ -267,6 +304,36 @@ export default function AuditModeCanvas({
           break;
       }
     });
+
+    const handleScreenPx = 8;
+    const handleSize = handleScreenPx / transform.scale;
+    selectedAnnotationIdsRef.current.forEach((id) => {
+      const ann = annotationsToDraw.find((a) => a.id === id);
+      if (!ann) return;
+      const bounds = getAnnotationBounds(ann);
+      if (!bounds) return;
+      const w = bounds.maxX - bounds.minX;
+      const h = bounds.maxY - bounds.minY;
+      ctx.save();
+      ctx.strokeStyle = '#fbbf24';
+      ctx.lineWidth = 1.5 / transform.scale;
+      ctx.setLineDash([6 / transform.scale, 4 / transform.scale]);
+      ctx.strokeRect(bounds.minX, bounds.minY, w, h);
+      ctx.setLineDash([]);
+      if (selectedAnnotationIdsRef.current.length === 1) {
+        ctx.fillStyle = '#fbbf24';
+        for (const handle of getResizeHandles(ann)) {
+          ctx.fillRect(
+            handle.x - handleSize / 2,
+            handle.y - handleSize / 2,
+            handleSize,
+            handleSize
+          );
+        }
+      }
+      ctx.restore();
+    });
+
     ctx.restore();
   }, [tempAnnotation, transform]);
 
@@ -295,7 +362,7 @@ export default function AuditModeCanvas({
       canvas.height = viewportSize.height;
     }
     renderAnnotations();
-  }, [auditAnnotations, tempAnnotation, renderAnnotations, viewportSize, transform]);
+  }, [auditAnnotations, tempAnnotation, renderAnnotations, viewportSize, transform, selectedAnnotationIds]);
 
   // ====== 图片处理 ======
 
@@ -328,7 +395,7 @@ export default function AuditModeCanvas({
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!containerRef.current) return;
+    if (!auditRootRef.current) return;
 
     const files = Array.from(e.dataTransfer.files || []);
     const file = files.find(f => f.type.startsWith('image/'));
@@ -351,11 +418,11 @@ export default function AuditModeCanvas({
         height: naturalSize.height,
         scale: 1,
       };
-      setAuditImages(prev => [...prev, newImage]);
+      setAuditImages(prev => appendAuditImages(prev, newImage));
       setSelectedImageIds([newImage.id]);
     };
     reader.readAsDataURL(file);
-  }, [containerRef, getCanvasCoords, setAuditImages]);
+  }, [getCanvasCoords, setAuditImages]);
 
   // 粘贴图片
   const handlePaste = useCallback(async (e: ClipboardEvent) => {
@@ -394,7 +461,7 @@ export default function AuditModeCanvas({
         height: naturalSize.height,
         scale: 1,
       };
-      setAuditImages(prev => [...prev, newImage]);
+      setAuditImages(prev => appendAuditImages(prev, newImage));
       setSelectedImageIds([newImage.id]);
     };
     reader.readAsDataURL(file);
@@ -402,7 +469,7 @@ export default function AuditModeCanvas({
 
   // 注册/注销粘贴事件 和 快捷键
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!auditRootRef.current) return;
 
     const onPaste = (e: ClipboardEvent) => {
       handlePaste(e);
@@ -530,7 +597,7 @@ export default function AuditModeCanvas({
                     height: naturalSize.height,
                     scale: 1,
                   };
-                  setAuditImages(prev => [...prev, newImage]);
+                  setAuditImages(prev => appendAuditImages(prev, newImage));
                   setSelectedImageIds([newImage.id]);
                 });
               };
@@ -551,8 +618,9 @@ export default function AuditModeCanvas({
               id: `audit-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
               x: pos.x - img.width / 2,
               y: pos.y - img.height / 2,
+              pinned: false,
             };
-            setAuditImages(prev => [...prev, newImage]);
+            setAuditImages(prev => appendAuditImages(prev, newImage));
             setSelectedImageIds([newImage.id]);
           }
         }
@@ -580,24 +648,15 @@ export default function AuditModeCanvas({
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('pointermove', onWindowPointerMove);
     };
-  }, [handlePaste, containerRef, selectedImageIds, getCanvasCoords, setAuditImages]);
+  }, [handlePaste, selectedImageIds, getCanvasCoords, setAuditImages]);
 
   // ====== 图片交互 ======
 
-  /** 将指定图片移到叠放顺序最上层（ids 中越靠后的越在上） */
+  /** 将指定图片移到叠放顺序最上层（已置顶图片始终在未置顶之上） */
   const bringImagesToFront = useCallback(
-    (ids: string[]) => {
+    (ids: string[], opts?: { pin?: boolean }) => {
       if (ids.length === 0) return;
-      setAuditImages((prev) => {
-        const idSet = new Set(ids);
-        const front: AuditImage[] = [];
-        for (const id of ids) {
-          const img = prev.find((i) => i.id === id);
-          if (img) front.push(img);
-        }
-        const rest = prev.filter((i) => !idSet.has(i.id));
-        return [...rest, ...front];
-      });
+      setAuditImages((prev) => bringAuditImagesToFront(prev, ids, opts));
     },
     [setAuditImages]
   );
@@ -605,14 +664,22 @@ export default function AuditModeCanvas({
   const pinSelectedImagesToTop = useCallback(() => {
     const ids = selectedImageIdsRef.current;
     if (ids.length === 0) return;
-    bringImagesToFront(ids);
+    bringImagesToFront(ids, { pin: true });
     setContextMenu(null);
   }, [bringImagesToFront]);
+
+  const unpinSelectedImagesFromTop = useCallback(() => {
+    const ids = selectedImageIdsRef.current;
+    if (ids.length === 0) return;
+    setAuditImages((prev) => unpinAuditImages(prev, ids));
+    setContextMenu(null);
+  }, [setAuditImages]);
 
   // 选中图片（支持 Ctrl 加选、Alt 减选）
   const handleImagePointerDown = (e: React.PointerEvent, imgId: string) => {
     e.stopPropagation();
     if (currentTool !== 'select') return;
+    setSelectedAnnotationIds([]);
 
     if (e.altKey) {
       // Alt: 减选
@@ -630,7 +697,7 @@ export default function AuditModeCanvas({
       // Ctrl + 拖拽移动
       const img = auditImages.find(i => i.id === imgId);
       if (!img) return;
-      const rect = containerRef.current?.getBoundingClientRect();
+      const rect = auditRootRef.current?.getBoundingClientRect();
       if (!rect) return;
       const imgScreenX = img.x * transform.scale + transform.x + rect.left;
       const imgScreenY = img.y * transform.scale + transform.y + rect.top;
@@ -652,7 +719,7 @@ export default function AuditModeCanvas({
     // 检查是否在右下角缩放手柄区域
     const img = auditImages.find(i => i.id === imgId);
     if (!img) return;
-    const rect = containerRef.current?.getBoundingClientRect();
+    const rect = auditRootRef.current?.getBoundingClientRect();
     if (!rect) return;
     const imgScreenX = img.x * transform.scale + transform.x + rect.left;
     const imgScreenY = img.y * transform.scale + transform.y + rect.top;
@@ -714,9 +781,9 @@ export default function AuditModeCanvas({
     });
 
     const handleMove = (e: PointerEvent) => {
-      if (!containerRef.current || !draggingImageId) return;
+      if (!auditRootRef.current || !draggingImageId) return;
       if (!isResize) {
-        const rect = containerRef.current.getBoundingClientRect();
+        const rect = auditRootRef.current.getBoundingClientRect();
         // 当前鼠标在画布坐标中的位置
         const mouseCanvas = {
           x: (e.clientX - rect.left - transform.x) / transform.scale,
@@ -739,7 +806,7 @@ export default function AuditModeCanvas({
         }));
       } else {
         // 缩放操作：只缩放被拖拽的那一张
-        const rect = containerRef.current.getBoundingClientRect();
+        const rect = auditRootRef.current.getBoundingClientRect();
         const startData = resizeStartDataRef.current;
         if (!startData) return;
         // 使用 ref 中记录的起始数据计算，避免每次从 prev 读取 img.x/img.y
@@ -769,7 +836,7 @@ export default function AuditModeCanvas({
       window.removeEventListener('pointermove', handleMove);
       window.removeEventListener('pointerup', handleUp);
     };
-  }, [draggingImageId, containerRef, transform, selectedImageIds, setAuditImages]);
+  }, [draggingImageId, transform, selectedImageIds, setAuditImages]);
 
   // ====== 标注绘制 ======
 
@@ -779,6 +846,51 @@ export default function AuditModeCanvas({
     newHistory.push([...newAnnotations]);
     setAnnotationHistory(newHistory);
     setHistoryIndex(newHistory.length - 1);
+  };
+
+  const beginAnnotationEdit = (
+    mode: 'move' | 'resize',
+    handle: ResizeHandleId | undefined,
+    pointer: { x: number; y: number },
+    ids: string[]
+  ) => {
+    const snapshots = new Map<string, AuditAnnotation>();
+    for (const id of ids) {
+      const ann = auditAnnotationsRef.current.find((a) => a.id === id);
+      if (ann) snapshots.set(id, cloneAnnotation(ann));
+    }
+    annotationEditRef.current = { mode, handle, startPointer: pointer, snapshots, ids };
+  };
+
+  const applyAnnotationEdit = (pointer: { x: number; y: number }) => {
+    const edit = annotationEditRef.current;
+    if (!edit) return;
+    const dx = pointer.x - edit.startPointer.x;
+    const dy = pointer.y - edit.startPointer.y;
+    setAuditAnnotations((prev) => {
+      const next = prev.map((ann) => {
+        if (!edit.ids.includes(ann.id)) return ann;
+        const snap = edit.snapshots.get(ann.id);
+        if (!snap) return ann;
+        if (edit.mode === 'move') {
+          return translateAnnotation(snap, dx, dy);
+        }
+        if (edit.mode === 'resize' && edit.handle) {
+          const startBounds = getAnnotationBounds(snap);
+          if (!startBounds) return ann;
+          return resizeAnnotationFromSnapshot(snap, edit.handle, pointer, startBounds);
+        }
+        return ann;
+      });
+      auditAnnotationsRef.current = next;
+      return next;
+    });
+  };
+
+  const finishAnnotationEdit = () => {
+    if (!annotationEditRef.current) return;
+    saveToHistory(auditAnnotationsRef.current);
+    annotationEditRef.current = null;
   };
 
   const handleCanvasPointerDown = (e: React.PointerEvent) => {
@@ -793,12 +905,53 @@ export default function AuditModeCanvas({
       return;
     }
 
-    // 选择工具下，点击空白处开始框选
+    // 选择工具：编辑标注 / 框选图片
     if (currentTool === 'select') {
       e.stopPropagation();
+      const pos = getCanvasCoords(e.clientX, e.clientY);
+      const hitTol = 8 / transform.scale;
+      const handleRadius = 10 / transform.scale;
+
+      if (selectedAnnotationIds.length === 1) {
+        const selectedAnn = auditAnnotationsRef.current.find(
+          (a) => a.id === selectedAnnotationIds[0]
+        );
+        if (selectedAnn) {
+          const handle = hitTestResizeHandle(selectedAnn, pos.x, pos.y, handleRadius);
+          if (handle) {
+            beginAnnotationEdit('resize', handle, pos, [selectedAnn.id]);
+            return;
+          }
+        }
+      }
+
+      const hitAnnId = hitTestTopmostAnnotation(
+        auditAnnotationsRef.current,
+        pos.x,
+        pos.y,
+        hitTol
+      );
+      if (hitAnnId) {
+        const nextIds =
+          e.ctrlKey || e.metaKey
+            ? selectedAnnotationIds.includes(hitAnnId)
+              ? selectedAnnotationIds.filter((id) => id !== hitAnnId)
+              : [...selectedAnnotationIds, hitAnnId]
+            : [hitAnnId];
+        setSelectedAnnotationIds(nextIds);
+        setSelectedImageIds([]);
+        if (nextIds.length > 0) {
+          beginAnnotationEdit('move', undefined, pos, nextIds);
+        }
+        return;
+      }
+
+      const rect = auditRootRef.current?.getBoundingClientRect();
+      const localX = rect ? e.clientX - rect.left : e.clientX;
+      const localY = rect ? e.clientY - rect.top : e.clientY;
       isBoxSelectingRef.current = true;
-      boxSelectStartRef.current = { x: e.clientX, y: e.clientY };
-      setSelectionBox({ left: e.clientX, top: e.clientY, width: 0, height: 0 });
+      boxSelectStartRef.current = { x: localX, y: localY };
+      setSelectionBox({ left: localX, top: localY, width: 0, height: 0 });
       return;
     }
 
@@ -807,8 +960,12 @@ export default function AuditModeCanvas({
     const pos = getCanvasCoords(e.clientX, e.clientY);
 
     if (currentTool === 'text') {
-      setIsTextInputMode(true);
+      if (isTextInputMode && textInputValue.trim()) {
+        confirmTextAnnotation();
+      }
       setTextInputPos(pos);
+      setTextInputValue('');
+      setIsTextInputMode(true);
       setIsDrawing(false);
       return;
     }
@@ -822,7 +979,7 @@ export default function AuditModeCanvas({
         type: 'pen',
         points: [pos],
         color: currentColor,
-        strokeWidth: 3,
+        strokeWidth: currentPenWidth,
       });
     } else if (currentTool === 'arrow') {
       setTempAnnotation({
@@ -832,7 +989,7 @@ export default function AuditModeCanvas({
         endX: pos.x,
         endY: pos.y,
         color: currentColor,
-        strokeWidth: 3,
+        strokeWidth: currentStrokeWidth,
       });
     } else {
       setTempAnnotation({
@@ -842,7 +999,7 @@ export default function AuditModeCanvas({
         width: 0,
         height: 0,
         color: currentColor,
-        strokeWidth: 3,
+        strokeWidth: currentStrokeWidth,
         fillOpacity: 0.45,
       });
     }
@@ -865,12 +1022,20 @@ export default function AuditModeCanvas({
       return;
     }
 
+    if (annotationEditRef.current) {
+      applyAnnotationEdit(canvasPos);
+      return;
+    }
+
     // 框选
     if (isBoxSelectingRef.current) {
-      const left = Math.min(boxSelectStartRef.current.x, e.clientX);
-      const top = Math.min(boxSelectStartRef.current.y, e.clientY);
-      const width = Math.abs(e.clientX - boxSelectStartRef.current.x);
-      const height = Math.abs(e.clientY - boxSelectStartRef.current.y);
+      const rect = auditRootRef.current?.getBoundingClientRect();
+      const curX = rect ? e.clientX - rect.left : e.clientX;
+      const curY = rect ? e.clientY - rect.top : e.clientY;
+      const left = Math.min(boxSelectStartRef.current.x, curX);
+      const top = Math.min(boxSelectStartRef.current.y, curY);
+      const width = Math.abs(curX - boxSelectStartRef.current.x);
+      const height = Math.abs(curY - boxSelectStartRef.current.y);
       setSelectionBox({ left, top, width, height });
       return;
     }
@@ -902,6 +1067,11 @@ export default function AuditModeCanvas({
       return;
     }
 
+    if (annotationEditRef.current) {
+      finishAnnotationEdit();
+      return;
+    }
+
     // 框选完成
     if (isBoxSelectingRef.current && selectionBox) {
       isBoxSelectingRef.current = false;
@@ -912,17 +1082,16 @@ export default function AuditModeCanvas({
         setContextMenu(null);
         if (!e.ctrlKey && !e.metaKey && !e.altKey) {
           setSelectedImageIds([]);
+          setSelectedAnnotationIds([]);
         }
         return;
       }
 
-      // 计算框选区域的画布坐标
-      if (!containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      const boxLeft = (selectionBox.left - rect.left - transform.x) / transform.scale;
-      const boxTop = (selectionBox.top - rect.top - transform.y) / transform.scale;
-      const boxRight = (selectionBox.left + selectionBox.width - rect.left - transform.x) / transform.scale;
-      const boxBottom = (selectionBox.top + selectionBox.height - rect.top - transform.y) / transform.scale;
+      // 计算框选区域的画布坐标（selectionBox 已是看图层本地坐标）
+      const boxLeft = (selectionBox.left - transform.x) / transform.scale;
+      const boxTop = (selectionBox.top - transform.y) / transform.scale;
+      const boxRight = (selectionBox.left + selectionBox.width - transform.x) / transform.scale;
+      const boxBottom = (selectionBox.top + selectionBox.height - transform.y) / transform.scale;
 
       // 找出与框选区域相交的图片
       const hitIds = auditImages.filter(img => {
@@ -951,6 +1120,7 @@ export default function AuditModeCanvas({
         bringImagesToFront(hitIds);
         return hitIds;
       });
+      setSelectedAnnotationIds([]);
       return;
     }
 
@@ -987,7 +1157,7 @@ export default function AuditModeCanvas({
       y: textInputPos.y,
       text: textInputValue,
       color: currentColor,
-      strokeWidth: 3,
+      strokeWidth: currentStrokeWidth,
       fontSize: currentFontSize,
     };
     const newAnnotations = [...auditAnnotations, newAnn];
@@ -1194,7 +1364,7 @@ export default function AuditModeCanvas({
         bgColor: textImageBgColor,
         bgOpacity: textImageBgOpacity,
       });
-      setAuditImages(prev => [...prev, newImage]);
+      setAuditImages(prev => appendAuditImages(prev, newImage));
       setSelectedImageIds([newId]);
     }
     setTextImageEditorOpen(false);
@@ -1237,6 +1407,7 @@ export default function AuditModeCanvas({
 
   return (
     <div
+      ref={auditRootRef}
       className="absolute inset-0 z-[45] overflow-hidden"
       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
       onDrop={handleDrop}
@@ -1247,18 +1418,29 @@ export default function AuditModeCanvas({
       onPointerUp={handleCanvasPointerUp}
       style={{
         touchAction: 'none',
-        cursor: isPanning ? 'grabbing' : currentTool !== 'select' ? 'crosshair' : undefined,
+        cursor: isPanning
+          ? 'grabbing'
+          : currentTool !== 'select'
+            ? 'crosshair'
+            : undefined,
       }}
     >
       <AuditAnnotationToolbar
         currentTool={currentTool}
         currentColor={currentColor}
         currentFontSize={currentFontSize}
+        currentPenWidth={currentPenWidth}
+        currentStrokeWidth={currentStrokeWidth}
         canUndo={historyIndex > 0}
         canRedo={historyIndex < annotationHistory.length - 1}
-        onToolChange={setCurrentTool}
+        onToolChange={(tool) => {
+          setCurrentTool(tool);
+          if (tool !== 'select') setSelectedAnnotationIds([]);
+        }}
         onColorChange={setCurrentColor}
         onFontSizeChange={setCurrentFontSize}
+        onPenWidthChange={setCurrentPenWidth}
+        onStrokeWidthChange={setCurrentStrokeWidth}
         onUndo={undoAnnotation}
         onRedo={redoAnnotation}
         onClear={clearAnnotations}
@@ -1295,11 +1477,13 @@ export default function AuditModeCanvas({
           transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
         }}
       >
-        {/* 叠放顺序与 auditImages 数组一致；选中时 bringImagesToFront 将图片移到末尾 */}
+        {/* 叠放顺序与 auditImages 数组一致；已置顶图片始终在未置顶之上 */}
         {auditImages.map((img) => (
           <div
             key={img.id}
-            className={`absolute pointer-events-auto ${
+            className={`absolute ${
+              currentTool === 'select' ? 'pointer-events-auto' : 'pointer-events-none'
+            } ${
               selectedImageIds.includes(img.id)
                 ? 'outline outline-4 outline-amber-300 outline-offset-2 shadow-[0_0_0_6px_rgba(251,191,36,0.35)] ring-2 ring-amber-400/60'
                 : ''
@@ -1344,7 +1528,7 @@ export default function AuditModeCanvas({
                   if (currentTool !== 'select') return;
                   const currentImg = auditImages.find(i => i.id === img.id);
                   if (!currentImg) return;
-                  const rect = containerRef.current?.getBoundingClientRect();
+                  const rect = auditRootRef.current?.getBoundingClientRect();
                   if (!rect) return;
                   isResizingRef.current = true;
                   setDraggingImageId(currentImg.id);
@@ -1403,6 +1587,7 @@ export default function AuditModeCanvas({
             saveToHistory([]);
             setAuditAnnotations([]);
             setSelectedImageIds([]);
+            setSelectedAnnotationIds([]);
           }}
           className="py-1.5 px-3 rounded-lg text-[11px] font-medium bg-red-800 hover:bg-red-700 text-white shadow-lg border border-red-600/50 transition-colors"
         >
@@ -1418,15 +1603,14 @@ export default function AuditModeCanvas({
             left: textInputPos.x * transform.scale + transform.x,
             top: textInputPos.y * transform.scale + transform.y,
           }}
+          onPointerDown={(e) => e.stopPropagation()}
         >
           <input
             ref={textInputRef}
-            autoFocus
             className="bg-[#222] border border-amber-500 rounded px-2 py-1 text-white outline-none min-w-[120px]"
             style={{ fontSize: currentFontSize }}
             value={textInputValue}
             onChange={(e) => setTextInputValue(e.target.value)}
-            onPointerDown={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
               if (e.key === 'Enter') { confirmTextAnnotation(); }
               if (e.key === 'Escape') { setIsTextInputMode(false); setTextInputValue(''); }
@@ -1453,6 +1637,17 @@ export default function AuditModeCanvas({
             >
               <span className="text-cyan-400 text-[14px]">↑</span>
               置顶{selectedImageIds.length > 1 ? `（${selectedImageIds.length} 张）` : '图片'}
+            </button>
+          )}
+          {selectedImageIds.length >= 1 &&
+            selectedImageIds.some((id) => auditImages.find((i) => i.id === id)?.pinned) && (
+            <button
+              className="w-full text-left px-3 py-1.5 text-[12px] text-gray-300 hover:bg-[#333] hover:text-white transition-colors flex items-center gap-2"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={unpinSelectedImagesFromTop}
+            >
+              <span className="text-gray-400 text-[14px]">↓</span>
+              取消置顶{selectedImageIds.length > 1 ? `（${selectedImageIds.length} 张）` : ''}
             </button>
           )}
           {selectedImageIds.length >= 1 && (

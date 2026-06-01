@@ -401,16 +401,16 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
     const targetEl = e.target as HTMLElement | null;
     if (targetEl?.closest('[data-resize-handle]')) return;
 
-    /** 节点内表单控件：不应触发整块节点拖拽（否则调整下拉/输入时窗口会跟着「飞」） */
+    const pickedNode = nodesRef.current.find(n => n.id === id);
+    /** 节点内表单控件：不应触发整块节点拖拽；文本节点预览区（.text-node-content）除外，未选中时可拖动 */
     const isInteractiveSurface =
       !!targetEl?.closest(
         'input, textarea, select, button, a, [role="button"], [role="slider"], [role="listbox"], [contenteditable="true"], [data-resize-handle], .text-node-content::-webkit-scrollbar'
-      );
+      ) &&
+      !(pickedNode?.type === 'text' && targetEl?.closest('.text-node-content'));
 
     /** 吸管模式：点击节点窗口任意非表单区域即可与「吸取目标」节点连线（与预览区点击行为一致） */
     const eyeT = eyedropperTargetNodeIdRef.current;
-    // text 节点内容区域（textarea）在吸管模式下应可被点击拾取作为源节点
-    const pickedNode = nodesRef.current.find(n => n.id === id);
     const isEyedropperPickable = eyeT && eyeT !== id && (pickedNode?.type === 'text' ? true : !isInteractiveSurface);
     if (isEyedropperPickable) {
       if (handleCanvasEyedropper(id, eyeT)) {

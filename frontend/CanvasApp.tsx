@@ -1929,7 +1929,6 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
           auditImages={auditImages}
           setAuditImages={setAuditImages}
           setTransform={setTransform}
-          containerRef={containerRef}
           onWheel={handleWheel}
           sharedClipboardImageRef={sharedClipboardImageRef}
           saveCurrentProject={saveCurrentProject}

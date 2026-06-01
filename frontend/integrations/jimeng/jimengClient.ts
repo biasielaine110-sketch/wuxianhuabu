@@ -1,26 +1,86 @@
-const JIMENG_SERVER = "/api/jimeng";
+const JIMENG_SERVER = '/api/jimeng';
+
+export class JimengBackendError extends Error {
+  readonly backendUnavailable: boolean;
+
+  constructor(message: string, backendUnavailable = false) {
+    super(message);
+    this.name = 'JimengBackendError';
+    this.backendUnavailable = backendUnavailable;
+  }
+}
+
+async function parseJimengResponse(res: Response): Promise<Record<string, unknown>> {
+  const contentType = res.headers.get('content-type') || '';
+  const text = await res.text();
+
+  if (!text.trim()) {
+    if (!res.ok) {
+      throw new JimengBackendError(`即梦接口 HTTP ${res.status}`, res.status === 502 || res.status === 503);
+    }
+    return {};
+  }
+
+  const looksJson =
+    contentType.includes('application/json') ||
+    contentType.includes('+json') ||
+    text.trimStart().startsWith('{') ||
+    text.trimStart().startsWith('[');
+
+  if (!looksJson) {
+    const snippet = text.replace(/\s+/g, ' ').slice(0, 80);
+    const onVercel =
+      typeof window !== 'undefined' &&
+      !window.location.hostname.includes('localhost') &&
+      !window.location.hostname.includes('127.0.0.1');
+    const hint = onVercel
+      ? '线上部署无法运行即梦后端（需本机 WSL + dreamina CLI）。请在本地启动 server 后使用。'
+      : '即梦后端未启动。请在项目 server 目录执行 npm start（端口 3107），并确保前端 dev 代理可用。';
+    throw new JimengBackendError(
+      `${hint}${snippet ? `（收到非 JSON 响应：${snippet}…）` : ''}`,
+      true,
+    );
+  }
+
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    throw new JimengBackendError('即梦接口返回了无效的 JSON', true);
+  }
+}
+
+async function fetchJimengApi(path: string, init?: RequestInit): Promise<Record<string, unknown>> {
+  try {
+    const res = await fetch(`${JIMENG_SERVER}${path}`, init);
+    const data = await parseJimengResponse(res);
+    if (!res.ok && data.ok !== false) {
+      return { ...data, ok: false, message: (data.message as string) || `HTTP ${res.status}` };
+    }
+    return data;
+  } catch (err) {
+    if (err instanceof JimengBackendError) throw err;
+    throw new JimengBackendError(
+      '无法连接即梦后端。请在 server 目录运行 npm start，并确认 http://localhost:3107/api/jimeng/health 可访问。',
+      true,
+    );
+  }
+}
 
 export async function checkJimengCli() {
-  const res = await fetch(`${JIMENG_SERVER}/health`);
-  return res.json();
+  return fetchJimengApi('/health');
 }
 
 export async function checkJimengSession() {
-  const res = await fetch(`${JIMENG_SERVER}/session`);
-  return res.json();
+  return fetchJimengApi('/session');
 }
 
 export async function startJimengLogin() {
-  const res = await fetch(`${JIMENG_SERVER}/login/start`, {
-    method: "POST"
-  });
-  const data = await res.json();
-  return { ...data, ok: data.ok !== false && res.ok };
+  const data = await fetchJimengApi('/login/start', { method: 'POST' });
+  return { ...data, ok: data.ok !== false };
 }
 
 export async function getJimengLoginCode() {
-  const res = await fetch(`${JIMENG_SERVER}/login/code`);
-  return res.json();
+  return fetchJimengApi('/login/code');
 }
 
 export function getJimengLoginScreenshotUrl() {
@@ -28,47 +88,39 @@ export function getJimengLoginScreenshotUrl() {
 }
 
 export async function checkJimengLoginStatus() {
-  const res = await fetch(`${JIMENG_SERVER}/login/status`);
-  return res.json();
+  return fetchJimengApi('/login/status');
 }
 
 export async function logoutJimeng() {
-  const res = await fetch(`${JIMENG_SERVER}/logout`, { method: "POST" });
-  return res.json();
+  return fetchJimengApi('/logout', { method: 'POST' });
 }
 
 export async function reloginJimeng() {
-  const res = await fetch(`${JIMENG_SERVER}/relogin`, { method: "POST" });
-  return res.json();
+  return fetchJimengApi('/relogin', { method: 'POST' });
 }
 
 export async function installOpencli() {
-  const res = await fetch(`${JIMENG_SERVER}/install-opencli`, { method: "POST" });
-  return res.json();
+  return fetchJimengApi('/install-opencli', { method: 'POST' });
 }
 
 export async function setupWSL() {
-  const res = await fetch(`${JIMENG_SERVER}/setup-wsl`, { method: "POST" });
-  return res.json();
+  return fetchJimengApi('/setup-wsl', { method: 'POST' });
 }
 
 export async function getSetupWSLStatus() {
-  const res = await fetch(`${JIMENG_SERVER}/setup-wsl/status`);
-  return res.json();
+  return fetchJimengApi('/setup-wsl/status');
 }
 
 export async function upscaleJimengImage(imageUrl: string, scale: number = 2) {
-  // 将 blob URL 转换为 base64 data URL
   const convertedImageUrl = imageUrl.startsWith('blob:') ? await blobToBase64(imageUrl) : imageUrl;
 
-  const res = await fetch(`${JIMENG_SERVER}/image/upscale`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ imageUrl: convertedImageUrl, scale })
+  const data = await fetchJimengApi('/image/upscale', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ imageUrl: convertedImageUrl, scale }),
   });
-  const data = await res.json();
   if (!data.ok) {
-    throw new Error(data.message || "智能超清失败");
+    throw new Error((data.message as string) || '智能超清失败');
   }
   return data as { ok: true; imageUrl: string; filename: string };
 }
@@ -86,25 +138,25 @@ async function blobToBase64(blobUrl: string): Promise<string> {
       reader.readAsDataURL(blob);
     });
   } catch {
-    return blobUrl; // 转换失败时返回原始 URL
+    return blobUrl;
   }
 }
 
 /** 递归转换对象中所有 blob URLs 为 base64 */
-async function convertBlobUrls(obj: any): Promise<any> {
+async function convertBlobUrls(obj: unknown): Promise<unknown> {
   if (!obj) return obj;
   if (Array.isArray(obj)) {
-    return Promise.all(obj.map(item => convertBlobUrls(item)));
+    return Promise.all(obj.map((item) => convertBlobUrls(item)));
   }
   if (typeof obj === 'object') {
-    const result: any = {};
-    for (const [key, value] of Object.entries(obj)) {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
       if (key === 'imageUrl' && typeof value === 'string' && value.startsWith('blob:')) {
         result[key] = await blobToBase64(value);
       } else if (key === 'images' && Array.isArray(value)) {
-        result[key] = await Promise.all(value.map((v: string) =>
-          v.startsWith('blob:') ? blobToBase64(v) : Promise.resolve(v)
-        ));
+        result[key] = await Promise.all(
+          value.map((v: string) => (v.startsWith('blob:') ? blobToBase64(v) : Promise.resolve(v))),
+        );
       } else if (typeof value === 'string' && value.startsWith('blob:')) {
         result[key] = await blobToBase64(value);
       } else if (typeof value === 'object') {
@@ -128,20 +180,14 @@ export async function generateJimengVideo(params: {
   ratio?: string;
   nodeId?: string;
 }) {
-  // 将所有 blob URLs 转换为 base64 data URLs（blob 只能在浏览器内访问，服务器无法 fetch）
   const convertedParams = await convertBlobUrls(params);
 
-  const res = await fetch(`${JIMENG_SERVER}/video/generate`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(convertedParams)
+  const data = await fetchJimengApi('/video/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(convertedParams),
   });
 
-  const data = await res.json();
-
-  // 任务仍在生成中（队列中），返回 submitId 让调用方自行轮询
   if (!data.ok && data.submitId) {
     return data as {
       ok: false;
@@ -152,31 +198,34 @@ export async function generateJimengVideo(params: {
   }
 
   if (!data.ok) {
-    const message = data.message || data.detail || data.stderr || "即梦视频生成失败";
-    const err: any = new Error(message);
-    (err as any).loginRequired =
+    const message =
+      (data.message as string) ||
+      (data.detail as string) ||
+      (data.stderr as string) ||
+      '即梦视频生成失败';
+    const err = new Error(message) as Error & {
+      loginRequired?: boolean;
+      detail?: unknown;
+      stderr?: unknown;
+    };
+    err.loginRequired =
       data.loginRequired === true ||
-      String(data.detail || data.stderr || data.message || "").includes("dreamina login");
-    (err as any).detail = data.detail;
-    (err as any).stderr = data.stderr;
+      String(data.detail || data.stderr || data.message || '').includes('dreamina login');
+    err.detail = data.detail;
+    err.stderr = data.stderr;
     throw err;
   }
 
-  return data as {
-    ok: true;
-    videoUrl: string;
-    filename: string;
-  };
+  return data as { ok: true; videoUrl: string; filename: string };
 }
 
 /** 查询即梦任务进度 */
 export async function queryJimengTask(submitId: string) {
-  const res = await fetch(`${JIMENG_SERVER}/query`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+  return fetchJimengApi('/query', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ submitId }),
   });
-  return res.json();
 }
 
 export async function generateJimengImage(params: {
@@ -189,21 +238,16 @@ export async function generateJimengImage(params: {
   height?: number;
   nodeId?: string;
 }) {
-  // 将所有 blob URLs 转换为 base64 data URLs
   const convertedParams = await convertBlobUrls(params);
 
-  const res = await fetch(`${JIMENG_SERVER}/image/generate`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(convertedParams)
+  const data = await fetchJimengApi('/image/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(convertedParams),
   });
 
-  const data = await res.json();
-
   if (!data.ok) {
-    throw new Error(data.message || data.detail || "即梦图片生成失败");
+    throw new Error((data.message as string) || (data.detail as string) || '即梦图片生成失败');
   }
 
   return data as {

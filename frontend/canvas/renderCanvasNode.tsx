@@ -523,14 +523,8 @@ return (
             )}
             {node.type === 'text' && !(isSelected && editingTextNodeIds.has(node.id)) ? (
               <div
-                className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] overflow-y-auto leading-relaxed whitespace-pre-wrap break-words text-node-content relative"
+                className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] overflow-y-auto leading-relaxed whitespace-pre-wrap break-words text-node-content relative cursor-grab active:cursor-grabbing"
                 style={{ fontSize: textNodeFontSizeLocal + 'px', minHeight: '120px' }}
-                onPointerDown={(e) => {
-                  if (eyedropperId) {
-                    return;
-                  }
-                  e.stopPropagation();
-                }}
                 onDoubleClick={(e) => {
                   if (!isSelected) {
                     e.stopPropagation();

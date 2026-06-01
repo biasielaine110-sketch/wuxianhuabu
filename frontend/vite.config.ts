@@ -148,8 +148,16 @@ const toapisFileCdnProxy = {
         console.warn('[vite proxy /api/jimeng] 即梦后端未启动 (npm start --prefix server):', err instanceof Error ? err.message : err);
         const r = res as { headersSent?: boolean; writeHead?: (c: number, h?: unknown) => void; end?: (s?: string) => void };
         if (r && !r.headersSent && typeof r.writeHead === 'function') {
-          r.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          r.end?.(JSON.stringify({ loggedIn: false }));
+          r.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
+          r.end?.(
+            JSON.stringify({
+              ok: false,
+              loggedIn: false,
+              backendUnavailable: true,
+              message:
+                '即梦后端未启动。请在项目 server 目录执行 npm start（默认端口 3107），然后刷新页面重试。',
+            }),
+          );
         }
       });
     },

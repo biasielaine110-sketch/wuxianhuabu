@@ -9,7 +9,6 @@ type AuditModeCanvasHostProps = {
   auditImages: AuditImage[];
   setAuditImages: React.Dispatch<React.SetStateAction<AuditImage[]>>;
   setTransform: ReturnType<typeof useCanvasStore.getState>['setTransform'];
-  containerRef: React.RefObject<HTMLDivElement | null>;
   onWheel: (e: React.WheelEvent) => void;
   sharedClipboardImageRef: React.MutableRefObject<AuditImage | null>;
   saveCurrentProject: () => void | Promise<void>;
