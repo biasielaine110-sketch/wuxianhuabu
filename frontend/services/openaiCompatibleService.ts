@@ -109,7 +109,7 @@ function rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNormalized: string): st
 function openAiCompatFailureHint(status: number, kind: 'generations-json' | 'image-edit'): string {
   if (status === 404) {
     return kind === 'image-edit'
-      ? '（404：请确认请求为 POST multipart；开发环境须在 frontend 目录启动 Vite；生产环境需已部署 api/codesonline-image-proxy/v1/images/edits 等显式路由。云智请用 /api/yunzhi-proxy。若出现 NOT_FOUND，多为 Vercel 未匹配到 API 函数，请重新部署。）'
+      ? '（404：请确认请求为 POST multipart；开发环境须在 frontend 目录启动 Vite；生产环境需已部署 /api/codesonline-image-proxy 单入口代理。若出现 NOT_FOUND，请重新部署并硬刷新。）'
       : '（404：请检查 Base URL 与路径；开发环境需 Vite 代理 /yunzhi-openai 或 /codesonline-image-api。）';
   }
   if (status === 502 || status === 504) {

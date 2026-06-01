@@ -24,14 +24,21 @@ function isHopByHopHeader(name) {
 async function handler(req, res) {
   const host = req.headers.host || 'localhost';
   const url = new URL(req.url || '/', `http://${host}`);
-  let sub = url.pathname.replace(/^\/api\/codesonline-image-proxy\/?/, '').replace(/^\/+/, '');
+  const pathFromQuery = url.searchParams.get('path')?.replace(/^\/+/, '') ?? '';
+  let sub = pathFromQuery;
+  if (!sub) {
+    sub = url.pathname.replace(/^\/api\/codesonline-image-proxy\/?/, '').replace(/^\/+/, '');
+  }
   if (!sub) {
     res.statusCode = 400;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.end(JSON.stringify({ error: 'missing path after /api/codesonline-image-proxy' }));
     return;
   }
-  const targetUrl = `${UPSTREAM_ORIGIN}/${sub}${url.search}`;
+  const upstreamSearch = new URLSearchParams(url.searchParams);
+  upstreamSearch.delete('path');
+  const qs = upstreamSearch.toString();
+  const targetUrl = `${UPSTREAM_ORIGIN}/${sub}${qs ? `?${qs}` : ''}`;
 
   const headers = new Headers();
   for (const [k, v] of Object.entries(req.headers)) {

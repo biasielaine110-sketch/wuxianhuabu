@@ -38,7 +38,11 @@
     },
     {
       "source": "/codesonline-image-api/(.*)",
-      "destination": "/api/codesonline-image-proxy/$1"
+      "destination": "/api/codesonline-image-proxy?path=$1"
+    },
+    {
+      "source": "/api/codesonline-image-proxy/(.*)",
+      "destination": "/api/codesonline-image-proxy?path=$1"
     },
     {
       "source": "/((?!api/).*)",
