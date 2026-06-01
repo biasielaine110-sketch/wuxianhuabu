@@ -1,8 +1,10 @@
 import React from 'react';
 import type { CanvasNode } from '../types';
+import { resolveNodeGeometry } from './canvasEdgeGeometry';
 import { getNodeBorderClass, getNodeDisplayMeta } from './nodeMeta';
 import { getNodeInputPortTitle } from './nodeInputPortTitle';
 import { NodeResizeHandles } from './NodeResizeHandles';
+import { useCanvasStore } from '../stores/canvasStore';
 
 export type NodePlaceholderProps = {
   node: CanvasNode;
@@ -27,6 +29,11 @@ export function NodePlaceholder({
   onBeginResize,
   hint = 'offscreen',
 }: NodePlaceholderProps) {
+  const nodeResizePreview = useCanvasStore((s) => {
+    const preview = s.nodeResizePreview;
+    return preview?.nodeId === node.id ? preview : null;
+  });
+  const geom = resolveNodeGeometry(node, null, nodeResizePreview);
   const meta = getNodeDisplayMeta(node.type, isSelected);
   const borderColor = getNodeBorderClass(node.type, isSelected);
 
@@ -39,13 +46,16 @@ export function NodePlaceholder({
       data-node-placeholder="true"
       className={`absolute flex flex-col bg-[#1a1a1a] rounded-[20px] border-8 shadow-xl ${borderColor} ${isSelected ? 'z-20 ring-2 ring-blue-400/40' : 'z-10'}`}
       style={{
-        left: node.x,
-        top: node.y,
-        width: node.width,
-        height: node.height,
+        left: geom.x,
+        top: geom.y,
+        width: geom.width,
+        height: geom.height,
         opacity: isSelected ? 1 : 0.82,
       }}
-      onPointerDown={(e) => onPointerDown(e, node.id)}
+      onPointerDown={(e) => {
+        if ((e.target as HTMLElement).closest('[data-resize-handle]')) return;
+        onPointerDown(e, node.id);
+      }}
     >
       <div className="absolute -top-[calc(7rem-30px)] left-3 z-30 flex items-center gap-1.5 cursor-grab active:cursor-grabbing">
         <span className={`w-2 h-2 rounded-full ${meta.dotClass}`} />

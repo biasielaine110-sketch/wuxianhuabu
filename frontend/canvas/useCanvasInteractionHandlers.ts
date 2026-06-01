@@ -42,6 +42,7 @@ export type UseCanvasInteractionHandlersOptions = {
   setSelectionBox: Dispatch<SetStateAction<{ x: number; y: number; width: number; height: number } | null>>;
   setDraggingNodeId: Dispatch<SetStateAction<string | null>>;
   setResizingNodeId: Dispatch<SetStateAction<string | null>>;
+  setNodeResizePreview: Dispatch<SetStateAction<ResizePreview | null>>;
   setResizeDirection: Dispatch<SetStateAction<string>>;
   setIsResizing: Dispatch<SetStateAction<boolean>>;
   setNodes: Dispatch<SetStateAction<CanvasNode[]>>;
@@ -112,6 +113,7 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
     setSelectionBox,
     setDraggingNodeId,
     setResizingNodeId,
+    setNodeResizePreview,
     setResizeDirection,
     setIsResizing,
     setNodes,
@@ -297,6 +299,7 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
       clearEdgeGeometryPreviews(edgesSvgRef.current);
       resizePreviewRef.current = null;
       setResizePreview(null);
+      setNodeResizePreview(null);
       nodeResizeSessionRef.current = null;
       setResizingNodeId(null);
       resizingNodeIdRef.current = null;
@@ -396,6 +399,8 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
     if (e.button === 2 || fullscreenImage) return;
 
     const targetEl = e.target as HTMLElement | null;
+    if (targetEl?.closest('[data-resize-handle]')) return;
+
     /** 节点内表单控件：不应触发整块节点拖拽（否则调整下拉/输入时窗口会跟着「飞」） */
     const isInteractiveSurface =
       !!targetEl?.closest(

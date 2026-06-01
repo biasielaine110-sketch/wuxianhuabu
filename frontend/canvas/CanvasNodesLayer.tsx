@@ -37,16 +37,19 @@ function CanvasNodesLayerInner({
 }: CanvasNodesLayerProps) {
   const eyedropperTargetNodeId = useCanvasStore((s) => s.eyedropperTargetNodeId);
   const thumbResolutionKey = useCanvasStore((s) => s.thumbResolutionPct);
+  const resizingNodeId = useCanvasStore((s) => s.resizingNodeId);
   return (
     <>
       {mountedNodes.map((node) => {
         const isInViewport = visibleNodeIds.has(node.id);
         const isDragging = draggingNodeId === node.id;
         const isSelected = selectedIdSet.has(node.id);
+        const isResizing = resizingNodeId === node.id;
         const usePlaceholder = shouldUseNodePlaceholder(node, {
           isInViewport,
           isDragging,
           isSelected,
+          isResizing,
           activeWebGLNodeId,
         });
         if (usePlaceholder) {

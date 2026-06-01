@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { ResizePreview } from '../canvas/canvasEdgeGeometry';
 import type { CanvasNode, Edge, Transform } from '../types';
 import { getThumbResolutionPercent, setThumbResolutionPercent } from '../canvas/thumbResolution';
 import { getTextNodeFontSize, setTextNodeFontSizeValue } from '../canvas/textNodeFontSize';
@@ -15,6 +16,8 @@ type CanvasStoreState = {
   selectedIds: string[];
   draggingNodeId: string | null;
   resizingNodeId: string | null;
+  /** 节点缩放拖拽中的实时几何（React 渲染用，避免 DOM 预览被 reconcile 覆盖） */
+  nodeResizePreview: ResizePreview | null;
   eyedropperTargetNodeId: string | null;
   thumbResolutionPct: number;
   editingTextNodeIds: Set<string>;
@@ -29,6 +32,7 @@ type CanvasStoreActions = {
   setSelectedIds: (updater: string[] | ((prev: string[]) => string[])) => void;
   setDraggingNodeId: (id: string | null) => void;
   setResizingNodeId: (id: string | null) => void;
+  setNodeResizePreview: (preview: ResizePreview | null) => void;
   setEyedropperTargetNodeId: (
     updater: string | null | ((prev: string | null) => string | null)
   ) => void;
@@ -52,6 +56,7 @@ export const useCanvasStore = create<CanvasStore>((set) => ({
   selectedIds: [],
   draggingNodeId: null,
   resizingNodeId: null,
+  nodeResizePreview: null,
   eyedropperTargetNodeId: null,
   thumbResolutionPct: getThumbResolutionPercent(),
   editingTextNodeIds: new Set<string>(),
@@ -68,6 +73,7 @@ export const useCanvasStore = create<CanvasStore>((set) => ({
     set((s) => ({ selectedIds: typeof updater === 'function' ? updater(s.selectedIds) : updater })),
   setDraggingNodeId: (id) => set({ draggingNodeId: id }),
   setResizingNodeId: (id) => set({ resizingNodeId: id }),
+  setNodeResizePreview: (preview) => set({ nodeResizePreview: preview }),
   setEyedropperTargetNodeId: (updater) =>
     set((s) => ({
       eyedropperTargetNodeId:
@@ -102,6 +108,7 @@ export const useCanvasStore = create<CanvasStore>((set) => ({
       selectedIds: patch?.selectedIds ?? [],
       draggingNodeId: null,
       resizingNodeId: null,
+      nodeResizePreview: null,
       eyedropperTargetNodeId: null,
       editingTextNodeIds: new Set<string>(),
       importTargetNodeId: null,

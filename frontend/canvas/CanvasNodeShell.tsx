@@ -1,7 +1,9 @@
 import React from 'react';
 import type { CanvasNode } from '../types';
+import { resolveNodeGeometry } from './canvasEdgeGeometry';
 import { getNodeInputPortTitle } from './nodeInputPortTitle';
 import { NodeResizeHandles } from './NodeResizeHandles';
+import { useCanvasStore } from '../stores/canvasStore';
 
 export type CanvasNodeShellProps = {
   node: CanvasNode;
@@ -37,6 +39,11 @@ export function CanvasNodeShell({
   onBeginResize,
   children,
 }: CanvasNodeShellProps) {
+  const nodeResizePreview = useCanvasStore((s) => {
+    const preview = s.nodeResizePreview;
+    return preview?.nodeId === node.id ? preview : null;
+  });
+  const geom = resolveNodeGeometry(node, null, nodeResizePreview);
   const rootClass = [
     'absolute flex flex-col bg-[#1e1e1e] rounded-[20px] border-8 shadow-2xl transition-shadow',
     borderColor,
@@ -56,8 +63,11 @@ export function CanvasNodeShell({
       data-node-id={node.id}
       data-selected={isSelected ? 'true' : 'false'}
       className={rootClass}
-      style={{ left: node.x, top: node.y, width: node.width, height: node.height }}
-      onPointerDown={onPointerDown}
+      style={{ left: geom.x, top: geom.y, width: geom.width, height: geom.height }}
+      onPointerDown={(e) => {
+        if ((e.target as HTMLElement).closest('[data-resize-handle]')) return;
+        onPointerDown(e);
+      }}
       onDoubleClick={onDoubleClick}
     >
       <div className="absolute -top-[calc(7rem-30px)] left-3 z-30 flex items-center gap-1.5 cursor-grab active:cursor-grabbing">

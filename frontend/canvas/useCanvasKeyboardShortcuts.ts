@@ -34,6 +34,7 @@ export type CanvasKeyboardShortcutDeps = {
   setShowShortcutsPanel: Dispatch<SetStateAction<boolean>>;
   setDraggingNodeId: Dispatch<SetStateAction<string | null>>;
   setResizingNodeId: Dispatch<SetStateAction<string | null>>;
+  setNodeResizePreview: Dispatch<SetStateAction<{ nodeId: string; x: number; y: number; width: number; height: number } | null>>;
   setIsResizing: Dispatch<SetStateAction<boolean>>;
   setIsSelecting: Dispatch<SetStateAction<boolean>>;
   setSelectionBox: Dispatch<SetStateAction<{ x: number; y: number; width: number; height: number } | null>>;
@@ -238,6 +239,7 @@ export function attachCanvasKeyboardShortcuts(
           d.resizePreviewRef.current = null;
           d.resizingNodeIdRef.current = null;
           d.setResizingNodeId(null);
+          d.setNodeResizePreview(null);
           d.setIsResizing(false);
           d.nodeResizeSessionRef.current = null;
         }

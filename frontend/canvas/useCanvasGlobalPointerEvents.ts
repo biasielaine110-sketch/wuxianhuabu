@@ -4,7 +4,6 @@ import type { DragPreview, ResizePreview } from './canvasEdgeGeometry';
 import { hideDraftEdgePath } from './canvasDraftEdgeDom';
 import {
   applyNodeDragPreview,
-  applyNodeGeometryPreview,
   clearNodeDragPreview,
   clearNodeGeometryPreview,
 } from './canvasNodeDragDom';
@@ -85,6 +84,7 @@ export type UseCanvasGlobalPointerEventsOptions = {
   setPendingEdgeSourceId: Dispatch<SetStateAction<string | null>>;
   setDraggingEdgeId: Dispatch<SetStateAction<string | null>>;
   setResizingNodeId: Dispatch<SetStateAction<string | null>>;
+  setNodeResizePreview: Dispatch<SetStateAction<ResizePreview | null>>;
   setResizeDirection: Dispatch<SetStateAction<string>>;
   setIsResizing: Dispatch<SetStateAction<boolean>>;
   setFsTransform: Dispatch<SetStateAction<{ x: number; y: number; scale: number }>>;
@@ -143,16 +143,42 @@ export function useCanvasGlobalPointerEvents(opts: UseCanvasGlobalPointerEventsO
     setPendingEdgeSourceId,
     setDraggingEdgeId,
     setResizingNodeId,
+    setNodeResizePreview,
     setResizeDirection,
     setIsResizing,
     setFsTransform,
   } = opts;
 
   useEffect(() => {
+    const commitNodeResizeSession = () => {
+      const preview = nodeResizePreviewRef.current;
+      if (preview) {
+        setNodes((prev) =>
+          prev.map((n) =>
+            n.id === preview.nodeId
+              ? { ...n, x: preview.x, y: preview.y, width: preview.width, height: preview.height }
+              : n,
+          ),
+        );
+        clearNodeGeometryPreview(canvasTransformLayerRef.current, preview.nodeId);
+        nodeResizePreviewRef.current = null;
+      }
+      clearEdgeGeometryPreviews(edgesSvgRef.current);
+      resizePreviewRef.current = null;
+      nodeResizeSessionRef.current = null;
+      setNodeResizePreview(null);
+      setResizingNodeId(null);
+      resizingNodeIdRef.current = null;
+      setResizeDirection('');
+      resizeDirectionRef.current = '';
+      setIsResizing(false);
+    };
+
     const handleGlobalPointerMove = (e: PointerEvent) => {
-    // 安全兜底：鼠标按键已释放但未收到 pointerup 时，强制清理拖拽状态
-    if (e.buttons === 0 && activePointerTypeRef.current) {
-      if (activePointerTypeRef.current === 'canvas') {
+    // 安全兜底：鼠标按键已释放但未收到 pointerup 时，强制清理拖拽/框选状态（缩放仅 pointerup 结束，避免误触）
+    if (e.buttons === 0 && activePointerTypeRef.current && activePointerTypeRef.current !== 'resize') {
+      const pt = activePointerTypeRef.current;
+      if (pt === 'canvas') {
         commitTransformFromRef();
       }
       if (draggingNodeIdRef.current) {
@@ -300,7 +326,7 @@ export function useCanvasGlobalPointerEvents(opts: UseCanvasGlobalPointerEventsO
         const preview = { nodeId: id, ...next };
         nodeResizePreviewRef.current = preview;
         resizePreviewRef.current = preview;
-        applyNodeGeometryPreview(canvasTransformLayerRef.current, id, next);
+        setNodeResizePreview(preview);
         applyEdgeResizePreview(
           edgesSvgRef.current,
           edgesRef.current,
@@ -367,26 +393,7 @@ export function useCanvasGlobalPointerEvents(opts: UseCanvasGlobalPointerEventsO
 
       // 清理缩放状态
       if (pointerType === 'resize') {
-        const preview = nodeResizePreviewRef.current;
-        if (preview) {
-          setNodes((prev) =>
-            prev.map((n) =>
-              n.id === preview.nodeId
-                ? { ...n, x: preview.x, y: preview.y, width: preview.width, height: preview.height }
-                : n,
-            ),
-          );
-          clearNodeGeometryPreview(canvasTransformLayerRef.current, preview.nodeId);
-          nodeResizePreviewRef.current = null;
-        }
-        clearEdgeGeometryPreviews(edgesSvgRef.current);
-        resizePreviewRef.current = null;
-        nodeResizeSessionRef.current = null;
-        setResizingNodeId(null);
-        resizingNodeIdRef.current = null;
-        setResizeDirection('');
-        resizeDirectionRef.current = '';
-        setIsResizing(false);
+        commitNodeResizeSession();
       }
 
       // 处理框选结束（使用 ref 避免闭包过期）

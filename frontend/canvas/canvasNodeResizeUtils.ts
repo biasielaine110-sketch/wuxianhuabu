@@ -27,7 +27,7 @@ export function computeNodeResizeFromPointer(
     newY = oy;
     newH = origin.height;
   } else if (direction === 'w') {
-    const edgeX = Math.max(0, px - (grabPx - ox));
+    const edgeX = px - (grabPx - ox);
     newW = Math.max(minWidth, right - edgeX);
     newX = right - newW;
     newY = oy;
@@ -39,7 +39,7 @@ export function computeNodeResizeFromPointer(
     newY = oy;
     newW = origin.width;
   } else if (direction === 'n') {
-    const edgeY = Math.max(0, py - (grabPy - oy));
+    const edgeY = py - (grabPy - oy);
     newH = Math.max(minHeight, bottom - edgeY);
     newY = bottom - newH;
     newX = ox;
@@ -71,7 +71,7 @@ export function computeNodeResizeFromPointer(
     }
   } else if (direction === 'sw') {
     newY = oy;
-    const cx = Math.max(0, px - (grabPx - ox));
+    const cx = px - (grabPx - ox);
     const cy = py - (grabPy - bottom);
     newW = Math.max(minWidth, right - cx);
     newX = right - newW;
@@ -79,13 +79,13 @@ export function computeNodeResizeFromPointer(
   } else if (direction === 'ne') {
     newX = ox;
     const cx = px - (grabPx - right);
-    const cy = Math.max(0, py - (grabPy - oy));
+    const cy = py - (grabPy - oy);
     newW = Math.max(minWidth, cx - ox);
     newH = Math.max(minHeight, bottom - cy);
     newY = bottom - newH;
   } else if (direction === 'nw') {
-    const cx = Math.max(0, px - (grabPx - ox));
-    const cy = Math.max(0, py - (grabPy - oy));
+    const cx = px - (grabPx - ox);
+    const cy = py - (grabPy - oy);
     newW = Math.max(minWidth, right - cx);
     newH = Math.max(minHeight, bottom - cy);
     newX = right - newW;

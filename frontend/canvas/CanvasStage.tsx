@@ -1,5 +1,5 @@
 import React, { memo, useLayoutEffect } from 'react';
-import type { MutableRefObject } from 'react';
+import type { MutableRefObject, RefObject } from 'react';
 import type { CanvasNode } from '../types';
 import { CanvasEdgesLayer } from './CanvasEdgesLayer';
 import { CanvasNodesLayer } from './CanvasNodesLayer';
@@ -7,6 +7,8 @@ import { computeEdgeBridges } from './edgeUtils';
 import { useCanvasViewportModel } from './useCanvasViewportModel';
 import { useCanvasStore } from '../stores/canvasStore';
 import type { CanvasNodeRenderState } from './canvasNodeRenderState';
+import type { DragPreview, ResizePreview } from './canvasEdgeGeometry';
+import { applyNodeDragPreview } from './canvasNodeDragDom';
 
 type CanvasStageProps = {
   canvasTransformLayerRef: React.RefObject<HTMLDivElement | null>;
@@ -24,6 +26,8 @@ type CanvasStageProps = {
   renderCanvasNodeStateRef: MutableRefObject<CanvasNodeRenderState>;
   /** App 侧每帧写入的非画布 store 状态（handlers、预设等） */
   renderStateOverlayRef: MutableRefObject<Partial<CanvasNodeRenderState>>;
+  dragPreviewRef: RefObject<DragPreview | null>;
+  nodeResizePreviewRef: RefObject<ResizePreview | null>;
   inputNodeTypes: readonly string[];
   renderNode: (node: CanvasNode) => React.ReactNode;
   onDeleteEdge: (id: string) => void;
@@ -41,6 +45,8 @@ function CanvasStageInner({
   viewportCullTick,
   renderCanvasNodeStateRef,
   renderStateOverlayRef,
+  dragPreviewRef,
+  nodeResizePreviewRef,
   inputNodeTypes,
   renderNode,
   onDeleteEdge,
@@ -58,6 +64,7 @@ function CanvasStageInner({
   const editingTextNodeIds = useCanvasStore((s) => s.editingTextNodeIds);
   const importTargetNodeId = useCanvasStore((s) => s.importTargetNodeId);
   const textNodeFontSize = useCanvasStore((s) => s.textNodeFontSize);
+  const nodeResizePreview = useCanvasStore((s) => s.nodeResizePreview);
 
   const edgeBridges = computeEdgeBridges(model.visibleEdges, model.nodeMap);
 
@@ -85,6 +92,16 @@ function CanvasStageInner({
     const tf = model.transform;
     el.style.transform = `translate(${tf.x}px, ${tf.y}px) scale(${tf.scale})`;
   }, [model.transform.x, model.transform.y, model.transform.scale, canvasTransformLayerRef]);
+
+  // 缩放预览由 store 驱动 React 渲染；此处仅恢复拖拽 transform 预览
+  useLayoutEffect(() => {
+    const layer = canvasTransformLayerRef.current;
+    if (!layer) return;
+    const dragPreview = dragPreviewRef.current;
+    if (dragPreview) {
+      applyNodeDragPreview(layer, dragPreview.nodeIds, dragPreview.deltaX, dragPreview.deltaY);
+    }
+  }, [nodeResizePreview, canvasTransformLayerRef, dragPreviewRef]);
 
   return (
     <div

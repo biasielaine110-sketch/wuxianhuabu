@@ -84,9 +84,9 @@ import { CanvasEyedropperOverlay } from './canvas/CanvasEyedropperOverlay';
 import { applyCanvasTransformDom, patchCanvasViewportRef } from './canvas/canvasTransformDom';
 import {
   applyNodeDragPreview,
-  applyNodeGeometryPreview,
   clearNodeDragPreview,
   clearNodeGeometryPreview,
+  readNodeGeometryFromDom,
 } from './canvas/canvasNodeDragDom';
 import { clearEdgeGeometryPreviews } from './canvas/canvasEdgeDragDom';
 import { buildSpacedImageNodes, buildSpacedImageNodesFromLists, buildStackedImageNodes, SPAWNED_IMAGE_NODE_HEIGHT, SPAWNED_IMAGE_NODE_WIDTH } from './canvas/spawnImageNodes';
@@ -160,6 +160,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
   const setSelectedIds = useCanvasStore((s) => s.setSelectedIds);
   const setDraggingNodeId = useCanvasStore((s) => s.setDraggingNodeId);
   const setResizingNodeId = useCanvasStore((s) => s.setResizingNodeId);
+  const setNodeResizePreview = useCanvasStore((s) => s.setNodeResizePreview);
   const setEyedropperTargetNodeId = useCanvasStore((s) => s.setEyedropperTargetNodeId);
   const setEditingTextNodeIds = useCanvasStore((s) => s.setEditingTextNodeIds);
   const setImportTargetNodeId = useCanvasStore((s) => s.setImportTargetNodeId);
@@ -637,31 +638,68 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
   const beginNodeResize = useCallback((e: React.PointerEvent, nodeId: string, direction: string) => {
     e.stopPropagation();
     e.preventDefault();
-    // 取消节点拖拽遗留的 RAF，避免下一帧仍 apply 位移导致 origin 快照与屏幕不一致（缩放开始就「跳一下」）
     if (rafIdRef.current) {
       cancelAnimationFrame(rafIdRef.current);
       rafIdRef.current = null;
     }
-    nodeDragAccumRef.current = null;
 
-    const node = nodesRef.current.find((n) => n.id === nodeId);
-    if (!node) return;
+    const nodeBefore = nodesRef.current.find((n) => n.id === nodeId);
+    if (!nodeBefore) return;
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
     const tf = transformRef.current;
     const scale = Math.max(tf.scale, 0.1);
+
+    // 先从屏幕读取真实位置（含未提交的拖拽 transform），再提交拖拽，避免 origin 落到 state 旧坐标 (0,0)
+    const originGeom = readNodeGeometryFromDom(
+      canvasTransformLayerRef.current,
+      nodeId,
+      {
+        x: nodeBefore.x,
+        y: nodeBefore.y,
+        width: nodeBefore.width,
+        height: nodeBefore.height,
+      },
+      rect,
+      tf,
+    );
+
+    const dragAcc = nodeDragAccumRef.current;
+    if (dragAcc && (dragAcc.deltaX !== 0 || dragAcc.deltaY !== 0)) {
+      const { nodeIds, deltaX, deltaY } = dragAcc;
+      setNodes((prev) =>
+        prev.map((n) =>
+          nodeIds.includes(n.id) ? { ...n, x: n.x + deltaX, y: n.y + deltaY } : n,
+        ),
+      );
+    }
+    if (dragAcc) {
+      clearNodeDragPreview(canvasTransformLayerRef.current, dragAcc.nodeIds);
+    }
+    clearEdgeGeometryPreviews(edgesSvgRef.current);
+    nodeDragAccumRef.current = null;
+    dragPreviewRef.current = null;
+    setDraggingNodeId(null);
+    draggingNodeIdRef.current = null;
+
     const grabCanvasX = (e.clientX - rect.left - tf.x) / scale;
     const grabCanvasY = (e.clientY - rect.top - tf.y) / scale;
-    const minSize = MIN_NODE_SIZES[node.type] || { width: 200, height: 150 };
+    const minSize = MIN_NODE_SIZES[nodeBefore.type] || { width: 200, height: 150 };
     nodeResizeSessionRef.current = {
       nodeId,
       direction,
-      origin: { x: node.x, y: node.y, width: node.width, height: node.height },
+      origin: originGeom,
       grabCanvasX,
       grabCanvasY,
       minWidth: minSize.width,
       minHeight: minSize.height,
     };
+
+    const initialPreview = { nodeId, ...originGeom };
+    nodeResizePreviewRef.current = initialPreview;
+    resizePreviewRef.current = initialPreview;
+    setNodeResizePreview(initialPreview);
+
     activePointerTypeRef.current = 'resize';
     resizingNodeIdRef.current = nodeId;
     resizeDirectionRef.current = direction;
@@ -669,7 +707,13 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     setResizeDirection(direction);
     setIsResizing(true);
     lastMousePosRef.current = { x: e.clientX, y: e.clientY };
-  }, []);
+
+    try {
+      containerRef.current?.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+  }, [setDraggingNodeId, setNodeResizePreview, setNodes, setResizingNodeId]);
 
   // 兼容旧数据：防止历史项目中的宫格节点过小导致内容显示不全
   useEffect(() => {
@@ -922,7 +966,9 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     );
   }, []);
 
-  const activePointerTypeRef = useRef<'canvas' | 'node' | 'edge' | 'fullscreen' | null>(null);
+  const activePointerTypeRef = useRef<
+    'canvas' | 'node' | 'edge' | 'fullscreen' | 'resize' | 'boxSelect' | 'selection' | 'selectStart' | null
+  >(null);
   const draggingNodeIdRef = useRef<string | null>(null);
   const lastMousePosRef = useRef({ x: 0, y: 0 });
   const lastFsMousePosRef = useRef({ x: 0, y: 0 });
@@ -1257,6 +1303,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     setSelectionBox,
     setDraggingNodeId,
     setResizingNodeId,
+    setNodeResizePreview,
     setResizeDirection,
     setIsResizing,
     setNodes,
@@ -1377,6 +1424,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     setPendingEdgeSourceId,
     setDraggingEdgeId,
     setResizingNodeId,
+    setNodeResizePreview,
     setResizeDirection,
     setIsResizing,
     setFsTransform,
@@ -1548,6 +1596,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     setShowShortcutsPanel,
     setDraggingNodeId,
     setResizingNodeId,
+    setNodeResizePreview,
     setIsResizing,
     setIsSelecting,
     setSelectionBox,
@@ -1857,6 +1906,8 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
           viewportCullTick={viewportCullTick}
           renderCanvasNodeStateRef={renderCanvasNodeStateRef}
           renderStateOverlayRef={renderStateOverlayRef}
+          dragPreviewRef={dragPreviewRef}
+          nodeResizePreviewRef={nodeResizePreviewRef}
           inputNodeTypes={INPUT_NODE_TYPES}
           renderNode={stableRenderNode}
           onDeleteEdge={handleDeleteEdge}

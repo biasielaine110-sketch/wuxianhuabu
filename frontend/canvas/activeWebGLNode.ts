@@ -56,9 +56,12 @@ export function shouldUseNodePlaceholder(
     isInViewport: boolean;
     isDragging: boolean;
     isSelected: boolean;
+    isResizing: boolean;
     activeWebGLNodeId: string | null;
   },
 ): boolean {
+  /** 缩放过程中禁止占位/实卡切换，避免 remount 丢几何 */
+  if (opts.isResizing) return false;
   /** 离屏生成中节点用轻量占位，避免挂载 Chat/Annotation 等重型 DOM */
   if (node.isGenerating && !opts.isInViewport && !opts.isDragging && !opts.isSelected) {
     return true;

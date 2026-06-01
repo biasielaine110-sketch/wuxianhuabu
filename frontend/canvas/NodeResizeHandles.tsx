@@ -7,7 +7,11 @@ type NodeResizeHandlesProps = {
 
 /** 节点八向缩放手柄（选中时显示） */
 export function NodeResizeHandles({ nodeId, onBeginResize }: NodeResizeHandlesProps) {
-  const handle = (direction: string) => (e: React.PointerEvent) => onBeginResize(e, nodeId, direction);
+  const handle = (direction: string) => (e: React.PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    onBeginResize(e, nodeId, direction);
+  };
 
   return (
     <>
