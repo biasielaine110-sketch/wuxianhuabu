@@ -1,5 +1,7 @@
 import React from 'react';
 import { base64ToImageDataUrl } from './auditImageUtils';
+import { MAX_AUDIT_INPAINT_REFERENCES } from './auditInpaintRefs';
+import { EyedropperIcon } from './canvasIcons';
 import {
   defaultCanvasImageModel,
   isGptImage2CanvasModelId,
@@ -27,11 +29,35 @@ export interface AuditInpaintPanelProps {
   onGenerate?: () => void;
   onCancelGenerate?: () => void;
   regionConfirmed?: boolean;
+  referenceImages?: { id: string; base64: string }[];
+  refPickActive?: boolean;
+  onToggleRefPick?: () => void;
+  onRemoveReference?: (imageId: string) => void;
+  contentPanelExpanded?: boolean;
+  onToggleContentPanel?: () => void;
 }
 
 /** 画布坐标系下未 scale 前的面板宽度；与 AuditModeCanvas 中 scale 相乘后约 280px */
 export const AUDIT_INPAINT_PANEL_BASE_WIDTH = Math.round(280 / 3);
 export const AUDIT_INPAINT_PANEL_CANVAS_SCALE = 3;
+/** 面板外壳宽度（标题栏、参考图栏等与内容区等宽时的设计宽度） */
+export const AUDIT_INPAINT_PANEL_SHELL_WIDTH = AUDIT_INPAINT_PANEL_BASE_WIDTH * 7;
+/** 描述词 + 模型区相对设计尺寸的缩放（整体 70%） */
+export const AUDIT_INPAINT_PANEL_CONTENT_SCALE = 0.7;
+/** 描述词 + 模型区固定宽高比（宽:高 = 5:2） */
+export const AUDIT_INPAINT_PANEL_CONTENT_ASPECT_W = 5;
+export const AUDIT_INPAINT_PANEL_CONTENT_ASPECT_H = 2;
+/** 画布 scale(3) 后约 978×390px */
+export const AUDIT_INPAINT_PANEL_CONTENT_WIDTH = Math.round(
+  AUDIT_INPAINT_PANEL_BASE_WIDTH *
+    AUDIT_INPAINT_PANEL_CONTENT_ASPECT_W *
+    AUDIT_INPAINT_PANEL_CONTENT_SCALE
+);
+export const AUDIT_INPAINT_PANEL_CONTENT_HEIGHT = Math.round(
+  AUDIT_INPAINT_PANEL_BASE_WIDTH *
+    AUDIT_INPAINT_PANEL_CONTENT_ASPECT_H *
+    AUDIT_INPAINT_PANEL_CONTENT_SCALE
+);
 
 /** 看图模式局部重绘：紧贴选区旁的内联控件（外层 scale 放大） */
 export function AuditInpaintPanel({
@@ -55,52 +81,115 @@ export function AuditInpaintPanel({
   onGenerate,
   onCancelGenerate,
   regionConfirmed,
+  referenceImages = [],
+  refPickActive = false,
+  onToggleRefPick,
+  onRemoveReference,
+  contentPanelExpanded = true,
+  onToggleContentPanel,
 }: AuditInpaintPanelProps) {
   const showQuality = isGptImage2CanvasModelId(model) || isManxueGptImage2Model(model);
   const canGenerate = !!regionConfirmed && !needsReconfirm && !!prompt.trim();
+
+  const panelHeaderActions = (
+    <div className="flex items-center gap-2 min-w-0 shrink-0">
+      {contentPanelExpanded && cropWidth && cropHeight ? (
+        <span className="text-[10px] text-gray-500 shrink-0">{cropWidth}×{cropHeight}px</span>
+      ) : null}
+      {isGenerating ? (
+        <button
+          type="button"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={onCancelGenerate}
+          className="py-1 px-2.5 rounded text-[11px] font-medium bg-red-900/80 hover:bg-red-800 text-red-100 border border-red-700/50 shrink-0"
+        >
+          取消
+        </button>
+      ) : (
+        <button
+          type="button"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={onGenerate}
+          disabled={!canGenerate}
+          className={`py-1 px-2.5 rounded text-[11px] font-medium shrink-0 transition-all disabled:cursor-not-allowed ${
+            canGenerate
+              ? 'bg-cyan-700 hover:bg-cyan-600 text-white shadow-[0_0_10px_rgba(34,211,238,0.3)]'
+              : 'bg-[#2a2a2a] text-gray-600 opacity-45'
+          }`}
+          title={canGenerate ? '根据描述与选区重绘' : needsReconfirm ? '请先确认选区' : '请先填写描述'}
+        >
+          重绘
+        </button>
+      )}
+    </div>
+  );
+
+  if (!contentPanelExpanded) {
+    return (
+      <div
+        className="pointer-events-auto bg-[#1a1a1a]/95 border border-purple-500/40 rounded-xl shadow-2xl overflow-hidden flex flex-col w-full min-w-0"
+        style={{
+          width: AUDIT_INPAINT_PANEL_SHELL_WIDTH,
+          minWidth: AUDIT_INPAINT_PANEL_SHELL_WIDTH,
+          maxWidth: AUDIT_INPAINT_PANEL_SHELL_WIDTH,
+        }}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <div className="px-3 py-2 bg-[#222] flex items-center justify-between gap-2 min-h-0">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-[11px] text-purple-300 font-medium shrink-0">局部重绘</span>
+            {onToggleContentPanel && (
+              <button
+                type="button"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={onToggleContentPanel}
+                className="shrink-0 py-0.5 px-1.5 rounded text-[10px] text-cyan-400 hover:text-cyan-200 hover:bg-[#333] border border-cyan-700/40"
+                title="展开局部重绘面板"
+              >
+                展开
+              </button>
+            )}
+            {isGenerating && (
+              <span className="text-[10px] text-purple-300 animate-pulse truncate">生成中…</span>
+            )}
+            {!isGenerating && error ? (
+              <span className="text-[10px] text-red-300 truncate max-w-[120px]" title={error}>
+                {error}
+              </span>
+            ) : null}
+          </div>
+          {panelHeaderActions}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
       className="pointer-events-auto bg-[#1a1a1a]/95 border border-purple-500/40 rounded-xl shadow-2xl overflow-hidden flex flex-col w-full min-w-0"
       style={{
-        width: AUDIT_INPAINT_PANEL_BASE_WIDTH,
-        minWidth: AUDIT_INPAINT_PANEL_BASE_WIDTH,
-        maxWidth: AUDIT_INPAINT_PANEL_BASE_WIDTH,
+        width: AUDIT_INPAINT_PANEL_SHELL_WIDTH,
+        minWidth: AUDIT_INPAINT_PANEL_SHELL_WIDTH,
+        maxWidth: AUDIT_INPAINT_PANEL_SHELL_WIDTH,
       }}
       onPointerDown={(e) => e.stopPropagation()}
     >
       <div className="px-3 py-2 border-b border-[#333] bg-[#222] flex items-center justify-between gap-2">
-        <span className="text-[11px] text-purple-300 font-medium shrink-0">局部重绘</span>
-        <div className="flex items-center gap-2 min-w-0">
-          {cropWidth && cropHeight ? (
-            <span className="text-[10px] text-gray-500 shrink-0">{cropWidth}×{cropHeight}px</span>
-          ) : null}
-          {isGenerating ? (
+        <div className="flex items-center gap-1.5 min-w-0 shrink">
+          <span className="text-[11px] text-purple-300 font-medium shrink-0">局部重绘</span>
+          {onToggleContentPanel && (
             <button
               type="button"
               onPointerDown={(e) => e.stopPropagation()}
-              onClick={onCancelGenerate}
-              className="py-1 px-2.5 rounded text-[11px] font-medium bg-red-900/80 hover:bg-red-800 text-red-100 border border-red-700/50 shrink-0"
+              onClick={onToggleContentPanel}
+              className="shrink-0 py-0.5 px-1.5 rounded text-[10px] text-gray-400 hover:text-gray-200 hover:bg-[#333] border border-[#444]/80"
+              title="收起局部重绘面板"
             >
-              取消重绘
-            </button>
-          ) : (
-            <button
-              type="button"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={onGenerate}
-              disabled={!canGenerate}
-              className={`py-1 px-2.5 rounded text-[11px] font-medium shrink-0 transition-all disabled:cursor-not-allowed ${
-                canGenerate
-                  ? 'bg-cyan-700 hover:bg-cyan-600 text-white shadow-[0_0_10px_rgba(34,211,238,0.3)]'
-                  : 'bg-[#2a2a2a] text-gray-600 opacity-45'
-              }`}
-              title={canGenerate ? '根据描述与选区重绘' : needsReconfirm ? '请先确认选区' : '请先填写描述'}
-            >
-              重绘
+              收起
             </button>
           )}
         </div>
+        {panelHeaderActions}
       </div>
 
       {needsReconfirm ? (
@@ -121,9 +210,92 @@ export function AuditInpaintPanel({
         </div>
       ) : null}
 
-      <div className="p-3 flex flex-col gap-2">
+      <div className="px-3 pt-2 pb-1 border-b border-[#2a2a2a] flex flex-col gap-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[10px] text-gray-500 shrink-0">参考图</span>
+          <span className="text-[10px] text-green-400 font-medium">
+            {referenceImages.length}/{MAX_AUDIT_INPAINT_REFERENCES}
+          </span>
+          {onToggleRefPick && (
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={onToggleRefPick}
+              disabled={isGenerating}
+              className={`ml-auto flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] text-white shrink-0 ${
+                refPickActive ? 'bg-cyan-600' : 'bg-cyan-700 hover:bg-cyan-600'
+              } disabled:opacity-40`}
+              title={
+                refPickActive
+                  ? '点击画布上的其他图片添加参考（Esc 退出）'
+                  : '吸取画布上的图片作为参考'
+              }
+            >
+              <EyedropperIcon size={10} />
+              吸管
+            </button>
+          )}
+        </div>
+        {refPickActive ? (
+          <p className="text-[10px] text-cyan-300/90 leading-snug">
+            吸管已开启：点击看图画布上的图片添加为参考，可连续拾取多张。
+          </p>
+        ) : null}
+        {referenceImages.length > 0 ? (
+          <div className="flex flex-wrap gap-1 pb-1">
+            {referenceImages.map((ref, idx) => (
+              <div key={ref.id} className="relative group">
+                <img
+                  src={base64ToImageDataUrl(ref.base64)}
+                  alt={`参考${idx + 1}`}
+                  className="w-9 h-9 object-cover rounded border border-[#444] bg-[#111]"
+                  draggable={false}
+                />
+                <span className="absolute bottom-0 left-0 right-0 text-center text-[8px] bg-black/60 text-gray-300 rounded-b">
+                  R{idx + 1}
+                </span>
+                {onRemoveReference && !isGenerating ? (
+                  <button
+                    type="button"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={() => onRemoveReference(ref.id)}
+                    className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-600 hover:bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="移除参考"
+                  >
+                    <svg viewBox="0 0 10 10" className="w-2.5 h-2.5">
+                      <path
+                        d="M1 1L9 9M9 1L1 9"
+                        stroke="white"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[10px] text-gray-600 leading-snug pb-1">
+            可选：用吸管拾取其他图片作为风格/人物参考（即梦模型仅使用选区图）。
+          </p>
+        )}
+      </div>
+
+      <div
+        className="mx-auto p-3 flex flex-row gap-2 min-h-0 overflow-hidden box-border items-stretch"
+        style={{
+          width: AUDIT_INPAINT_PANEL_CONTENT_WIDTH,
+          height: AUDIT_INPAINT_PANEL_CONTENT_HEIGHT,
+          minWidth: AUDIT_INPAINT_PANEL_CONTENT_WIDTH,
+          maxWidth: AUDIT_INPAINT_PANEL_CONTENT_WIDTH,
+          minHeight: AUDIT_INPAINT_PANEL_CONTENT_HEIGHT,
+          maxHeight: AUDIT_INPAINT_PANEL_CONTENT_HEIGHT,
+          aspectRatio: '5 / 2',
+        }}
+      >
         <textarea
-          className="w-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] focus:outline-none focus:border-purple-500 transition-colors resize-none leading-relaxed text-[13px] min-h-[100px] cursor-text"
+          className="flex-1 min-h-0 min-w-0 bg-[#222222] text-gray-200 p-2 rounded-lg border border-[#444] focus:outline-none focus:border-purple-500 transition-colors resize-none leading-relaxed text-[13px] cursor-text overflow-y-auto"
           placeholder="输入重绘描述，例如：将此处改为…（双击放大编辑）"
           value={prompt}
           onChange={(e) => onPromptChange(e.target.value)}
@@ -136,9 +308,9 @@ export function AuditInpaintPanel({
           }}
         />
 
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="shrink-0 flex flex-col justify-center gap-1 w-[108px] min-w-[108px]">
           <select
-            className="nodemodel-select bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-[11px] text-gray-200 outline-none focus:border-purple-500 flex-1 min-w-[120px]"
+            className="nodemodel-select bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-[11px] text-gray-200 outline-none focus:border-purple-500 w-full min-w-0"
             value={model}
             onChange={(e) => {
               const m = e.target.value;
@@ -175,7 +347,7 @@ export function AuditInpaintPanel({
           </select>
 
           <select
-            className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-[11px] text-gray-200 outline-none focus:border-purple-500"
+            className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-[11px] text-gray-200 outline-none focus:border-purple-500 w-full"
             value={aspectRatio}
             onChange={(e) => onAspectRatioChange(e.target.value)}
             disabled={isGenerating}
@@ -190,7 +362,7 @@ export function AuditInpaintPanel({
           </select>
 
           <select
-            className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-[11px] text-gray-200 outline-none focus:border-purple-500"
+            className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-[11px] text-gray-200 outline-none focus:border-purple-500 w-full"
             value={resolution}
             onChange={(e) => onResolutionChange(e.target.value)}
             disabled={isGenerating}
@@ -202,7 +374,7 @@ export function AuditInpaintPanel({
 
           {showQuality && (
             <select
-              className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-[11px] text-gray-200 outline-none focus:border-purple-500"
+              className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-[11px] text-gray-200 outline-none focus:border-purple-500 w-full"
               value={quality}
               onChange={(e) => onQualityChange(e.target.value)}
               disabled={isGenerating}
@@ -214,17 +386,17 @@ export function AuditInpaintPanel({
             </select>
           )}
         </div>
-
-        {error && (
-          <div className="text-[11px] text-red-300 bg-red-950/40 border border-red-800/50 rounded px-2 py-1.5 whitespace-pre-wrap">
-            {error}
-          </div>
-        )}
-
-        {isGenerating && (
-          <div className="text-[11px] text-purple-300 animate-pulse">正在重绘，请稍候…</div>
-        )}
       </div>
+
+      {error && (
+        <div className="mx-3 mb-2 shrink-0 max-h-12 overflow-y-auto text-[11px] text-red-300 bg-red-950/40 border border-red-800/50 rounded px-2 py-1 whitespace-pre-wrap">
+          {error}
+        </div>
+      )}
+
+      {isGenerating && (
+        <div className="mx-3 mb-2 shrink-0 text-[11px] text-purple-300 animate-pulse">正在重绘，请稍候…</div>
+      )}
     </div>
   );
 }

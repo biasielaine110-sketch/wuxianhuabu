@@ -25,8 +25,8 @@ const COLOR_PRESETS = [
 const LINE_WIDTH_PRESETS = [1, 2, 3, 4, 6, 8, 12, 16, 24];
 
 const TOOLS: { id: AuditAnnotationTool; label: string; title: string }[] = [
-  { id: 'select', label: '↖', title: '选择标注 / 框选图片' },
-  { id: 'inpaint', label: '✦', title: '局部重绘（框选区域）' },
+  { id: 'select', label: '↖', title: '选择标注 / 框选图片（Q）' },
+  { id: 'inpaint', label: '✦', title: '局部重绘，框选区域（W）' },
   { id: 'rect', label: '□', title: '矩形框' },
   { id: 'fillRect', label: '▣', title: '填充矩形' },
   { id: 'circle', label: '○', title: '椭圆框' },

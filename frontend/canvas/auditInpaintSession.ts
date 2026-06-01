@@ -20,6 +20,10 @@ export type AuditInpaintSession = {
   isGenerating: boolean;
   error: string | null;
   panelVisible: boolean;
+  /** 吸管拾取的参考图（看图画布上的 AuditImage.id） */
+  referenceImageIds: string[];
+  /** 描述输入 + 模型调用区域是否展开 */
+  contentPanelExpanded: boolean;
 };
 
 export function createInpaintSessionId(): string {
@@ -42,6 +46,8 @@ export function createInpaintSession(sourceImageId = ''): AuditInpaintSession {
     isGenerating: false,
     error: null,
     panelVisible: false,
+    referenceImageIds: [],
+    contentPanelExpanded: true,
   };
 }
 

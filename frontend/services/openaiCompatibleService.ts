@@ -105,7 +105,7 @@ function openAiCompatFailureHint(status: number, kind: 'generations-json' | 'ima
       : '（404：请检查 Base URL 与路径；开发环境需 Vite 代理 /yunzhi-openai。）';
   }
   if (status === 502 || status === 504) {
-    return '（502/504：多为上游 API 暂时失败、超时，或生图成功但图片回传失败；codesonline 已自动改用 URL 回传，若仍失败请稍后重试、检查密钥，图生图可缩小参考图。）';
+    return '（502/504：多为上游 API 暂时失败、超时，或生图成功但图片回传失败；codesonline 已自动改用 URL 回传，若仍失败请稍后重试、检查密钥，图生图可缩小参考图。若出现 ROUTER_EXTERNAL_TARGET_ERROR，请重新部署以启用图像 API 函数代理。）';
   }
   if (status === 503) {
     return kind === 'generations-json'
@@ -2548,7 +2548,13 @@ const MANXUE_EDIT_IMAGE_MAX_BYTES = 4 * 1024 * 1024;
 
 function isCodesonlineOpenAiCompatBase(baseNormalized: string): boolean {
   try {
-    return new URL(baseNormalized).hostname.toLowerCase() === 'image.codesonline.dev';
+    const u = new URL(baseNormalized);
+    if (u.hostname.toLowerCase() === 'image.codesonline.dev') return true;
+    const path = u.pathname.replace(/\/+$/, '') || '/';
+    return (
+      path.startsWith('/codesonline-image-api') ||
+      path.startsWith('/api/codesonline-image-proxy')
+    );
   } catch {
     return false;
   }
@@ -3086,12 +3092,31 @@ async function editImagesAtOpenAiCompatibleBase(
     }
 
     let format = preferredImageResponseFormat(baseNorm);
+    const isRetryableGateway = (msg: string) =>
+      /\((502|504)\)/.test(msg) ||
+      /ROUTER_EXTERNAL_TARGET_ERROR/i.test(msg) ||
+      /codesonline_image_upstream_unreachable/i.test(msg);
+
+    const runEditWithFallback = async (): Promise<string> => {
+      try {
+        return await submitEditOnce(format);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (format === 'b64_json' && isImageDeliveryFailedError(msg)) {
+          return submitEditOnce('url');
+        }
+        throw err;
+      }
+    };
+
     try {
-      results.push(await submitEditOnce(format));
+      results.push(await runEditWithFallback());
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (format === 'b64_json' && isImageDeliveryFailedError(msg)) {
-        results.push(await submitEditOnce('url'));
+      if (isRetryableGateway(msg)) {
+        await new Promise((r) => setTimeout(r, 1800));
+        assertNotAborted(signal);
+        results.push(await runEditWithFallback());
       } else {
         throw err;
       }

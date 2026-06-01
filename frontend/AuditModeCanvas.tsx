@@ -25,8 +25,8 @@ import {
 } from './canvas/auditAnnotationEdit';
 import {
   AuditInpaintPanel,
-  AUDIT_INPAINT_PANEL_BASE_WIDTH,
   AUDIT_INPAINT_PANEL_CANVAS_SCALE,
+  AUDIT_INPAINT_PANEL_SHELL_WIDTH,
 } from './canvas/AuditInpaintPanel';
 import {
   cropAuditImageRegion,
@@ -45,6 +45,11 @@ import {
   type InpaintHandleId,
 } from './canvas/auditInpaintRegion';
 import { runAuditInpaintGeneration } from './canvas/auditInpaintGenerate';
+import {
+  buildAuditInpaintGenerationImages,
+  MAX_AUDIT_INPAINT_REFERENCES,
+  resolveAuditInpaintReferencePreviews,
+} from './canvas/auditInpaintRefs';
 import {
   createInpaintSession,
   type AuditInpaintSession,
@@ -170,6 +175,11 @@ export default function AuditModeCanvas({
   // 局部重绘（支持同图多区域并行）
   const [inpaintSessions, setInpaintSessions] = useState<AuditInpaintSession[]>([]);
   const [activeInpaintSessionId, setActiveInpaintSessionId] = useState<string | null>(null);
+  const [inpaintRefPickSessionId, setInpaintRefPickSessionId] = useState<string | null>(null);
+  const inpaintRefPickSessionIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    inpaintRefPickSessionIdRef.current = inpaintRefPickSessionId;
+  }, [inpaintRefPickSessionId]);
   const inpaintSessionsRef = useRef(inpaintSessions);
   useEffect(() => {
     inpaintSessionsRef.current = inpaintSessions;
@@ -559,6 +569,27 @@ export default function AuditModeCanvas({
         return;
       }
 
+      if (e.code === 'Escape' && inpaintRefPickSessionIdRef.current) {
+        setInpaintRefPickSessionId(null);
+        e.preventDefault();
+        return;
+      }
+
+      // Q / W：选择 / 局部重绘
+      if (!isInput && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (e.code === 'KeyQ') {
+          e.preventDefault();
+          setCurrentTool('select');
+          setInpaintRefPickSessionId(null);
+          return;
+        }
+        if (e.code === 'KeyW') {
+          e.preventDefault();
+          setCurrentTool('inpaint');
+          return;
+        }
+      }
+
       // Alt+Q / Backspace / Delete：删除选中图片
       if (
         (e.altKey && e.code === 'KeyQ') ||
@@ -726,6 +757,11 @@ export default function AuditModeCanvas({
   // 选中图片（支持 Ctrl 加选、Alt 减选）
   const handleImagePointerDown = (e: React.PointerEvent, imgId: string) => {
     e.stopPropagation();
+    const refPickSessionId = inpaintRefPickSessionIdRef.current;
+    if (refPickSessionId) {
+      addInpaintReference(refPickSessionId, imgId);
+      return;
+    }
     if (currentTool !== 'select') return;
     setSelectedAnnotationIds([]);
 
@@ -957,9 +993,54 @@ export default function AuditModeCanvas({
       isInpaintSelectingRef.current = false;
       inpaintSelectingSessionIdRef.current = null;
     }
+    setInpaintRefPickSessionId((prev) => (prev === sessionId ? null : prev));
     setInpaintSessions((prev) => prev.filter((s) => s.id !== sessionId));
     setActiveInpaintSessionId((prev) => (prev === sessionId ? null : prev));
   }, []);
+
+  const toggleInpaintRefPick = useCallback((sessionId: string) => {
+    setInpaintRefPickSessionId((prev) => (prev === sessionId ? null : sessionId));
+  }, []);
+
+  const addInpaintReference = useCallback(
+    (sessionId: string, imageId: string) => {
+      const session = inpaintSessionsRef.current.find((s) => s.id === sessionId);
+      if (!session) return;
+      if (session.referenceImageIds.includes(imageId)) return;
+      if (session.referenceImageIds.length >= MAX_AUDIT_INPAINT_REFERENCES) {
+        window.alert(`最多添加 ${MAX_AUDIT_INPAINT_REFERENCES} 张参考图`);
+        return;
+      }
+      patchInpaintSession(sessionId, {
+        referenceImageIds: [...session.referenceImageIds, imageId],
+      });
+    },
+    [patchInpaintSession]
+  );
+
+  const removeInpaintReference = useCallback(
+    (sessionId: string, imageId: string) => {
+      const session = inpaintSessionsRef.current.find((s) => s.id === sessionId);
+      if (!session) return;
+      patchInpaintSession(sessionId, {
+        referenceImageIds: session.referenceImageIds.filter((id) => id !== imageId),
+      });
+    },
+    [patchInpaintSession]
+  );
+
+  const toggleInpaintContentPanel = useCallback(
+    (sessionId: string) => {
+      const session = inpaintSessionsRef.current.find((s) => s.id === sessionId);
+      if (!session) return;
+      const nextExpanded = !(session.contentPanelExpanded ?? true);
+      patchInpaintSession(sessionId, { contentPanelExpanded: nextExpanded });
+      if (!nextExpanded) {
+        setInpaintRefPickSessionId((prev) => (prev === sessionId ? null : prev));
+      }
+    },
+    [patchInpaintSession]
+  );
 
   const reopenInpaintRegionAdjust = useCallback((sessionId: string) => {
     patchInpaintSession(sessionId, {
@@ -1066,6 +1147,12 @@ export default function AuditModeCanvas({
     patchInpaintSession(sessionId, { isGenerating: true, error: null });
 
     const { crop, prompt, model, aspectRatio, resolution, quality } = session;
+    const generationImages = buildAuditInpaintGenerationImages(
+      crop.base64,
+      auditImagesRef.current,
+      session.referenceImageIds ?? []
+    );
+    const extraReferenceBase64 = generationImages.slice(1);
     try {
       const results = await runAuditInpaintGeneration({
         cropBase64: crop.base64,
@@ -1076,6 +1163,7 @@ export default function AuditModeCanvas({
         quality,
         cropWidth: crop.width,
         cropHeight: crop.height,
+        extraReferenceBase64,
         signal: ac.signal,
       });
       const resultBase64 = results[0]?.replace(/^data:[^;]+;base64,/, '');
@@ -1126,6 +1214,7 @@ export default function AuditModeCanvas({
     // 局部重绘：调整已有选区，或在空白处新建选区
     if (currentTool === 'inpaint') {
       e.stopPropagation();
+      if (inpaintRefPickSessionIdRef.current) return;
       const pos = getCanvasCoords(e.clientX, e.clientY);
       const handleRadius = 10 / transform.scale;
 
@@ -1801,11 +1890,22 @@ export default function AuditModeCanvas({
         }}
       >
         {/* 叠放顺序与 auditImages 数组一致；已置顶图片始终在未置顶之上 */}
-        {auditImages.map((img) => (
+        {auditImages.map((img) => {
+          const refPickSession = inpaintRefPickSessionId
+            ? inpaintSessions.find((s) => s.id === inpaintRefPickSessionId)
+            : null;
+          const isInpaintRef =
+            !!refPickSession?.referenceImageIds.includes(img.id);
+          const refPickActive = !!inpaintRefPickSessionId;
+          return (
           <div
             key={img.id}
             className={`absolute ${
-              currentTool === 'select' ? 'pointer-events-auto' : 'pointer-events-none'
+              currentTool === 'select' || refPickActive ? 'pointer-events-auto' : 'pointer-events-none'
+            } ${
+              refPickActive
+                ? `cursor-crosshair ${isInpaintRef ? 'ring-2 ring-green-400/80' : 'ring-2 ring-cyan-400/50'}`
+                : ''
             } ${
               selectedImageIds.includes(img.id)
                 ? 'outline outline-4 outline-amber-300 outline-offset-2 shadow-[0_0_0_6px_rgba(251,191,36,0.35)] ring-2 ring-amber-400/60'
@@ -1877,7 +1977,8 @@ export default function AuditModeCanvas({
               />
             )}
           </div>
-        ))}
+        );
+        })}
 
         {inpaintSessions.map((session) => {
           const rect = session.region ?? session.regionBox;
@@ -1942,9 +2043,9 @@ export default function AuditModeCanvas({
               style={{
                 left,
                 top: bottom + gap,
-                width: AUDIT_INPAINT_PANEL_BASE_WIDTH,
-                minWidth: AUDIT_INPAINT_PANEL_BASE_WIDTH,
-                maxWidth: AUDIT_INPAINT_PANEL_BASE_WIDTH,
+                width: AUDIT_INPAINT_PANEL_SHELL_WIDTH,
+                minWidth: AUDIT_INPAINT_PANEL_SHELL_WIDTH,
+                maxWidth: AUDIT_INPAINT_PANEL_SHELL_WIDTH,
                 transform: `scale(${AUDIT_INPAINT_PANEL_CANVAS_SCALE})`,
                 transformOrigin: 'top left',
                 zIndex: 57 + sessionIndex,
@@ -1971,11 +2072,26 @@ export default function AuditModeCanvas({
                 needsReconfirm={!session.regionConfirmed}
                 isGenerating={session.isGenerating}
                 error={session.error}
+                referenceImages={resolveAuditInpaintReferencePreviews(
+                  auditImages,
+                  session.referenceImageIds
+                )}
+                refPickActive={inpaintRefPickSessionId === session.id}
+                onToggleRefPick={() => toggleInpaintRefPick(session.id)}
+                onRemoveReference={(imageId) => removeInpaintReference(session.id, imageId)}
+                contentPanelExpanded={session.contentPanelExpanded ?? true}
+                onToggleContentPanel={() => toggleInpaintContentPanel(session.id)}
               />
             </div>
           );
         })}
       </div>
+
+      {inpaintRefPickSessionId && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[70] pointer-events-none px-4 py-2 rounded-lg bg-cyan-950/90 border border-cyan-500/40 text-[11px] text-cyan-100 shadow-lg">
+          吸管模式：点击画布上的图片添加为局部重绘参考（Esc 退出）
+        </div>
+      )}
 
       {/* 标注 Canvas 层 */}
       <canvas

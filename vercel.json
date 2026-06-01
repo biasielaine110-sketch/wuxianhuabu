@@ -50,8 +50,8 @@
       "destination": "https://files.dashlyai.cc/:path*"
     },
     {
-      "source": "/codesonline-image-api/:path*",
-      "destination": "https://image.codesonline.dev/:path*"
+      "source": "/codesonline-image-api/(.*)",
+      "destination": "/api/codesonline-image-proxy/$1"
     },
     {
       "source": "/manxue-api/:path*",

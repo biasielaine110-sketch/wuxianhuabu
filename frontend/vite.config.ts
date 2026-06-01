@@ -108,6 +108,18 @@ const toapisFileCdnProxy = {
     target: 'https://image.codesonline.dev',
     changeOrigin: true,
     secure: true,
+    timeout: 1_800_000,
+    proxyTimeout: 1_800_000,
+    configure(proxy) {
+      proxy.on('error', (err, _req, res) => {
+        console.error('[vite proxy /codesonline-image-api]', err);
+        const r = res as { headersSent?: boolean; writeHead?: (c: number, h?: unknown) => void; end?: (s?: string) => void };
+        if (r && !r.headersSent && typeof r.writeHead === 'function') {
+          r.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
+          r.end?.(`codesonline 图像代理错误: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      });
+    },
     rewrite: (p: string) => p.replace(/^\/codesonline-image-api/, ''),
   },
   '/codesonline-chat-api': {
