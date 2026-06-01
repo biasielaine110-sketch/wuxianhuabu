@@ -23,7 +23,11 @@ import {
   translateAnnotation,
   type ResizeHandleId,
 } from './canvas/auditAnnotationEdit';
-import { AuditInpaintPanel } from './canvas/AuditInpaintPanel';
+import {
+  AuditInpaintPanel,
+  AUDIT_INPAINT_PANEL_BASE_WIDTH,
+  AUDIT_INPAINT_PANEL_CANVAS_SCALE,
+} from './canvas/AuditInpaintPanel';
 import {
   cropAuditImageRegion,
   compositePatchOntoAuditImage,
@@ -1887,7 +1891,7 @@ export default function AuditModeCanvas({
               style={{
                 left: right + gap,
                 top,
-                transform: 'scale(3)',
+                transform: `scale(${AUDIT_INPAINT_PANEL_CANVAS_SCALE})`,
                 transformOrigin: 'top left',
               }}
               onPointerDown={(e) => e.stopPropagation()}
@@ -1929,9 +1933,8 @@ export default function AuditModeCanvas({
 
         {inpaintSessions.map((session, sessionIndex) => {
           if (!session.panelVisible || !session.region) return null;
-          const { left, top, bottom, width: regionW } = normalizeCanvasRect(session.region);
+          const { left, top, bottom } = normalizeCanvasRect(session.region);
           const gap = 4;
-          const panelBaseWidth = Math.round(Math.max(280, regionW) / 3);
           return (
             <div
               key={`${session.id}-panel`}
@@ -1939,8 +1942,10 @@ export default function AuditModeCanvas({
               style={{
                 left,
                 top: bottom + gap,
-                width: panelBaseWidth,
-                transform: 'scale(3)',
+                width: AUDIT_INPAINT_PANEL_BASE_WIDTH,
+                minWidth: AUDIT_INPAINT_PANEL_BASE_WIDTH,
+                maxWidth: AUDIT_INPAINT_PANEL_BASE_WIDTH,
+                transform: `scale(${AUDIT_INPAINT_PANEL_CANVAS_SCALE})`,
                 transformOrigin: 'top left',
                 zIndex: 57 + sessionIndex,
               }}

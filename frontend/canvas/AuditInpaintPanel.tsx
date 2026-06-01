@@ -29,7 +29,11 @@ export interface AuditInpaintPanelProps {
   regionConfirmed?: boolean;
 }
 
-/** 看图模式局部重绘：紧贴选区旁的内联控件（外层 scale(3) 放大） */
+/** 画布坐标系下未 scale 前的面板宽度；与 AuditModeCanvas 中 scale 相乘后约 280px */
+export const AUDIT_INPAINT_PANEL_BASE_WIDTH = Math.round(280 / 3);
+export const AUDIT_INPAINT_PANEL_CANVAS_SCALE = 3;
+
+/** 看图模式局部重绘：紧贴选区旁的内联控件（外层 scale 放大） */
 export function AuditInpaintPanel({
   prompt,
   onPromptChange,
@@ -57,7 +61,12 @@ export function AuditInpaintPanel({
 
   return (
     <div
-      className="pointer-events-auto bg-[#1a1a1a]/95 border border-purple-500/40 rounded-xl shadow-2xl overflow-hidden flex flex-col w-full"
+      className="pointer-events-auto bg-[#1a1a1a]/95 border border-purple-500/40 rounded-xl shadow-2xl overflow-hidden flex flex-col w-full min-w-0"
+      style={{
+        width: AUDIT_INPAINT_PANEL_BASE_WIDTH,
+        minWidth: AUDIT_INPAINT_PANEL_BASE_WIDTH,
+        maxWidth: AUDIT_INPAINT_PANEL_BASE_WIDTH,
+      }}
       onPointerDown={(e) => e.stopPropagation()}
     >
       <div className="px-3 py-2 border-b border-[#333] bg-[#222] flex items-center justify-between gap-2">
