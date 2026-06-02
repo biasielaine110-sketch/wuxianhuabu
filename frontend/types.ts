@@ -8,8 +8,62 @@ export interface Director3DNode extends CanvasNode {
   yaw?: number; // 水平视角 (-180 to 180)
   pitch?: number; // 垂直视角 (-90 to 90)
   fov?: number; // 视野角度
+  /** 相机距目标点的距离（与 3D 棚机位一致） */
+  cameraDistance?: number;
+  /** 相机注视目标点（场景坐标） */
+  cameraTarget?: { x: number; y: number; z: number };
   figures?: Figure3D[]; // 3D小人列表
   selectedFigureId?: string; // 当前选中的小人ID
+  /** 保存的机位预设（特写/近景/中景/全景/远景/自定义） */
+  cameras?: CameraPreset[];
+  /** 当前选中的机位预设 id（用于高亮） */
+  activeCameraId?: string | null;
+  /** 构图辅助线叠加：三分法 / 安全区 / 视线 / 轴线 */
+  compositionGuides?: CompositionGuides;
+  /** AI 渲染提示词模板，生成图片时拼到 prompt 头部 */
+  renderPromptTemplate?: string;
+  /**
+   * 全景环境类型：决定背景几何体形状
+   * - sphere: 720° 球形穹顶（默认）
+   * - photoWall: 照片墙（前方一面 360° 弧形墙）
+   * - sevenWall: 2 面墙（7 字型）
+   * - threeWall: 3 面墙（U 字型）
+   * - fourWall: 4 面墙（O 字型）
+   * - circleWall: 圆圈墙
+   */
+  environmentType?: EnvironmentType;
+}
+
+/** 3D 棚机位预设 */
+export interface CameraPreset {
+  id: string;
+  name: string; // 自定义名，默认"特写/近景/中景/全景/远景"
+  kind?: 'closeup' | 'close' | 'medium' | 'full' | 'long' | 'custom';
+  yaw: number;
+  pitch: number;
+  fov: number;
+  cameraDistance: number;
+  cameraTarget: { x: number; y: number; z: number };
+  createdAt: number;
+}
+
+/** 构图辅助线开关 */
+export interface CompositionGuides {
+  /** 三分法 */
+  ruleOfThirds?: boolean;
+  /** 安全区（5% 内缩进） */
+  safeArea?: boolean;
+  /**
+   * 视线：开启后，从"当前选中角色"的眼睛位置朝"看向的目标点"
+   * （默认：相机注视点 cameraTarget，可由其他角色方向推断）画一条线。
+   * 仅在已选中角色时生效。
+   */
+  sightLine?: boolean;
+  /**
+   * 轴线：开启后，当至少选中两个角色时，画一条穿过两角色头顶的 180° 轴线
+   * （与两人连线平行）；用于约束"对话/对视"机位不跨轴。仅在 ≥2 角色时生效。
+   */
+  axisLine?: boolean;
 }
 
 export interface Figure3D {
@@ -20,7 +74,56 @@ export interface Figure3D {
   y: number; // 在场景中的Y位置 (0-100百分比)
   scale: number; // 缩放比例
   rotation: number; // 旋转角度
+  /** 人物预设 id（与 PERSON_PRESETS 中某项对应），用于选择人物造型 */
+  presetId?: string;
+  /** 姿势 id（与 FIGURE_POSES 中某项对应），用于切换 pose */
+  poseId?: string;
 }
+
+/** 人物造型预设：head/torso/limbs/hair 配色 + 体型 + 风格 */
+export interface FigurePreset {
+  id: string;
+  name: string;
+  /** 风格标签 */
+  style: 'realistic' | 'cartoon' | 'stylized';
+  /** 体型 */
+  bodyType: 'slim' | 'standard' | 'chubby' | 'child';
+  /** 头部色（肤色） */
+  skinColor: string;
+  /** 上衣色 */
+  topColor: string;
+  /** 裤子色 */
+  bottomColor: string;
+  /** 头发色 */
+  hairColor: string;
+  /** 鞋子色 */
+  shoeColor: string;
+}
+
+/** 人物姿势预设：身体各部位的相对旋转/位移（与基础站姿相叠加） */
+export interface FigurePose {
+  id: string;
+  name: string;
+  /** 描述文本，会写入 prompt */
+  description: string;
+  /** 各部位姿态：head/leftArm/rightArm/leftLeg/rightLeg 的旋转/位移 */
+  parts: {
+    head?: { rx?: number; ry?: number; rz?: number };
+    leftArm?: { rx?: number; ry?: number; rz?: number };
+    rightArm?: { rx?: number; ry?: number; rz?: number };
+    leftLeg?: { rx?: number; ry?: number; rz?: number };
+    rightLeg?: { rx?: number; ry?: number; rz?: number };
+  };
+}
+
+/** 全景环境类型 */
+export type EnvironmentType =
+  | 'sphere'
+  | 'photoWall'
+  | 'sevenWall'
+  | 'threeWall'
+  | 'fourWall'
+  | 'circleWall';
 
 // 360° 全景图节点
 export interface PanoramaNode extends CanvasNode {

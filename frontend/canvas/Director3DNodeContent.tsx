@@ -1,8 +1,16 @@
-﻿import React, { useEffect, useRef, useState } from 'react';
+﻿import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { devLog } from './devLog';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
-import type { CanvasNode, Director3DNode, Figure3D } from '../types';
+import type { CanvasNode, CameraPreset, Director3DNode, EnvironmentType, Figure3D, FigurePose } from '../types';
+import {
+  ENVIRONMENT_OPTIONS,
+  FIGURE_POSES,
+  PERSON_PRESETS,
+  getFigurePose,
+  getPersonPreset,
+} from './director3dPresets';
+import { createEnvironmentWall, disposeEnvironmentWall, type EnvironmentWall } from './director3dEnvironment';
 import {
   DeleteIcon,
   CopyIcon,
@@ -11,6 +19,7 @@ import {
   ImageIcon,
   PersonIcon,
   PlusIcon,
+  SparklesIcon,
   ViewIcon,
 } from './canvasIcons';
 
@@ -21,9 +30,243 @@ export interface Director3DNodeContentProps {
   onEyedropperSelect: () => void;
   onUpdate: (updates: Partial<Director3DNode>) => void;
   onCreateImageNode: (images: string[], nodeX: number, nodeY: number) => void;
+  /** 创建一个新的 i2i 节点，并把结构化渲染种子写入（参考图 + prompt + aspectRatio + 节点位置） */
+  onCreateI2iSeed?: (seed: {
+    image: string;
+    prompt: string;
+    aspectRatio: string;
+    model?: string;
+    nodeX: number;
+    nodeY: number;
+  }) => void;
   onCopyToImage?: () => void;
 }
-export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onEyedropperSelect, onUpdate, onCreateImageNode, onCopyToImage }: Director3DNodeContentProps) {
+
+/**
+ * 创建角色 3D 组：基于 Figure3D 的人物预设 + 姿势预设构造可视化角色
+ * 部位命名约定（用于 applyFigurePose 定位）：
+ *   - 'head' / 'hair' / 'torso' / 'leftArm' / 'rightArm' / 'leftLeg' / 'rightLeg' / 'leftShoe' / 'rightShoe'
+ * 体型：slim / standard / chubby / child 影响 torso 与 limb 的 width
+ */
+function buildFigureGroup(
+  figure: Figure3D,
+  index: number,
+  labelText: string,
+  buildFigureColor: (i: number) => string
+): THREE.Group {
+  const preset = getPersonPreset(figure.presetId);
+  const pose = getFigurePose(figure.poseId);
+  const paletteAccent = buildFigureColor(index);
+
+  const group = new THREE.Group();
+  group.userData = { figureId: figure.id, isFigure: true };
+
+  // 体型尺寸因子
+  const bodyFactor =
+    preset.bodyType === 'slim' ? 0.85 : preset.bodyType === 'chubby' ? 1.18 : preset.bodyType === 'child' ? 0.7 : 1.0;
+  const headFactor = preset.bodyType === 'child' ? 0.8 : 1.0;
+
+  // 各部位基础尺寸
+  const headR = 1.5 * headFactor;
+  const torsoW = 2.5 * bodyFactor;
+  const torsoH = 4;
+  const torsoD = 1.2;
+  const limbW = 0.6 * bodyFactor;
+  const armL = 3;
+  const legW = 0.8 * bodyFactor;
+  const legH = 3.5;
+  const shoeH = 0.5;
+
+  // 材质工厂：避免共享 material 时改一处影响全部
+  const matOf = (color: string, roughness = 0.55) =>
+    new THREE.MeshStandardMaterial({ color, roughness, metalness: 0.05, emissive: 0x000000 });
+
+  // ===== 头（含头发） =====
+  const head = new THREE.Mesh(new THREE.SphereGeometry(headR, 24, 24), matOf(preset.skinColor));
+  head.position.y = 6.5 * headFactor;
+  head.userData = { figureId: figure.id, isFigurePart: true, partRole: 'head' };
+  head.castShadow = true;
+  group.add(head);
+
+  // 头发：半冠球壳，套在头上
+  const hairGeom = new THREE.SphereGeometry(headR * 1.05, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.55);
+  const hair = new THREE.Mesh(hairGeom, matOf(preset.hairColor, 0.7));
+  hair.position.y = 6.5 * headFactor;
+  hair.userData = { figureId: figure.id, isFigurePart: true, partRole: 'hair' };
+  group.add(hair);
+
+  // ===== 躯干（上衣色） =====
+  const torso = new THREE.Mesh(
+    new THREE.BoxGeometry(torsoW, torsoH, torsoD),
+    matOf(preset.topColor)
+  );
+  torso.position.y = 3;
+  torso.userData = { figureId: figure.id, isFigurePart: true, partRole: 'torso' };
+  torso.castShadow = true;
+  group.add(torso);
+
+  // 腰（下装色）：box，比 torso 略小一点高度
+  const waist = new THREE.Mesh(
+    new THREE.BoxGeometry(torsoW * 0.95, 0.5, torsoD * 1.0),
+    matOf(preset.bottomColor)
+  );
+  waist.position.y = 0.9;
+  waist.userData = { figureId: figure.id, isFigurePart: true, partRole: 'waist' };
+  group.add(waist);
+
+  // ===== 手臂（以肩膀为旋转中心，pivot 用 group 包裹） =====
+  const armGeom = new THREE.BoxGeometry(limbW, armL, limbW);
+
+  // 左臂
+  const leftArmPivot = new THREE.Group();
+  leftArmPivot.position.set(-torsoW / 2 - limbW / 2, 4.5, 0);
+  const leftArm = new THREE.Mesh(armGeom, matOf(preset.topColor));
+  leftArm.position.y = -armL / 2;
+  leftArm.userData = { figureId: figure.id, isFigurePart: true, partRole: 'leftArm' };
+  leftArm.castShadow = true;
+  leftArmPivot.add(leftArm);
+  leftArmPivot.userData = { partRole: 'leftArm' };
+  group.add(leftArmPivot);
+
+  // 右臂
+  const rightArmPivot = new THREE.Group();
+  rightArmPivot.position.set(torsoW / 2 + limbW / 2, 4.5, 0);
+  const rightArm = new THREE.Mesh(armGeom, matOf(preset.topColor));
+  rightArm.position.y = -armL / 2;
+  rightArm.userData = { figureId: figure.id, isFigurePart: true, partRole: 'rightArm' };
+  rightArm.castShadow = true;
+  rightArmPivot.add(rightArm);
+  rightArmPivot.userData = { partRole: 'rightArm' };
+  group.add(rightArmPivot);
+
+  // ===== 腿（下装色） =====
+  const legGeom = new THREE.BoxGeometry(legW, legH, legW);
+
+  const leftLegPivot = new THREE.Group();
+  leftLegPivot.position.set(-0.5 * bodyFactor, 0.65, 0);
+  const leftLeg = new THREE.Mesh(legGeom, matOf(preset.bottomColor));
+  leftLeg.position.y = -legH / 2;
+  leftLeg.userData = { figureId: figure.id, isFigurePart: true, partRole: 'leftLeg' };
+  leftLegPivot.add(leftLeg);
+  leftLegPivot.userData = { partRole: 'leftLeg' };
+  group.add(leftLegPivot);
+
+  const rightLegPivot = new THREE.Group();
+  rightLegPivot.position.set(0.5 * bodyFactor, 0.65, 0);
+  const rightLeg = new THREE.Mesh(legGeom, matOf(preset.bottomColor));
+  rightLeg.position.y = -legH / 2;
+  rightLeg.userData = { figureId: figure.id, isFigurePart: true, partRole: 'rightLeg' };
+  rightLegPivot.add(rightLeg);
+  rightLegPivot.userData = { partRole: 'rightLeg' };
+  group.add(rightLegPivot);
+
+  // ===== 鞋（鞋色） =====
+  const shoeGeom = new THREE.BoxGeometry(legW * 1.1, shoeH, legW * 1.4);
+  const leftShoe = new THREE.Mesh(shoeGeom, matOf(preset.shoeColor, 0.75));
+  leftShoe.position.set(-0.5 * bodyFactor, -legH + shoeH / 2 + 0.05, legW * 0.2);
+  leftShoe.userData = { figureId: figure.id, isFigurePart: true, partRole: 'leftShoe' };
+  group.add(leftShoe);
+
+  const rightShoe = new THREE.Mesh(shoeGeom, matOf(preset.shoeColor, 0.75));
+  rightShoe.position.set(0.5 * bodyFactor, -legH + shoeH / 2 + 0.05, legW * 0.2);
+  rightShoe.userData = { figureId: figure.id, isFigurePart: true, partRole: 'rightShoe' };
+  group.add(rightShoe);
+
+  // 应用初始姿势
+  applyFigurePose(group, pose);
+
+  // 位置 + 朝向
+  group.rotation.y = (figure.rotation || 0) * Math.PI / 180;
+  group.scale.setScalar(figure.scale || 1);
+  const worldX = (figure.x / 100) * 1000 - 500;
+  const worldZ = (figure.y / 100) * 1000 - 500;
+  group.position.set(worldX, 0, worldZ);
+
+  // 顶部标签
+  const labelSprite = buildFigureLabelSprite(labelText, paletteAccent);
+  if (labelSprite) group.add(labelSprite);
+
+  return group;
+}
+
+/**
+ * 应用姿势：把 group.userData.partRole = 'leftArm' 之类的子对象 rotation 按 pose.parts 调整
+ * - pivot（带 partRole 的 group）旋转即可带动下方 mesh
+ * - 直挂 mesh 的 part（如 head / hair / torso）也支持
+ */
+function applyFigurePose(group: THREE.Group, pose: FigurePose): void {
+  const parts = pose.parts;
+  group.traverse((child) => {
+    const role = (child.userData as { partRole?: string } | undefined)?.partRole;
+    if (!role) return;
+    const p = (parts as Record<string, { rx?: number; ry?: number; rz?: number } | undefined>)[role];
+    if (!p) return;
+    if (p.rx !== undefined) child.rotation.x = p.rx;
+    if (p.ry !== undefined) child.rotation.y = p.ry;
+    if (p.rz !== undefined) child.rotation.z = p.rz;
+  });
+}
+
+/** 5 档预设机位（按"景别 ↔ 距离 + fov"查表，点击瞬移） */
+const CAMERA_SHOT_PRESETS: ReadonlyArray<{
+  kind: CameraPreset['kind'];
+  name: string;
+  fov: number;
+  cameraDistance: number;
+  aspectRatio: string;
+}> = [
+  { kind: 'closeup', name: '特写', fov: 35, cameraDistance: 18, aspectRatio: '1:1' },
+  { kind: 'close', name: '近景', fov: 45, cameraDistance: 28, aspectRatio: '4:3' },
+  { kind: 'medium', name: '中景', fov: 55, cameraDistance: 42, aspectRatio: '16:9' },
+  { kind: 'full', name: '全景', fov: 60, cameraDistance: 60, aspectRatio: '16:9' },
+  { kind: 'long', name: '远景', fov: 70, cameraDistance: 90, aspectRatio: '21:9' },
+];
+
+/** 把"机位 + 环境墙 + 全景 + 站位 + 角色造型 + 姿势 + 视角"打包成结构化 prompt，供后续 i2i 生图使用 */
+function buildRenderPrompt(
+  shotName: string,
+  fov: number,
+  yaw: number,
+  pitch: number,
+  cameraDistance: number,
+  figures: Figure3D[],
+  hasPanorama: boolean,
+  envType: EnvironmentType,
+  envName: string
+): string {
+  const fovHint = fov <= 40 ? '窄视角突出主体' : fov <= 60 ? '中景' : '广角远景';
+  const figLine =
+    figures.length === 0
+      ? '画面中无人物。'
+      : `画面中有 ${figures.length} 个角色：${figures
+          .map((f, i) => {
+            const preset = getPersonPreset(f.presetId);
+            const pose = getFigurePose(f.poseId);
+            return (
+              `角色${i + 1}「${f.name || `角色${i + 1}`}」` +
+              `，风格 ${preset.style} / ${preset.bodyType} 体型` +
+              `，肤色 ${preset.skinColor}、上衣 ${preset.topColor}、下装 ${preset.bottomColor}、鞋 ${preset.shoeColor}` +
+              `，姿势：${pose.name}（${pose.description}）` +
+              `，位于场景 ${Math.round(f.x)}%, ${Math.round(f.y)}% 处，朝向 ${f.rotation ?? 0}°，` +
+              `${(f.scale ?? 1).toFixed(1)}x 比例`
+            );
+          })
+          .join('；')}。`;
+  const bgLine = hasPanorama
+    ? `背景采用提供的 720° 全景图作为环境依据（环境墙：${envName}），保留光影方向与色调。`
+    : `背景为${envName}简洁的电影感环境，请根据景别与构图生成。`;
+  return (
+    `[导演台机位：${shotName}]\n` +
+    `机位参数：FOV ${fov.toFixed(0)}°、水平视角 ${yaw.toFixed(0)}°、俯仰 ${pitch.toFixed(
+      0
+    )}°、距离 ${cameraDistance.toFixed(0)}（${fovHint}）。\n` +
+    `环境墙：${envName}。\n` +
+    `${figLine}\n` +
+    `${bgLine}\n` +
+    `风格：电影感构图，主体清晰，光影统一，禁止出现 UI 与文字。`
+  );
+}
+export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onEyedropperSelect, onUpdate, onCreateImageNode, onCreateI2iSeed, onCopyToImage }: Director3DNodeContentProps) {
   const figurePalette = ['#ef4444', '#f59e0b', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899', '#84cc16', '#f97316', '#14b8a6'];
   const buildFigureColor = (index: number) => figurePalette[index % figurePalette.length];
   const buildFigureLabelSprite = (labelText: string, color: string) => {
@@ -50,7 +293,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
     const sprite = new THREE.Sprite(material);
     sprite.scale.set(12, 3, 1);
     sprite.position.set(0, 9.5, 0);
-    sprite.userData = { isFigureLabel: true };
+    sprite.userData = { isFigureLabel: true, labelText };
     return sprite;
   };
 
@@ -66,6 +309,13 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
   const textureRef = useRef<THREE.Texture | null>(null);
   const groundRef = useRef<THREE.Mesh | null>(null);
   const groundMaterialRef = useRef<THREE.MeshStandardMaterial | null>(null);
+  /** 全景环境墙（sphere / photoWall / 7/U/O/circle）：承载 sky material + ground material */
+  const envWallRef = useRef<EnvironmentWall | null>(null);
+  /** 视线 / 轴线 3D 辅助对象：保持 ref 以便 effect 内更新顶点 */
+  const sightLineRef = useRef<THREE.Line | null>(null);
+  const axisLineRef = useRef<THREE.Line | null>(null);
+  const sightLineMatRef = useRef<THREE.LineBasicMaterial | null>(null);
+  const axisLineMatRef = useRef<THREE.LineBasicMaterial | null>(null);
   const groundTextureRef = useRef<THREE.Texture | null>(null);
   const animationFrameRef = useRef<number>(0);
   const currentImageRef = useRef<string>('');
@@ -180,25 +430,23 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       directionalLight.position.set(50, 100, 50);
       scene.add(directionalLight);
 
-      // 720全景图背景（天空穹顶）
-      const skyGeometry = new THREE.SphereGeometry(900, 64, 40);
-      skyGeometry.scale(-1, 1, 1);
-      const skyMaterial = new THREE.MeshBasicMaterial({
-        color: 0x2f2f2f,
-        side: THREE.BackSide,
-      });
-      const skyMesh = new THREE.Mesh(skyGeometry, skyMaterial);
-      scene.add(skyMesh);
-      sphereRef.current = skyMesh;
-      materialRef.current = skyMaterial;
+      // 720全景图背景（默认 sphere 球形穹顶；后续 effect 可切换为 photoWall/7字/U字/O字/圆圈墙）
+      const envType: EnvironmentType = nodeRef.current.environmentType ?? 'sphere';
+      const envWall = createEnvironmentWall(envType);
+      scene.add(envWall.root);
+      envWallRef.current = envWall;
+      // 兼容旧代码：把"主 sky material"指到 root 子 mesh 的 material 上（取第一个）
+      const firstSkyMesh = envWall.root.children.find(
+        (c) => c instanceof THREE.Mesh && (c.userData as { isEnvSky?: boolean })?.isEnvSky
+      ) as THREE.Mesh | undefined;
+      if (firstSkyMesh) {
+        sphereRef.current = firstSkyMesh;
+        materialRef.current = firstSkyMesh.material as THREE.MeshBasicMaterial;
+      }
 
       // 720全景图地面（使用全景图下半部分纹理）
       const groundGeometry = new THREE.CircleGeometry(500, 72);
-      const groundMaterial = new THREE.MeshStandardMaterial({
-        color: 0x2b2b2b,
-        roughness: 0.95,
-        metalness: 0.02,
-      });
+      const groundMaterial = envWall.groundMaterial;
       const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
       groundMesh.rotation.x = -Math.PI / 2;
       groundMesh.position.y = -0.05;
@@ -427,7 +675,26 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         },
         update: updateCamera,
         setTheta: (t: number) => { theta = t; },
-        setPhi: (p: number) => { phi = p; }
+        setPhi: (p: number) => { phi = p; },
+        /**
+         * 一次性瞬移到指定机位（机位预设 / 视角应用都走这里）
+         * yaw 单位度（0..360，0=正北），pitch 单位度（0=地平、90=天顶、-90=正下）
+         */
+        applyCameraView: (view: {
+          yaw: number;
+          pitch: number;
+          fov: number;
+          cameraDistance: number;
+          cameraTarget?: { x: number; y: number; z: number };
+        }) => {
+          theta = (view.yaw * Math.PI) / 180;
+          phi = Math.max(0.2, Math.min(Math.PI / 2 - 0.1, (Math.PI / 2) - (view.pitch * Math.PI) / 180));
+          cameraDistance = Math.max(10, Math.min(200, view.cameraDistance));
+          if (view.cameraTarget) {
+            cameraTarget.set(view.cameraTarget.x, view.cameraTarget.y, view.cameraTarget.z);
+          }
+          updateCamera();
+        },
       };
 
       let animLoopActive = false;
@@ -497,6 +764,11 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
           if (g) g.dispose();
           groundRef.current = null;
         }
+        // 释放全景环境墙（其内部所有 sky material + ground material + geometry）
+        if (envWallRef.current) {
+          disposeEnvironmentWall(envWallRef.current);
+          envWallRef.current = null;
+        }
         if (sceneRef.current) { sceneRef.current.clear(); }
         renderer.dispose();
         renderer.forceContextLoss();
@@ -514,6 +786,49 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       }
     };
   }, []);
+
+  // 切换全景环境类型：移除旧 wall，构造新 wall
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    const envType = node.environmentType ?? 'sphere';
+    if (!envWallRef.current) return; // 初始化 effect 还没建好
+
+    // 取出当前 wall 的 envType（通过 root.userData 推断）
+    const currentKind = (envWallRef.current.root.userData as { envType?: string }).envType;
+    if (currentKind === envType) return;
+
+    // 移除并 dispose 旧 wall
+    scene.remove(envWallRef.current.root);
+    disposeEnvironmentWall(envWallRef.current);
+    envWallRef.current = null;
+    sphereRef.current = null;
+    materialRef.current = null;
+    // 地面材质是 envWall 内部的 groundMaterial 之一，dispose 已释放；这里把 groundMaterialRef 解绑避免后续误用
+    groundMaterialRef.current = null;
+    groundRef.current = null;
+
+    // 创建新 wall
+    const newWall = createEnvironmentWall(envType);
+    (newWall.root.userData as { envType?: string }).envType = envType;
+    scene.add(newWall.root);
+    envWallRef.current = newWall;
+    const firstSkyMesh = newWall.root.children.find(
+      (c) => c instanceof THREE.Mesh && (c.userData as { isEnvSky?: boolean })?.isEnvSky
+    ) as THREE.Mesh | undefined;
+    if (firstSkyMesh) {
+      sphereRef.current = firstSkyMesh;
+      materialRef.current = firstSkyMesh.material as THREE.MeshBasicMaterial;
+    }
+    // 重建地面
+    const groundGeometry = new THREE.CircleGeometry(500, 72);
+    const groundMesh = new THREE.Mesh(groundGeometry, newWall.groundMaterial);
+    groundMesh.rotation.x = -Math.PI / 2;
+    groundMesh.position.y = -0.05;
+    scene.add(groundMesh);
+    groundRef.current = groundMesh;
+    groundMaterialRef.current = newWall.groundMaterial;
+  }, [node.environmentType]);
 
   // 载入720全景图作为背景+地面纹理（支持 assetId）
   useEffect(() => {
@@ -680,8 +995,10 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
 
     // 添加或更新角色
     currentFigures.forEach((figure, index) => {
+      // 角色编号色（用于选中高亮与标签描边）—— 来自 palette + 序号
       const figureColor = new THREE.Color(buildFigureColor(index));
       const labelText = figure.name || `角色${index + 1}`;
+
       if (figuresRef.current.has(figure.id)) {
         // 检查是否正被TransformControls控制，如果是则跳过位置更新
         const tc = transformControlsRef.current;
@@ -700,17 +1017,17 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
           group.position.set(worldX, 0, worldZ);
         }
 
-        // 更新角色颜色、编号标签和选中状态
+        // 同步姿势：遍历已建好的部位 mesh，根据 figure.poseId 调整 rotation
+        const pose = getFigurePose(figure.poseId);
+        applyFigurePose(group, pose);
+
+        // 同步选中态与 emissive（保留原配色，仅修改 emissive）
         group.traverse((child) => {
           if (child.userData?.isFigureLabel && child instanceof THREE.Sprite) {
-            const mat = child.material as THREE.SpriteMaterial;
-            mat.map?.dispose();
-            mat.dispose();
-            group.remove(child);
+            // 标签随名字变化才重生成；这里保留旧 sprite，避免抖动
             return;
           }
           if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial) {
-            (child.material as THREE.MeshStandardMaterial).color.copy(figureColor);
             if (selectedFigureId === figure.id) {
               (child.material as THREE.MeshStandardMaterial).emissive.setHex(0x444444);
             } else {
@@ -718,76 +1035,200 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
             }
           }
         });
-        const labelSprite = buildFigureLabelSprite(labelText, `#${figureColor.getHexString()}`);
-        if (labelSprite) group.add(labelSprite);
+
+        // 同步标签文本：若 labelText 变化，重建 sprite
+        const existingLabel = group.children.find((c) => c.userData?.isFigureLabel) as THREE.Sprite | undefined;
+        const existingLabelText = (existingLabel?.userData as { labelText?: string } | undefined)?.labelText;
+        if (existingLabelText !== labelText) {
+          if (existingLabel) {
+            const mat = existingLabel.material as THREE.SpriteMaterial;
+            mat.map?.dispose();
+            mat.dispose();
+            group.remove(existingLabel);
+          }
+          const newLabel = buildFigureLabelSprite(labelText, `#${figureColor.getHexString()}`);
+          if (newLabel) group.add(newLabel);
+        }
       } else {
-        // 创建新角色 - 尺寸更大，有光照效果
-        const group = new THREE.Group();
-        group.userData = { figureId: figure.id, isFigure: true };
-
-        const material = new THREE.MeshStandardMaterial({
-          color: figureColor,
-          roughness: 0.5,
-          metalness: 0.3,
-          emissive: 0x000000
-        });
-
-        // 头部 - 放大约3倍
-        const headGeometry = new THREE.SphereGeometry(1.5, 24, 24);
-        const head = new THREE.Mesh(headGeometry, material.clone());
-        head.position.y = 6;
-        head.userData = { figureId: figure.id, isFigurePart: true };
-        group.add(head);
-
-        // 身体 - 放大约3倍
-        const bodyGeometry = new THREE.BoxGeometry(2.5, 4, 1.2);
-        const body = new THREE.Mesh(bodyGeometry, material.clone());
-        body.position.y = 3;
-        body.userData = { figureId: figure.id, isFigurePart: true };
-        group.add(body);
-
-        // 左手臂
-        const armGeometry = new THREE.BoxGeometry(0.6, 3, 0.6);
-        const leftArm = new THREE.Mesh(armGeometry, material.clone());
-        leftArm.position.set(-1.8, 3, 0);
-        leftArm.userData = { figureId: figure.id, isFigurePart: true };
-        group.add(leftArm);
-
-        // 右手臂
-        const rightArm = new THREE.Mesh(armGeometry, material.clone());
-        rightArm.position.set(1.8, 3, 0);
-        rightArm.userData = { figureId: figure.id, isFigurePart: true };
-        group.add(rightArm);
-
-        // 左腿
-        const legGeometry = new THREE.BoxGeometry(0.8, 3.5, 0.8);
-        const leftLeg = new THREE.Mesh(legGeometry, material.clone());
-        leftLeg.position.set(-0.6, 0.75, 0);
-        leftLeg.userData = { figureId: figure.id, isFigurePart: true };
-        group.add(leftLeg);
-
-        // 右腿
-        const rightLeg = new THREE.Mesh(legGeometry, material.clone());
-        rightLeg.position.set(0.6, 0.75, 0);
-        rightLeg.userData = { figureId: figure.id, isFigurePart: true };
-        group.add(rightLeg);
-
-        // 设置位置和旋转
-        group.rotation.y = (figure.rotation || 0) * Math.PI / 180;
-        group.scale.setScalar(figure.scale || 1);
-
-        const worldX = (figure.x / 100) * 1000 - 500;
-        const worldZ = (figure.y / 100) * 1000 - 500;
-        group.position.set(worldX, 0, worldZ);
-
-        const labelSprite = buildFigureLabelSprite(labelText, `#${figureColor.getHexString()}`);
-        if (labelSprite) group.add(labelSprite);
-
+        // 创建新角色 —— 引用人物预设 + 姿势预设
+        const group = buildFigureGroup(figure, index, labelText, buildFigureColor);
         scene.add(group);
         figuresRef.current.set(figure.id, group);
       }
     });
   }, [figures, selectedFigureId]);
+
+  // 视线 / 轴线 辅助：在 3D 场景内绘制，分两个独立 Line 对象，便于分别清理
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    const guides = node.compositionGuides ?? {};
+    const showSight = !!guides.sightLine;
+    const showAxis = !!guides.axisLine;
+    // 注意：selectedFigure 在更下方才定义，此处内联查找避免引用未初始化的常量
+    const selectedFigureHere = figures.find((f) => f.id === selectedFigureId) ?? null;
+
+    // 找两个最接近的角色（按 2D 距离平方）作为轴线端点
+    const pickAxisPair = (figs: Figure3D[]): [Figure3D, Figure3D] | null => {
+      if (figs.length < 2) return null;
+      let best: [Figure3D, Figure3D] | null = null;
+      let bestDist = Infinity;
+      for (let i = 0; i < figs.length; i++) {
+        for (let j = i + 1; j < figs.length; j++) {
+          const a = figs[i];
+          const b = figs[j];
+          const dx = a.x - b.x;
+          const dy = a.y - b.y;
+          const d = dx * dx + dy * dy;
+          if (d < bestDist) {
+            bestDist = d;
+            best = [a, b];
+          }
+        }
+      }
+      return best;
+    };
+
+    // 计算角色眼睛/头顶位置（头顶比身高略高）
+    const figureEyeWorld = (f: Figure3D) => {
+      const wx = (f.x / 100) * 1000 - 500;
+      const wz = (f.y / 100) * 1000 - 500;
+      return new THREE.Vector3(wx, 6.5, wz); // 6.5 约等于角色头部高度
+    };
+
+    // --- 视线 ---
+    if (showSight && selectedFigureHere) {
+      const start = figureEyeWorld(selectedFigureHere);
+      const rotation = ((selectedFigureHere.rotation ?? 0) * Math.PI) / 180;
+      // forward 方向：rotation=0 朝 +Z，与 three.js 中 group.rotation.y = rot 一致
+      const forward = new THREE.Vector3(Math.sin(rotation), 0, Math.cos(rotation));
+      const length = 60; // 视线长度（世界单位）
+      const end = start.clone().add(forward.multiplyScalar(length));
+
+      const geom = new THREE.BufferGeometry().setFromPoints([start, end]);
+      const mat = new THREE.LineBasicMaterial({
+        color: 0xff66cc,
+        transparent: true,
+        opacity: 0.85,
+        depthTest: false,
+        depthWrite: false,
+      });
+      const line = new THREE.Line(geom, mat);
+      line.renderOrder = 5;
+      line.userData = { isCompositionGuide: true };
+      scene.add(line);
+      sightLineRef.current = line;
+      sightLineMatRef.current = mat;
+
+      // 端点小圆点（眼睛位置）
+      const dotGeom = new THREE.SphereGeometry(0.6, 8, 8);
+      const dotMat = new THREE.MeshBasicMaterial({
+        color: 0xff66cc,
+        depthTest: false,
+        depthWrite: false,
+      });
+      const dot = new THREE.Mesh(dotGeom, dotMat);
+      dot.position.copy(start);
+      dot.userData = { isCompositionGuide: true };
+      scene.add(dot);
+      sightLineRef.current.userData.endDot = dot;
+    }
+
+    // --- 轴线：连接两角色头顶，并在其法向上画一条 180° 限制线（实线 + 虚线镜像） ---
+    if (showAxis) {
+      const pair = pickAxisPair(figures);
+      if (pair) {
+        const a = figureEyeWorld(pair[0]);
+        const b = figureEyeWorld(pair[1]);
+        const mid = a.clone().add(b).multiplyScalar(0.5);
+        // 轴线方向（两角色连线的法线，作为「不可跨越的 180° 边界」）
+        const axisDir = new THREE.Vector3().subVectors(b, a).normalize();
+        // 让轴线方向在 XZ 平面上（保持水平）
+        axisDir.y = 0;
+        if (axisDir.lengthSq() < 1e-6) axisDir.set(1, 0, 0);
+        axisDir.normalize();
+        const axisLen = 80; // 180° 轴线长度
+        const p1 = mid.clone().add(axisDir.clone().multiplyScalar(axisLen));
+        const p2 = mid.clone().add(axisDir.clone().multiplyScalar(-axisLen));
+
+        // 实线
+        const axisGeom = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+        const axisMat = new THREE.LineBasicMaterial({
+          color: 0xffd166,
+          transparent: true,
+          opacity: 0.9,
+          depthTest: false,
+          depthWrite: false,
+        });
+        const axisLine = new THREE.Line(axisGeom, axisMat);
+        axisLine.renderOrder = 5;
+        axisLine.userData = { isCompositionGuide: true };
+        scene.add(axisLine);
+        axisLineRef.current = axisLine;
+        axisLineMatRef.current = axisMat;
+
+        // 两端点端帽（短竖线提示「不要跨越」）
+        for (const pt of [p1, p2]) {
+          const capGeom = new THREE.BufferGeometry().setFromPoints([
+            pt.clone().add(new THREE.Vector3(0, -2, 0)),
+            pt.clone().add(new THREE.Vector3(0, 2, 0)),
+          ]);
+          const capMat = new THREE.LineBasicMaterial({
+            color: 0xffd166,
+            transparent: true,
+            opacity: 0.9,
+            depthTest: false,
+            depthWrite: false,
+          });
+          const cap = new THREE.Line(capGeom, capMat);
+          cap.renderOrder = 5;
+          cap.userData = { isCompositionGuide: true };
+          scene.add(cap);
+          (axisLineRef.current.userData.caps ??= []).push(cap);
+        }
+      }
+    }
+
+    // 清理：卸载/开关关闭时移除上一次绘制的辅助对象
+    return () => {
+      const removeFromScene = (line: THREE.Line | null) => {
+        if (!line) return;
+        scene.remove(line);
+        line.geometry.dispose();
+        const mat = (line.material as THREE.Material) ?? null;
+        if (mat) mat.dispose();
+        const endDot = (line.userData as { endDot?: THREE.Mesh })?.endDot;
+        if (endDot) {
+          scene.remove(endDot);
+          endDot.geometry.dispose();
+          (endDot.material as THREE.Material | undefined)?.dispose();
+        }
+        const caps: THREE.Line[] | undefined = (line.userData as { caps?: THREE.Line[] })?.caps;
+        if (caps) {
+          for (const c of caps) {
+            scene.remove(c);
+            c.geometry.dispose();
+            (c.material as THREE.Material | undefined)?.dispose();
+          }
+        }
+      };
+      removeFromScene(sightLineRef.current);
+      sightLineRef.current = null;
+      sightLineMatRef.current = null;
+      removeFromScene(axisLineRef.current);
+      axisLineRef.current = null;
+      axisLineMatRef.current = null;
+    };
+  }, [
+    figures,
+    selectedFigureId,
+    node.compositionGuides?.sightLine,
+    node.compositionGuides?.axisLine,
+    node.cameraTarget?.x,
+    node.cameraTarget?.y,
+    node.cameraTarget?.z,
+  ]);
 
   // 强制刷新渲染
   const forceRefresh = () => {
@@ -826,16 +1267,204 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
     setIsFullscreen(true);
   };
 
-  // 添加角色 - 直接创建3D模型
+  // 退出全屏
+  const closeFullscreen = useCallback(() => {
+    setIsFullscreen(false);
+  }, []);
+
+  // 全屏 effect：把已有 canvas 用 fixed 定位"覆盖"整个窗口、resize，再把机位/视线/轴线参考系的渲染坐标系也跟上
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    const camera = cameraRef.current;
+    const scene = sceneRef.current;
+    if (!renderer || !camera || !scene) return;
+
+    const dom = renderer.domElement;
+    if (!dom) return;
+
+    // 记录原 size/样式，退出时恢复
+    const prevStyle = dom.getAttribute('style') ?? '';
+    const prevWidth = dom.width;
+    const prevHeight = dom.height;
+    const prevAspect = camera.aspect;
+
+    if (isFullscreen) {
+      const onResize = () => {
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        renderer.setSize(w, h, false);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.render(scene, camera);
+      };
+      onResize();
+      // 用 fixed 定位把 canvas 覆盖整个窗口，保留节点内原 DOM 父子结构以免重新挂载触发 mousedown 等监听丢失
+      dom.style.position = 'fixed';
+      dom.style.top = '0';
+      dom.style.left = '0';
+      dom.style.width = '100vw';
+      dom.style.height = '100vh';
+      dom.style.zIndex = '9999';
+      dom.style.borderRadius = '0';
+      dom.style.cursor = 'grab';
+      // 允许 canvas 接收键盘事件（Esc 退出）
+      dom.tabIndex = 0;
+      dom.focus();
+
+      const onKey = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          closeFullscreen();
+        }
+      };
+      window.addEventListener('keydown', onKey, true);
+      window.addEventListener('resize', onResize);
+
+      return () => {
+        window.removeEventListener('keydown', onKey, true);
+        window.removeEventListener('resize', onResize);
+      };
+    } else {
+      // 退出：恢复原 size 和样式
+      dom.setAttribute('style', prevStyle);
+      renderer.setSize(prevWidth, prevHeight, false);
+      camera.aspect = prevAspect;
+      camera.updateProjectionMatrix();
+      renderer.render(scene, camera);
+    }
+  }, [isFullscreen, closeFullscreen]);
+
+  /** 当前机位参数（从节点上读，兼容旧节点没有 cameraDistance / cameraTarget） */
+  const currentView = {
+    yaw: node.yaw ?? 0,
+    pitch: node.pitch ?? 0,
+    fov: node.fov ?? 60,
+    cameraDistance: node.cameraDistance ?? 60,
+    cameraTarget: node.cameraTarget ?? { x: 0, y: 0, z: 0 },
+  };
+
+  /** 应用某个机位预设（点击列表项） */
+  const applyCameraPreset = (preset: CameraPreset) => {
+    controlsRef.current?.applyCameraView({
+      yaw: preset.yaw,
+      pitch: preset.pitch,
+      fov: preset.fov,
+      cameraDistance: preset.cameraDistance,
+      cameraTarget: preset.cameraTarget,
+    });
+    setDisplayInfo({ yaw: preset.yaw, pitch: preset.pitch, fov: preset.fov });
+    onUpdate({
+      yaw: preset.yaw,
+      pitch: preset.pitch,
+      fov: preset.fov,
+      cameraDistance: preset.cameraDistance,
+      cameraTarget: preset.cameraTarget,
+      activeCameraId: preset.id,
+    });
+  };
+
+  /** 跳到一档预设景别（特写/近/中/全/远），保留当前 yaw/pitch */
+  const applyShotPreset = (preset: (typeof CAMERA_SHOT_PRESETS)[number]) => {
+    const target = { ...currentView, fov: preset.fov, cameraDistance: preset.cameraDistance };
+    controlsRef.current?.applyCameraView(target);
+    setDisplayInfo({ yaw: target.yaw, pitch: target.pitch, fov: target.fov });
+    onUpdate({ fov: target.fov, cameraDistance: target.cameraDistance });
+  };
+
+  /** 把当前机位保存为自定义预设 */
+  const saveCurrentCamera = () => {
+    const id = `cam-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const preset: CameraPreset = {
+      id,
+      name: `机位 ${((node.cameras ?? []).length + 1).toString().padStart(2, '0')}`,
+      kind: 'custom',
+      ...currentView,
+      createdAt: Date.now(),
+    };
+    onUpdate({
+      cameras: [...(node.cameras ?? []), preset],
+      activeCameraId: id,
+    });
+  };
+
+  const removeCameraPreset = (id: string) => {
+    onUpdate({
+      cameras: (node.cameras ?? []).filter((c) => c.id !== id),
+      activeCameraId: node.activeCameraId === id ? null : node.activeCameraId,
+    });
+  };
+
+  /** 命名机位 */
+  const renameCameraPreset = (id: string, name: string) => {
+    onUpdate({
+      cameras: (node.cameras ?? []).map((c) => (c.id === id ? { ...c, name } : c)),
+    });
+  };
+
+  /** AI 渲染：把当前机位 + 全景 + 站位打包为结构化 prompt，预填到一个新建的 i2i 节点里 */
+  const renderWithAI = () => {
+    if (!onCreateI2iSeed) {
+      window.alert('该节点暂未挂接 AI 渲染出口。');
+      return;
+    }
+    if (!hasBackgroundMedia) {
+      window.alert('请先导入或吸取一张 720° 全景背景图。');
+      return;
+    }
+    const shotName = node.activeCameraId
+      ? (node.cameras ?? []).find((c) => c.id === node.activeCameraId)?.name ?? '自定义机位'
+      : '当前视角';
+    // 找与当前 fov/cameraDistance 最接近的预设以决定 aspectRatio
+    const matchedShot =
+      CAMERA_SHOT_PRESETS.find(
+        (s) => s.fov === currentView.fov && s.cameraDistance === currentView.cameraDistance
+      ) ?? null;
+    const aspectRatio = matchedShot?.aspectRatio ?? '16:9';
+    const envType = node.environmentType ?? 'sphere';
+    const envName = ENVIRONMENT_OPTIONS.find((e) => e.id === envType)?.name ?? '球形墙';
+    const prompt = buildRenderPrompt(
+      shotName,
+      currentView.fov,
+      currentView.yaw,
+      currentView.pitch,
+      currentView.cameraDistance,
+      figures,
+      hasBackgroundMedia,
+      envType,
+      envName
+    );
+    onCreateI2iSeed({
+      image: backgroundImage,
+      prompt,
+      aspectRatio,
+      nodeX: node.x + node.width + 40,
+      nodeY: node.y,
+    });
+  };
+
+  /** 构图辅助线开关 */
+  const guides = node.compositionGuides ?? {};
+  const toggleGuide = (key: keyof NonNullable<Director3DNode['compositionGuides']>) => {
+    onUpdate({
+      compositionGuides: { ...guides, [key]: !guides[key] },
+    });
+  };
+
+  // 添加角色 - 直接创建3D模型；新角色循环用人物预设 + 姿势预设
   const addFigure = () => {
+    const presetIndex = figures.length % PERSON_PRESETS.length;
+    const preset = PERSON_PRESETS[presetIndex];
     const newFigure: Figure3D = {
       id: `figure-${Date.now()}`,
-      name: `角色${figures.length + 1}`,
+      name: preset.name,
       image: '',
       x: 50, // 场景中心
       y: 50, // 场景中心
       scale: 2, // 默认缩放2倍
-      rotation: 0
+      rotation: 0,
+      presetId: preset.id,
+      poseId: FIGURE_POSES[0].id,
     };
     onUpdate({ figures: [...figures, newFigure] });
   };
@@ -867,6 +1496,30 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
 
   return (
     <div className="flex flex-col h-full min-h-0 gap-2 p-3 overflow-y-auto">
+      {/* 全屏退出浮层：仅在全屏态显示，点击或按 Esc 退出 */}
+      {isFullscreen ? (
+        <div className="fixed top-4 right-4 z-[10000] flex items-center gap-2 pointer-events-none">
+          <div className="px-3 py-1.5 rounded bg-black/70 text-white text-[12px] backdrop-blur-sm pointer-events-none">
+            全屏模式 · 按 Esc 或点右侧按钮退出
+          </div>
+          <button
+            type="button"
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              closeFullscreen();
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              closeFullscreen();
+            }}
+            className="px-3 py-1.5 rounded bg-pink-600 hover:bg-pink-500 text-white text-[12px] shadow-lg pointer-events-auto"
+            title="退出全屏 (Esc)"
+          >
+            退出全屏
+          </button>
+        </div>
+      ) : null}
+
       {/* 3D场景预览 - 默认显示网格地面 */}
       <div
         ref={containerRef}
@@ -926,6 +1579,183 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
             <PersonIcon size={10} /> {figures.length}个角色 | 点击选中后用轴操作
           </div>
         )}
+
+        {/* 构图辅助线：三分法 / 安全区（pointer-events: none 避免影响 3D 操作） */}
+        {(guides.ruleOfThirds || guides.safeArea) && (
+          <svg
+            className="absolute inset-0 w-full h-full pointer-events-none z-20"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            aria-hidden
+          >
+            {guides.ruleOfThirds && (
+              <g stroke="rgba(255,255,255,0.45)" strokeWidth="0.2" fill="none">
+                <line x1="33.333" y1="0" x2="33.333" y2="100" />
+                <line x1="66.666" y1="0" x2="66.666" y2="100" />
+                <line x1="0" y1="33.333" x2="100" y2="33.333" />
+                <line x1="0" y1="66.666" x2="100" y2="66.666" />
+              </g>
+            )}
+            {guides.safeArea && (
+              <g stroke="rgba(255,220,80,0.5)" strokeWidth="0.2" strokeDasharray="1.2 1.2" fill="none">
+                <rect x="5" y="5" width="90" height="90" />
+              </g>
+            )}
+          </svg>
+        )}
+      </div>
+
+      {/* 机位栏：5 档预设景别 + 自定义机位保存/应用 */}
+      <div className="border border-[#333] rounded-lg p-2 bg-[#1a1a1a] flex flex-col gap-1.5">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] text-gray-400">机位</span>
+          <div className="flex gap-1">
+            {CAMERA_SHOT_PRESETS.map((s) => {
+              const active = s.fov === currentView.fov && s.cameraDistance === currentView.cameraDistance;
+              return (
+                <button
+                  key={s.kind}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => applyShotPreset(s)}
+                  className={`py-0.5 px-1.5 rounded text-[10px] ${
+                    active
+                      ? 'bg-pink-600 text-white'
+                      : 'bg-[#333] hover:bg-[#444] text-gray-300'
+                  }`}
+                  title={`${s.name}：FOV ${s.fov}°、距离 ${s.cameraDistance}、出图建议 ${s.aspectRatio}`}
+                >
+                  {s.name}
+                </button>
+              );
+            })}
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={saveCurrentCamera}
+              className="py-0.5 px-1.5 rounded text-[10px] bg-emerald-700 hover:bg-emerald-600 text-white"
+              title="保存当前机位为自定义预设"
+            >
+              保存机位
+            </button>
+          </div>
+        </div>
+
+        {(node.cameras ?? []).length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {(node.cameras ?? []).map((c) => (
+              <div
+                key={c.id}
+                className={`group flex items-center gap-1 pl-2 pr-1 py-0.5 rounded text-[10px] cursor-pointer ${
+                  node.activeCameraId === c.id
+                    ? 'bg-pink-600/30 border border-pink-500/60 text-pink-200'
+                    : 'bg-[#252525] hover:bg-[#333] border border-transparent text-gray-300'
+                }`}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  applyCameraPreset(c);
+                }}
+              >
+                <input
+                  className="bg-transparent outline-none w-16 text-[10px]"
+                  value={c.name}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => renameCameraPreset(c.id, e.target.value)}
+                />
+                <span className="text-[9px] text-gray-500">
+                  {c.fov}°/{Math.round(c.cameraDistance)}
+                </span>
+                <button
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeCameraPreset(c.id);
+                  }}
+                  className="ml-1 text-red-400 hover:text-red-300 opacity-0 group-hover:opacity-100"
+                  title="删除机位"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      {/* 构图辅助 + AI 渲染 */}
+      <div className="border border-[#333] rounded-lg p-2 bg-[#1a1a1a] flex flex-col gap-1.5">
+        <div className="flex items-center justify-between flex-wrap gap-1">
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-gray-400 mr-1">构图</span>
+            {(
+              [
+                ['ruleOfThirds', '三分法'],
+                ['safeArea', '安全区'],
+                ['sightLine', '视线'],
+                ['axisLine', '轴线'],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => toggleGuide(key)}
+                className={`py-0.5 px-1.5 rounded text-[10px] ${
+                  guides[key] ? 'bg-pink-600 text-white' : 'bg-[#333] hover:bg-[#444] text-gray-300'
+                }`}
+                title={label}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={renderWithAI}
+            disabled={!hasBackgroundMedia}
+            className="py-0.5 px-2 rounded text-[10px] bg-gradient-to-r from-pink-600 to-fuchsia-600 hover:from-pink-500 hover:to-fuchsia-500 text-white flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+            title={
+              hasBackgroundMedia
+                ? '把当前机位 + 全景 + 站位打包成结构化 prompt，在右侧创建一个图生图节点'
+                : '请先导入或吸取全景背景图'
+            }
+          >
+            <SparklesIcon size={10} /> AI 渲染
+          </button>
+        </div>
+        {guides.sightLine && selectedFigure ? (
+          <p className="text-[10px] text-pink-300/80">
+            视线：选中角色「{selectedFigure.name}」将在 3D 场景中绘制朝向目标的视线（占位提示，后续接入）
+          </p>
+        ) : null}
+      </div>
+
+      {/* 全景环境墙选择：球形 / 照片墙 / 7字 / U字 / O字 / 圆圈墙 */}
+      <div className="border border-[#333] rounded-lg p-2 bg-[#1a1a1a] flex flex-col gap-1.5">
+        <div className="flex items-center justify-between flex-wrap gap-1">
+          <span className="text-[10px] text-gray-400">全景环境</span>
+          <div className="flex flex-wrap gap-1">
+            {ENVIRONMENT_OPTIONS.map((env) => {
+              const active = (node.environmentType ?? 'sphere') === env.id;
+              return (
+                <button
+                  key={env.id}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => onUpdate({ environmentType: env.id })}
+                  className={`py-0.5 px-1.5 rounded text-[10px] ${
+                    active
+                      ? 'bg-cyan-600 text-white'
+                      : 'bg-[#333] hover:bg-[#444] text-gray-300'
+                  }`}
+                  title={env.description}
+                >
+                  {env.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <p className="text-[10px] text-gray-500 leading-snug">
+          {ENVIRONMENT_OPTIONS.find((e) => e.id === (node.environmentType ?? 'sphere'))?.description}
+        </p>
       </div>
 
       {/* 控制按钮 */}
@@ -1123,6 +1953,32 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                 className="flex-1 accent-pink-500"
               />
               <span className="text-[10px] text-gray-400 w-10 text-right">{selectedFigure.rotation}°</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-[10px] text-gray-400 w-12">预设:</label>
+              <select
+                value={selectedFigure.presetId ?? PERSON_PRESETS[0].id}
+                onPointerDown={(e) => e.stopPropagation()}
+                onChange={(e) => updateFigure(selectedFigure.id, { presetId: e.target.value })}
+                className="flex-1 bg-[#252525] text-gray-200 text-[10px] px-2 py-1 rounded border border-[#333] focus:outline-none focus:border-pink-500"
+              >
+                {PERSON_PRESETS.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-[10px] text-gray-400 w-12">姿势:</label>
+              <select
+                value={selectedFigure.poseId ?? FIGURE_POSES[0].id}
+                onPointerDown={(e) => e.stopPropagation()}
+                onChange={(e) => updateFigure(selectedFigure.id, { poseId: e.target.value })}
+                className="flex-1 bg-[#252525] text-gray-200 text-[10px] px-2 py-1 rounded border border-[#333] focus:outline-none focus:border-pink-500"
+              >
+                {FIGURE_POSES.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
             </div>
           </div>
         )}
