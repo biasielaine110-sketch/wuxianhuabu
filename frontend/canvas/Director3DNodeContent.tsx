@@ -266,36 +266,75 @@ function buildRenderPrompt(
     `风格：电影感构图，主体清晰，光影统一，禁止出现 UI 与文字。`
   );
 }
+
+/** 在模块顶层：构造角色头顶的标签 sprite（不依赖任何组件内状态，buildFigureGroup 才可访问） */
+function buildFigureLabelSprite(labelText: string, color: string): THREE.Sprite | null {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = 'rgba(0,0,0,0.65)';
+  ctx.fillRect(6, 10, canvas.width - 12, canvas.height - 20);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(6, 10, canvas.width - 12, canvas.height - 20);
+  ctx.fillStyle = color;
+  ctx.font = 'bold 24px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(labelText, canvas.width / 2, canvas.height / 2);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(12, 3, 1);
+  sprite.position.set(0, 9.5, 0);
+  sprite.userData = { isFigureLabel: true, labelText };
+  return sprite;
+}
+
 export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onEyedropperSelect, onUpdate, onCreateImageNode, onCreateI2iSeed, onCopyToImage }: Director3DNodeContentProps) {
   const figurePalette = ['#ef4444', '#f59e0b', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899', '#84cc16', '#f97316', '#14b8a6'];
   const buildFigureColor = (index: number) => figurePalette[index % figurePalette.length];
-  const buildFigureLabelSprite = (labelText: string, color: string) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 64;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = 'rgba(0,0,0,0.65)';
-    ctx.fillRect(6, 10, canvas.width - 12, canvas.height - 20);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(6, 10, canvas.width - 12, canvas.height - 20);
-    ctx.fillStyle = color;
-    ctx.font = 'bold 24px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(labelText, canvas.width / 2, canvas.height / 2);
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false });
-    const sprite = new THREE.Sprite(material);
-    sprite.scale.set(12, 3, 1);
-    sprite.position.set(0, 9.5, 0);
-    sprite.userData = { isFigureLabel: true, labelText };
-    return sprite;
-  };
+
+  /**
+   * 当前相机机位（live）—— 拖动中由 onMouseMove / onWheel 实时更新。
+   * 使用 ref 而非 state 是为了避免每帧触发组件重渲染。
+   * node.yaw/pitch/fov/cameraDistance 仅在用户释放鼠标（onMouseUp）时同步写回。
+   * 初始值从 node 取（旧节点没存时 fallback 到默认）。
+   */
+  const liveViewRef = useRef<{
+    yaw: number;        // 0..360
+    pitch: number;      // -90..90
+    fov: number;
+    cameraDistance: number;
+  }>({
+    yaw: node.yaw ?? 0,
+    pitch: node.pitch ?? 0,
+    fov: node.fov ?? 60,
+    cameraDistance: node.cameraDistance ?? 60,
+  });
+  /** 同步标记：onMouseMove / onWheel 拖动中为 true，停止后再写回 node */
+  const viewDirtyRef = useRef(false);
+  /** wheel 节流 timer：连续滚动时合并写回 node 的频率 */
+  const wheelFlushTimerRef = useRef<number | null>(null);
+  /** props.onUpdate 实时引用：让 init effect 内的 listener 调到的总是最新 onUpdate */
+  const onUpdateRef = useRef(onUpdate);
+  onUpdateRef.current = onUpdate;
+  /** 把 live 视角同步到 node state（节流：至多 100ms 一次） */
+  const flushLiveViewToNode = useCallback(() => {
+    const v = liveViewRef.current;
+    onUpdateRef.current({
+      yaw: v.yaw,
+      pitch: v.pitch,
+      fov: v.fov,
+      cameraDistance: v.cameraDistance,
+    });
+    viewDirtyRef.current = false;
+  }, []);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -507,10 +546,29 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       let isPanning = false;
       let lastX = 0;
       let lastY = 0;
-      let theta = 0.3;
-      let phi = 0.8;
-      let cameraDistance = 60;
+      // 初始值由 liveViewRef.current 提供（来自 node state）
+      // 这样切换"机位预设"或"保存机位"都能拿到真实的"当前视角"
+      const initialLive = liveViewRef.current;
+      let theta = (initialLive.yaw * Math.PI) / 180;
+      let phi = Math.PI / 2 - (initialLive.pitch * Math.PI) / 180;
+      let cameraDistance = initialLive.cameraDistance;
       let cameraTarget = new THREE.Vector3(0, 0, 0);
+
+      /**
+       * 同步工作变量（theta/phi/cameraDistance）→ liveViewRef（不触发 render）
+       * 与"是否要把 live 写回 node state"解耦。
+       */
+      const syncLiveFromWork = () => {
+        const yawDeg = (((theta * 180) / Math.PI) % 360 + 360) % 360;
+        const pitchDeg = 90 - (phi * 180) / Math.PI;
+        liveViewRef.current = {
+          yaw: yawDeg,
+          pitch: pitchDeg,
+          fov: nodeRef.current.fov ?? 60,
+          cameraDistance,
+        };
+        viewDirtyRef.current = true;
+      };
 
       const updateCamera = () => {
         const fov = nodeRef.current.fov ?? 60;
@@ -610,6 +668,14 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
           const yawDeg = ((theta * 180 / Math.PI) % 360 + 360) % 360;
           const pitchDeg = 90 - (phi * 180 / Math.PI);
           setDisplayInfo({ yaw: yawDeg, pitch: pitchDeg, fov: nodeRef.current.fov ?? 60 });
+          // 同步到 live view（不触发 render）
+          liveViewRef.current = {
+            yaw: yawDeg,
+            pitch: pitchDeg,
+            fov: nodeRef.current.fov ?? 60,
+            cameraDistance,
+          };
+          viewDirtyRef.current = true;
         }
 
         lastX = e.clientX;
@@ -617,16 +683,32 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       };
 
       const onMouseUp = () => {
+        const wasInteracting = isDragging || isPanning;
         isDragging = false;
         isPanning = false;
         isDraggingFigureRef.current = false;
         draggingFigureIdRef.current = null;
+        // 释放鼠标时把 live 视角同步回 node state（让"保存机位"拿到正确值）
+        if (wasInteracting && viewDirtyRef.current) {
+          flushLiveViewToNode();
+        }
       };
 
       const onWheel = (e: WheelEvent) => {
         e.preventDefault();
         cameraDistance = Math.max(10, Math.min(200, cameraDistance + e.deltaY * 0.05));
         updateCamera();
+        // 同步到 live view（不触发 render）
+        liveViewRef.current = {
+          ...liveViewRef.current,
+          cameraDistance,
+        };
+        viewDirtyRef.current = true;
+        // wheel 没有"mouseup"事件，节流 100ms 写回 node
+        if (wheelFlushTimerRef.current) window.clearTimeout(wheelFlushTimerRef.current);
+        wheelFlushTimerRef.current = window.setTimeout(() => {
+          flushLiveViewToNode();
+        }, 100);
       };
 
       const onContextMenu = (e: Event) => {
@@ -1272,7 +1354,12 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
     setIsFullscreen(false);
   }, []);
 
-  // 全屏 effect：把已有 canvas 用 fixed 定位"覆盖"整个窗口、resize，再把机位/视线/轴线参考系的渲染坐标系也跟上
+  // 全屏 effect：
+  //   节点根容器存在 `overflow: hidden` / `transform: translate3d` 等"会创建新层叠上下文"的属性，
+  //   canvas 留在原 DOM 树时 position:fixed 是相对这些祖先而不是视口，导致"无法全屏最大化"。
+  //   修复：把 canvas 移出节点 DOM 树，挂到 document.body 上，定位 fixed;0 覆盖整个视口。
+  //   事件监听是绑在 dom 元素上的（mousedown/mousemove/wheel/keydown 等），
+  //   dom 节点的位置变化不影响这些监听。
   useEffect(() => {
     const renderer = rendererRef.current;
     const camera = cameraRef.current;
@@ -1282,7 +1369,8 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
     const dom = renderer.domElement;
     if (!dom) return;
 
-    // 记录原 size/样式，退出时恢复
+    // 记录原 size/样式/父节点，退出时恢复
+    const prevParent = dom.parentElement;
     const prevStyle = dom.getAttribute('style') ?? '';
     const prevWidth = dom.width;
     const prevHeight = dom.height;
@@ -1297,8 +1385,11 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         camera.updateProjectionMatrix();
         renderer.render(scene, camera);
       };
+      // 先把 canvas 挂到 body，避免被节点 transform 影响 fixed 定位
+      if (prevParent && dom.parentElement === prevParent) {
+        document.body.appendChild(dom);
+      }
       onResize();
-      // 用 fixed 定位把 canvas 覆盖整个窗口，保留节点内原 DOM 父子结构以免重新挂载触发 mousedown 等监听丢失
       dom.style.position = 'fixed';
       dom.style.top = '0';
       dom.style.left = '0';
@@ -1326,8 +1417,11 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         window.removeEventListener('resize', onResize);
       };
     } else {
-      // 退出：恢复原 size 和样式
+      // 退出：恢复 size + 样式 + 父节点
       dom.setAttribute('style', prevStyle);
+      if (prevParent && dom.parentElement !== prevParent) {
+        prevParent.appendChild(dom);
+      }
       renderer.setSize(prevWidth, prevHeight, false);
       camera.aspect = prevAspect;
       camera.updateProjectionMatrix();
@@ -1335,12 +1429,16 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
     }
   }, [isFullscreen, closeFullscreen]);
 
-  /** 当前机位参数（从节点上读，兼容旧节点没有 cameraDistance / cameraTarget） */
+  /**
+   * 当前机位参数。
+   * - 优先读 liveViewRef（拖动中最新值，"保存机位"用这个）
+   * - node 端只在用户停止拖动后才同步，所以渲染时 fallback 到 node 也是安全的
+   */
   const currentView = {
-    yaw: node.yaw ?? 0,
-    pitch: node.pitch ?? 0,
-    fov: node.fov ?? 60,
-    cameraDistance: node.cameraDistance ?? 60,
+    yaw: liveViewRef.current.yaw || (node.yaw ?? 0),
+    pitch: liveViewRef.current.pitch || (node.pitch ?? 0),
+    fov: liveViewRef.current.fov || (node.fov ?? 60),
+    cameraDistance: liveViewRef.current.cameraDistance || (node.cameraDistance ?? 60),
     cameraTarget: node.cameraTarget ?? { x: 0, y: 0, z: 0 },
   };
 
@@ -1354,6 +1452,14 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       cameraTarget: preset.cameraTarget,
     });
     setDisplayInfo({ yaw: preset.yaw, pitch: preset.pitch, fov: preset.fov });
+    // 同步到 live（让用户再旋转后保存也不会跳回旧视角）
+    liveViewRef.current = {
+      yaw: preset.yaw,
+      pitch: preset.pitch,
+      fov: preset.fov,
+      cameraDistance: preset.cameraDistance,
+    };
+    viewDirtyRef.current = false;
     onUpdate({
       yaw: preset.yaw,
       pitch: preset.pitch,
@@ -1369,17 +1475,30 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
     const target = { ...currentView, fov: preset.fov, cameraDistance: preset.cameraDistance };
     controlsRef.current?.applyCameraView(target);
     setDisplayInfo({ yaw: target.yaw, pitch: target.pitch, fov: target.fov });
+    // 同步到 live
+    liveViewRef.current = {
+      yaw: target.yaw,
+      pitch: target.pitch,
+      fov: target.fov,
+      cameraDistance: target.cameraDistance,
+    };
+    viewDirtyRef.current = false;
     onUpdate({ fov: target.fov, cameraDistance: target.cameraDistance });
   };
 
-  /** 把当前机位保存为自定义预设 */
+  /** 把当前机位保存为自定义预设（从 live view 读，永远是用户当前真实看到的视角） */
   const saveCurrentCamera = () => {
     const id = `cam-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const v = liveViewRef.current;
     const preset: CameraPreset = {
       id,
       name: `机位 ${((node.cameras ?? []).length + 1).toString().padStart(2, '0')}`,
       kind: 'custom',
-      ...currentView,
+      yaw: v.yaw,
+      pitch: v.pitch,
+      fov: v.fov,
+      cameraDistance: v.cameraDistance,
+      cameraTarget: node.cameraTarget ?? { x: 0, y: 0, z: 0 },
       createdAt: Date.now(),
     };
     onUpdate({
@@ -1844,8 +1963,8 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                   selectFigure(figure.id);
                 }}
               >
-                <div className="w-8 h-8 rounded border border-[#444] bg-gradient-to-br from-pink-500 to-purple-500 flex items-center justify-center">
-                  <PersonIcon size={16} className="text-white" />
+                <div className="w-8 h-8 rounded border border-[#444] bg-gradient-to-br from-pink-500 to-purple-500 flex items-center justify-center text-white">
+                  <PersonIcon size={16} />
                 </div>
                 <span className="flex-1 text-[10px] text-gray-300 truncate">{figure.name}</span>
 
