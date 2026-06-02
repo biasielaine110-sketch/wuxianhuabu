@@ -175,11 +175,32 @@ export default function AuditModeCanvas({
   // 局部重绘（支持同图多区域并行）
   const [inpaintSessions, setInpaintSessions] = useState<AuditInpaintSession[]>([]);
   const [activeInpaintSessionId, setActiveInpaintSessionId] = useState<string | null>(null);
+  const activeInpaintSessionIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeInpaintSessionIdRef.current = activeInpaintSessionId;
+  }, [activeInpaintSessionId]);
   const [inpaintRefPickSessionId, setInpaintRefPickSessionId] = useState<string | null>(null);
   const inpaintRefPickSessionIdRef = useRef<string | null>(null);
   useEffect(() => {
     inpaintRefPickSessionIdRef.current = inpaintRefPickSessionId;
   }, [inpaintRefPickSessionId]);
+  /** 局部重绘面板的「最近激活时间戳」：值越大 zIndex 越高（active 始终最大） */
+  const inpaintPanelZTickRef = useRef(0);
+  const inpaintPanelActivatedAtRef = useRef<Map<string, number>>(new Map());
+  const [inpaintPanelZTick, setInpaintPanelZTick] = useState(0);
+  const touchInpaintPanel = useCallback((sessionId: string) => {
+    inpaintPanelZTickRef.current += 1;
+    inpaintPanelActivatedAtRef.current.set(sessionId, inpaintPanelZTickRef.current);
+    setInpaintPanelZTick(inpaintPanelZTickRef.current);
+  }, []);
+  /** 关闭/删除会话时同步清理激活记录 */
+  useEffect(() => {
+    const known = new Set(inpaintSessions.map((s) => s.id));
+    const map = inpaintPanelActivatedAtRef.current;
+    for (const id of Array.from(map.keys())) {
+      if (!known.has(id)) map.delete(id);
+    }
+  }, [inpaintSessions]);
   const inpaintSessionsRef = useRef(inpaintSessions);
   useEffect(() => {
     inpaintSessionsRef.current = inpaintSessions;
@@ -587,6 +608,15 @@ export default function AuditModeCanvas({
           e.preventDefault();
           setCurrentTool('inpaint');
           return;
+        }
+        // X：切换当前 active 局部重绘会话的吸管拾取
+        if (e.code === 'KeyX') {
+          const activeId = activeInpaintSessionIdRef.current;
+          if (activeId) {
+            e.preventDefault();
+            setInpaintRefPickSessionId((prev) => (prev === activeId ? null : activeId));
+            return;
+          }
         }
       }
 
@@ -2032,10 +2062,14 @@ export default function AuditModeCanvas({
           );
         })}
 
-        {inpaintSessions.map((session, sessionIndex) => {
+        {inpaintSessions.map((session) => {
           if (!session.panelVisible || !session.region) return null;
           const { left, top, bottom } = normalizeCanvasRect(session.region);
           const gap = 4;
+          // zIndex：active 最高；其余按"最近一次激活时间"倒序
+          const isActive = activeInpaintSessionId === session.id;
+          const activatedAt = inpaintPanelActivatedAtRef.current.get(session.id) ?? 0;
+          const tier = (isActive ? 1_000_000 : 0) + activatedAt;
           return (
             <div
               key={`${session.id}-panel`}
@@ -2048,7 +2082,14 @@ export default function AuditModeCanvas({
                 maxWidth: AUDIT_INPAINT_PANEL_SHELL_WIDTH,
                 transform: `scale(${AUDIT_INPAINT_PANEL_CANVAS_SCALE})`,
                 transformOrigin: 'top left',
-                zIndex: 57 + sessionIndex,
+                zIndex: 57 + (tier % 1000),
+              }}
+              onPointerDownCapture={(e) => {
+                // 用 capture 阶段，textarea/按钮内部 stopPropagation 也会先经过此处
+                if (activeInpaintSessionId !== session.id) {
+                  setActiveInpaintSessionId(session.id);
+                }
+                touchInpaintPanel(session.id);
               }}
             >
               <AuditInpaintPanel
@@ -2089,7 +2130,7 @@ export default function AuditModeCanvas({
 
       {inpaintRefPickSessionId && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[70] pointer-events-none px-4 py-2 rounded-lg bg-cyan-950/90 border border-cyan-500/40 text-[11px] text-cyan-100 shadow-lg">
-          吸管模式：点击画布上的图片添加为局部重绘参考（Esc 退出）
+          吸管模式：点击画布上的图片添加为局部重绘参考（X 切换 / Esc 退出）
         </div>
       )}
 

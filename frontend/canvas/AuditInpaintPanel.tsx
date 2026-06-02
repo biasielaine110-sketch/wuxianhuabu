@@ -40,24 +40,8 @@ export interface AuditInpaintPanelProps {
 /** 画布坐标系下未 scale 前的面板宽度；与 AuditModeCanvas 中 scale 相乘后约 280px */
 export const AUDIT_INPAINT_PANEL_BASE_WIDTH = Math.round(280 / 3);
 export const AUDIT_INPAINT_PANEL_CANVAS_SCALE = 3;
-/** 面板外壳宽度（标题栏、参考图栏等与内容区等宽时的设计宽度） */
-export const AUDIT_INPAINT_PANEL_SHELL_WIDTH = AUDIT_INPAINT_PANEL_BASE_WIDTH * 7;
-/** 描述词 + 模型区相对设计尺寸的缩放（整体 70%） */
-export const AUDIT_INPAINT_PANEL_CONTENT_SCALE = 0.7;
-/** 描述词 + 模型区固定宽高比（宽:高 = 5:2） */
-export const AUDIT_INPAINT_PANEL_CONTENT_ASPECT_W = 5;
-export const AUDIT_INPAINT_PANEL_CONTENT_ASPECT_H = 2;
-/** 画布 scale(3) 后约 978×390px */
-export const AUDIT_INPAINT_PANEL_CONTENT_WIDTH = Math.round(
-  AUDIT_INPAINT_PANEL_BASE_WIDTH *
-    AUDIT_INPAINT_PANEL_CONTENT_ASPECT_W *
-    AUDIT_INPAINT_PANEL_CONTENT_SCALE
-);
-export const AUDIT_INPAINT_PANEL_CONTENT_HEIGHT = Math.round(
-  AUDIT_INPAINT_PANEL_BASE_WIDTH *
-    AUDIT_INPAINT_PANEL_CONTENT_ASPECT_H *
-    AUDIT_INPAINT_PANEL_CONTENT_SCALE
-);
+/** 面板外壳宽度（未 scale）。scale(3) 后约 960px，刚好容纳 4 列参数 + 描述 textarea */
+export const AUDIT_INPAINT_PANEL_SHELL_WIDTH = 320;
 
 /** 看图模式局部重绘：紧贴选区旁的内联控件（外层 scale 放大） */
 export function AuditInpaintPanel({
@@ -174,7 +158,7 @@ export function AuditInpaintPanel({
       }}
       onPointerDown={(e) => e.stopPropagation()}
     >
-      <div className="px-3 py-2 border-b border-[#333] bg-[#222] flex items-center justify-between gap-2">
+      <div className="px-2.5 py-1.5 border-b border-[#333] bg-[#222] flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0 shrink">
           <span className="text-[11px] text-purple-300 font-medium shrink-0">局部重绘</span>
           {onToggleContentPanel && (
@@ -193,29 +177,38 @@ export function AuditInpaintPanel({
       </div>
 
       {needsReconfirm ? (
-        <div className="px-3 pt-2 pb-2 border-b border-amber-500/30 bg-amber-500/10 text-[10px] text-amber-200 leading-snug">
+        <div className="px-2.5 py-1.5 border-b border-amber-500/30 bg-amber-500/10 text-[10px] text-amber-200 leading-snug">
           选区已变更或未确认，请拖动调整选区后点击选区旁「确认」，再执行重绘。
         </div>
       ) : previewBase64 ? (
-        <div className="px-3 pt-2 flex items-center gap-2 border-b border-[#2a2a2a] pb-2">
+        <div className="px-2.5 py-1.5 flex items-center gap-2 border-b border-[#2a2a2a]">
           <img
             src={base64ToImageDataUrl(previewBase64)}
             alt="选区"
-            className="w-14 h-14 object-contain rounded border border-[#444] bg-[#111]"
+            className="w-7 h-7 object-contain rounded border border-[#444] bg-[#111] shrink-0"
             draggable={false}
           />
-          <span className="text-[10px] text-gray-500 leading-snug">
-            选区已确认（{cropWidth}×{cropHeight}px），填写描述后点击面板右上角「重绘」
+          <span className="text-[10px] text-gray-500 leading-snug truncate">
+            选区已确认 {cropWidth}×{cropHeight}px，填写描述后点「重绘」
           </span>
         </div>
       ) : null}
 
-      <div className="px-3 pt-2 pb-1 border-b border-[#2a2a2a] flex flex-col gap-1.5">
+      <div className="px-2.5 py-1.5 border-b border-[#2a2a2a] flex flex-col gap-1">
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-[10px] text-gray-500 shrink-0">参考图</span>
           <span className="text-[10px] text-green-400 font-medium">
             {referenceImages.length}/{MAX_AUDIT_INPAINT_REFERENCES}
           </span>
+          {refPickActive ? (
+            <span className="text-[10px] text-cyan-300/90 leading-snug">
+              吸管已开启，点击画布拾取（X 切换 / Esc 退出）
+            </span>
+          ) : referenceImages.length === 0 ? (
+            <span className="text-[10px] text-gray-600 leading-snug truncate">
+              可选：吸管拾取风格/人物参考（即梦仅用选区图）
+            </span>
+          ) : null}
           {onToggleRefPick && (
             <button
               type="button"
@@ -227,8 +220,8 @@ export function AuditInpaintPanel({
               } disabled:opacity-40`}
               title={
                 refPickActive
-                  ? '点击画布上的其他图片添加参考（Esc 退出）'
-                  : '吸取画布上的图片作为参考'
+                  ? '点击画布上的其他图片添加参考（X 切换 / Esc 退出）'
+                  : '吸取画布上的图片作为参考（快捷键 X）'
               }
             >
               <EyedropperIcon size={10} />
@@ -236,19 +229,14 @@ export function AuditInpaintPanel({
             </button>
           )}
         </div>
-        {refPickActive ? (
-          <p className="text-[10px] text-cyan-300/90 leading-snug">
-            吸管已开启：点击看图画布上的图片添加为参考，可连续拾取多张。
-          </p>
-        ) : null}
         {referenceImages.length > 0 ? (
-          <div className="flex flex-wrap gap-1 pb-1">
+          <div className="flex flex-wrap gap-1">
             {referenceImages.map((ref, idx) => (
               <div key={ref.id} className="relative group">
                 <img
                   src={base64ToImageDataUrl(ref.base64)}
                   alt={`参考${idx + 1}`}
-                  className="w-9 h-9 object-cover rounded border border-[#444] bg-[#111]"
+                  className="w-7 h-7 object-cover rounded border border-[#444] bg-[#111]"
                   draggable={false}
                 />
                 <span className="absolute bottom-0 left-0 right-0 text-center text-[8px] bg-black/60 text-gray-300 rounded-b">
@@ -275,27 +263,13 @@ export function AuditInpaintPanel({
               </div>
             ))}
           </div>
-        ) : (
-          <p className="text-[10px] text-gray-600 leading-snug pb-1">
-            可选：用吸管拾取其他图片作为风格/人物参考（即梦模型仅使用选区图）。
-          </p>
-        )}
+        ) : null}
       </div>
 
-      <div
-        className="mx-auto p-3 flex flex-row gap-2 min-h-0 overflow-hidden box-border items-stretch"
-        style={{
-          width: AUDIT_INPAINT_PANEL_CONTENT_WIDTH,
-          height: AUDIT_INPAINT_PANEL_CONTENT_HEIGHT,
-          minWidth: AUDIT_INPAINT_PANEL_CONTENT_WIDTH,
-          maxWidth: AUDIT_INPAINT_PANEL_CONTENT_WIDTH,
-          minHeight: AUDIT_INPAINT_PANEL_CONTENT_HEIGHT,
-          maxHeight: AUDIT_INPAINT_PANEL_CONTENT_HEIGHT,
-          aspectRatio: '5 / 2',
-        }}
-      >
+      <div className="p-2.5 flex flex-col gap-1.5 min-h-0 overflow-hidden box-border">
         <textarea
-          className="flex-1 min-h-0 min-w-0 bg-[#222222] text-gray-200 p-2 rounded-lg border border-[#444] focus:outline-none focus:border-purple-500 transition-colors resize-none leading-relaxed text-[13px] cursor-text overflow-y-auto"
+          className="w-full bg-[#222222] text-gray-200 px-2 py-1.5 rounded border border-[#444] focus:outline-none focus:border-purple-500 transition-colors resize-none leading-snug text-[12px] cursor-text overflow-y-auto"
+          rows={3}
           placeholder="输入重绘描述，例如：将此处改为…（双击放大编辑）"
           value={prompt}
           onChange={(e) => onPromptChange(e.target.value)}
@@ -308,9 +282,9 @@ export function AuditInpaintPanel({
           }}
         />
 
-        <div className="shrink-0 flex flex-col justify-center gap-1 w-[108px] min-w-[108px]">
+        <div className="grid grid-cols-2 gap-1">
           <select
-            className="nodemodel-select bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-[11px] text-gray-200 outline-none focus:border-purple-500 w-full min-w-0"
+            className="nodemodel-select bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none focus:border-purple-500 min-w-0"
             value={model}
             onChange={(e) => {
               const m = e.target.value;
@@ -347,7 +321,7 @@ export function AuditInpaintPanel({
           </select>
 
           <select
-            className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-[11px] text-gray-200 outline-none focus:border-purple-500 w-full"
+            className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none focus:border-purple-500 min-w-0"
             value={aspectRatio}
             onChange={(e) => onAspectRatioChange(e.target.value)}
             disabled={isGenerating}
@@ -362,7 +336,7 @@ export function AuditInpaintPanel({
           </select>
 
           <select
-            className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-[11px] text-gray-200 outline-none focus:border-purple-500 w-full"
+            className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none focus:border-purple-500 min-w-0"
             value={resolution}
             onChange={(e) => onResolutionChange(e.target.value)}
             disabled={isGenerating}
@@ -372,9 +346,9 @@ export function AuditInpaintPanel({
             <option value="1k">1K</option>
           </select>
 
-          {showQuality && (
+          {showQuality ? (
             <select
-              className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-[11px] text-gray-200 outline-none focus:border-purple-500 w-full"
+              className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none focus:border-purple-500 min-w-0"
               value={quality}
               onChange={(e) => onQualityChange(e.target.value)}
               disabled={isGenerating}
@@ -384,19 +358,23 @@ export function AuditInpaintPanel({
               <option value="high">high</option>
               <option value="auto">auto</option>
             </select>
+          ) : (
+            <div className="bg-transparent" aria-hidden />
           )}
         </div>
       </div>
 
-      {error && (
-        <div className="mx-3 mb-2 shrink-0 max-h-12 overflow-y-auto text-[11px] text-red-300 bg-red-950/40 border border-red-800/50 rounded px-2 py-1 whitespace-pre-wrap">
+      {error ? (
+        <div className="mx-2.5 mb-2 shrink-0 max-h-10 overflow-y-auto text-[10px] text-red-300 bg-red-950/40 border border-red-800/50 rounded px-2 py-1 whitespace-pre-wrap">
           {error}
         </div>
-      )}
+      ) : null}
 
-      {isGenerating && (
-        <div className="mx-3 mb-2 shrink-0 text-[11px] text-purple-300 animate-pulse">正在重绘，请稍候…</div>
-      )}
+      {isGenerating ? (
+        <div className="mx-2.5 mb-2 shrink-0 text-[10px] text-purple-300 animate-pulse">
+          正在重绘，请稍候…
+        </div>
+      ) : null}
     </div>
   );
 }
