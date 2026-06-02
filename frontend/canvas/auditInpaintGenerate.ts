@@ -103,6 +103,7 @@ export async function runAuditInpaintGeneration(
     resolvedAspect,
     resolution,
     quality || 'high',
+    undefined,
     signal
   );
   return normalizeCanvasGenerationImages(images, { signal });

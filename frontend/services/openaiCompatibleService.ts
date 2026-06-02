@@ -2205,6 +2205,7 @@ async function manxueEditImage(
   aspectRatio: string,
   nodeResolution?: string,
   quality?: string,
+  pixelSize?: string,
   signal?: AbortSignal
 ): Promise<string[]> {
   if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
@@ -2219,7 +2220,7 @@ async function manxueEditImage(
   }
 
   // GPT 模型使用标准 OpenAI /images/edits（multipart 上传参考图）
-  const size = manxueAspectSize(aspectRatio);
+  const size = pixelSize || manxueAspectSize(aspectRatio);
   const imageBlobs: { blob: Blob; filename: string }[] = [];
   for (const img of base64Images.slice(0, 16)) {
     imageBlobs.push({
@@ -2298,6 +2299,7 @@ async function codesonlineEditImage(
   aspectRatio: string,
   nodeResolution?: string,
   quality?: string,
+  pixelSize?: string,
   signal?: AbortSignal
 ): Promise<string[]> {
   if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
@@ -2316,6 +2318,7 @@ async function codesonlineEditImage(
     'gpt-image-2',
     aspectRatio,
     quality,
+    pixelSize,
     signal
   );
 }
@@ -3028,11 +3031,14 @@ async function editImagesAtOpenAiCompatibleBase(
   resolvedEditModel: string,
   aspectRatio: string,
   quality?: string,
+  pixelSize?: string,
   signal?: AbortSignal
 ): Promise<string[]> {
   if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
-  const size = aspectRatioToOpenAiSize(aspectRatio, resolvedEditModel);
-  const enhancedPrompt = buildPromptWithDimensions(prompt, aspectRatio);
+  const size = pixelSize || aspectRatioToOpenAiSize(aspectRatio, resolvedEditModel);
+  const enhancedPrompt = pixelSize
+    ? prompt
+    : buildPromptWithDimensions(prompt, aspectRatio);
   const useCodesonlineCap = isCodesonlineOpenAiCompatBase(baseNorm);
   // 支持多图：将所有 base64 图片转换为 blob
   const imageBlobs: { blob: Blob; filename: string }[] = [];
@@ -3233,13 +3239,14 @@ export async function openAiEditImage(
   aspectRatio: string,
   nodeResolution?: string,
   quality?: string,
+  pixelSize?: string,
   signal?: AbortSignal
 ): Promise<string[]> {
   const rawModel = (modelName || '').trim();
   if (rawModel === 'gpt-image-2-junlan') {
     const jlKey = getJunlanSavedKey().trim();
     if (!jlKey) {
-      return openAiEditImage(base64Images, prompt, numberOfImages, 'gpt-image-2-codesonline', aspectRatio, nodeResolution, quality, signal);
+      return openAiEditImage(base64Images, prompt, numberOfImages, 'gpt-image-2-codesonline', aspectRatio, nodeResolution, quality, pixelSize, signal);
     }
     const jlBase = normalizeBaseUrl(getJunlanBaseUrl());
     try {
@@ -3252,12 +3259,13 @@ export async function openAiEditImage(
         'gpt-image-2',
         aspectRatio,
         quality,
+        pixelSize,
         signal
       );
     } catch (err) {
       // 君澜服务不可用（503 等）时回退 codesonline
       console.warn('[openAiEditImage] 君澜不可用，尝试回退:', err);
-      return openAiEditImage(base64Images, prompt, numberOfImages, 'gpt-image-2-codesonline', aspectRatio, nodeResolution, quality, signal);
+      return openAiEditImage(base64Images, prompt, numberOfImages, 'gpt-image-2-codesonline', aspectRatio, nodeResolution, quality, pixelSize, signal);
     }
   }
 
@@ -3275,6 +3283,7 @@ export async function openAiEditImage(
       aspectRatio,
       nodeResolution,
       quality,
+      pixelSize,
       signal
     );
   }
@@ -3287,12 +3296,13 @@ export async function openAiEditImage(
         '未配置满 eAPI（manxueapi.com）Key。请在「设置 → API」填写「满 e」API Key。'
       );
     }
-    return manxueEditImage(base64Images, prompt, numberOfImages, rawModel, aspectRatio, nodeResolution, quality, signal);
+    return manxueEditImage(base64Images, prompt, numberOfImages, rawModel, aspectRatio, nodeResolution, quality, pixelSize, signal);
   }
 
   if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
   if (isToApisHost(normalizeBaseUrl(getOpenAiBaseUrl()))) {
-    return toApisEditImage(base64Images, prompt, numberOfImages, modelName, aspectRatio, nodeResolution, signal);
+    const toApisPrompt = pixelSize ? `${prompt}\n\n（输出约 ${pixelSize} 像素，保持参考图宽高比）` : prompt;
+    return toApisEditImage(base64Images, toApisPrompt, numberOfImages, modelName, aspectRatio, nodeResolution, signal);
   }
   const apiKey = getOpenAiSavedKey();
   if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key。');
@@ -3307,6 +3317,7 @@ export async function openAiEditImage(
     model,
     aspectRatio,
     quality,
+    pixelSize,
     signal
   );
 }

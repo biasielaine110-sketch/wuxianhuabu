@@ -233,30 +233,33 @@ export const editExistingImage = async (
   aspectRatio: string = '1:1',
   outputResolution?: string,
   quality?: string,
+  pixelSize?: string,
   signal?: AbortSignal
 ): Promise<string[]> => {
   try {
     modelName = normalizeGcpVertexModelWhenDisabled(modelName);
 
     if (getAiProvider() === 'openai-compatible') {
-      return openAiEditImage(base64Images, prompt, numberOfImages, modelName, aspectRatio, outputResolution, quality, signal);
+      return openAiEditImage(base64Images, prompt, numberOfImages, modelName, aspectRatio, outputResolution, quality, pixelSize, signal);
     }
 
     const results: string[] = [];
     const model = modelName || 'gemini-3.1-flash-image-preview';
     if (model === 'gpt-image-2-junlan') {
-      return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, signal);
+      return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, pixelSize, signal);
     }
     if (model === 'gpt-image-2-codesonline') {
-      return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, signal);
+      return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, pixelSize, signal);
     }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {
       throw new Error(
         'GPT Image 2（ToAPIs）图生图需使用 OpenAI 兼容主通道与 ToAPIs。君澜 / codesonline 请选择对应节点模型并填写密钥。'
       );
     }
-    // 构建包含比例和尺寸要求的提示词
-    const enhancedPrompt = buildPromptWithDimensions(prompt, aspectRatio, outputResolution);
+    const sizeHint = pixelSize
+      ? ` IMPORTANT: Output image size must be ${pixelSize} pixels, matching reference aspect ratio.`
+      : '';
+    const enhancedPrompt = buildPromptWithDimensions(prompt, aspectRatio, outputResolution) + sizeHint;
 
     for (let i = 0; i < numberOfImages; i++) {
       const imageParts = base64Images.map(base64 => ({

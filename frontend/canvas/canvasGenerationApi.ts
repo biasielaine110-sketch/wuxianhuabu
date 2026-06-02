@@ -27,9 +27,10 @@ import {
   resolveSlotAudios,
 } from '../referenceSlots';
 import {
+  buildOriginalAspectPromptSuffix,
   isOriginalAspectRatio,
   loadImageDimensionsFromBase64,
-  resolveI2iGenerationAspectRatio,
+  resolveI2iGenerationAspect,
 } from './i2iAspectRatio';
 import { useCanvasStore } from '../stores/canvasStore';
 
@@ -130,11 +131,21 @@ export function createCanvasGenerationApi(
           const pickIndices = parseRefPickIndices(combined);
           const { base64s: imageInputs } = await resolveSlotImagesForIndices(slots, pickIndices);
           if (imageInputs.length > 0) imageUrl = imageInputs[0];
-          jimengI2iAspect = await resolveI2iGenerationAspectRatio(node.aspectRatio, imageInputs[0]);
+          const resolved = await resolveI2iGenerationAspect(
+            node.aspectRatio,
+            imageInputs[0],
+            node.resolution
+          );
+          jimengI2iAspect = resolved.aspectRatio;
           if (isOriginalAspectRatio(node.aspectRatio) && imageInputs[0]) {
-            const dims = await loadImageDimensionsFromBase64(imageInputs[0]);
-            jimengWidth = dims.width;
-            jimengHeight = dims.height;
+            if (resolved.sourceWidth && resolved.sourceHeight) {
+              jimengWidth = resolved.sourceWidth;
+              jimengHeight = resolved.sourceHeight;
+            } else {
+              const dims = await loadImageDimensionsFromBase64(imageInputs[0]);
+              jimengWidth = dims.width;
+              jimengHeight = dims.height;
+            }
           }
         }
 
@@ -206,18 +217,28 @@ export function createCanvasGenerationApi(
         const promptForModel = stripRefMarkers(finalPrompt2) || finalPrompt2;
         if (imageInputs.length === 0) throw new Error("请连接参考图片或视频节点，或使用 @R 引用有效参考槽位");
         if (!promptForModel) throw new Error("请输入编辑指令或连接文本节点");
-        const aspectRatio =
-          node.type === 'i2i'
-            ? await resolveI2iGenerationAspectRatio(node.aspectRatio, imageInputs[0])
-            : node.aspectRatio || '2:1';
+        let aspectRatio = node.aspectRatio || '2:1';
+        let pixelSize: string | undefined;
+        let promptForEdit = promptForModel;
+        if (node.type === 'i2i') {
+          const resolved = await resolveI2iGenerationAspect(
+            node.aspectRatio,
+            imageInputs[0],
+            node.resolution
+          );
+          aspectRatio = resolved.aspectRatio;
+          pixelSize = resolved.pixelSize;
+          promptForEdit = promptForModel + buildOriginalAspectPromptSuffix(resolved);
+        }
         base64DataArray = await editExistingImage(
           imageInputs,
-          promptForModel,
+          promptForEdit,
           node.imageCount || 1,
           node.model || defaultCanvasImageModel(),
           aspectRatio,
           node.resolution,
           node.quality,
+          pixelSize,
           ac.signal
         );
       }

@@ -621,7 +621,7 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
       aspectRatio:
         type === 'panoramaT2i'
           ? '2:1'
-          : type === 't2i' || type === 'i2i' || type === 'video' || type === 'gridSplit' || type === 'gridMerge'
+          : type === 'i2i' || type === 't2i' || type === 'video' || type === 'gridSplit' || type === 'gridMerge'
             ? '16:9'
             : '1:1',
       resolution: '2k',
