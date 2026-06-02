@@ -7,6 +7,7 @@ import type {
   GridMergeNode,
   Director3DNode,
   ChatNode,
+  Edge,
 } from '../types';
 import { GridSplitNodeContent } from './GridSplitNodeContent';
 import { GridMergeNodeContent } from './GridMergeNodeContent';
@@ -238,6 +239,32 @@ return (
               currentImageIndex: 0
             };
             addNodes([newNode]);
+          }}
+          onCreateI2iSeed={(seed) => {
+            const newId = `i2i-${Date.now()}`;
+            const newNode: CanvasNode = {
+              id: newId,
+              type: 'i2i',
+              x: seed.nodeX,
+              y: seed.nodeY,
+              width: 420,
+              height: 300,
+              prompt: seed.prompt,
+              images: [],
+              aspectRatio: seed.aspectRatio,
+              resolution: '2k',
+              imageCount: 1,
+              model: seed.model || defaultCanvasImageModel(),
+              viewMode: 'single',
+              currentImageIndex: 0,
+            };
+            // 用边把 director3d 节点的背景图作为 i2i 的第一张参考图
+            const newEdge: Edge = {
+              id: `edge-${Date.now()}`,
+              sourceId: node.id,
+              targetId: newId,
+            };
+            addNodes([newNode], { edges: [newEdge], selectIds: [newId] });
           }}
           onCopyToImage={() => s.handleCopyToImage(node.id)}
         />

@@ -69,7 +69,7 @@ export interface CompositionGuides {
 export interface Figure3D {
   id: string;
   name: string;
-  image: string; // 小人图片 base64
+  image: string; // 小人图片 / GLB 模型 base64
   x: number; // 在场景中的X位置 (0-100百分比)
   y: number; // 在场景中的Y位置 (0-100百分比)
   scale: number; // 缩放比例
@@ -78,6 +78,12 @@ export interface Figure3D {
   presetId?: string;
   /** 姿势 id（与 FIGURE_POSES 中某项对应），用于切换 pose */
   poseId?: string;
+  /**
+   * 模型来源：
+   *   - 'preset'（默认）：用 PERSON_PRESETS + FIGURE_POSES 几何构造的人偶
+   *   - 'glb'：用户上传的 .glb/.gltf 模型（存到 image 字段）
+   */
+  modelType?: 'preset' | 'glb';
 }
 
 /** 人物造型预设：head/torso/limbs/hair 配色 + 体型 + 风格 */

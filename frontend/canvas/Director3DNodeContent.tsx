@@ -1,4 +1,5 @@
 ﻿import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import * as THREE from 'three';
 import { devLog } from './devLog';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
@@ -11,6 +12,7 @@ import {
   getPersonPreset,
 } from './director3dPresets';
 import { createEnvironmentWall, disposeEnvironmentWall, type EnvironmentWall } from './director3dEnvironment';
+import { disposeFigureModel, loadFigureModelFromFile, normalizeFigureModel } from './director3dFigureModel';
 import {
   DeleteIcon,
   CopyIcon,
@@ -45,8 +47,17 @@ export interface Director3DNodeContentProps {
 /**
  * 创建角色 3D 组：基于 Figure3D 的人物预设 + 姿势预设构造可视化角色
  * 部位命名约定（用于 applyFigurePose 定位）：
- *   - 'head' / 'hair' / 'torso' / 'leftArm' / 'rightArm' / 'leftLeg' / 'rightLeg' / 'leftShoe' / 'rightShoe'
+ *   - 'head' / 'hair' / 'neck' / 'torso' / 'leftArm' / 'rightArm' / 'leftLeg' / 'rightLeg' / 'leftShoe' / 'rightShoe'
  * 体型：slim / standard / chubby / child 影响 torso 与 limb 的 width
+ *
+ * 几何细节（比 v1 更精细，更像"人"而不是 box 占位）：
+ *   - 头：sphere（带下巴点）
+ *   - 头发：球冠（不同 preset 长度 / 厚度不同）
+ *   - 脖子：短 cylinder
+ *   - 躯干：cylinder + 衣领（torus 段）+ 腰带
+ *   - 手臂：cylinder 上臂 + 肘 sphere + cylinder 前臂
+ *   - 腿：cylinder 大腿 + 膝 sphere + cylinder 小腿
+ *   - 鞋：box（鞋头略宽）
  */
 function buildFigureGroup(
   figure: Figure3D,
@@ -63,114 +74,219 @@ function buildFigureGroup(
 
   // 体型尺寸因子
   const bodyFactor =
-    preset.bodyType === 'slim' ? 0.85 : preset.bodyType === 'chubby' ? 1.18 : preset.bodyType === 'child' ? 0.7 : 1.0;
-  const headFactor = preset.bodyType === 'child' ? 0.8 : 1.0;
+    preset.bodyType === 'slim' ? 0.85 : preset.bodyType === 'chubby' ? 1.2 : preset.bodyType === 'child' ? 0.7 : 1.0;
+  const headFactor = preset.bodyType === 'child' ? 0.85 : 1.0;
 
-  // 各部位基础尺寸
-  const headR = 1.5 * headFactor;
-  const torsoW = 2.5 * bodyFactor;
-  const torsoH = 4;
-  const torsoD = 1.2;
-  const limbW = 0.6 * bodyFactor;
-  const armL = 3;
-  const legW = 0.8 * bodyFactor;
-  const legH = 3.5;
-  const shoeH = 0.5;
+  // 部位尺寸（缩放自 base 尺寸）
+  const headR = 1.0 * headFactor;
+  const neckH = 0.4;
+  const neckR = 0.35 * bodyFactor;
+  const torsoTopR = 0.95 * bodyFactor;
+  const torsoBottomR = 0.7 * bodyFactor;
+  const torsoH = 2.2;
+  const limbR = 0.28 * bodyFactor;
+  const upperArmL = 1.1;
+  const lowerArmL = 1.1;
+  const handR = 0.32 * bodyFactor;
+  const upperLegL = 1.5;
+  const lowerLegL = 1.4;
+  const footR = 0.35 * bodyFactor;
+  const shoeH = 0.4;
+  const shoeL = 1.2;
 
-  // 材质工厂：避免共享 material 时改一处影响全部
-  const matOf = (color: string, roughness = 0.55) =>
-    new THREE.MeshStandardMaterial({ color, roughness, metalness: 0.05, emissive: 0x000000 });
+  // 头发长度因子（不同 preset 头发长度不同）：长 / 短
+  const hairLengthFactor =
+    preset.id.includes('woman') || preset.id.includes('child') || preset.style === 'stylized'
+      ? 1.4
+      : 0.45;
 
-  // ===== 头（含头发） =====
-  const head = new THREE.Mesh(new THREE.SphereGeometry(headR, 24, 24), matOf(preset.skinColor));
-  head.position.y = 6.5 * headFactor;
+  // 材质工厂
+  const matOf = (color: string, roughness = 0.55, metalness = 0.05) =>
+    new THREE.MeshStandardMaterial({ color, roughness, metalness, emissive: 0x000000 });
+
+  const skinMat = matOf(preset.skinColor, 0.7, 0.0);
+  const topMat = matOf(preset.topColor, 0.6);
+  const bottomMat = matOf(preset.bottomColor, 0.7);
+  const hairMat = matOf(preset.hairColor, 0.7, 0.1);
+  const shoeMat = matOf(preset.shoeColor, 0.6, 0.1);
+  const collarMat = matOf(preset.topColor, 0.5);
+
+  // ===== 头 =====
+  const head = new THREE.Mesh(new THREE.SphereGeometry(headR, 24, 20), skinMat);
+  head.position.y = 6.4 * headFactor;
   head.userData = { figureId: figure.id, isFigurePart: true, partRole: 'head' };
   head.castShadow = true;
   group.add(head);
 
-  // 头发：半冠球壳，套在头上
-  const hairGeom = new THREE.SphereGeometry(headR * 1.05, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.55);
-  const hair = new THREE.Mesh(hairGeom, matOf(preset.hairColor, 0.7));
-  hair.position.y = 6.5 * headFactor;
+  // 头发：球冠，长度/厚度由 preset 决定
+  const hairGeom = new THREE.SphereGeometry(
+    headR * 1.06,
+    24,
+    16,
+    0,
+    Math.PI * 2,
+    0,
+    Math.PI * 0.55 * hairLengthFactor
+  );
+  const hair = new THREE.Mesh(hairGeom, hairMat);
+  hair.position.y = 6.4 * headFactor;
   hair.userData = { figureId: figure.id, isFigurePart: true, partRole: 'hair' };
   group.add(hair);
 
-  // ===== 躯干（上衣色） =====
+  // ===== 脖子 =====
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(neckR, neckR * 1.05, neckH, 14), skinMat);
+  neck.position.y = 5.7 * headFactor + neckH / 2;
+  neck.userData = { figureId: figure.id, isFigurePart: true, partRole: 'neck' };
+  group.add(neck);
+
+  // ===== 躯干（cylinder，Y 轴从上到下半径渐变） =====
   const torso = new THREE.Mesh(
-    new THREE.BoxGeometry(torsoW, torsoH, torsoD),
-    matOf(preset.topColor)
+    new THREE.CylinderGeometry(torsoTopR, torsoBottomR, torsoH, 18),
+    topMat
   );
-  torso.position.y = 3;
+  torso.position.y = 5.7 * headFactor + neckH + torsoH / 2;
   torso.userData = { figureId: figure.id, isFigurePart: true, partRole: 'torso' };
   torso.castShadow = true;
   group.add(torso);
 
-  // 腰（下装色）：box，比 torso 略小一点高度
-  const waist = new THREE.Mesh(
-    new THREE.BoxGeometry(torsoW * 0.95, 0.5, torsoD * 1.0),
-    matOf(preset.bottomColor)
+  // 衣领（torus 段，仅前面半圈，绕 Y 轴）
+  const collar = new THREE.Mesh(
+    new THREE.TorusGeometry(torsoTopR * 1.02, 0.15, 8, 16, Math.PI),
+    collarMat
   );
-  waist.position.y = 0.9;
-  waist.userData = { figureId: figure.id, isFigurePart: true, partRole: 'waist' };
-  group.add(waist);
+  collar.rotation.x = Math.PI / 2;
+  collar.rotation.z = Math.PI;
+  collar.position.y = 5.7 * headFactor + neckH + 0.15;
+  collar.userData = { figureId: figure.id, isFigurePart: true };
+  group.add(collar);
 
-  // ===== 手臂（以肩膀为旋转中心，pivot 用 group 包裹） =====
-  const armGeom = new THREE.BoxGeometry(limbW, armL, limbW);
+  // 腰带
+  const belt = new THREE.Mesh(
+    new THREE.CylinderGeometry(torsoBottomR * 1.02, torsoBottomR * 1.02, 0.18, 18),
+    matOf(preset.bottomColor, 0.4, 0.2)
+  );
+  belt.position.y = 5.7 * headFactor + neckH + torsoH - 0.3;
+  belt.userData = { figureId: figure.id, isFigurePart: true };
+  group.add(belt);
 
-  // 左臂
-  const leftArmPivot = new THREE.Group();
-  leftArmPivot.position.set(-torsoW / 2 - limbW / 2, 4.5, 0);
-  const leftArm = new THREE.Mesh(armGeom, matOf(preset.topColor));
-  leftArm.position.y = -armL / 2;
-  leftArm.userData = { figureId: figure.id, isFigurePart: true, partRole: 'leftArm' };
-  leftArm.castShadow = true;
-  leftArmPivot.add(leftArm);
-  leftArmPivot.userData = { partRole: 'leftArm' };
-  group.add(leftArmPivot);
+  // 肩膀（左右各一个 sphere 作为关节，更像人）
+  const shoulderR = 0.4 * bodyFactor;
+  const shoulderY = 5.7 * headFactor + neckH + torsoH * 0.85;
+  const leftShoulder = new THREE.Mesh(new THREE.SphereGeometry(shoulderR, 14, 12), topMat);
+  leftShoulder.position.set(-torsoTopR - 0.05, shoulderY, 0);
+  leftShoulder.userData = { figureId: figure.id, isFigurePart: true };
+  group.add(leftShoulder);
+  const rightShoulder = leftShoulder.clone();
+  rightShoulder.position.x = torsoTopR + 0.05;
+  group.add(rightShoulder);
 
-  // 右臂
-  const rightArmPivot = new THREE.Group();
-  rightArmPivot.position.set(torsoW / 2 + limbW / 2, 4.5, 0);
-  const rightArm = new THREE.Mesh(armGeom, matOf(preset.topColor));
-  rightArm.position.y = -armL / 2;
-  rightArm.userData = { figureId: figure.id, isFigurePart: true, partRole: 'rightArm' };
-  rightArm.castShadow = true;
-  rightArmPivot.add(rightArm);
-  rightArmPivot.userData = { partRole: 'rightArm' };
-  group.add(rightArmPivot);
+  // ===== 手臂（上臂 + 肘关节 + 前臂 + 手）=====
+  const buildArm = (side: 'left' | 'right', mirrorX: 1 | -1) => {
+    const armPivot = new THREE.Group();
+    armPivot.position.set(
+      mirrorX * (torsoTopR + 0.1),
+      shoulderY,
+      0
+    );
+    armPivot.userData = { partRole: side === 'left' ? 'leftArm' : 'rightArm' };
 
-  // ===== 腿（下装色） =====
-  const legGeom = new THREE.BoxGeometry(legW, legH, legW);
+    // 上臂 cylinder
+    const upper = new THREE.Mesh(
+      new THREE.CylinderGeometry(limbR, limbR * 0.95, upperArmL, 12),
+      topMat
+    );
+    upper.position.y = -upperArmL / 2;
+    upper.userData = { figureId: figure.id, isFigurePart: true };
+    upper.castShadow = true;
+    armPivot.add(upper);
 
-  const leftLegPivot = new THREE.Group();
-  leftLegPivot.position.set(-0.5 * bodyFactor, 0.65, 0);
-  const leftLeg = new THREE.Mesh(legGeom, matOf(preset.bottomColor));
-  leftLeg.position.y = -legH / 2;
-  leftLeg.userData = { figureId: figure.id, isFigurePart: true, partRole: 'leftLeg' };
-  leftLegPivot.add(leftLeg);
-  leftLegPivot.userData = { partRole: 'leftLeg' };
-  group.add(leftLegPivot);
+    // 肘关节 sphere
+    const elbow = new THREE.Mesh(new THREE.SphereGeometry(limbR * 1.05, 10, 10), skinMat);
+    elbow.position.y = -upperArmL;
+    elbow.userData = { figureId: figure.id, isFigurePart: true };
+    armPivot.add(elbow);
 
-  const rightLegPivot = new THREE.Group();
-  rightLegPivot.position.set(0.5 * bodyFactor, 0.65, 0);
-  const rightLeg = new THREE.Mesh(legGeom, matOf(preset.bottomColor));
-  rightLeg.position.y = -legH / 2;
-  rightLeg.userData = { figureId: figure.id, isFigurePart: true, partRole: 'rightLeg' };
-  rightLegPivot.add(rightLeg);
-  rightLegPivot.userData = { partRole: 'rightLeg' };
-  group.add(rightLegPivot);
+    // 前臂 cylinder（皮肤色，模拟手袖外露的小臂）
+    const lower = new THREE.Mesh(
+      new THREE.CylinderGeometry(limbR * 0.95, limbR * 0.9, lowerArmL, 12),
+      skinMat
+    );
+    lower.position.y = -upperArmL - lowerArmL / 2;
+    lower.userData = { figureId: figure.id, isFigurePart: true };
+    armPivot.add(lower);
 
-  // ===== 鞋（鞋色） =====
-  const shoeGeom = new THREE.BoxGeometry(legW * 1.1, shoeH, legW * 1.4);
-  const leftShoe = new THREE.Mesh(shoeGeom, matOf(preset.shoeColor, 0.75));
-  leftShoe.position.set(-0.5 * bodyFactor, -legH + shoeH / 2 + 0.05, legW * 0.2);
-  leftShoe.userData = { figureId: figure.id, isFigurePart: true, partRole: 'leftShoe' };
-  group.add(leftShoe);
+    // 手 sphere
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(handR, 10, 10), skinMat);
+    hand.position.y = -upperArmL - lowerArmL - handR * 0.4;
+    hand.userData = { figureId: figure.id, isFigurePart: true };
+    armPivot.add(hand);
 
-  const rightShoe = new THREE.Mesh(shoeGeom, matOf(preset.shoeColor, 0.75));
-  rightShoe.position.set(0.5 * bodyFactor, -legH + shoeH / 2 + 0.05, legW * 0.2);
-  rightShoe.userData = { figureId: figure.id, isFigurePart: true, partRole: 'rightShoe' };
-  group.add(rightShoe);
+    group.add(armPivot);
+  };
+  buildArm('left', -1);
+  buildArm('right', 1);
+
+  // 髋关节（左右各一）
+  const hipY = 5.7 * headFactor + neckH + torsoH;
+  const hipR = 0.4 * bodyFactor;
+  const leftHip = new THREE.Mesh(new THREE.SphereGeometry(hipR, 12, 10), bottomMat);
+  leftHip.position.set(-0.4 * bodyFactor, hipY, 0);
+  leftHip.userData = { figureId: figure.id, isFigurePart: true };
+  group.add(leftHip);
+  const rightHip = leftHip.clone();
+  rightHip.position.x = 0.4 * bodyFactor;
+  group.add(rightHip);
+
+  // ===== 腿（大腿 + 膝关节 + 小腿 + 脚） =====
+  const buildLeg = (side: 'leftLeg' | 'rightLeg', offsetX: number) => {
+    const legPivot = new THREE.Group();
+    legPivot.position.set(offsetX, hipY, 0);
+    legPivot.userData = { partRole: side };
+
+    // 大腿 cylinder
+    const upper = new THREE.Mesh(
+      new THREE.CylinderGeometry(limbR * 1.1, limbR * 1.0, upperLegL, 12),
+      bottomMat
+    );
+    upper.position.y = -upperLegL / 2;
+    upper.userData = { figureId: figure.id, isFigurePart: true };
+    upper.castShadow = true;
+    legPivot.add(upper);
+
+    // 膝关节 sphere
+    const knee = new THREE.Mesh(new THREE.SphereGeometry(limbR * 1.05, 10, 10), bottomMat);
+    knee.position.y = -upperLegL;
+    knee.userData = { figureId: figure.id, isFigurePart: true };
+    legPivot.add(knee);
+
+    // 小腿 cylinder（略细）
+    const lower = new THREE.Mesh(
+      new THREE.CylinderGeometry(limbR * 0.95, limbR * 0.8, lowerLegL, 12),
+      bottomMat
+    );
+    lower.position.y = -upperLegL - lowerLegL / 2;
+    lower.userData = { figureId: figure.id, isFigurePart: true };
+    legPivot.add(lower);
+
+    // 脚踝 sphere
+    const ankle = new THREE.Mesh(new THREE.SphereGeometry(footR, 10, 10), shoeMat);
+    ankle.position.y = -upperLegL - lowerLegL;
+    ankle.userData = { figureId: figure.id, isFigurePart: true };
+    legPivot.add(ankle);
+
+    // 鞋（box，从脚踝向前延伸）
+    const shoe = new THREE.Mesh(
+      new THREE.BoxGeometry(shoeH, 0.5, shoeL),
+      shoeMat
+    );
+    shoe.position.set(0, -upperLegL - lowerLegL - 0.05, shoeL * 0.3);
+    shoe.userData = { figureId: figure.id, isFigurePart: true };
+    legPivot.add(shoe);
+
+    group.add(legPivot);
+  };
+  buildLeg('leftLeg', -0.4 * bodyFactor);
+  buildLeg('rightLeg', 0.4 * bodyFactor);
 
   // 应用初始姿势
   applyFigurePose(group, pose);
@@ -296,6 +412,71 @@ function buildFigureLabelSprite(labelText: string, color: string): THREE.Sprite 
   return sprite;
 }
 
+/**
+ * 异步加载 GLB/GLTF 并替换 figureId 对应的占位 group。
+ * - base64 → Blob → File → GLTFLoader
+ * - 加载成功后 normalize（y=0、xz 居中、身高 ~7 单位）
+ * - 释放旧 group（占位），挂新 group
+ * - 若 figureId 已不在 figuresRef 中（用户已删），不挂载
+ */
+async function loadGlbFigureIntoGroup(
+  base64: string,
+  figureId: string,
+  scene: THREE.Scene,
+  placeholder: THREE.Group,
+  figuresRef: React.MutableRefObject<Map<string, THREE.Group>>,
+  figureRenderMetaRef: React.MutableRefObject<Map<string, { presetId: string; poseId: string }>>,
+  figure: Figure3D,
+  index: number,
+  labelText: string,
+  buildFigureColor: (i: number) => string
+): Promise<void> {
+  // base64 → Blob → File
+  const bin = atob(base64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  const blob = new Blob([arr], { type: 'model/gltf-binary' });
+  const file = new File([blob], 'figure.glb', { type: 'model/gltf-binary' });
+
+  const root = await loadFigureModelFromFile(file);
+  // 标 figureId
+  root.userData = { ...(root.userData || {}), figureId, isFigure: true, isGlb: true };
+  // 调整 root 的位置/旋转/缩放
+  root.rotation.y = (figure.rotation || 0) * Math.PI / 180;
+  root.scale.setScalar(figure.scale || 1);
+  const worldX = (figure.x / 100) * 1000 - 500;
+  const worldZ = (figure.y / 100) * 1000 - 500;
+  root.position.set(worldX, 0, worldZ);
+
+  // 加 label sprite
+  const accent = buildFigureColor(index);
+  const label = buildFigureLabelSprite(labelText, accent);
+  if (label) root.add(label);
+
+  // 替换占位：如果 figureId 还存在 figuresRef 且仍指向 placeholder
+  if (figuresRef.current.get(figureId) === placeholder) {
+    scene.remove(placeholder);
+    // 释放 placeholder 的 geometry/material
+    placeholder.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) {
+        obj.geometry?.dispose();
+        const m = obj.material;
+        if (Array.isArray(m)) m.forEach((mm) => mm.dispose());
+        else m?.dispose();
+      } else if (obj instanceof THREE.Sprite) {
+        const sm = obj.material as THREE.SpriteMaterial;
+        sm.map?.dispose();
+        sm.dispose();
+      }
+    });
+    scene.add(root);
+    figuresRef.current.set(figureId, root);
+  } else {
+    // 用户已经删了/切换了：直接 dispose 这个新加载的 root
+    disposeFigureModel(root);
+  }
+}
+
 export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onEyedropperSelect, onUpdate, onCreateImageNode, onCreateI2iSeed, onCopyToImage }: Director3DNodeContentProps) {
   const figurePalette = ['#ef4444', '#f59e0b', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899', '#84cc16', '#f97316', '#14b8a6'];
   const buildFigureColor = (index: number) => figurePalette[index % figurePalette.length];
@@ -359,6 +540,8 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
   const animationFrameRef = useRef<number>(0);
   const currentImageRef = useRef<string>('');
   const figuresRef = useRef<Map<string, THREE.Group>>(new Map());
+  /** 每个角色最近一次 build 时用的 presetId/poseId（用来检测是否需要重建） */
+  const figureRenderMetaRef = useRef<Map<string, { presetId: string; poseId: string }>>(new Map());
   const nodeRef = useRef(node);
   nodeRef.current = node; // 保持 ref 同步
   const [forceUpdateKey, setForceUpdateKey] = useState(0);
@@ -1066,12 +1249,28 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
     const currentFigureIds = new Set(currentFigures.map(f => f.id));
     console.log('当前figures列表:', Array.from(currentFigureIds));
 
-    // 删除不存在的角色
+    // 删除不存在的角色（同时释放 group 内的所有 geometry / material）
+    const disposeGroup = (group: THREE.Group) => {
+      group.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          obj.geometry?.dispose();
+          const m = obj.material;
+          if (Array.isArray(m)) m.forEach((mm) => mm.dispose());
+          else m?.dispose();
+        } else if (obj instanceof THREE.Sprite) {
+          const sm = obj.material as THREE.SpriteMaterial;
+          sm.map?.dispose();
+          sm.dispose();
+        }
+      });
+    };
     figuresRef.current.forEach((group, id) => {
       if (!currentFigureIds.has(id)) {
         console.log('删除角色:', id, '原因: 不在currentFigures中');
         scene.remove(group);
+        disposeGroup(group);
         figuresRef.current.delete(id);
+        figureRenderMetaRef.current.delete(id);
       }
     });
 
@@ -1081,61 +1280,92 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       const figureColor = new THREE.Color(buildFigureColor(index));
       const labelText = figure.name || `角色${index + 1}`;
 
-      if (figuresRef.current.has(figure.id)) {
-        // 检查是否正被TransformControls控制，如果是则跳过位置更新
-        const tc = transformControlsRef.current;
-        const controlledGroup = tc?.object as THREE.Group | undefined;
-        const isControlled = controlledGroup?.userData?.figureId === figure.id;
+      // 决定是否需要重建：preset 变化 / 姿势变化 → 完整 dispose 旧 group 后 buildFigureGroup
+      const prevMeta = figureRenderMetaRef.current.get(figure.id);
+      const targetPresetId = figure.presetId ?? PERSON_PRESETS[0].id;
+      const targetPoseId = figure.poseId ?? FIGURE_POSES[0].id;
+      const needRebuild = !prevMeta || prevMeta.presetId !== targetPresetId || prevMeta.poseId !== targetPoseId;
 
-        // 更新现有角色（但不在TransformControls控制时更新位置）
-        const group = figuresRef.current.get(figure.id)!;
-        if (!isControlled) {
-          group.rotation.y = (figure.rotation || 0) * Math.PI / 180;
-          group.scale.setScalar(figure.scale || 1);
+      if (figuresRef.current.has(figure.id) && needRebuild) {
+        // dispose 旧 group 后重建
+        const old = figuresRef.current.get(figure.id)!;
+        scene.remove(old);
+        disposeGroup(old);
+        figuresRef.current.delete(figure.id);
+      }
 
-          // 将网格坐标转换为世界坐标
-          const worldX = (figure.x / 100) * 1000 - 500;
-          const worldZ = (figure.y / 100) * 1000 - 500;
-          group.position.set(worldX, 0, worldZ);
+      if (!figuresRef.current.has(figure.id)) {
+        if (figure.modelType === 'glb' && figure.image) {
+          // GLB 模型：异步加载（base64 → Blob → GLTFLoader）
+          // 这里不能 await；用"先放一个临时占位 + 异步替换"的方式
+          const placeholder = buildFigureGroup(figure, index, labelText, buildFigureColor);
+          scene.add(placeholder);
+          figuresRef.current.set(figure.id, placeholder);
+          figureRenderMetaRef.current.set(figure.id, { presetId: targetPresetId, poseId: targetPoseId });
+          // 异步加载
+          loadGlbFigureIntoGroup(figure.image, figure.id, scene, placeholder, figuresRef, figureRenderMetaRef, figure, index, labelText, buildFigureColor).catch((err) => {
+            console.warn('[Director3D] GLB 加载失败，使用内置人偶占位:', err);
+          });
+        } else {
+          // 内置人偶
+          const group = buildFigureGroup(figure, index, labelText, buildFigureColor);
+          scene.add(group);
+          figuresRef.current.set(figure.id, group);
+          figureRenderMetaRef.current.set(figure.id, { presetId: targetPresetId, poseId: targetPoseId });
         }
+        return;
+      }
 
-        // 同步姿势：遍历已建好的部位 mesh，根据 figure.poseId 调整 rotation
-        const pose = getFigurePose(figure.poseId);
-        applyFigurePose(group, pose);
+      // 已有角色且无需重建 → 走"原地更新"路径
+      const group = figuresRef.current.get(figure.id)!;
 
-        // 同步选中态与 emissive（保留原配色，仅修改 emissive）
-        group.traverse((child) => {
-          if (child.userData?.isFigureLabel && child instanceof THREE.Sprite) {
-            // 标签随名字变化才重生成；这里保留旧 sprite，避免抖动
-            return;
-          }
-          if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial) {
-            if (selectedFigureId === figure.id) {
-              (child.material as THREE.MeshStandardMaterial).emissive.setHex(0x444444);
-            } else {
-              (child.material as THREE.MeshStandardMaterial).emissive.setHex(0x000000);
-            }
-          }
-        });
+      // 检查是否正被TransformControls控制，如果是则跳过位置更新
+      const tc = transformControlsRef.current;
+      const controlledGroup = tc?.object as THREE.Group | undefined;
+      const isControlled = controlledGroup?.userData?.figureId === figure.id;
 
-        // 同步标签文本：若 labelText 变化，重建 sprite
-        const existingLabel = group.children.find((c) => c.userData?.isFigureLabel) as THREE.Sprite | undefined;
-        const existingLabelText = (existingLabel?.userData as { labelText?: string } | undefined)?.labelText;
-        if (existingLabelText !== labelText) {
-          if (existingLabel) {
-            const mat = existingLabel.material as THREE.SpriteMaterial;
-            mat.map?.dispose();
-            mat.dispose();
-            group.remove(existingLabel);
-          }
-          const newLabel = buildFigureLabelSprite(labelText, `#${figureColor.getHexString()}`);
-          if (newLabel) group.add(newLabel);
+      if (!isControlled) {
+        group.rotation.y = (figure.rotation || 0) * Math.PI / 180;
+        group.scale.setScalar(figure.scale || 1);
+
+        // 将网格坐标转换为世界坐标
+        const worldX = (figure.x / 100) * 1000 - 500;
+        const worldZ = (figure.y / 100) * 1000 - 500;
+        group.position.set(worldX, 0, worldZ);
+      }
+
+      // 同步姿势（即使没 rebuild 也要把当前 poseId 应用上去）
+      const pose = getFigurePose(figure.poseId);
+      applyFigurePose(group, pose);
+      // 记录当前 meta，防止下次 effect 误判
+      figureRenderMetaRef.current.set(figure.id, { presetId: targetPresetId, poseId: targetPoseId });
+
+      // 同步选中态与 emissive（保留原配色，仅修改 emissive）
+      group.traverse((child) => {
+        if (child.userData?.isFigureLabel && child instanceof THREE.Sprite) {
+          return;
         }
-      } else {
-        // 创建新角色 —— 引用人物预设 + 姿势预设
-        const group = buildFigureGroup(figure, index, labelText, buildFigureColor);
-        scene.add(group);
-        figuresRef.current.set(figure.id, group);
+        if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial) {
+          if (selectedFigureId === figure.id) {
+            (child.material as THREE.MeshStandardMaterial).emissive.setHex(0x444444);
+          } else {
+            (child.material as THREE.MeshStandardMaterial).emissive.setHex(0x000000);
+          }
+        }
+      });
+
+      // 同步标签文本：若 labelText 变化，重建 sprite
+      const existingLabel = group.children.find((c) => c.userData?.isFigureLabel) as THREE.Sprite | undefined;
+      const existingLabelText = (existingLabel?.userData as { labelText?: string } | undefined)?.labelText;
+      if (existingLabelText !== labelText) {
+        if (existingLabel) {
+          const mat = existingLabel.material as THREE.SpriteMaterial;
+          mat.map?.dispose();
+          mat.dispose();
+          group.remove(existingLabel);
+        }
+        const newLabel = buildFigureLabelSprite(labelText, `#${figureColor.getHexString()}`);
+        if (newLabel) group.add(newLabel);
       }
     });
   }, [figures, selectedFigureId]);
@@ -1342,7 +1572,15 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
     setFullscreenCapture({ type: 'single', base64 });
   };
 
-  // 全屏查看
+  /**
+   * 全屏查看：双保险。
+   *   1. CSS 全屏：把 canvas 移出节点 DOM，挂到 document.documentElement 的专用容器，
+   *      用 fixed + 最大 z-index 覆盖整个视口；documentElement 不会被任何 transform 限制。
+   *   2. 原生全屏（如果环境支持 requestFullscreen）：让浏览器把该容器独占全屏，
+   *      彻底脱离任何外层 stacking context / overflow。
+   */
+  const fullscreenContainerRef = useRef<HTMLDivElement | null>(null);
+
   const openFullscreen = () => {
     if (!rendererRef.current || !sceneRef.current || !cameraRef.current) return;
     setFsFullscreenParams({ yaw: displayInfo.yaw, pitch: displayInfo.pitch, fov: displayInfo.fov });
@@ -1354,12 +1592,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
     setIsFullscreen(false);
   }, []);
 
-  // 全屏 effect：
-  //   节点根容器存在 `overflow: hidden` / `transform: translate3d` 等"会创建新层叠上下文"的属性，
-  //   canvas 留在原 DOM 树时 position:fixed 是相对这些祖先而不是视口，导致"无法全屏最大化"。
-  //   修复：把 canvas 移出节点 DOM 树，挂到 document.body 上，定位 fixed;0 覆盖整个视口。
-  //   事件监听是绑在 dom 元素上的（mousedown/mousemove/wheel/keydown 等），
-  //   dom 节点的位置变化不影响这些监听。
+  // 全屏 effect：管理 canvas 在"节点容器 / 全屏容器"之间的迁移
   useEffect(() => {
     const renderer = rendererRef.current;
     const camera = cameraRef.current;
@@ -1377,6 +1610,34 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
     const prevAspect = camera.aspect;
 
     if (isFullscreen) {
+      // 1) 创建/获取全屏容器，append 到 documentElement（比 body 更根级）
+      let fsContainer = fullscreenContainerRef.current;
+      if (!fsContainer) {
+        fsContainer = document.createElement('div');
+        fsContainer.setAttribute('data-director3d-fullscreen', 'true');
+        fsContainer.style.cssText = [
+          'position: fixed',
+          'inset: 0',
+          'width: 100vw',
+          'height: 100vh',
+          'z-index: 2147483647',  // 最大 int32
+          'background: #000',
+          'overflow: hidden',
+          'margin: 0',
+          'padding: 0',
+        ].join(';');
+        document.documentElement.appendChild(fsContainer);
+        fullscreenContainerRef.current = fsContainer;
+      } else if (!fsContainer.parentElement) {
+        document.documentElement.appendChild(fsContainer);
+      }
+      fsContainer.style.display = 'block';
+
+      // 2) 把 canvas 移入全屏容器
+      if (dom.parentElement !== fsContainer) {
+        fsContainer.appendChild(dom);
+      }
+
       const onResize = () => {
         const w = window.innerWidth;
         const h = window.innerHeight;
@@ -1385,22 +1646,37 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         camera.updateProjectionMatrix();
         renderer.render(scene, camera);
       };
-      // 先把 canvas 挂到 body，避免被节点 transform 影响 fixed 定位
-      if (prevParent && dom.parentElement === prevParent) {
-        document.body.appendChild(dom);
-      }
       onResize();
-      dom.style.position = 'fixed';
+      dom.style.position = 'absolute';
       dom.style.top = '0';
       dom.style.left = '0';
-      dom.style.width = '100vw';
-      dom.style.height = '100vh';
-      dom.style.zIndex = '9999';
+      dom.style.width = '100%';
+      dom.style.height = '100%';
       dom.style.borderRadius = '0';
       dom.style.cursor = 'grab';
-      // 允许 canvas 接收键盘事件（Esc 退出）
       dom.tabIndex = 0;
       dom.focus();
+
+      // 3) 尝试原生全屏（必须在 user gesture 内调用；这里是从点击进入，OK）
+      //    失败时降级到 CSS 全屏（已有 fixed 容器覆盖视口）
+      try {
+        const reqFs =
+          fsContainer.requestFullscreen ||
+          (fsContainer as any).webkitRequestFullscreen ||
+          (fsContainer as any).mozRequestFullScreen ||
+          (fsContainer as any).msRequestFullscreen;
+        if (reqFs) reqFs.call(fsContainer).catch(() => {});
+      } catch {
+        // 忽略：降级到 CSS 全屏
+      }
+
+      // 4) 原生全屏被浏览器主动退出时（比如用户按 Esc 退浏览器全屏）→ 同步 React 状态
+      const onFsChange = () => {
+        if (!document.fullscreenElement && isFullscreen) {
+          setIsFullscreen(false);
+        }
+      };
+      document.addEventListener('fullscreenchange', onFsChange);
 
       const onKey = (e: KeyboardEvent) => {
         if (e.key === 'Escape') {
@@ -1415,6 +1691,11 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       return () => {
         window.removeEventListener('keydown', onKey, true);
         window.removeEventListener('resize', onResize);
+        document.removeEventListener('fullscreenchange', onFsChange);
+        // 退出时主动退出原生全屏（如果还在的话）
+        if (document.fullscreenElement && document.exitFullscreen) {
+          try { document.exitFullscreen().catch(() => {}); } catch { /* ignore */ }
+        }
       };
     } else {
       // 退出：恢复 size + 样式 + 父节点
@@ -1422,12 +1703,26 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       if (prevParent && dom.parentElement !== prevParent) {
         prevParent.appendChild(dom);
       }
+      // 隐藏全屏容器（不立即 remove，留待组件 unmount 时清理）
+      if (fullscreenContainerRef.current) {
+        fullscreenContainerRef.current.style.display = 'none';
+      }
       renderer.setSize(prevWidth, prevHeight, false);
       camera.aspect = prevAspect;
       camera.updateProjectionMatrix();
       renderer.render(scene, camera);
     }
   }, [isFullscreen, closeFullscreen]);
+
+  // 组件 unmount 时清理全屏容器 DOM
+  useEffect(() => {
+    return () => {
+      if (fullscreenContainerRef.current) {
+        fullscreenContainerRef.current.remove();
+        fullscreenContainerRef.current = null;
+      }
+    };
+  }, []);
 
   /**
    * 当前机位参数。
@@ -1570,7 +1865,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
     });
   };
 
-  // 添加角色 - 直接创建3D模型；新角色循环用人物预设 + 姿势预设
+  // 添加角色 - 默认用内置人偶（modelType='preset'）；GLB 上传走单独入口
   const addFigure = () => {
     const presetIndex = figures.length % PERSON_PRESETS.length;
     const preset = PERSON_PRESETS[presetIndex];
@@ -1584,8 +1879,52 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       rotation: 0,
       presetId: preset.id,
       poseId: FIGURE_POSES[0].id,
+      modelType: 'preset',
     };
     onUpdate({ figures: [...figures, newFigure] });
+  };
+
+  // 上传 .glb / .gltf 作为角色模型
+  const addFigureFromGlbFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = String(ev.target?.result ?? '');
+      const base64 = dataUrl.split(',')[1] ?? '';
+      if (!base64) {
+        window.alert('读取 GLB 文件失败。');
+        return;
+      }
+      const newFigure: Figure3D = {
+        id: `figure-${Date.now()}`,
+        name: file.name.replace(/\.(glb|gltf)$/i, ''),
+        image: base64,
+        x: 50,
+        y: 50,
+        scale: 1.4,  // GLB 已 normalize 到 7 单位高，scale=1.4 ≈ 10 单位，与 preset scale=2 接近
+        rotation: 0,
+        modelType: 'glb',
+        // GLB 模型没有"姿势 / 预设"概念，填占位
+        presetId: PERSON_PRESETS[0].id,
+        poseId: FIGURE_POSES[0].id,
+      };
+      onUpdate({ figures: [...figures, newFigure] });
+    };
+    reader.onerror = () => {
+      window.alert('读取 GLB 文件失败。');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  /** 触发"上传 GLB" 隐藏 input */
+  const glbFileInputRef = useRef<HTMLInputElement>(null);
+  const onPickGlbFile = () => {
+    glbFileInputRef.current?.click();
+  };
+  const onGlbFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) addFigureFromGlbFile(file);
+    // 允许同名再次上传
+    e.target.value = '';
   };
 
   // 选择小人
@@ -1613,11 +1952,10 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
 
   const selectedFigure = figures.find(f => f.id === selectedFigureId);
 
-  return (
-    <div className="flex flex-col h-full min-h-0 gap-2 p-3 overflow-y-auto">
-      {/* 全屏退出浮层：仅在全屏态显示，点击或按 Esc 退出 */}
-      {isFullscreen ? (
-        <div className="fixed top-4 right-4 z-[10000] flex items-center gap-2 pointer-events-none">
+  // 全屏浮层：用 portal 渲染到 documentElement 下的全屏容器内（不依赖节点 React 树）
+  const fullscreenOverlay = isFullscreen && fullscreenContainerRef.current
+    ? createPortal(
+        <div className="absolute top-4 right-4 z-[10] flex items-center gap-2 pointer-events-none">
           <div className="px-3 py-1.5 rounded bg-black/70 text-white text-[12px] backdrop-blur-sm pointer-events-none">
             全屏模式 · 按 Esc 或点右侧按钮退出
           </div>
@@ -1636,8 +1974,14 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
           >
             退出全屏
           </button>
-        </div>
-      ) : null}
+        </div>,
+        fullscreenContainerRef.current
+      )
+    : null;
+
+  return (
+    <div className="flex flex-col h-full min-h-0 gap-2 p-3 overflow-y-auto">
+      {fullscreenOverlay}
 
       {/* 3D场景预览 - 默认显示网格地面 */}
       <div
@@ -1938,39 +2282,58 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
 
       {/* 小人管理区 */}
       <div className="border border-[#333] rounded-lg p-2 bg-[#1a1a1a]">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-2 gap-1">
           <span className="text-xs text-gray-300 font-medium flex items-center gap-1">
             <PersonIcon size={12} /> 角色管理 ({figures.length})
           </span>
-          <button
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={addFigure}
-            className="py-1 px-2 rounded text-[10px] bg-pink-600 hover:bg-pink-500 text-white flex items-center gap-1"
-          >
-            <PlusIcon size={10} /> 添加角色
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={addFigure}
+              className="py-1 px-2 rounded text-[10px] bg-pink-600 hover:bg-pink-500 text-white flex items-center gap-1"
+              title="添加内置人物预设"
+            >
+              <PlusIcon size={10} /> 角色
+            </button>
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={onPickGlbFile}
+              className="py-1 px-2 rounded text-[10px] bg-cyan-700 hover:bg-cyan-600 text-white flex items-center gap-1"
+              title="上传 .glb / .gltf 自定义 3D 模型"
+            >
+              <ImageIcon size={10} /> GLB
+            </button>
+            <input
+              ref={glbFileInputRef}
+              type="file"
+              accept=".glb,.gltf,model/gltf-binary,model/gltf+json"
+              style={{ display: 'none' }}
+              onChange={onGlbFileChange}
+            />
+          </div>
         </div>
 
         {/* 角色列表 */}
         {figures.length > 0 ? (
           <div className="space-y-1 max-h-32 overflow-y-auto">
-            {figures.map(figure => (
-              <div
-                key={figure.id}
-                className={`flex items-center gap-2 p-1.5 rounded cursor-pointer ${selectedFigureId === figure.id ? 'bg-pink-600/30 border border-pink-500/50' : 'bg-[#252525] hover:bg-[#333]'}`}
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                  selectFigure(figure.id);
-                }}
-              >
-                <div className="w-8 h-8 rounded border border-[#444] bg-gradient-to-br from-pink-500 to-purple-500 flex items-center justify-center text-white">
-                  <PersonIcon size={16} />
-                </div>
-                <span className="flex-1 text-[10px] text-gray-300 truncate">{figure.name}</span>
+            {figures.map(figure => {
+              const isSelected = selectedFigureId === figure.id;
+              return (
+                <div
+                  key={figure.id}
+                  className={`group flex items-center gap-2 p-1.5 rounded cursor-pointer ${isSelected ? 'bg-pink-600/30 border border-pink-500/50' : 'bg-[#252525] hover:bg-[#333]'}`}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    selectFigure(figure.id);
+                  }}
+                >
+                  <div className="w-8 h-8 rounded border border-[#444] bg-gradient-to-br from-pink-500 to-purple-500 flex items-center justify-center text-white">
+                    <PersonIcon size={16} />
+                  </div>
+                  <span className="flex-1 text-[10px] text-gray-300 truncate">{figure.name}</span>
 
-                {/* 选中角色的控制按钮 */}
-                {selectedFigureId === figure.id && (
-                  <div className="flex items-center gap-1">
+                  {/* 操作按钮：选中时一直显示，否则 hover 时显示 */}
+                  <div className={`flex items-center gap-1 ${isSelected ? '' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
                     <button
                       onPointerDown={(e) => {
                         e.stopPropagation();
@@ -2022,9 +2385,9 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                       <DeleteIcon size={14} />
                     </button>
                   </div>
-                )}
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </div>
         ) : (
           <div className="text-[10px] text-gray-500 text-center py-2">
