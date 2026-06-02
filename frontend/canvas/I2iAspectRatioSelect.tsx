@@ -6,7 +6,7 @@ export type I2iAspectRatioSelectProps = {
   onChange: (aspectRatio: string) => void;
 };
 
-/** 图生图节点内画幅选择（原图尺寸 / 16:9 / 9:16） */
+/** 图生图节点内画幅选择（原图尺寸 / 1:1 / 16:9 / 9:16 / 21:9 / 4:3 / 3:4） */
 export function I2iAspectRatioSelect({ aspectRatio, onChange }: I2iAspectRatioSelectProps) {
   const value = aspectRatio || '16:9';
 
@@ -22,8 +22,12 @@ export function I2iAspectRatioSelect({ aspectRatio, onChange }: I2iAspectRatioSe
         onChange={(e) => onChange(e.target.value)}
       >
         <option value={I2I_ASPECT_RATIO_ORIGINAL}>原图尺寸</option>
+        <option value="1:1">1:1</option>
         <option value="16:9">16:9</option>
         <option value="9:16">9:16</option>
+        <option value="21:9">21:9</option>
+        <option value="4:3">4:3</option>
+        <option value="3:4">3:4</option>
       </select>
     </div>
   );
