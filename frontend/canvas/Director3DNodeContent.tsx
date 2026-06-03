@@ -2257,7 +2257,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
   const fullscreenOverlay = isFullscreen && fullscreenContainerRef.current
     ? createPortal(
         <div className="absolute top-4 right-4 z-[10] flex items-center gap-2 pointer-events-none">
-          <div className="px-3 py-1.5 rounded bg-black/70 text-white text-[12px] backdrop-blur-sm pointer-events-none">
+          <div className="px-3 py-1.5 rounded bg-black/70 text-white text-[18px] backdrop-blur-sm pointer-events-none">
             全屏模式 · 按 Esc 或点右侧按钮退出
           </div>
           <button
@@ -2270,7 +2270,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
               e.stopPropagation();
               closeFullscreen();
             }}
-            className="px-3 py-1.5 rounded bg-pink-600 hover:bg-pink-500 text-white text-[12px] shadow-lg pointer-events-auto"
+            className="px-3 py-1.5 rounded bg-pink-600 hover:bg-pink-500 text-white text-[18px] shadow-lg pointer-events-auto"
             title="退出全屏 (Esc)"
           >
             退出全屏
@@ -2292,12 +2292,12 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         onPointerDown={(e) => e.stopPropagation()}
       >
         {/* 视角指示器 */}
-        <div className="absolute top-2 left-2 px-2 py-1 bg-black/60 rounded text-[10px] text-white backdrop-blur-sm z-30 pointer-events-none flex items-center gap-1">
+        <div className="absolute top-2 left-2 px-2 py-1 bg-black/60 rounded text-[15px] text-white backdrop-blur-sm z-30 pointer-events-none flex items-center gap-1">
           <ViewIcon size={10} /> 视角: {displayInfo.yaw.toFixed(0)}° / {displayInfo.pitch.toFixed(0)}°
         </div>
 
         {/* 操作提示 */}
-        <div className="absolute top-2 right-2 px-2 py-1 bg-black/60 rounded text-[10px] text-gray-300 backdrop-blur-sm z-30 pointer-events-none flex flex-col items-end gap-1">
+        <div className="absolute top-2 right-2 px-2 py-1 bg-black/60 rounded text-[15px] text-gray-300 backdrop-blur-sm z-30 pointer-events-none flex flex-col items-end gap-1">
           <span>左键旋转 | 右键平移 | 滚轮缩放</span>
           {selectedFigureId && (
             <span className="text-yellow-400">W移动 | E旋转 | R缩放 | H归位 | Del删除</span>
@@ -2306,21 +2306,21 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
           <div className="flex gap-1">
             <button
               onPointerDown={(e) => { e.stopPropagation(); setTransformMode('translate'); }}
-              className={`pointer-events-auto px-1.5 py-0.5 rounded text-[9px] ${transformMode === 'translate' ? 'bg-pink-600 text-white' : 'bg-[#444] text-gray-300 hover:bg-[#555]'}`}
+              className={`pointer-events-auto px-1.5 py-0.5 rounded text-[14px] ${transformMode === 'translate' ? 'bg-pink-600 text-white' : 'bg-[#444] text-gray-300 hover:bg-[#555]'}`}
               title="移动模式"
             >
               移动
             </button>
             <button
               onPointerDown={(e) => { e.stopPropagation(); setTransformMode('rotate'); }}
-              className={`pointer-events-auto px-1.5 py-0.5 rounded text-[9px] ${transformMode === 'rotate' ? 'bg-pink-600 text-white' : 'bg-[#444] text-gray-300 hover:bg-[#555]'}`}
+              className={`pointer-events-auto px-1.5 py-0.5 rounded text-[14px] ${transformMode === 'rotate' ? 'bg-pink-600 text-white' : 'bg-[#444] text-gray-300 hover:bg-[#555]'}`}
               title="旋转模式"
             >
               旋转
             </button>
             <button
               onPointerDown={(e) => { e.stopPropagation(); setTransformMode('scale'); }}
-              className={`pointer-events-auto px-1.5 py-0.5 rounded text-[9px] ${transformMode === 'scale' ? 'bg-pink-600 text-white' : 'bg-[#444] text-gray-300 hover:bg-[#555]'}`}
+              className={`pointer-events-auto px-1.5 py-0.5 rounded text-[14px] ${transformMode === 'scale' ? 'bg-pink-600 text-white' : 'bg-[#444] text-gray-300 hover:bg-[#555]'}`}
               title="缩放模式"
             >
               缩放
@@ -2339,7 +2339,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
 
         {/* 角色数量提示 */}
         {figures.length > 0 && (
-          <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/60 rounded text-[10px] text-pink-300 backdrop-blur-sm z-30 pointer-events-none flex items-center gap-1">
+          <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/60 rounded text-[15px] text-pink-300 backdrop-blur-sm z-30 pointer-events-none flex items-center gap-1">
             <PersonIcon size={10} /> {figures.length}个角色 | 点击选中后用轴操作
           </div>
         )}
@@ -2372,7 +2372,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       {/* 机位栏：5 档预设景别 + 自定义机位保存/应用 */}
       <div className="border border-[#333] rounded-lg p-2 bg-[#1a1a1a] flex flex-col gap-1.5">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] text-gray-400">机位</span>
+          <span className="text-[15px] text-gray-400">机位</span>
           <div className="flex gap-1">
             {CAMERA_SHOT_PRESETS.map((s) => {
               const active = s.fov === currentView.fov && s.cameraDistance === currentView.cameraDistance;
@@ -2381,7 +2381,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                   key={s.kind}
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => applyShotPreset(s)}
-                  className={`py-0.5 px-1.5 rounded text-[10px] ${
+                  className={`py-0.5 px-1.5 rounded text-[15px] ${
                     active
                       ? 'bg-pink-600 text-white'
                       : 'bg-[#333] hover:bg-[#444] text-gray-300'
@@ -2395,7 +2395,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
             <button
               onPointerDown={(e) => e.stopPropagation()}
               onClick={saveCurrentCamera}
-              className="py-0.5 px-1.5 rounded text-[10px] bg-emerald-700 hover:bg-emerald-600 text-white"
+              className="py-0.5 px-1.5 rounded text-[15px] bg-emerald-700 hover:bg-emerald-600 text-white"
               title="保存当前机位为自定义预设"
             >
               保存机位
@@ -2408,7 +2408,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
             {(node.cameras ?? []).map((c) => (
               <div
                 key={c.id}
-                className={`group flex items-center gap-1 pl-2 pr-1 py-0.5 rounded text-[10px] cursor-pointer ${
+                className={`group flex items-center gap-1 pl-2 pr-1 py-0.5 rounded text-[15px] cursor-pointer ${
                   node.activeCameraId === c.id
                     ? 'bg-pink-600/30 border border-pink-500/60 text-pink-200'
                     : 'bg-[#252525] hover:bg-[#333] border border-transparent text-gray-300'
@@ -2419,13 +2419,13 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                 }}
               >
                 <input
-                  className="bg-transparent outline-none w-16 text-[10px]"
+                  className="bg-transparent outline-none w-16 text-[15px]"
                   value={c.name}
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => e.stopPropagation()}
                   onChange={(e) => renameCameraPreset(c.id, e.target.value)}
                 />
-                <span className="text-[9px] text-gray-500">
+                <span className="text-[14px] text-gray-500">
                   {c.fov}°/{Math.round(c.cameraDistance)}
                 </span>
                 <button
@@ -2449,7 +2449,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       <div className="border border-[#333] rounded-lg p-2 bg-[#1a1a1a] flex flex-col gap-1.5">
         <div className="flex items-center justify-between flex-wrap gap-1">
           <div className="flex items-center gap-1">
-            <span className="text-[10px] text-gray-400 mr-1">构图</span>
+            <span className="text-[15px] text-gray-400 mr-1">构图</span>
             {(
               [
                 ['ruleOfThirds', '三分法'],
@@ -2462,7 +2462,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                 key={key}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={() => toggleGuide(key)}
-                className={`py-0.5 px-1.5 rounded text-[10px] ${
+                className={`py-0.5 px-1.5 rounded text-[15px] ${
                   guides[key] ? 'bg-pink-600 text-white' : 'bg-[#333] hover:bg-[#444] text-gray-300'
                 }`}
                 title={label}
@@ -2475,7 +2475,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
             onPointerDown={(e) => e.stopPropagation()}
             onClick={renderWithAI}
             disabled={!hasBackgroundMedia}
-            className="py-0.5 px-2 rounded text-[10px] bg-gradient-to-r from-pink-600 to-fuchsia-600 hover:from-pink-500 hover:to-fuchsia-500 text-white flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="py-0.5 px-2 rounded text-[15px] bg-gradient-to-r from-pink-600 to-fuchsia-600 hover:from-pink-500 hover:to-fuchsia-500 text-white flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
             title={
               hasBackgroundMedia
                 ? '把当前机位 + 全景 + 站位打包成结构化 prompt，在右侧创建一个图生图节点'
@@ -2486,7 +2486,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
           </button>
         </div>
         {guides.sightLine && selectedFigure ? (
-          <p className="text-[10px] text-pink-300/80">
+          <p className="text-[15px] text-pink-300/80">
             视线：选中角色「{selectedFigure.name}」将在 3D 场景中绘制朝向目标的视线（占位提示，后续接入）
           </p>
         ) : null}
@@ -2495,7 +2495,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       {/* 全景环境墙选择：球形 / 照片墙 / 7字 / U字 / O字 / 圆圈墙 */}
       <div className="border border-[#333] rounded-lg p-2 bg-[#1a1a1a] flex flex-col gap-1.5">
         <div className="flex items-center justify-between flex-wrap gap-1">
-          <span className="text-[10px] text-gray-400">全景环境</span>
+          <span className="text-[15px] text-gray-400">全景环境</span>
           <div className="flex flex-wrap gap-1">
             {ENVIRONMENT_OPTIONS.map((env) => {
               const active = (node.environmentType ?? 'sphere') === env.id;
@@ -2504,7 +2504,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                   key={env.id}
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => onUpdate({ environmentType: env.id })}
-                  className={`py-0.5 px-1.5 rounded text-[10px] ${
+                  className={`py-0.5 px-1.5 rounded text-[15px] ${
                     active
                       ? 'bg-cyan-600 text-white'
                       : 'bg-[#333] hover:bg-[#444] text-gray-300'
@@ -2517,7 +2517,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
             })}
           </div>
         </div>
-        <p className="text-[10px] text-gray-500 leading-snug">
+        <p className="text-[15px] text-gray-500 leading-snug">
           {ENVIRONMENT_OPTIONS.find((e) => e.id === (node.environmentType ?? 'sphere'))?.description}
         </p>
       </div>
@@ -2526,7 +2526,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       <div className="flex gap-1">
         <button
           onPointerDown={(e) => { e.stopPropagation(); onEyedropperSelect(); }}
-          className={`py-1 px-2 rounded text-[10px] flex items-center gap-1 ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600 text-white' : 'bg-cyan-700 hover:bg-cyan-600 text-white'}`}
+          className={`py-1 px-2 rounded text-[15px] flex items-center gap-1 ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600 text-white' : 'bg-cyan-700 hover:bg-cyan-600 text-white'}`}
           title={eyedropperTargetNodeId === node.id ? "取消吸取" : "吸取背景图片"}
         >
           <EyedropperIcon size={10} /> 吸管
@@ -2550,7 +2550,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
             };
             input.click();
           }}
-          className="flex-1 py-1 px-2 rounded text-[10px] bg-[#333] hover:bg-[#444] text-gray-300 flex items-center justify-center gap-1"
+          className="flex-1 py-1 px-2 rounded text-[15px] bg-[#333] hover:bg-[#444] text-gray-300 flex items-center justify-center gap-1"
         >
           <ImageIcon size={10} /> 导入背景
         </button>
@@ -2558,7 +2558,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
           onPointerDown={(e) => e.stopPropagation()}
           onClick={() => onCopyToImage?.()}
           disabled={!hasBackgroundMedia || !onCopyToImage}
-          className="py-1 px-2 rounded text-[10px] bg-blue-700 hover:bg-blue-600 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+          className="py-1 px-2 rounded text-[15px] bg-blue-700 hover:bg-blue-600 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
           title="复制背景图为新图片节点"
         >
           <CopyIcon size={10} /> 复制
@@ -2566,7 +2566,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         <button
           onPointerDown={(e) => e.stopPropagation()}
           onClick={resetCamera}
-          className="py-1 px-2 rounded text-[10px] bg-[#333] hover:bg-[#444] text-gray-300"
+          className="py-1 px-2 rounded text-[15px] bg-[#333] hover:bg-[#444] text-gray-300"
           title="重置视角"
         >
           重置
@@ -2574,7 +2574,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         <button
           onPointerDown={(e) => e.stopPropagation()}
           onClick={forceRefresh}
-          className="py-1 px-2 rounded text-[10px] bg-[#333] hover:bg-[#444] text-gray-300"
+          className="py-1 px-2 rounded text-[15px] bg-[#333] hover:bg-[#444] text-gray-300"
           title="刷新渲染"
         >
           刷新
@@ -2582,7 +2582,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         <button
           onPointerDown={(e) => e.stopPropagation()}
           onClick={() => setShowAxes((v) => !v)}
-          className={`py-1 px-2 rounded text-[10px] ${showAxes ? 'bg-pink-600 text-white' : 'bg-[#333] text-gray-300 hover:bg-[#444]'}`}
+          className={`py-1 px-2 rounded text-[15px] ${showAxes ? 'bg-pink-600 text-white' : 'bg-[#333] text-gray-300 hover:bg-[#444]'}`}
           title={showAxes ? '隐藏 xyz 轴线（截图前必关）' : '显示 xyz 轴线（默认显示，方便对齐）'}
         >
           轴线
@@ -2590,7 +2590,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         <button
           onPointerDown={(e) => e.stopPropagation()}
           onClick={() => setShowGrid((v) => !v)}
-          className={`py-1 px-2 rounded text-[10px] ${showGrid ? 'bg-pink-600 text-white' : 'bg-[#333] text-gray-300 hover:bg-[#444]'}`}
+          className={`py-1 px-2 rounded text-[15px] ${showGrid ? 'bg-pink-600 text-white' : 'bg-[#333] text-gray-300 hover:bg-[#444]'}`}
           title={showGrid ? '隐藏角色底部网格' : '显示角色底部网格（默认隐藏，方便看全景）'}
         >
           网格
@@ -2598,7 +2598,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         <button
           onPointerDown={(e) => e.stopPropagation()}
           onClick={() => setShowGround((v) => !v)}
-          className={`py-1 px-2 rounded text-[10px] ${showGround ? 'bg-pink-600 text-white' : 'bg-[#333] text-gray-300 hover:bg-[#444]'}`}
+          className={`py-1 px-2 rounded text-[15px] ${showGround ? 'bg-pink-600 text-white' : 'bg-[#333] text-gray-300 hover:bg-[#444]'}`}
           title={showGround ? '隐藏角色脚底地面平面' : '显示角色脚底地面平面（默认隐藏，方便看全景）'}
         >
           地面
@@ -2608,14 +2608,14 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       {/* 小人管理区 */}
       <div className="border border-[#333] rounded-lg p-2 bg-[#1a1a1a]">
         <div className="flex items-center justify-between mb-2 gap-1">
-          <span className="text-xs text-gray-300 font-medium flex items-center gap-1">
+          <span className="text-[18px] text-gray-300 font-medium flex items-center gap-1">
             <PersonIcon size={12} /> 角色管理 ({figures.length})
           </span>
           <div className="flex items-center gap-1">
             <button
               onPointerDown={(e) => e.stopPropagation()}
               onClick={addFigure}
-              className="py-1 px-2 rounded text-[10px] bg-pink-600 hover:bg-pink-500 text-white flex items-center gap-1"
+              className="py-1 px-2 rounded text-[15px] bg-pink-600 hover:bg-pink-500 text-white flex items-center gap-1"
               title="添加内置人物预设"
             >
               <PlusIcon size={10} /> 角色
@@ -2623,7 +2623,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
             <button
               onPointerDown={(e) => e.stopPropagation()}
               onClick={onPickGlbFile}
-              className="py-1 px-2 rounded text-[10px] bg-cyan-700 hover:bg-cyan-600 text-white flex items-center gap-1"
+              className="py-1 px-2 rounded text-[15px] bg-cyan-700 hover:bg-cyan-600 text-white flex items-center gap-1"
               title="上传 .glb / .gltf 自定义 3D 模型"
             >
               <ImageIcon size={10} /> GLB
@@ -2656,7 +2656,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                   <div className="w-8 h-8 rounded border border-[#444] bg-gradient-to-br from-pink-500 to-purple-500 flex items-center justify-center text-white">
                     <PersonIcon size={16} />
                   </div>
-                  <span className="flex-1 text-[10px] text-gray-300 truncate">{displayName}</span>
+                  <span className="flex-1 text-[15px] text-gray-300 truncate">{displayName}</span>
 
                   {/* 操作按钮：选中时一直显示，否则 hover 时显示 */}
                   <div className={`flex items-center gap-1 ${isSelected ? '' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
@@ -2665,7 +2665,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                         e.stopPropagation();
                         updateFigure(figure.id, { scale: Math.max(0.1, (figure.scale || 1) - 1) });
                       }}
-                      className="p-1 rounded bg-[#444] hover:bg-[#555] text-white text-[10px]"
+                      className="p-1 rounded bg-[#444] hover:bg-[#555] text-white text-[15px]"
                       title="缩小"
                     >
                       -
@@ -2675,7 +2675,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                         e.stopPropagation();
                         updateFigure(figure.id, { scale: Math.min(200, (figure.scale || 1) + 1) });
                       }}
-                      className="p-1 rounded bg-[#444] hover:bg-[#555] text-white text-[10px]"
+                      className="p-1 rounded bg-[#444] hover:bg-[#555] text-white text-[15px]"
                       title="放大"
                     >
                       +
@@ -2685,7 +2685,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                         e.stopPropagation();
                         updateFigure(figure.id, { rotation: ((figure.rotation || 0) - 15) % 360 });
                       }}
-                      className="p-1 rounded bg-[#444] hover:bg-[#555] text-white text-[10px]"
+                      className="p-1 rounded bg-[#444] hover:bg-[#555] text-white text-[15px]"
                       title="左旋转15度"
                     >
                       ↺
@@ -2695,7 +2695,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                         e.stopPropagation();
                         updateFigure(figure.id, { rotation: ((figure.rotation || 0) + 15) % 360 });
                       }}
-                      className="p-1 rounded bg-[#444] hover:bg-[#555] text-white text-[10px]"
+                      className="p-1 rounded bg-[#444] hover:bg-[#555] text-white text-[15px]"
                       title="右旋转15度"
                     >
                       ↻
@@ -2716,7 +2716,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
             })}
           </div>
         ) : (
-          <div className="text-[10px] text-gray-500 text-center py-2">
+          <div className="text-[15px] text-gray-500 text-center py-2">
             暂无角色，点击"添加角色"创建3D人物
           </div>
         )}
@@ -2725,7 +2725,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         {selectedFigure && (
           <div className="mt-2 pt-2 border-t border-[#333] space-y-1">
             <div className="flex items-center gap-2">
-              <label className="text-[10px] text-gray-400 w-12">名称:</label>
+              <label className="text-[15px] text-gray-400 w-12">名称:</label>
               <input
                 type="text"
                 value={selectedFigure.name}
@@ -2736,11 +2736,11 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                 })()}
                 onPointerDown={(e) => e.stopPropagation()}
                 onChange={(e) => updateFigure(selectedFigure.id, { name: e.target.value })}
-                className="flex-1 bg-[#252525] text-gray-200 text-[10px] px-2 py-1 rounded border border-[#333] focus:outline-none focus:border-pink-500"
+                className="flex-1 bg-[#252525] text-gray-200 text-[15px] px-2 py-1 rounded border border-[#333] focus:outline-none focus:border-pink-500"
               />
             </div>
             <div className="flex items-center gap-2">
-              <label className="text-[10px] text-gray-400 w-12">缩放:</label>
+              <label className="text-[15px] text-gray-400 w-12">缩放:</label>
               <input
                 type="range"
                 min="0.2"
@@ -2751,10 +2751,10 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                 onChange={(e) => updateFigure(selectedFigure.id, { scale: parseFloat(e.target.value) })}
                 className="flex-1 accent-pink-500"
               />
-              <span className="text-[10px] text-gray-400 w-10 text-right">{selectedFigure.scale.toFixed(1)}x</span>
+              <span className="text-[15px] text-gray-400 w-10 text-right">{selectedFigure.scale.toFixed(1)}x</span>
             </div>
             <div className="flex items-center gap-2">
-              <label className="text-[10px] text-gray-400 w-12">旋转:</label>
+              <label className="text-[15px] text-gray-400 w-12">旋转:</label>
               <input
                 type="range"
                 min="-180"
@@ -2765,15 +2765,15 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                 onChange={(e) => updateFigure(selectedFigure.id, { rotation: parseInt(e.target.value) })}
                 className="flex-1 accent-pink-500"
               />
-              <span className="text-[10px] text-gray-400 w-10 text-right">{selectedFigure.rotation}°</span>
+              <span className="text-[15px] text-gray-400 w-10 text-right">{selectedFigure.rotation}°</span>
             </div>
             <div className="flex items-center gap-2">
-              <label className="text-[10px] text-gray-400 w-12">预设:</label>
+              <label className="text-[15px] text-gray-400 w-12">预设:</label>
               <select
                 value={selectedFigure.presetId ?? PERSON_PRESETS[0].id}
                 onPointerDown={(e) => e.stopPropagation()}
                 onChange={(e) => updateFigure(selectedFigure.id, { presetId: e.target.value })}
-                className="flex-1 bg-[#252525] text-gray-200 text-[10px] px-2 py-1 rounded border border-[#333] focus:outline-none focus:border-pink-500"
+                className="flex-1 bg-[#252525] text-gray-200 text-[15px] px-2 py-1 rounded border border-[#333] focus:outline-none focus:border-pink-500"
               >
                 {PERSON_PRESETS.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
@@ -2781,12 +2781,12 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
               </select>
             </div>
             <div className="flex items-center gap-2">
-              <label className="text-[10px] text-gray-400 w-12">姿势:</label>
+              <label className="text-[15px] text-gray-400 w-12">姿势:</label>
               <select
                 value={selectedFigure.poseId ?? FIGURE_POSES[0].id}
                 onPointerDown={(e) => e.stopPropagation()}
                 onChange={(e) => updateFigure(selectedFigure.id, { poseId: e.target.value })}
-                className="flex-1 bg-[#252525] text-gray-200 text-[10px] px-2 py-1 rounded border border-[#333] focus:outline-none focus:border-pink-500"
+                className="flex-1 bg-[#252525] text-gray-200 text-[15px] px-2 py-1 rounded border border-[#333] focus:outline-none focus:border-pink-500"
               >
                 {FIGURE_POSES.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
@@ -2802,7 +2802,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         <button
           onPointerDown={(e) => e.stopPropagation()}
           onClick={captureCurrentView}
-          className="flex-1 py-1 px-2 rounded text-[10px] bg-green-700 hover:bg-green-600 text-white"
+          className="flex-1 py-1 px-2 rounded text-[15px] bg-green-700 hover:bg-green-600 text-white"
         >
           截图
         </button>
