@@ -2562,9 +2562,21 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
             onPointerDown={(e) => e.stopPropagation()}
             onChange={(e) => {
               const focal = parseFloat(e.target.value);
-              onUpdate({ fov: focalToFov(focal) });
-              // 立即应用 fov 到 camera（nodeRef 变化需要重跑 updateCamera）
-              controlsRef.current?.update?.();
+              const newFov = focalToFov(focal);
+              onUpdate({ fov: newFov });
+              // 立即应用：直接改 camera.fov + 重算投影矩阵 + 触发一帧渲染
+              // （controlsRef.update 走的 updateCamera 闭包会基于过时的
+              //   theta/phi/distance/cameraTarget 重算 position，导致画面闪一下才稳定）
+              const cam = cameraRef.current;
+              const rend = rendererRef.current;
+              const scn = sceneRef.current;
+              if (cam && rend && scn) {
+                cam.fov = newFov;
+                cam.updateProjectionMatrix();
+                // 同步工作变量，让 updateCamera 后续也用新 fov
+                liveViewRef.current = { ...liveViewRef.current, fov: newFov };
+                rend.render(scn, cam);
+              }
             }}
             className="flex-1 accent-pink-500"
           />
