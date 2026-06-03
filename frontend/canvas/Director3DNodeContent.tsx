@@ -1874,6 +1874,123 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
   };
 
   /**
+   * 宫格截图：绕当前 cameraTarget 旋转 yaw 拍 N 张，拼成网格图。
+   * 2 → 2×1, 4 → 2×2, 6 → 2×3, 9 → 3×3
+   * pitch / fov / distance / target 保持当前值
+   * 起始 yaw = 当前 liveViewRef.yaw，每格偏移 360 / N
+   */
+  const captureGridView = async (count: number) => {
+    if (!rendererRef.current || !sceneRef.current || !cameraRef.current) return;
+    if (![2, 4, 6, 9].includes(count)) return;
+
+    const renderer = rendererRef.current;
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+
+    // 宫格配置
+    const gridCfg: Record<number, { cols: number; rows: number }> = {
+      2: { cols: 2, rows: 1 },
+      4: { cols: 2, rows: 2 },
+      6: { cols: 2, rows: 3 },
+      9: { cols: 3, rows: 3 },
+    };
+    const { cols, rows } = gridCfg[count];
+
+    // 当前视角快照
+    const v = liveViewRef.current;
+    const baseYawDeg = v.yaw;
+    const pitchDeg = v.pitch;
+    const fovDeg = v.fov;
+    const distance = v.cameraDistance;
+    const target = new THREE.Vector3(v.cameraTarget.x, v.cameraTarget.y, v.cameraTarget.z);
+    const stepDeg = 360 / count;
+
+    // 隐藏 helpers（截图全程）
+    const hideHelpers = (): { obj: { visible: boolean }; wasVisible: boolean }[] => {
+      const restore: { obj: { visible: boolean }; wasVisible: boolean }[] = [];
+      const toHide: { visible: boolean }[] = [];
+      if (axesRef.current) toHide.push(axesRef.current);
+      if (gridRef.current) toHide.push(gridRef.current);
+      if (groundRef.current) toHide.push(groundRef.current);
+      const tc = transformControlsRef.current?.getHelper();
+      if (tc) toHide.push(tc as unknown as { visible: boolean });
+      toHide.forEach((h) => {
+        restore.push({ obj: h, wasVisible: h.visible });
+        h.visible = false;
+      });
+      return restore;
+    };
+    const restoreHelpers = (
+      restore: { obj: { visible: boolean }; wasVisible: boolean }[]
+    ) => {
+      restore.forEach(({ obj, wasVisible }) => {
+        obj.visible = wasVisible;
+      });
+    };
+
+    // 备份相机状态
+    const savedPos = camera.position.clone();
+    const savedQuat = camera.quaternion.clone();
+    const savedFov = camera.fov;
+
+    let helperRestore: { obj: { visible: boolean }; wasVisible: boolean }[] = [];
+    try {
+      helperRestore = hideHelpers();
+
+      const cellW = renderer.domElement.width;
+      const cellH = renderer.domElement.height;
+      const canvas = document.createElement('canvas');
+      canvas.width = cellW * cols;
+      canvas.height = cellH * rows;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      for (let i = 0; i < count; i++) {
+        const yaw = baseYawDeg + stepDeg * i;
+        const phi = Math.PI / 2 - (pitchDeg * Math.PI) / 180;
+        const x = distance * Math.sin(phi) * Math.sin((yaw * Math.PI) / 180);
+        const y = distance * Math.cos(phi);
+        const z = distance * Math.sin(phi) * Math.cos((yaw * Math.PI) / 180);
+        camera.position.set(target.x + x, target.y + y, target.z + z);
+        camera.lookAt(target);
+        camera.fov = fovDeg;
+        camera.updateProjectionMatrix();
+        renderer.render(scene, camera);
+        const dataURL = renderer.domElement.toDataURL('image/png');
+        await new Promise<void>((resolve) => {
+          const img = new Image();
+          img.onload = () => {
+            const col = i % cols;
+            const row = Math.floor(i / cols);
+            ctx.drawImage(img, col * cellW, row * cellH, cellW, cellH);
+            resolve();
+          };
+          img.onerror = () => resolve();
+          img.src = dataURL;
+        });
+      }
+
+      const finalDataURL = canvas.toDataURL('image/png');
+      const base64 = finalDataURL.split(',')[1];
+      setFullscreenCapture({ type: 'grid', base64 });
+    } catch (err) {
+      console.error('[Director3D] 宫格截图失败:', err);
+    } finally {
+      // 恢复相机
+      camera.position.copy(savedPos);
+      camera.quaternion.copy(savedQuat);
+      camera.fov = savedFov;
+      camera.updateProjectionMatrix();
+      // 恢复 helpers
+      restoreHelpers(helperRestore);
+      // 让 3D 预览回到当前视角（render 一帧）
+      renderer.render(scene, camera);
+    }
+  };
+
+  /**
    * 全屏查看：双保险。
    *   1. CSS 全屏：把 canvas 移出节点 DOM，挂到 document.documentElement 的专用容器，
    *      用 fixed + 最大 z-index 覆盖整个视口；documentElement 不会被任何 transform 限制。
@@ -2850,14 +2967,47 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         )}
       </div>
 
-      {/* 截图功能 */}
-      <div className="flex gap-1">
+      {/* 截图功能：单图 + 2/4/6/9 宫格（绕当前 target 旋转 yaw 拍 N 张拼图） */}
+      <div className="flex gap-1 flex-wrap">
         <button
           onPointerDown={(e) => e.stopPropagation()}
           onClick={captureCurrentView}
-          className="flex-1 py-1 px-2 rounded text-[15px] bg-green-700 hover:bg-green-600 text-white"
+          className="flex-1 min-w-[60px] py-1 px-2 rounded text-[15px] bg-green-700 hover:bg-green-600 text-white"
+          title="截取当前视角的 3D 场景"
         >
           截图
+        </button>
+        <button
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => captureGridView(2)}
+          className="flex-1 min-w-[60px] py-1 px-2 rounded text-[15px] bg-emerald-700 hover:bg-emerald-600 text-white"
+          title="绕当前注视点旋转 180°，拍 2 张（2×1）拼图"
+        >
+          2宫格
+        </button>
+        <button
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => captureGridView(4)}
+          className="flex-1 min-w-[60px] py-1 px-2 rounded text-[15px] bg-emerald-700 hover:bg-emerald-600 text-white"
+          title="绕当前注视点旋转 360° 每 90° 一张（2×2）拼图"
+        >
+          4宫格
+        </button>
+        <button
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => captureGridView(6)}
+          className="flex-1 min-w-[60px] py-1 px-2 rounded text-[15px] bg-emerald-700 hover:bg-emerald-600 text-white"
+          title="绕当前注视点旋转 360° 每 60° 一张（2×3）拼图"
+        >
+          6宫格
+        </button>
+        <button
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => captureGridView(9)}
+          className="flex-1 min-w-[60px] py-1 px-2 rounded text-[15px] bg-emerald-700 hover:bg-emerald-600 text-white"
+          title="绕当前注视点旋转 360° 每 40° 一张（3×3）拼图"
+        >
+          9宫格
         </button>
       </div>
     </div>
