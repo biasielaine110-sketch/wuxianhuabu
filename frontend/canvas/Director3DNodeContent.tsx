@@ -1109,6 +1109,28 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
 
         // 模式切换：W 移动 / E 旋转 / R 缩放
         if (!transformControls.object) return; // 只有选中物体时才响应
+
+        // H 键：把当前选中的角色重置到世界中心 (x=0, y=0, z=0，rotation=0)
+        if (e.key.toLowerCase() === 'h' && selectedFigureIdsRef.current.size > 0) {
+          const ids = Array.from(selectedFigureIdsRef.current);
+          const currentFigures = nodeRef.current.figures ?? [];
+          const newFigs = currentFigures.map((f) =>
+            ids.includes(f.id) ? { ...f, x: 50, y: 50, y3d: 0, rotation: 0 } : f
+          );
+          // 同步 group.position / rotation（让 TransformControls 拖动时基线立即变）
+          ids.forEach((id) => {
+            const group = figuresRef.current.get(id);
+            if (group) {
+              group.position.set(0, 0, 0);
+              group.rotation.set(0, 0, 0);
+            }
+          });
+          onUpdate({ figures: newFigs });
+          renderer.render(scene, camera);
+          e.preventDefault();
+          return;
+        }
+
         switch (e.key.toLowerCase()) {
           case 'w':
             transformControls.setMode('translate');
@@ -2278,7 +2300,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         <div className="absolute top-2 right-2 px-2 py-1 bg-black/60 rounded text-[10px] text-gray-300 backdrop-blur-sm z-30 pointer-events-none flex flex-col items-end gap-1">
           <span>左键旋转 | 右键平移 | 滚轮缩放</span>
           {selectedFigureId && (
-            <span className="text-yellow-400">W移动 | E旋转 | R缩放 | Del删除</span>
+            <span className="text-yellow-400">W移动 | E旋转 | R缩放 | H归位 | Del删除</span>
           )}
           {/* 变换模式切换 */}
           <div className="flex gap-1">
