@@ -961,8 +961,8 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
 
       const onWheel = (e: WheelEvent) => {
         e.preventDefault();
-        // 滚轮缩放：最近 1 单位（贴近角色），最远 500 单位（看全景）
-        cameraDistance = Math.max(1, Math.min(500, cameraDistance + e.deltaY * 0.05));
+        // 滚轮缩放：最近 1 单位（贴近角色），最远 2000 单位（看全景甚至球壳外）
+        cameraDistance = Math.max(1, Math.min(2000, cameraDistance + e.deltaY * 0.05));
         updateCamera();
         // 同步到 live view（不触发 render）
         liveViewRef.current = {
@@ -1037,7 +1037,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         }) => {
           theta = (view.yaw * Math.PI) / 180;
           phi = Math.max(0.01, Math.min(Math.PI - 0.01, (Math.PI / 2) - (view.pitch * Math.PI) / 180));
-          cameraDistance = Math.max(1, Math.min(500, view.cameraDistance));
+          cameraDistance = Math.max(1, Math.min(2000, view.cameraDistance));
           if (view.cameraTarget) {
             cameraTarget.set(view.cameraTarget.x, view.cameraTarget.y, view.cameraTarget.z);
           }
