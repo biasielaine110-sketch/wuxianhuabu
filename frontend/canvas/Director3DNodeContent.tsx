@@ -582,7 +582,39 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
   const [fullscreenCapture, setFullscreenCapture] = useState<{ type: 'single' | 'grid', base64: string } | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [selectedFigureId, setSelectedFigureId] = useState<string | null>(null);
+  /** 多选集合（Ctrl+点 = 加选 / Alt+点 = 减选 / Delete 删全部） */
+  const [selectedFigureIds, setSelectedFigureIds] = useState<Set<string>>(() => new Set());
+  /** 多选集合的 ref 镜像：让 3D 场景 effect 内的 onKeyDown 闭包能拿到最新值 */
+  const selectedFigureIdsRef = useRef<Set<string>>(new Set());
+  selectedFigureIdsRef.current = selectedFigureIds;
   const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'scale'>('translate');
+
+  /**
+   * 切换角色选中状态。
+   * @param figureId 角色 id
+   * @param mode 'replace' 单选替换（默认） | 'add' 加选（已在则移除） | 'remove' 减选
+   */
+  const toggleFigureSelection = (figureId: string, mode: 'replace' | 'add' | 'remove' = 'replace') => {
+    setSelectedFigureIds((prev) => {
+      const next = new Set(prev);
+      if (mode === 'add') {
+        if (next.has(figureId)) next.delete(figureId);
+        else next.add(figureId);
+      } else if (mode === 'remove') {
+        next.delete(figureId);
+      } else {
+        next.clear();
+        next.add(figureId);
+      }
+      return next;
+    });
+    if (mode === 'remove') {
+      // 减选时主选中 id 也清掉
+      setSelectedFigureId((cur) => (cur === figureId ? null : cur));
+    } else {
+      setSelectedFigureId(figureId);
+    }
+  };
   const isDraggingFigureRef = useRef(false);
   const draggingFigureIdRef = useRef<string | null>(null);
 
@@ -888,8 +920,22 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
             if (figureGroup) {
               // 在 attach 之前设置标志，防止 attach 触发的 change 事件
               isTransforming = true;
-              setSelectedFigureId(figureId);
-              transformControls.attach(figureGroup);
+              // Ctrl = 加选，Alt = 减选，默认 = 单选替换
+              const mode: 'replace' | 'add' | 'remove' = e.ctrlKey
+                ? 'add'
+                : e.altKey
+                ? 'remove'
+                : 'replace';
+              toggleFigureSelection(figureId, mode);
+              // TransformControls 一次只 attach 一个：
+              // - 多选时 attach 当前主选（最近选中的）
+              // - 减选后如果空了则 detach
+              if (mode === 'remove' && !selectedFigureIds.has(figureId) && selectedFigureId === figureId) {
+                // 该项已被减选掉，detach
+                transformControls.detach();
+              } else {
+                transformControls.attach(figureGroup);
+              }
               // 选中后让 canvas 获取焦点，以便接收键盘事件
               renderer.domElement.focus();
               // attach 完成后，重置标志
@@ -911,6 +957,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
             if (hitEnv) {
               isTransforming = true;
               setSelectedFigureId(null);
+              setSelectedFigureIds(new Set());
               // 强制 translate 模式（拖动背景墙用）
               transformControls.setMode('translate');
               setTransformMode('translate');
@@ -1024,21 +1071,54 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         e.preventDefault();
       };
 
-      // 键盘事件 - 快捷键切换变换模式
+      // 键盘事件 - 快捷键切换变换模式 + Delete 删除
       const onKeyDown = (e: KeyboardEvent) => {
-        if (!transformControls.object) return; // 只有选中物体时才响应
         if (e.target instanceof HTMLInputElement) return; // 输入框中不响应
+        if (e.target instanceof HTMLTextAreaElement) return;
 
+        // Delete / Backspace：删除当前选中的角色（不删除导演台节点）
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+          if (selectedFigureIdsRef.current.size > 0) {
+            e.preventDefault();
+            e.stopPropagation();
+            const ids = Array.from(selectedFigureIdsRef.current);
+            // 从 scene 中移出 + dispose
+            ids.forEach((id) => {
+              const group = figuresRef.current.get(id);
+              if (group && sceneRef.current) {
+                sceneRef.current.remove(group);
+                // 递归释放 group 内的 geometry / material
+                group.traverse((obj) => {
+                  if (obj instanceof THREE.Mesh) {
+                    obj.geometry?.dispose();
+                    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+                    mats.forEach((m) => m?.dispose?.());
+                  }
+                });
+              }
+              figuresRef.current.delete(id);
+              figureRenderMetaRef.current.delete(id);
+            });
+            onUpdate({ figures: (nodeRef.current.figures ?? []).filter((f) => !ids.includes(f.id)) });
+            setSelectedFigureId(null);
+            setSelectedFigureIds(new Set());
+            transformControls.detach();
+            return;
+          }
+        }
+
+        // 模式切换：W 移动 / E 旋转 / R 缩放
+        if (!transformControls.object) return; // 只有选中物体时才响应
         switch (e.key.toLowerCase()) {
-          case 'g':
+          case 'w':
             transformControls.setMode('translate');
             setTransformMode('translate');
             break;
-          case 'r':
+          case 'e':
             transformControls.setMode('rotate');
             setTransformMode('rotate');
             break;
-          case 's':
+          case 'r':
             transformControls.setMode('scale');
             setTransformMode('scale');
             break;
@@ -1488,12 +1568,13 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       figureRenderMetaRef.current.set(figure.id, { presetId: targetPresetId, poseId: targetPoseId });
 
       // 同步选中态与 emissive（保留原配色，仅修改 emissive）
+      const isSel = selectedFigureIdsRef.current.has(figure.id);
       group.traverse((child) => {
         if (child.userData?.isFigureLabel && child instanceof THREE.Sprite) {
           return;
         }
         if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial) {
-          if (selectedFigureId === figure.id) {
+          if (isSel) {
             (child.material as THREE.MeshStandardMaterial).emissive.setHex(0x444444);
           } else {
             (child.material as THREE.MeshStandardMaterial).emissive.setHex(0x000000);
@@ -1515,7 +1596,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         if (newLabel) group.add(newLabel);
       }
     });
-  }, [figures, selectedFigureId]);
+  }, [figures, selectedFigureId, selectedFigureIds]);
 
   // 视线 / 轴线 辅助：在 3D 场景内绘制，分两个独立 Line 对象，便于分别清理
   useEffect(() => {
@@ -1596,7 +1677,11 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
 
     // --- 轴线：连接两角色头顶，并在其法向上画一条 180° 限制线（实线 + 虚线镜像） ---
     if (showAxis) {
-      const pair = pickAxisPair(figures);
+      // 多选时取选中集合中最接近的一对；否则从全角色中取
+      const axisFigs = selectedFigureIds.size >= 2
+        ? figures.filter((f) => selectedFigureIds.has(f.id))
+        : figures;
+      const pair = pickAxisPair(axisFigs);
       if (pair) {
         const a = figureEyeWorld(pair[0]);
         const b = figureEyeWorld(pair[1]);
@@ -1682,6 +1767,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
   }, [
     figures,
     selectedFigureId,
+    selectedFigureIds,
     node.compositionGuides?.sightLine,
     node.compositionGuides?.axisLine,
     node.cameraTarget?.x,
@@ -2099,19 +2185,40 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
     e.target.value = '';
   };
 
-  // 选择小人
-  const selectFigure = (figureId: string) => {
-    setSelectedFigureId(selectedFigureId === figureId ? null : figureId);
+  // 选择小人（列表项点击 / 详情面板时使用）
+  // 也支持 Ctrl/Alt 加减选（通过 KeyboardEvent.ctrlKey/altKey）
+  const selectFigure = (figureId: string, e?: React.MouseEvent | React.KeyboardEvent) => {
+    const mode: 'replace' | 'add' | 'remove' = e?.ctrlKey
+      ? 'add'
+      : e?.altKey
+      ? 'remove'
+      : 'replace';
+    toggleFigureSelection(figureId, mode);
   };
 
-  // 删除小人
+  // 删除小人（列表上的"删除"按钮调用）
   const deleteFigure = (figureId: string) => {
     const group = figuresRef.current.get(figureId);
     if (group && sceneRef.current) {
       sceneRef.current.remove(group);
+      // 释放 geometry / material
+      group.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          obj.geometry?.dispose();
+          const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+          mats.forEach((m) => m?.dispose?.());
+        }
+      });
       figuresRef.current.delete(figureId);
+      figureRenderMetaRef.current.delete(figureId);
     }
-    onUpdate({ figures: figures.filter(f => f.id !== figureId) });
+    onUpdate({ figures: (nodeRef.current.figures ?? []).filter(f => f.id !== figureId) });
+    setSelectedFigureIds((prev) => {
+      if (!prev.has(figureId)) return prev;
+      const next = new Set(prev);
+      next.delete(figureId);
+      return next;
+    });
     if (selectedFigureId === figureId) {
       setSelectedFigureId(null);
     }
@@ -2171,7 +2278,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         <div className="absolute top-2 right-2 px-2 py-1 bg-black/60 rounded text-[10px] text-gray-300 backdrop-blur-sm z-30 pointer-events-none flex flex-col items-end gap-1">
           <span>左键旋转 | 右键平移 | 滚轮缩放</span>
           {selectedFigureId && (
-            <span className="text-yellow-400">G移动 | R旋转 | S缩放</span>
+            <span className="text-yellow-400">W移动 | E旋转 | R缩放 | Del删除</span>
           )}
           {/* 变换模式切换 */}
           <div className="flex gap-1">
@@ -2513,7 +2620,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         {figures.length > 0 ? (
           <div className="space-y-1 overflow-y-auto">
             {figures.map((figure, idx) => {
-              const isSelected = selectedFigureId === figure.id;
+              const isSelected = selectedFigureIds.has(figure.id);
               const displayName = figure.name || `角色${indexToCharLabel(idx)}`;
               return (
                 <div
@@ -2521,7 +2628,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                   className={`group flex items-center gap-2 p-1.5 rounded cursor-pointer ${isSelected ? 'bg-pink-600/30 border border-pink-500/50' : 'bg-[#252525] hover:bg-[#333]'}`}
                   onPointerDown={(e) => {
                     e.stopPropagation();
-                    selectFigure(figure.id);
+                    selectFigure(figure.id, e);
                   }}
                 >
                   <div className="w-8 h-8 rounded border border-[#444] bg-gradient-to-br from-pink-500 to-purple-500 flex items-center justify-center text-white">
