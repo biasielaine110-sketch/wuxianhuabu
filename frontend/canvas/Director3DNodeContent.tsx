@@ -944,7 +944,9 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
             }
           }
 
-          // 没点到角色：尝试选中全景环境墙（背景图），挂上 TransformControls 即可平移
+          // 没点到角色：尝试选中全景环境墙（背景图）。
+          // **双击**才挂上 TransformControls（可拖动），单击命中走"未命中"路径
+          // → 旋转视角。这样既能移动背景墙，又不会被"点中就锁住"影响视角。
           if (envWallRef.current) {
             const envRoot = envWallRef.current.root;
             // 命中对象在 envRoot 子树内
@@ -955,16 +957,25 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
               node = node.parent;
             }
             if (hitEnv) {
-              isTransforming = true;
-              setSelectedFigureId(null);
-              setSelectedFigureIds(new Set());
-              // 强制 translate 模式（拖动背景墙用）
-              transformControls.setMode('translate');
-              setTransformMode('translate');
-              transformControls.attach(envRoot);
-              renderer.domElement.focus();
-              setTimeout(() => { isTransforming = false; }, 100);
-              return;
+              // 当前已 attach 背景墙：单击也走原本的"未命中"路径，
+              // 让 transformControls helper 自己接管交互（拖动 helper 不会进 onMouseDown）
+              if (transformControls.object === envRoot) {
+                // 落到下面的"未命中"路径：旋转 / 平移视角
+              } else {
+                // 未 attach：必须双击才进入拖动
+                if (e.detail >= 2) {
+                  isTransforming = true;
+                  setSelectedFigureId(null);
+                  setSelectedFigureIds(new Set());
+                  transformControls.setMode('translate');
+                  setTransformMode('translate');
+                  transformControls.attach(envRoot);
+                  renderer.domElement.focus();
+                  setTimeout(() => { isTransforming = false; }, 100);
+                  return;
+                }
+                // 单击 → 不 attach，让用户能继续旋转视角
+              }
             }
           }
         }
@@ -2298,7 +2309,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
 
         {/* 操作提示 */}
         <div className="absolute top-2 right-2 px-2 py-1 bg-black/60 rounded text-[15px] text-gray-300 backdrop-blur-sm z-30 pointer-events-none flex flex-col items-end gap-1">
-          <span>左键旋转 | 右键平移 | 滚轮缩放</span>
+          <span>左键旋转 | 右键平移 | 滚轮缩放 | 双击背景墙移动</span>
           {selectedFigureId && (
             <span className="text-yellow-400">W移动 | E旋转 | R缩放 | H归位 | Del删除</span>
           )}
