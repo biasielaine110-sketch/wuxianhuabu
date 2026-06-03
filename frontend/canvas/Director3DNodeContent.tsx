@@ -466,9 +466,9 @@ function buildFigureLabelSprite(labelText: string, color: string): THREE.Sprite 
   texture.magFilter = THREE.LinearFilter;
   const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false });
   const sprite = new THREE.Sprite(material);
-  // sprite 缩放：宽 1 世界单位 ≈ 0.2 字符（经验值），按 textW 等比
-  // 保持原大尺度（≈3 高），宽按比例
-  const baseH = 3;
+  // sprite 缩放：宽按 width/height 比例，高度按 baseH
+  // 缩小 60%：baseH 3 → 1.2（保留 40%）
+  const baseH = 1.2;
   const scaleW = baseH * (width / height);
   sprite.scale.set(scaleW, baseH, 1);
   sprite.position.set(0, 9.5, 0);
@@ -1220,7 +1220,9 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       renderer.domElement.addEventListener('mouseleave', onMouseUp);
       renderer.domElement.addEventListener('wheel', onWheel, { passive: false });
       renderer.domElement.addEventListener('contextmenu', onContextMenu);
-      renderer.domElement.addEventListener('keydown', onKeyDown);
+      // 监听 window 捕获阶段：3D 导演台内的快捷键（W/E/R/H/Del）优先于画布全局
+      // （useCanvasKeyboardShortcuts 里"选中 director3d 时跳过 W/E/R"作为兜底）
+      window.addEventListener('keydown', onKeyDown, true);
 
       controlsRef.current = {
         dispose: () => {
@@ -1230,7 +1232,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
           renderer.domElement.removeEventListener('mouseleave', onMouseUp);
           renderer.domElement.removeEventListener('wheel', onWheel);
           renderer.domElement.removeEventListener('contextmenu', onContextMenu);
-          renderer.domElement.removeEventListener('keydown', onKeyDown);
+          window.removeEventListener('keydown', onKeyDown, true);
           transformControls.dispose();
         },
         update: updateCamera,

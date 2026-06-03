@@ -98,12 +98,19 @@ export function attachCanvasKeyboardShortcuts(
         return;
       }
 
+      // 当前选中的节点里若有 director3d（3D 导演台），则 W/E/R 键
+      // 由导演台内部 onKeyDown 处理（移动/旋转/缩放），不触发画布的"创建节点"
+      const hasDirector3DSelected = d.selectedIdsRef.current.some((id) => {
+        const n = d.nodesRef.current?.find((nd) => nd.id === id);
+        return n?.type === 'director3d';
+      });
       const shortcutCreatesNode =
         !isInput &&
         !isContentEditable &&
         !e.ctrlKey &&
         !e.metaKey &&
-        !e.altKey;
+        !e.altKey &&
+        !hasDirector3DSelected;
 
       const placeNewNodeAtMouse = (type: NodeType) => {
         const defaultSize = d.DEFAULT_NODE_SIZES[type] || { width: 420, height: 300 };
