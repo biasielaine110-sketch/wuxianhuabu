@@ -25,6 +25,7 @@ import { TextNodeFontSizeSelect } from './TextNodeFontSizeSelect';
 import { I2iPresetCategorySelect } from './I2iPresetCategorySelect';
 import { I2iAspectRatioSelect } from './I2iAspectRatioSelect';
 import { T2iPresetCategorySelect } from './T2iPresetCategorySelect';
+import { PANORAMA_PRESET_KEYS } from './initialPromptPresets';
 import { EyedropperIcon, ImageIcon, CopyIcon, LoaderIcon } from './canvasIcons';
 import {
   defaultCanvasImageModel,
@@ -743,17 +744,25 @@ return (
                 </button>
               </div>
             )}
-            {/* 预设按钮 */}
-            <button
-              onPointerDown={(e) => { e.stopPropagation(); s.handleTogglePreset(node.id, '全景图生成'); }}
-              className={`w-full px-2 py-1 text-[10px] rounded transition-all mb-2 ${
-                (node.activePresets ?? []).includes('全景图生成') 
-                  ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white ring-1 ring-indigo-400' 
-                  : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white'
-              }`}
-            >
-              全景图生成
-            </button>
+            {/* 预设按钮（多预设列表） */}
+            <div className="flex flex-col gap-1 mb-2">
+              {PANORAMA_PRESET_KEYS.map((presetKey) => {
+                const active = (node.activePresets ?? []).includes(presetKey);
+                return (
+                  <button
+                    key={presetKey}
+                    onPointerDown={(e) => { e.stopPropagation(); s.handleTogglePreset(node.id, presetKey); }}
+                    className={`w-full px-2 py-1 text-[10px] rounded transition-all ${
+                      active
+                        ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white ring-1 ring-indigo-400'
+                        : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white'
+                    }`}
+                  >
+                    {presetKey}
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <div className="relative flex flex-col shrink-0 p-2 border-t border-[#333] bg-[#252525]">
             <textarea
