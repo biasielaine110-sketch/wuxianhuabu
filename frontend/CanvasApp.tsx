@@ -596,7 +596,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     /** 图生图：高:宽 ≈ 1.4:1（较 2:3 略矮，贴近参考界面） */
     'i2i': { width: 900, height: 1260 },
     'panorama': { width: 1300, height: 1000 },
-    'panoramaT2i': { width: 1300, height: 1000 },
+    'panoramaT2i': { width: 2000, height: 1800 },
     /** 图片标注：近方形略竖长，宽:高 = 4:5（介于 4:5～5:6） */
     'annotation': { width: 960, height: 1000 },
     'director3d': { width: 4000, height: 4700 },
