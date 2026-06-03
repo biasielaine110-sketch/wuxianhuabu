@@ -365,6 +365,21 @@ const CAMERA_SHOT_PRESETS: ReadonlyArray<{
   { kind: 'long', name: '远景', fov: 70, cameraDistance: 90, aspectRatio: '21:9' },
 ];
 
+/**
+ * 35mm 等效焦距 ↔ 水平 FOV 换算。
+ * 视角 fov（水平方向，度） = 2 * atan(36 / (2 * focal)) * 180 / pi
+ * 焦距 focal（mm）         = 36 / (2 * tan(fov * pi / 360))
+ * 用 36mm 视场宽度对应 35mm 全画幅水平方向（业界标准）
+ */
+function fovToFocal(fovDeg: number): number {
+  if (fovDeg <= 0 || fovDeg >= 180) return 50;
+  return 36 / (2 * Math.tan((fovDeg * Math.PI) / 360));
+}
+function focalToFov(focalMm: number): number {
+  if (focalMm <= 0) return 60;
+  return (2 * Math.atan(36 / (2 * focalMm)) * 180) / Math.PI;
+}
+
 /** 把"机位 + 环境墙 + 全景 + 站位 + 角色造型 + 姿势 + 视角"打包成结构化 prompt，供后续 i2i 生图使用 */
 function buildRenderPrompt(
   shotName: string,
@@ -2412,6 +2427,33 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
               保存机位
             </button>
           </div>
+        </div>
+
+        {/* 焦距（35mm 等效）：slider 改 fov，标签显示 mm */}
+        <div className="flex items-center gap-2">
+          <span className="text-[30px] text-gray-400 w-16">焦距</span>
+          <input
+            type="range"
+            min={18}
+            max={200}
+            step={1}
+            value={(() => {
+              const fov = currentView.fov ?? 60;
+              const focal = fovToFocal(fov);
+              return Math.round(focal);
+            })()}
+            onPointerDown={(e) => e.stopPropagation()}
+            onChange={(e) => {
+              const focal = parseFloat(e.target.value);
+              onUpdate({ fov: focalToFov(focal) });
+              // 立即应用 fov 到 camera（nodeRef 变化需要重跑 updateCamera）
+              controlsRef.current?.update?.();
+            }}
+            className="flex-1 accent-pink-500"
+          />
+          <span className="text-[30px] text-gray-400 w-16 text-right">
+            {Math.round(fovToFocal(currentView.fov ?? 60))}mm
+          </span>
         </div>
 
         {(node.cameras ?? []).length > 0 ? (
