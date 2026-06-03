@@ -152,6 +152,15 @@ const CHAT_FEATURE_BUTTON_SPECS: ChatFeatureButtonSpec[] = [
       'IIII_故事板分镜视频：工业级漫剧 Block 分镜师模板，10秒 3 Shot Block 时序 + 双份逐字复制输出（跨 Block 衔接物理起点、@ 引用约束、角色外貌锁、视听设定 4 项强制齐全、双份逐字一致 P0 级）。发送前请填入输入文案/前后 Block 参考/角色/场景/物品/故事情节。',
   },
   {
+    id: 'jjjj-batch-storyboard-block-video',
+    presetKey: 'JJJJ_批量_故事板分镜视频',
+    label: '批量_故事板分镜视频',
+    icon: 'video',
+    tone: 'blue',
+    title:
+      'JJJJ_批量_故事板分镜视频：工业级漫剧 Block 分镜师批量版，一次性处理 N 镜（按 panel_index 1..N 顺序），批内跨镜首尾相连 + 批首对接上一批 + 批末对接下一批 + 跨镜实体唯一性（服饰/道具/光影）+ 双层分隔符协议（panel_index_FIELD_first_FIELD_second_RECORD_...）+ 13 项强制自检。发送前请填入章节文案/前后批次参考/角色/场景/物品/小说原文/故事情节。',
+  },
+  {
     id: 'hhhh-grok-four-grid-storyboard-video',
     presetKey: 'HHHH_grok_4宫格分镜视频',
     label: 'grok_4宫格分镜视频',
