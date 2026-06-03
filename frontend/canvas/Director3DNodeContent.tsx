@@ -599,10 +599,14 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
   }, [showGrid]);
 
   // 是否显示 720 全景的"脚底地面平面"（半透明纹理大圆面）：默认隐藏
+  //   ⚠️ sphere 模式下 groundMesh 永远隐藏（球壳内壁已包含整张 720 图，包括下半部分，
+  //       重复贴地面会视觉错位）；其他墙模式（照片墙 / 7字 / U字 / O字 / 圆筒）下生效
   const [showGround, setShowGround] = useState(false);
   useEffect(() => {
-    if (groundRef.current) groundRef.current.visible = showGround;
-  }, [showGround]);
+    const envType = node.environmentType ?? 'sphere';
+    const effectiveVisible = showGround && envType !== 'sphere';
+    if (groundRef.current) groundRef.current.visible = effectiveVisible;
+  }, [showGround, node.environmentType]);
   const figures = node.figures ?? [];
 
   // 处理全屏截图
@@ -1183,6 +1187,16 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       skyMaterial.color.setHex(0xffffff);
       skyMaterial.needsUpdate = true;
       scene.background = skyTexture;
+
+      // sphere 模式下整张 720 图已经贴在球壳内壁（含下半部分），
+      // 不再单独生成 groundTexture，避免"地面 + 球壳下半"画面重复
+      const currentEnvType = nodeRef.current.environmentType ?? 'sphere';
+      if (currentEnvType === 'sphere') {
+        groundMaterial.map = null;
+        groundMaterial.color.setHex(0x2b2b2b);
+        groundMaterial.needsUpdate = true;
+        return;
+      }
 
       const groundCanvas = document.createElement('canvas');
       const groundSize = 1024;
