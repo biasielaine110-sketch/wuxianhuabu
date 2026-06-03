@@ -2736,7 +2736,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         {selectedFigure && (
           <div className="mt-2 pt-2 border-t border-[#333] space-y-1">
             <div className="flex items-center gap-2">
-              <label className="text-[15px] text-gray-400 w-12">名称:</label>
+              <label className="text-[30px] text-gray-400 w-12">名称:</label>
               <input
                 type="text"
                 value={selectedFigure.name}
@@ -2747,11 +2747,11 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                 })()}
                 onPointerDown={(e) => e.stopPropagation()}
                 onChange={(e) => updateFigure(selectedFigure.id, { name: e.target.value })}
-                className="flex-1 bg-[#252525] text-gray-200 text-[15px] px-2 py-1 rounded border border-[#333] focus:outline-none focus:border-pink-500"
+                className="flex-1 bg-[#252525] text-gray-200 text-[30px] px-2 py-1 rounded border border-[#333] focus:outline-none focus:border-pink-500"
               />
             </div>
             <div className="flex items-center gap-2">
-              <label className="text-[15px] text-gray-400 w-12">缩放:</label>
+              <label className="text-[30px] text-gray-400 w-12">缩放:</label>
               <input
                 type="range"
                 min="0.2"
@@ -2762,10 +2762,10 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                 onChange={(e) => updateFigure(selectedFigure.id, { scale: parseFloat(e.target.value) })}
                 className="flex-1 accent-pink-500"
               />
-              <span className="text-[15px] text-gray-400 w-10 text-right">{selectedFigure.scale.toFixed(1)}x</span>
+              <span className="text-[30px] text-gray-400 w-10 text-right">{selectedFigure.scale.toFixed(1)}x</span>
             </div>
             <div className="flex items-center gap-2">
-              <label className="text-[15px] text-gray-400 w-12">旋转:</label>
+              <label className="text-[30px] text-gray-400 w-12">旋转:</label>
               <input
                 type="range"
                 min="-180"
@@ -2776,15 +2776,15 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                 onChange={(e) => updateFigure(selectedFigure.id, { rotation: parseInt(e.target.value) })}
                 className="flex-1 accent-pink-500"
               />
-              <span className="text-[15px] text-gray-400 w-10 text-right">{selectedFigure.rotation}°</span>
+              <span className="text-[30px] text-gray-400 w-10 text-right">{selectedFigure.rotation}°</span>
             </div>
             <div className="flex items-center gap-2">
-              <label className="text-[15px] text-gray-400 w-12">预设:</label>
+              <label className="text-[30px] text-gray-400 w-12">预设:</label>
               <select
                 value={selectedFigure.presetId ?? PERSON_PRESETS[0].id}
                 onPointerDown={(e) => e.stopPropagation()}
                 onChange={(e) => updateFigure(selectedFigure.id, { presetId: e.target.value })}
-                className="flex-1 bg-[#252525] text-gray-200 text-[15px] px-2 py-1 rounded border border-[#333] focus:outline-none focus:border-pink-500"
+                className="flex-1 bg-[#252525] text-gray-200 text-[30px] px-2 py-1 rounded border border-[#333] focus:outline-none focus:border-pink-500"
               >
                 {PERSON_PRESETS.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
@@ -2792,12 +2792,12 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
               </select>
             </div>
             <div className="flex items-center gap-2">
-              <label className="text-[15px] text-gray-400 w-12">姿势:</label>
+              <label className="text-[30px] text-gray-400 w-12">姿势:</label>
               <select
                 value={selectedFigure.poseId ?? FIGURE_POSES[0].id}
                 onPointerDown={(e) => e.stopPropagation()}
                 onChange={(e) => updateFigure(selectedFigure.id, { poseId: e.target.value })}
-                className="flex-1 bg-[#252525] text-gray-200 text-[15px] px-2 py-1 rounded border border-[#333] focus:outline-none focus:border-pink-500"
+                className="flex-1 bg-[#252525] text-gray-200 text-[30px] px-2 py-1 rounded border border-[#333] focus:outline-none focus:border-pink-500"
               >
                 {FIGURE_POSES.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
