@@ -750,7 +750,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       scene.background = new THREE.Color(0x333333);
       sceneRef.current = scene;
 
-      const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 2000);
+      const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1500);
       // 相机初始在 y=0 地平线高度（贴近 720 全景图查看器体验）
       camera.position.set(0, 0, 50);
       camera.lookAt(0, 0, 0);
@@ -761,6 +761,9 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         alpha: true,
         preserveDrawingBuffer: true,
         powerPreference: 'low-power',
+        // 开启对数深度缓冲：解决 near/far 比很大时（1500/0.1=15000）
+        // 远距离物体（球壳内壁 ~900 单位）出现的 z-fighting / 切片灰带问题
+        logarithmicDepthBuffer: true,
       });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.2));
       renderer.setSize(width, height);
@@ -1115,8 +1118,8 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
 
       const onWheel = (e: WheelEvent) => {
         e.preventDefault();
-        // 滚轮缩放：最近 1 单位（贴近角色），最远 2000 单位（看全景甚至球壳外）
-        cameraDistance = Math.max(1, Math.min(2000, cameraDistance + e.deltaY * 0.05));
+        // 滚轮缩放：最近 1 单位（贴近角色），最远 1500 单位（与 camera.far 对齐）
+        cameraDistance = Math.max(1, Math.min(1500, cameraDistance + e.deltaY * 0.05));
         updateCamera();
         // 同步到 live view（不触发 render）
         liveViewRef.current = {
@@ -1246,7 +1249,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         }) => {
           theta = (view.yaw * Math.PI) / 180;
           phi = Math.max(0.01, Math.min(Math.PI - 0.01, (Math.PI / 2) - (view.pitch * Math.PI) / 180));
-          cameraDistance = Math.max(1, Math.min(2000, view.cameraDistance));
+          cameraDistance = Math.max(1, Math.min(1500, view.cameraDistance));
           if (view.cameraTarget) {
             cameraTarget.set(view.cameraTarget.x, view.cameraTarget.y, view.cameraTarget.z);
           }
