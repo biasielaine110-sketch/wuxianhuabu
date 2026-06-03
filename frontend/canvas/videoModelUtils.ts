@@ -1,5 +1,6 @@
 import type { CanvasNode } from '../types';
 import type { ToApisVideoModelId } from '../services/openaiCompatibleService';
+import { MANXUE_GROK_IMAGINE_VIDEO_MODEL_ID } from '../services/openaiCompatibleService';
 
 /** 视频节点 Veo：当前存 `veo3.1-fast`；旧工程可能仍为 `veo3.1-fast-official` */
 export function isVeo31FastVideoModel(m?: string): boolean {
@@ -14,6 +15,13 @@ export function isVideoVeoStyleModel(m?: string): boolean {
 /** 视频节点 Sora */
 export function isVideoSoraStyleModel(m?: string): boolean {
   return m === 'sora-2-vvip';
+}
+
+/** 满 eAPI（manxueapi.com）Grok Imagine Video 1.5 Preview */
+export const MANXUE_GROK_IMAGINE_VIDEO_MODEL = MANXUE_GROK_IMAGINE_VIDEO_MODEL_ID;
+
+export function isManxueGrokImagineVideoModel(m?: string): boolean {
+  return m === MANXUE_GROK_IMAGINE_VIDEO_MODEL;
 }
 
 /** 视频节点 Grok 秒数档 */
@@ -99,6 +107,12 @@ export function getVideoModelSwitchUpdates(m: string, node: CanvasNode): Partial
     const d = node.videoDuration ?? 6;
     updates.videoDuration = [6, 10].includes(d) ? d : 6;
     updates.videoResolution = '720p';
+  } else if (m === MANXUE_GROK_IMAGINE_VIDEO_MODEL) {
+    const d = node.videoDuration ?? 10;
+    updates.videoDuration = [10, 15].includes(d) ? d : 10;
+    updates.videoResolution = '720p';
+    const ar = node.aspectRatio || '16:9';
+    if (!['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].includes(ar)) updates.aspectRatio = '16:9';
   } else if (m === 'doubao-seedance-2-0-260128' || m === 'doubao-seedance-2-0-fast-260128') {
     const d = node.videoDuration ?? 8;
     updates.videoDuration = [4, 6, 8, 10, 12, 15].includes(d) ? d : 8;
@@ -127,6 +141,7 @@ export function videoNodeModelToToApis(m?: string): ToApisVideoModelId {
   if (vm === 'doubao-seedance-2-0-260128' || vm === 'doubao-seedance-2-0-fast-260128') return vm as ToApisVideoModelId;
   if (vm === 'seedance-2' || vm === 'seedance-2-fast') return vm as ToApisVideoModelId;
   if (vm === 'gemini-omni-flash') return 'gemini-omni-flash';
+  if (isManxueGrokImagineVideoModel(vm)) return MANXUE_GROK_IMAGINE_VIDEO_MODEL as ToApisVideoModelId;
   if (vm === 'jimeng-video-v3' || vm === 'jimeng-image-to-video') return vm as ToApisVideoModelId;
   return 'grok-video-3';
 }

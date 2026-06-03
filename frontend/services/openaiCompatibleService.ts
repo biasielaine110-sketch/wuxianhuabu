@@ -164,6 +164,14 @@ function isManxueHost(baseNormalized: string): boolean {
   }
 }
 
+/** 满 eAPI 视频模型（Grok Imagine Video 系列） */
+export const MANXUE_GROK_IMAGINE_VIDEO_MODEL_ID = 'grok-imagine-video-1.5-preview';
+
+export function isManxueVideoModel(m?: string): boolean {
+  if (!m) return false;
+  return m === MANXUE_GROK_IMAGINE_VIDEO_MODEL_ID || m.endsWith('-manxue-video');
+}
+
 /** 判断是否为 MiniMax 域名（api.minimax.io） */
 function isMiniMaxHost(baseNormalized: string): boolean {
   try {
@@ -1307,7 +1315,7 @@ async function toApisUploadVideoReferenceImageUrls(
   return imageUrls;
 }
 
-export type ToApisVideoModelId = 'grok-video-3' | 'sora-2-vvip' | 'veo3.1-fast' | 'doubao-seedance-1-5-pro' | 'jimeng-video-v3' | 'jimeng-image-to-video' | 'gemini-omni-flash' | 'seedance-2' | 'seedance-2-fast' | 'doubao-seedance-2-0-260128' | 'doubao-seedance-2-0-fast-260128';
+export type ToApisVideoModelId = 'grok-video-3' | 'sora-2-vvip' | 'veo3.1-fast' | 'doubao-seedance-1-5-pro' | 'jimeng-video-v3' | 'jimeng-image-to-video' | 'gemini-omni-flash' | 'seedance-2' | 'seedance-2-fast' | 'doubao-seedance-2-0-260128' | 'doubao-seedance-2-0-fast-260128' | 'grok-imagine-video-1.5-preview';
 
 function isHttpUrlString(v: unknown): v is string {
   if (typeof v !== 'string') return false;
@@ -1488,6 +1496,151 @@ async function toApisPollVideoTaskToPlayableUrl(taskId: string, signal?: AbortSi
   throw new Error(
     `ToAPIs 视频任务超时（已等待超过 ${TOAPIS_VIDEO_TASK_MAX_WAIT_MS / 60_000} 分钟），请稍后重试。`
   );
+}
+
+/** 满 eAPI 视频任务超时：30 分钟 */
+const MANXUE_VIDEO_TASK_MAX_WAIT_MS = 1_800_000;
+
+/** 满 eAPI 参考图最大张数（首帧） */
+const MANXUE_VIDEO_MAX_REFERENCE_IMAGES = 3;
+
+/**
+ * 满 eAPI（manxueapi.com）视频生成：`grok-imagine-video-1.5-preview`。
+ * 走 OpenAI 兼容 `/videos/generations` 提交 + `/videos/generations/{id}` 轮询。
+ * CORS 已由 `/manxue-api` 同源代理处理（Vite dev + Vercel rewrite）。
+ */
+async function manxueUploadReferenceImageUrls(
+  refs: string[],
+  signal?: AbortSignal
+): Promise<string[]> {
+  if (!refs || refs.length === 0) return [];
+  const apiKey = getManxueSavedKey();
+  if (!apiKey) throw new Error('未配置满 e API Key。请在「设置 → API → 满 e」填写。');
+  const base = manxueFetchBase();
+  const list = refs.filter(Boolean).slice(0, MANXUE_VIDEO_MAX_REFERENCE_IMAGES);
+  const urls: string[] = [];
+  for (let i = 0; i < list.length; i++) {
+    assertNotAborted(signal);
+    const { raw, mime } = parseBase64ImageInput(list[i]);
+    const blob = base64ToBlob(raw, mime);
+    const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : mime.includes('gif') ? 'gif' : 'jpg';
+    const url = await openAiCompatUploadImageBlob(base, apiKey, blob, `manxue-grok-imagine-ref-${i}.${ext}`, signal);
+    urls.push(url);
+  }
+  return urls;
+}
+
+async function manxueSubmitVideoGeneration(
+  body: Record<string, unknown>,
+  signal?: AbortSignal
+): Promise<{ id: string }> {
+  const apiKey = getManxueSavedKey();
+  if (!apiKey) throw new Error('未配置满 e API Key。请在「设置 → API → 满 e」填写。');
+  const base = manxueFetchBase();
+  const res = await fetch(`${base}/videos/generations`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`满 e 视频提交失败 (${res.status}): ${text.slice(0, 800)}`);
+  }
+  let json: { id?: string; task_id?: string; taskId?: string; error?: { message?: string } };
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error(`满 e 响应非 JSON: ${text.slice(0, 400)}`);
+  }
+  if (json.error?.message) throw new Error(`满 e: ${json.error.message}`);
+  const id = json.id || json.task_id || json.taskId;
+  if (!id) throw new Error(`满 e 未返回视频任务 id：${text.slice(0, 400)}`);
+  return { id: String(id) };
+}
+
+async function manxuePollVideoTaskToPlayableUrl(
+  taskId: string,
+  signal?: AbortSignal
+): Promise<string> {
+  const apiKey = getManxueSavedKey();
+  const base = manxueFetchBase();
+  const deadline = Date.now() + MANXUE_VIDEO_TASK_MAX_WAIT_MS;
+  await sleepInterruptible(5_000, signal);
+
+  while (Date.now() < deadline) {
+    assertNotAborted(signal);
+    const res = await fetch(`${base}/videos/generations/${encodeURIComponent(taskId)}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal,
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      // 偶发 5xx 继续重试
+      await sleepInterruptible(10_000, signal);
+      continue;
+    }
+    let data: { status?: string; error?: { message?: string } };
+    try {
+      data = JSON.parse(text);
+    } catch {
+      await sleepInterruptible(5_000, signal);
+      continue;
+    }
+    if (isVideoTaskCompletedStatus(data.status)) {
+      const rawUrl = extractVideoUrlFromPollPayload(data);
+      if (!rawUrl) {
+        throw new Error(
+          `满 e 视频任务完成但未返回可播放 URL。完整响应：${text.slice(0, 2000)}`
+        );
+      }
+      const normalizedUrl = rawUrl.replace(/^(https?:\/)([^/])/i, '$1/$2');
+      return normalizedUrl;
+    }
+    const st = String(data.status || '').toLowerCase();
+    if (st === 'failed' || st === 'error' || st === 'cancelled') {
+      throw new Error(`满 e 视频生成失败: ${data.error?.message || text.slice(0, 300)}`);
+    }
+    await sleepInterruptible(10_000, signal);
+  }
+  throw new Error(
+    `满 e 视频任务超时（已等待超过 ${MANXUE_VIDEO_TASK_MAX_WAIT_MS / 60_000} 分钟），请稍后重试。`
+  );
+}
+
+/**
+ * 满 eAPI：`grok-imagine-video-1.5-preview` 文生 / 图生视频。
+ * - 10 / 15 秒；720p（固定）。
+ * - 参考图 0 张 = 文生；1+ 张 = 图生（取首张作为关键帧）。
+ * - 字段名沿用 OpenAI 兼容 / Sora 风格（seconds / aspect_ratio / resolution），
+ *   同时附 `resolution_name` 双字段以兼容部分聚合网关的命名。
+ */
+export async function manxueVideoGenerate(params: {
+  prompt: string;
+  durationSeconds: number;
+  aspectRatio: string;
+  resolution: '720p';
+  referenceImagesBase64?: string[];
+  signal?: AbortSignal;
+}): Promise<string> {
+  const { prompt, durationSeconds, aspectRatio, referenceImagesBase64 = [], signal } = params;
+  const imageUrls = await manxueUploadReferenceImageUrls(referenceImagesBase64, signal);
+
+  const body: Record<string, unknown> = {
+    model: MANXUE_GROK_IMAGINE_VIDEO_MODEL_ID,
+    prompt,
+    seconds: String(durationSeconds),
+    aspect_ratio: aspectRatio,
+    resolution: '720p',
+    resolution_name: '720p',
+  };
+  if (imageUrls.length) body.image_urls = imageUrls;
+
+  const { id } = await manxueSubmitVideoGeneration(body, signal);
+  return manxuePollVideoTaskToPlayableUrl(id, signal);
 }
 
 /**
@@ -1958,6 +2111,17 @@ export async function toApisCanvasVideoGenerate(params: {
   referenceAudioBase64?: string;
   signal?: AbortSignal;
 }): Promise<string> {
+  // 满 e 视频优先拦截（避免后续 isToApisHost 校验误伤）
+  if (isManxueVideoModel(params.videoModel)) {
+    return manxueVideoGenerate({
+      prompt: params.prompt,
+      durationSeconds: params.durationSeconds,
+      aspectRatio: params.aspectRatio,
+      resolution: '720p',
+      referenceImagesBase64: params.referenceImagesBase64,
+      signal: params.signal,
+    });
+  }
   if (params.videoModel === 'veo3.1-fast') {
     const res =
       params.resolution === '1080p' || params.resolution === '4k'

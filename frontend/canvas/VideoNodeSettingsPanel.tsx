@@ -6,11 +6,13 @@ import { EyedropperIcon } from './canvasIcons';
 import {
   getVideoModelSwitchUpdates,
   isJimengVideoModel,
+  isManxueGrokImagineVideoModel,
   isVideoDoubaoFamilyModel,
   isVideoDoubaoSeedance2Model,
   isVideoGrokDurationStyleModel,
   isVideoSoraStyleModel,
   isVideoVeoStyleModel,
+  MANXUE_GROK_IMAGINE_VIDEO_MODEL,
 } from './videoModelUtils';
 
 export interface VideoNodeSettingsPanelProps {
@@ -42,6 +44,7 @@ export function VideoNodeSettingsPanel({
   const isSeedance2Fast = vm === 'seedance-2-fast';
   const isGemini = vm === 'gemini-omni-flash';
   const isDoubaoSeedance2 = isVideoDoubaoSeedance2Model(vm);
+  const isManxueGrokImagine = isManxueGrokImagineVideoModel(vm);
 
   const vSlots = useMemo(() => buildIncomingRefSlots(node.id, edges, nodes), [node.id, edges, nodes]);
   const imageSlots = vSlots.filter((s) => s.kind === 'image');
@@ -134,7 +137,9 @@ export function VideoNodeSettingsPanel({
               ? ' · Grok：多档秒数与画幅'
               : isDoubao
                 ? ' · Seedance 2：5-10 秒；画幅 16:9/9:16/1:1'
-                : ''}
+                : isManxueGrokImagine
+                  ? ' · 满 e Grok Imagine：10/15 秒、720p；需满 e API Key'
+                  : ''}
       </div>
       {!isSora && !isVeo && isGroDur && (
         <div className="text-[9px] text-amber-600/95 px-1 leading-snug">
@@ -158,6 +163,9 @@ export function VideoNodeSettingsPanel({
             <option value="seedance-2">Seedance 2</option>
             <option value="seedance-2-fast">Seedance 2 Fast</option>
             <option value="gemini-omni-flash">Gemini Omni Flash</option>
+          </optgroup>
+          <optgroup label="满 e (manxueapi.com)">
+            <option value={MANXUE_GROK_IMAGINE_VIDEO_MODEL}>Grok Imagine Video 1.5 Preview（满 e）</option>
           </optgroup>
           <optgroup label="AIID (豆包Seedance2.0)">
             <option value="doubao-seedance-2-0-260128">Doubao Seedance 2.0</option>
@@ -263,6 +271,16 @@ export function VideoNodeSettingsPanel({
             >
               <option value={6}>6 秒 (1元)</option>
               <option value={10}>10 秒 (1.4元)</option>
+            </select>
+          ) : isManxueGrokImagine ? (
+            <select
+              className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+              value={[10, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 10}
+              onChange={(e) => onUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <option value={10}>10 秒</option>
+              <option value={15}>15 秒</option>
             </select>
           ) : isJimengVideoModel(node.model) ? (
             <select
@@ -397,6 +415,8 @@ export function VideoNodeSettingsPanel({
           ) : isSeedance2Fast ? (
             <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p (8毛/秒)</span>
           ) : isGemini ? (
+            <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p</span>
+          ) : isManxueGrokImagine ? (
             <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p</span>
           ) : (
             <select
