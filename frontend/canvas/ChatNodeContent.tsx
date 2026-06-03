@@ -143,6 +143,15 @@ const CHAT_FEATURE_BUTTON_SPECS: ChatFeatureButtonSpec[] = [
       'GGGG_6宫格分镜视频：工业级AI漫剧视效总监模板，六宫格 2×3 横屏关键帧 + 15秒视频提示词（零帧硬切、零黑屏废帧、角色外貌锁 P0 级、台词逐字零遗漏）。发送前请填入输入文案/故事情节/前后分镜/角色库/场景与物品库。',
   },
   {
+    id: 'iiii-storyboard-block-video',
+    presetKey: 'IIII_故事板分镜视频',
+    label: '故事板分镜视频',
+    icon: 'video',
+    tone: 'blue',
+    title:
+      'IIII_故事板分镜视频：工业级漫剧 Block 分镜师模板，10秒 3 Shot Block 时序 + 双份逐字复制输出（跨 Block 衔接物理起点、@ 引用约束、角色外貌锁、视听设定 4 项强制齐全、双份逐字一致 P0 级）。发送前请填入输入文案/前后 Block 参考/角色/场景/物品/故事情节。',
+  },
+  {
     id: 'hhhh-grok-four-grid-storyboard-video',
     presetKey: 'HHHH_grok_4宫格分镜视频',
     label: 'grok_4宫格分镜视频',
