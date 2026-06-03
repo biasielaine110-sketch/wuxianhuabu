@@ -2328,7 +2328,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
 
         {/* 角色列表 */}
         {figures.length > 0 ? (
-          <div className="space-y-1 max-h-32 overflow-y-auto">
+          <div className="space-y-1 overflow-y-auto">
             {figures.map(figure => {
               const isSelected = selectedFigureId === figure.id;
               return (
