@@ -573,6 +573,8 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
   nodeRef.current = node; // 保持 ref 同步
   const [forceUpdateKey, setForceUpdateKey] = useState(0);
   const [displayInfo, setDisplayInfo] = useState({ yaw: 0, pitch: 0, fov: 75 });
+  // 是否显示角色底部的网格地面：默认隐藏（让用户视觉上专注于 720° 全景）
+  const [showGrid, setShowGrid] = useState(false);
   const [fullscreenCapture, setFullscreenCapture] = useState<{ type: 'single' | 'grid', base64: string } | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [selectedFigureId, setSelectedFigureId] = useState<string | null>(null);
@@ -590,6 +592,11 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
   useEffect(() => {
     currentImageRef.current = '';
   }, [backgroundImage, backgroundImageAssetId]);
+
+  // 同步 showGrid → gridHelper.visible
+  useEffect(() => {
+    if (gridRef.current) gridRef.current.visible = showGrid;
+  }, [showGrid]);
   const figures = node.figures ?? [];
 
   // 处理全屏截图
@@ -666,6 +673,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       gridHelper.position.y = 0;
       (gridHelper.material as THREE.Material).opacity = 0.6;
       (gridHelper.material as THREE.Material).transparent = true;
+      gridHelper.visible = false;  // 默认隐藏，让用户视觉专注于 720° 全景
       scene.add(gridHelper);
       gridRef.current = gridHelper;
 
@@ -2305,6 +2313,14 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
           title="刷新渲染"
         >
           刷新
+        </button>
+        <button
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => setShowGrid((v) => !v)}
+          className={`py-1 px-2 rounded text-[10px] ${showGrid ? 'bg-pink-600 text-white' : 'bg-[#333] text-gray-300 hover:bg-[#444]'}`}
+          title={showGrid ? '隐藏角色底部网格' : '显示角色底部网格（默认隐藏，方便看全景）'}
+        >
+          网格
         </button>
       </div>
 
