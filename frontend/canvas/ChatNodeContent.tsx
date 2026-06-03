@@ -161,6 +161,15 @@ const CHAT_FEATURE_BUTTON_SPECS: ChatFeatureButtonSpec[] = [
       'JJJJ_批量_故事板分镜视频：工业级漫剧 Block 分镜师批量版，一次性处理 N 镜（按 panel_index 1..N 顺序），批内跨镜首尾相连 + 批首对接上一批 + 批末对接下一批 + 跨镜实体唯一性（服饰/道具/光影）+ 双层分隔符协议（panel_index_FIELD_first_FIELD_second_RECORD_...）+ 13 项强制自检。发送前请填入章节文案/前后批次参考/角色/场景/物品/小说原文/故事情节。',
   },
   {
+    id: 'kkkk-batch-shot-video-reasoning',
+    presetKey: 'KKKK_批量_分镜视频推理',
+    label: '批量_分镜视频推理',
+    icon: 'video',
+    tone: 'blue',
+    title:
+      'KKKK_批量_分镜视频推理：工业级 AI 漫剧分镜师 + 视频提示词工程师批量版，一次性处理一批分镜（10 条左右），为每条分镜生成「首帧提示词 / 尾帧提示词 / 视频提示词」三段产物；视频提示词 4 段时间轴（0-3/4-8/9-12/13-15秒）+ 衔接前置指令 + 单一空间 + 纯视觉 + 禁止外貌描写 + 台词来源唯一 + 中文引号 + 内容安全违禁词替换 + 10 项自检。发送前请填入故事情节/角色/场景/物品/小说原文/推文文案/前后批次参考/章节文案。',
+  },
+  {
     id: 'hhhh-grok-four-grid-storyboard-video',
     presetKey: 'HHHH_grok_4宫格分镜视频',
     label: 'grok_4宫格分镜视频',
