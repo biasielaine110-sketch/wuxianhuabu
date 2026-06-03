@@ -2398,7 +2398,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       {/* 机位栏：5 档预设景别 + 自定义机位保存/应用 */}
       <div className="border border-[#333] rounded-lg p-2 bg-[#1a1a1a] flex flex-col gap-1.5">
         <div className="flex items-center justify-between">
-          <span className="text-[30px] text-gray-400">机位</span>
+          <span className="text-[45px] text-gray-400">机位</span>
           <div className="flex gap-1">
             {CAMERA_SHOT_PRESETS.map((s) => {
               const active = s.fov === currentView.fov && s.cameraDistance === currentView.cameraDistance;
@@ -2407,7 +2407,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                   key={s.kind}
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => applyShotPreset(s)}
-                  className={`py-0.5 px-1.5 rounded text-[30px] ${
+                  className={`py-0.5 px-1.5 rounded text-[45px] ${
                     active
                       ? 'bg-pink-600 text-white'
                       : 'bg-[#333] hover:bg-[#444] text-gray-300'
@@ -2421,7 +2421,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
             <button
               onPointerDown={(e) => e.stopPropagation()}
               onClick={saveCurrentCamera}
-              className="py-0.5 px-1.5 rounded text-[30px] bg-emerald-700 hover:bg-emerald-600 text-white"
+              className="py-0.5 px-1.5 rounded text-[45px] bg-emerald-700 hover:bg-emerald-600 text-white"
               title="保存当前机位为自定义预设"
             >
               保存机位
@@ -2431,7 +2431,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
 
         {/* 焦距（35mm 等效）：slider 改 fov，标签显示 mm */}
         <div className="flex items-center gap-2">
-          <span className="text-[30px] text-gray-400 w-16">焦距</span>
+          <span className="text-[45px] text-gray-400 w-16">焦距</span>
           <input
             type="range"
             min={18}
@@ -2451,7 +2451,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
             }}
             className="flex-1 accent-pink-500"
           />
-          <span className="text-[30px] text-gray-400 w-16 text-right">
+          <span className="text-[45px] text-gray-400 w-16 text-right">
             {Math.round(fovToFocal(currentView.fov ?? 60))}mm
           </span>
         </div>
