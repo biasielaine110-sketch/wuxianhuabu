@@ -519,11 +519,13 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
     pitch: number;      // -90..90
     fov: number;
     cameraDistance: number;
+    cameraTarget: { x: number; y: number; z: number };
   }>({
     yaw: node.yaw ?? 0,
     pitch: node.pitch ?? 0,
     fov: node.fov ?? 60,
     cameraDistance: node.cameraDistance ?? 60,
+    cameraTarget: node.cameraTarget ?? { x: 0, y: 0, z: 0 },
   });
   /** 同步标记：onMouseMove / onWheel 拖动中为 true，停止后再写回 node */
   const viewDirtyRef = useRef(false);
@@ -540,6 +542,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       pitch: v.pitch,
       fov: v.fov,
       cameraDistance: v.cameraDistance,
+      cameraTarget: v.cameraTarget,
     });
     viewDirtyRef.current = false;
   }, []);
@@ -804,6 +807,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
           pitch: pitchDeg,
           fov: nodeRef.current.fov ?? 60,
           cameraDistance,
+          cameraTarget: { x: cameraTarget.x, y: cameraTarget.y, z: cameraTarget.z },
         };
         viewDirtyRef.current = true;
       };
@@ -894,9 +898,31 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         if (transformControls.dragging) return;
 
         if (isPanning) {
-          const panSpeed = 0.1;
-          cameraTarget.x -= dx * panSpeed * (cameraDistance / 100);
-          cameraTarget.z -= dy * panSpeed * (cameraDistance / 100);
+          // 平移：沿相机的 right / up 向量移动 cameraTarget
+          // （dx 沿水平方向，dy 沿垂直方向；不再硬编码到 XZ 平面）
+          // 关键：scale 选为"屏幕高度对应 fov 视角下的一半世界宽度"
+          // = cameraDistance * tan(fov/2)。平移 1 像素 = 移动 (scale * 2 / canvasH) 单位
+          const aspect = renderer.domElement.width / Math.max(1, renderer.domElement.height);
+          const forward = new THREE.Vector3()
+            .subVectors(cameraTarget, camera.position)
+            .normalize();
+          const worldUp = new THREE.Vector3(0, 1, 0);
+          const right = new THREE.Vector3().crossVectors(forward, worldUp).normalize();
+          const up = new THREE.Vector3().crossVectors(right, forward).normalize();
+          const halfH = cameraDistance * Math.tan(((camera.fov * Math.PI) / 180) / 2);
+          const halfW = halfH * aspect;
+          // 1 像素 = 对应视场高度的 (2 * halfH) / canvasH 单位
+          // 水平方向再乘 aspect 换算成世界单位的水平距离
+          const dyWorld = ( dy / renderer.domElement.height) * (halfH * 2);
+          const dxWorld = (-dx / renderer.domElement.width) * (halfW * 2);
+          cameraTarget.addScaledVector(right, dxWorld);
+          cameraTarget.addScaledVector(up, dyWorld);
+          // 同步到 live view（不触发 render），松开鼠标时一并写回 node
+          liveViewRef.current = {
+            ...liveViewRef.current,
+            cameraTarget: { x: cameraTarget.x, y: cameraTarget.y, z: cameraTarget.z },
+          };
+          viewDirtyRef.current = true;
           updateCamera();
         } else if (isDragging) {
           theta -= dx * 0.01;
@@ -912,6 +938,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
             pitch: pitchDeg,
             fov: nodeRef.current.fov ?? 60,
             cameraDistance,
+            cameraTarget: { x: cameraTarget.x, y: cameraTarget.y, z: cameraTarget.z },
           };
           viewDirtyRef.current = true;
         }
@@ -934,7 +961,8 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
 
       const onWheel = (e: WheelEvent) => {
         e.preventDefault();
-        cameraDistance = Math.max(10, Math.min(200, cameraDistance + e.deltaY * 0.05));
+        // 滚轮缩放：最近 1 单位（贴近角色），最远 500 单位（看全景）
+        cameraDistance = Math.max(1, Math.min(500, cameraDistance + e.deltaY * 0.05));
         updateCamera();
         // 同步到 live view（不触发 render）
         liveViewRef.current = {
@@ -1009,7 +1037,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         }) => {
           theta = (view.yaw * Math.PI) / 180;
           phi = Math.max(0.01, Math.min(Math.PI - 0.01, (Math.PI / 2) - (view.pitch * Math.PI) / 180));
-          cameraDistance = Math.max(10, Math.min(200, view.cameraDistance));
+          cameraDistance = Math.max(1, Math.min(500, view.cameraDistance));
           if (view.cameraTarget) {
             cameraTarget.set(view.cameraTarget.x, view.cameraTarget.y, view.cameraTarget.z);
           }
@@ -1844,6 +1872,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       pitch: preset.pitch,
       fov: preset.fov,
       cameraDistance: preset.cameraDistance,
+      cameraTarget: preset.cameraTarget,
     };
     viewDirtyRef.current = false;
     onUpdate({
@@ -1867,6 +1896,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       pitch: target.pitch,
       fov: target.fov,
       cameraDistance: target.cameraDistance,
+      cameraTarget: target.cameraTarget,
     };
     viewDirtyRef.current = false;
     onUpdate({ fov: target.fov, cameraDistance: target.cameraDistance });
