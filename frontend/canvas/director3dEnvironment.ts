@@ -12,7 +12,8 @@ export interface EnvironmentWall {
   groundMaterial: THREE.MeshStandardMaterial;
 }
 
-const ENV_RADIUS = 900; // 球形墙的远端半径
+const ENV_RADIUS = 1600; // 球形墙的远端半径（> camera.far 1500 + cameraDistance 上限 1500，
+// 相机最远 1500 距球壳内壁至少 100，避免脱出看到背景色 / 灰球）
 const WALL_HEIGHT = 320; // 平面墙的高度（场景单位）
 const WALL_RADIUS = 220; // 圆圈墙的半径
 
@@ -30,7 +31,8 @@ export function createEnvironmentWall(envType: EnvironmentType): EnvironmentWall
   root.userData = { isEnvironmentWall: true };
 
   const skyMaterial = new THREE.MeshBasicMaterial({
-    color: 0x2f2f2f,
+    // 默认黑色背景：避免"未导入全景图 + 拉远"时球壳呈现深灰"灰球"
+    color: 0x000000,
     side: THREE.DoubleSide,
   });
   const groundMaterial = new THREE.MeshStandardMaterial({

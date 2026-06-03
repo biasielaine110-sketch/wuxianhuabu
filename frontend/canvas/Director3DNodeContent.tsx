@@ -747,10 +747,10 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       const height = rect.height;
 
       const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x333333);
+      scene.background = new THREE.Color(0x000000);
       sceneRef.current = scene;
 
-      const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1500);
+      const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 2000);
       // 相机初始在 y=0 地平线高度（贴近 720 全景图查看器体验）
       camera.position.set(0, 0, 50);
       camera.lookAt(0, 0, 0);
@@ -768,7 +768,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.2));
       renderer.setSize(width, height);
       renderer.outputColorSpace = THREE.SRGBColorSpace;
-      renderer.setClearColor(0x333333, 1);
+      renderer.setClearColor(0x000000, 1);
       container.appendChild(renderer.domElement);
       rendererRef.current = renderer;
 
@@ -1118,7 +1118,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
 
       const onWheel = (e: WheelEvent) => {
         e.preventDefault();
-        // 滚轮缩放：最近 1 单位（贴近角色），最远 1500 单位（与 camera.far 对齐）
+        // 滚轮缩放：最近 1 单位（贴近角色），最远 1500 单位（< 球壳 1600 - 100 margin）
         cameraDistance = Math.max(1, Math.min(1500, cameraDistance + e.deltaY * 0.05));
         updateCamera();
         // 同步到 live view（不触发 render）
@@ -1412,7 +1412,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       groundMaterial.map = null;
       groundMaterial.color.setHex(0x2b2b2b);
       groundMaterial.needsUpdate = true;
-      scene.background = new THREE.Color(0x333333);
+      scene.background = new THREE.Color(0x000000);
     };
 
     if (!hasBackgroundMedia) {
@@ -1447,7 +1447,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       skyMaterial.needsUpdate = true;
       // scene.background 不再贴 skyTexture（避免全屏 2D 背景与球壳内壁冲突，
       // 同时也避免贴图绕场造成视觉错乱）。球壳本身就是环境。
-      scene.background = new THREE.Color(0x333333);
+      scene.background = new THREE.Color(0x000000);
 
       // sphere 模式下整张 720 图已经贴在球壳内壁（含下半部分），
       // 不再单独生成 groundTexture，避免"地面 + 球壳下半"画面重复
