@@ -319,6 +319,20 @@ function buildFigureGroup(
 }
 
 /**
+ * 角色默认名：把 index 转为字母序号
+ *   0 → A, 1 → B, …, 25 → Z, 26 → AA, 27 → AB …
+ */
+function indexToCharLabel(index: number): string {
+  let n = Math.max(0, index);
+  let s = '';
+  do {
+    s = String.fromCharCode(65 + (n % 26)) + s;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return s;
+}
+
+/**
  * 应用姿势：把 group.userData.partRole = 'leftArm' 之类的子对象 rotation 按 pose.parts 调整
  * - pivot（带 partRole 的 group）旋转即可带动下方 mesh
  * - 直挂 mesh 的 part（如 head / hair / torso）也支持
@@ -1291,7 +1305,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
     currentFigures.forEach((figure, index) => {
       // 角色编号色（用于选中高亮与标签描边）—— 来自 palette + 序号
       const figureColor = new THREE.Color(buildFigureColor(index));
-      const labelText = figure.name || `角色${index + 1}`;
+      const labelText = figure.name || `角色${indexToCharLabel(index)}`;
 
       // 决定是否需要重建：preset 变化 / 姿势变化 → 完整 dispose 旧 group 后 buildFigureGroup
       const prevMeta = figureRenderMetaRef.current.get(figure.id);
@@ -1879,12 +1893,13 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
   };
 
   // 添加角色 - 默认用内置人偶（modelType='preset'）；GLB 上传走单独入口
+  // name 留空，由渲染端按 index 兜底为「角色A / 角色B / 角色C …」
   const addFigure = () => {
     const presetIndex = figures.length % PERSON_PRESETS.length;
     const preset = PERSON_PRESETS[presetIndex];
     const newFigure: Figure3D = {
       id: `figure-${Date.now()}`,
-      name: preset.name,
+      name: '',
       image: '',
       x: 50, // 场景中心
       y: 50, // 场景中心
@@ -2329,8 +2344,9 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         {/* 角色列表 */}
         {figures.length > 0 ? (
           <div className="space-y-1 overflow-y-auto">
-            {figures.map(figure => {
+            {figures.map((figure, idx) => {
               const isSelected = selectedFigureId === figure.id;
+              const displayName = figure.name || `角色${indexToCharLabel(idx)}`;
               return (
                 <div
                   key={figure.id}
@@ -2343,7 +2359,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                   <div className="w-8 h-8 rounded border border-[#444] bg-gradient-to-br from-pink-500 to-purple-500 flex items-center justify-center text-white">
                     <PersonIcon size={16} />
                   </div>
-                  <span className="flex-1 text-[10px] text-gray-300 truncate">{figure.name}</span>
+                  <span className="flex-1 text-[10px] text-gray-300 truncate">{displayName}</span>
 
                   {/* 操作按钮：选中时一直显示，否则 hover 时显示 */}
                   <div className={`flex items-center gap-1 ${isSelected ? '' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
@@ -2416,6 +2432,11 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
               <input
                 type="text"
                 value={selectedFigure.name}
+                placeholder={(() => {
+                  // 用 figures 数组的索引作为默认名兜底显示在 placeholder
+                  const idx = figures.findIndex((f) => f.id === selectedFigure.id);
+                  return `角色${indexToCharLabel(idx)}`;
+                })()}
                 onPointerDown={(e) => e.stopPropagation()}
                 onChange={(e) => updateFigure(selectedFigure.id, { name: e.target.value })}
                 className="flex-1 bg-[#252525] text-gray-200 text-[10px] px-2 py-1 rounded border border-[#333] focus:outline-none focus:border-pink-500"
