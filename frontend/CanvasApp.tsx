@@ -599,7 +599,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     'panoramaT2i': { width: 1300, height: 1000 },
     /** 图片标注：近方形略竖长，宽:高 = 4:5（介于 4:5～5:6） */
     'annotation': { width: 960, height: 1000 },
-    'director3d': { width: 4000, height: 5000 },
+    'director3d': { width: 4000, height: 4700 },
     /** AI 对话：竖向更高；内容区消息列表:底部输入带 = 2:1 */
     'chat': { width: 1560, height: 2760 },
     'text': { width: 1050, height: 750 },
