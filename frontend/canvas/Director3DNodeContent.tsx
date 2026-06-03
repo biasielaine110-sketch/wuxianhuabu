@@ -597,6 +597,12 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
   useEffect(() => {
     if (gridRef.current) gridRef.current.visible = showGrid;
   }, [showGrid]);
+
+  // 是否显示 720 全景的"脚底地面平面"（半透明纹理大圆面）：默认隐藏
+  const [showGround, setShowGround] = useState(false);
+  useEffect(() => {
+    if (groundRef.current) groundRef.current.visible = showGround;
+  }, [showGround]);
   const figures = node.figures ?? [];
 
   // 处理全屏截图
@@ -707,6 +713,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
       groundMesh.rotation.x = -Math.PI / 2;
       groundMesh.position.y = -0.05;
+      groundMesh.visible = false;  // 默认隐藏（用户视角应该"站在全景图里"，不需要脚下硬地板）
       scene.add(groundMesh);
       groundRef.current = groundMesh;
       groundMaterialRef.current = groundMaterial;
@@ -1125,6 +1132,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
     const groundMesh = new THREE.Mesh(groundGeometry, newWall.groundMaterial);
     groundMesh.rotation.x = -Math.PI / 2;
     groundMesh.position.y = -0.05;
+    groundMesh.visible = false;  // 默认隐藏（用户视角"站在全景里"，不需要脚下硬地板）
     scene.add(groundMesh);
     groundRef.current = groundMesh;
     groundMaterialRef.current = newWall.groundMaterial;
@@ -2321,6 +2329,14 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
           title={showGrid ? '隐藏角色底部网格' : '显示角色底部网格（默认隐藏，方便看全景）'}
         >
           网格
+        </button>
+        <button
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => setShowGround((v) => !v)}
+          className={`py-1 px-2 rounded text-[10px] ${showGround ? 'bg-pink-600 text-white' : 'bg-[#333] text-gray-300 hover:bg-[#444]'}`}
+          title={showGround ? '隐藏角色脚底地面平面' : '显示角色脚底地面平面（默认隐藏，方便看全景）'}
+        >
+          地面
         </button>
       </div>
 
