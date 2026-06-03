@@ -33,32 +33,38 @@ export async function loadFigureModelFromFile(
 }
 
 /**
- * 归一化模型：放到 y=0、缩放到 ~7 单位高、center 到原点（XZ）
- * - 拿到 bounding box 后调整 position + scale
+ * 归一化模型：放到 y=0、缩放到 ~targetHeight 单位高、center 到原点（XZ）
+ *
+ * 关键：先 scale（只动 root.scale，不动 position），再重新计算
+ * 缩放后世界的 box，最后用世界坐标把 root 平移到 y=0 + xz 居中。
+ * 这样无论原模型多大，最终 mesh 的世界 minY 一定 = 0，不会被
+ * 推高成「浮空」。
  */
 export function normalizeFigureModel(root: THREE.Object3D, targetHeight = 7): void {
-  const box = new THREE.Box3().setFromObject(root);
-  const size = new THREE.Vector3();
-  const center = new THREE.Vector3();
-  box.getSize(size);
-  box.getCenter(center);
-
-  // 先把 root 摆到 y=0 平面（最小 y = 0）
-  const minY = box.min.y;
-  // 再把 xz 中心移到 (0, 0, 0)
-  const cx = center.x;
-  const cz = center.z;
-  root.position.x -= cx;
-  root.position.y -= minY;
-  root.position.z -= cz;
-
-  // 缩放到目标身高
-  if (size.y > 0 && Number.isFinite(size.y)) {
-    const s = targetHeight / size.y;
+  // 1) 先按原始 box 决定 scale
+  const box0 = new THREE.Box3().setFromObject(root);
+  const size0 = new THREE.Vector3();
+  box0.getSize(size0);
+  if (size0.y > 0 && Number.isFinite(size0.y)) {
+    const s = targetHeight / size0.y;
     root.scale.multiplyScalar(s);
   }
+  // 注意：此时 root.position 还没改；box0 也是缩放前算的，下面要重新算
 
-  // 启用阴影
+  // 2) 重新算缩放后的世界 box（root 还在原点，scale 已改）
+  //    需要先 updateMatrixWorld 才能拿准确的世界 box
+  root.updateMatrixWorld(true);
+  const box1 = new THREE.Box3().setFromObject(root);
+  const minY = box1.min.y;
+  const center1 = new THREE.Vector3();
+  box1.getCenter(center1);
+
+  // 3) 用世界 box 把 root 平移，让 mesh 的世界 y 起点 = 0、xz 中心 = 0
+  root.position.x -= center1.x;
+  root.position.y -= minY;
+  root.position.z -= center1.z;
+
+  // 4) 启用阴影
   root.traverse((obj) => {
     if (obj instanceof THREE.Mesh) {
       obj.castShadow = true;

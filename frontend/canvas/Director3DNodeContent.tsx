@@ -111,14 +111,140 @@ function buildFigureGroup(
   const shoeMat = matOf(preset.shoeColor, 0.6, 0.1);
   const collarMat = matOf(preset.topColor, 0.5);
 
-  // ===== 头 =====
+  // ============================================================
+  // 几何堆叠：从 y=0 地面往上严格叠加，保证脚踩地面（y=0 平面）
+  //   y 累加器 cursor 表示"当前堆叠到的 y"
+  // ============================================================
+  let y = 0;
+
+  // ===== 左 / 右 腿（先建到一定 y 高度，再回到小腿 / 鞋 / 脚踝）=====
+  // 用 addLegMirror 直接挂两条腿的整段几何到 group
+  const hipR = 0.4 * bodyFactor;
+  // 腿总高（鞋 0.5 + 脚踝 0 + 小腿 1.4 + 膝关节 0.4 + 大腿 1.5 ≈ 3.8 视觉身高）
+  // 直接把 hipY 写死 = 0.5(鞋) + footR*1.2 + lowerLegL + limbR*0.4 + upperLegL
+  // = 0.5 + 0.42 + 1.4 + 0.112 + 1.5 ≈ 3.93
+  // 实际 hipY = 3.93（取近似 3.9），后续 y 从此继续
+  const hipY = 0.5 + footR * 1.2 + lowerLegL + limbR * 0.4 + upperLegL;
+
+  const addLegMirror = (side: 'leftLeg' | 'rightLeg', offsetX: number) => {
+    // legPivot 放在 hipY（= 大腿顶），这样 partRole='leftLeg' 旋转 = 整条腿绕髋旋转
+    const legPivot = new THREE.Group();
+    legPivot.position.set(offsetX, hipY, 0);
+    legPivot.userData = { partRole: side };
+
+    // 大腿 cylinder：中心在 legPivot 下方 upperLegL/2
+    const upper = new THREE.Mesh(
+      new THREE.CylinderGeometry(limbR * 1.1, limbR * 1.0, upperLegL, 12),
+      bottomMat
+    );
+    upper.position.y = -upperLegL / 2;
+    upper.userData = { figureId: figure.id, isFigurePart: true };
+    upper.castShadow = true;
+    legPivot.add(upper);
+
+    // 膝关节 sphere
+    const kn = new THREE.Mesh(new THREE.SphereGeometry(limbR * 1.05, 10, 10), bottomMat);
+    kn.position.y = -upperLegL;
+    kn.userData = { figureId: figure.id, isFigurePart: true };
+    legPivot.add(kn);
+
+    // 小腿 cylinder
+    const lower = new THREE.Mesh(
+      new THREE.CylinderGeometry(limbR * 0.95, limbR * 0.8, lowerLegL, 12),
+      bottomMat
+    );
+    lower.position.y = -upperLegL - lowerLegL / 2;
+    lower.userData = { figureId: figure.id, isFigurePart: true };
+    legPivot.add(lower);
+
+    // 脚踝 sphere
+    const ank = new THREE.Mesh(new THREE.SphereGeometry(footR, 10, 10), shoeMat);
+    ank.position.y = -upperLegL - lowerLegL;
+    ank.userData = { figureId: figure.id, isFigurePart: true };
+    legPivot.add(ank);
+
+    // 鞋 box（注意 legPivot 在 hipY，所以鞋的 y = -(hipY - 0.25)）
+    const shoebox = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, shoeL), shoeMat);
+    shoebox.position.set(0, -(hipY - 0.25), shoeL * 0.3);
+    shoebox.userData = { figureId: figure.id, isFigurePart: true };
+    legPivot.add(shoebox);
+
+    group.add(legPivot);
+  };
+  addLegMirror('leftLeg', -0.4 * bodyFactor);
+  addLegMirror('rightLeg', 0.4 * bodyFactor);
+
+  // 累加器到 hipY
+  y = hipY;
+
+  // ===== 髋关节 sphere（左右各一，作为髋部关节标识）=====
+  const leftHip = new THREE.Mesh(new THREE.SphereGeometry(hipR, 12, 10), bottomMat);
+  leftHip.position.set(-0.4 * bodyFactor, hipY, 0);
+  leftHip.userData = { figureId: figure.id, isFigurePart: true };
+  group.add(leftHip);
+  const rightHip = leftHip.clone();
+  rightHip.position.x = 0.4 * bodyFactor;
+  group.add(rightHip);
+  y += hipR * 0.6;
+
+  // ===== 躯干 cylinder（center = y + torsoH/2）=====
+  const torso = new THREE.Mesh(
+    new THREE.CylinderGeometry(torsoTopR, torsoBottomR, torsoH, 18),
+    topMat
+  );
+  torso.position.set(0, y + torsoH / 2, 0);
+  torso.userData = { figureId: figure.id, isFigurePart: true, partRole: 'torso' };
+  torso.castShadow = true;
+  group.add(torso);
+
+  // 衣领（贴在躯干顶）
+  const collar = new THREE.Mesh(
+    new THREE.TorusGeometry(torsoTopR * 1.02, 0.15, 8, 16, Math.PI),
+    collarMat
+  );
+  collar.rotation.x = Math.PI / 2;
+  collar.rotation.z = Math.PI;
+  collar.position.set(0, y + torsoH - 0.15, 0);
+  collar.userData = { figureId: figure.id, isFigurePart: true };
+  group.add(collar);
+
+  // 腰带（贴在躯干底）
+  const belt = new THREE.Mesh(
+    new THREE.CylinderGeometry(torsoBottomR * 1.02, torsoBottomR * 1.02, 0.18, 18),
+    matOf(preset.bottomColor, 0.4, 0.2)
+  );
+  belt.position.set(0, y + 0.1, 0);
+  belt.userData = { figureId: figure.id, isFigurePart: true };
+  group.add(belt);
+
+  // 肩膀（左右 sphere，挂在躯干顶稍下）
+  const shoulderR = 0.4 * bodyFactor;
+  const shoulderY = y + torsoH - 0.2;
+  const leftShoulder = new THREE.Mesh(new THREE.SphereGeometry(shoulderR, 14, 12), topMat);
+  leftShoulder.position.set(-torsoTopR - 0.05, shoulderY, 0);
+  leftShoulder.userData = { figureId: figure.id, isFigurePart: true };
+  group.add(leftShoulder);
+  const rightShoulder = leftShoulder.clone();
+  rightShoulder.position.x = torsoTopR + 0.05;
+  group.add(rightShoulder);
+
+  y += torsoH;
+
+  // ===== 脖子 cylinder（骑在躯干顶）=====
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(neckR, neckR * 1.05, neckH, 14), skinMat);
+  neck.position.set(0, y + neckH / 2, 0);
+  neck.userData = { figureId: figure.id, isFigurePart: true, partRole: 'neck' };
+  group.add(neck);
+  y += neckH;
+
+  // ===== 头 sphere（底面与脖子顶相切）=====
   const head = new THREE.Mesh(new THREE.SphereGeometry(headR, 24, 20), skinMat);
-  head.position.y = 6.4 * headFactor;
+  head.position.set(0, y + headR * 0.85, 0);
   head.userData = { figureId: figure.id, isFigurePart: true, partRole: 'head' };
   head.castShadow = true;
   group.add(head);
 
-  // 头发：球冠，长度/厚度由 preset 决定
+  // 头发：球冠，套在头上
   const hairGeom = new THREE.SphereGeometry(
     headR * 1.06,
     24,
@@ -129,65 +255,14 @@ function buildFigureGroup(
     Math.PI * 0.55 * hairLengthFactor
   );
   const hair = new THREE.Mesh(hairGeom, hairMat);
-  hair.position.y = 6.4 * headFactor;
+  hair.position.set(0, y + headR * 0.85, 0);
   hair.userData = { figureId: figure.id, isFigurePart: true, partRole: 'hair' };
   group.add(hair);
 
-  // ===== 脖子 =====
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(neckR, neckR * 1.05, neckH, 14), skinMat);
-  neck.position.y = 5.7 * headFactor + neckH / 2;
-  neck.userData = { figureId: figure.id, isFigurePart: true, partRole: 'neck' };
-  group.add(neck);
-
-  // ===== 躯干（cylinder，Y 轴从上到下半径渐变） =====
-  const torso = new THREE.Mesh(
-    new THREE.CylinderGeometry(torsoTopR, torsoBottomR, torsoH, 18),
-    topMat
-  );
-  torso.position.y = 5.7 * headFactor + neckH + torsoH / 2;
-  torso.userData = { figureId: figure.id, isFigurePart: true, partRole: 'torso' };
-  torso.castShadow = true;
-  group.add(torso);
-
-  // 衣领（torus 段，仅前面半圈，绕 Y 轴）
-  const collar = new THREE.Mesh(
-    new THREE.TorusGeometry(torsoTopR * 1.02, 0.15, 8, 16, Math.PI),
-    collarMat
-  );
-  collar.rotation.x = Math.PI / 2;
-  collar.rotation.z = Math.PI;
-  collar.position.y = 5.7 * headFactor + neckH + 0.15;
-  collar.userData = { figureId: figure.id, isFigurePart: true };
-  group.add(collar);
-
-  // 腰带
-  const belt = new THREE.Mesh(
-    new THREE.CylinderGeometry(torsoBottomR * 1.02, torsoBottomR * 1.02, 0.18, 18),
-    matOf(preset.bottomColor, 0.4, 0.2)
-  );
-  belt.position.y = 5.7 * headFactor + neckH + torsoH - 0.3;
-  belt.userData = { figureId: figure.id, isFigurePart: true };
-  group.add(belt);
-
-  // 肩膀（左右各一个 sphere 作为关节，更像人）
-  const shoulderR = 0.4 * bodyFactor;
-  const shoulderY = 5.7 * headFactor + neckH + torsoH * 0.85;
-  const leftShoulder = new THREE.Mesh(new THREE.SphereGeometry(shoulderR, 14, 12), topMat);
-  leftShoulder.position.set(-torsoTopR - 0.05, shoulderY, 0);
-  leftShoulder.userData = { figureId: figure.id, isFigurePart: true };
-  group.add(leftShoulder);
-  const rightShoulder = leftShoulder.clone();
-  rightShoulder.position.x = torsoTopR + 0.05;
-  group.add(rightShoulder);
-
-  // ===== 手臂（上臂 + 肘关节 + 前臂 + 手）=====
+  // ===== 手臂（上臂 + 肘关节 + 前臂 + 手）：以肩为旋转中心 =====
   const buildArm = (side: 'left' | 'right', mirrorX: 1 | -1) => {
     const armPivot = new THREE.Group();
-    armPivot.position.set(
-      mirrorX * (torsoTopR + 0.1),
-      shoulderY,
-      0
-    );
+    armPivot.position.set(mirrorX * (torsoTopR + 0.1), shoulderY, 0);
     armPivot.userData = { partRole: side === 'left' ? 'leftArm' : 'rightArm' };
 
     // 上臂 cylinder
@@ -200,13 +275,13 @@ function buildFigureGroup(
     upper.castShadow = true;
     armPivot.add(upper);
 
-    // 肘关节 sphere
+    // 肘关节
     const elbow = new THREE.Mesh(new THREE.SphereGeometry(limbR * 1.05, 10, 10), skinMat);
     elbow.position.y = -upperArmL;
     elbow.userData = { figureId: figure.id, isFigurePart: true };
     armPivot.add(elbow);
 
-    // 前臂 cylinder（皮肤色，模拟手袖外露的小臂）
+    // 前臂 cylinder
     const lower = new THREE.Mesh(
       new THREE.CylinderGeometry(limbR * 0.95, limbR * 0.9, lowerArmL, 12),
       skinMat
@@ -215,7 +290,7 @@ function buildFigureGroup(
     lower.userData = { figureId: figure.id, isFigurePart: true };
     armPivot.add(lower);
 
-    // 手 sphere
+    // 手
     const hand = new THREE.Mesh(new THREE.SphereGeometry(handR, 10, 10), skinMat);
     hand.position.y = -upperArmL - lowerArmL - handR * 0.4;
     hand.userData = { figureId: figure.id, isFigurePart: true };
@@ -225,68 +300,6 @@ function buildFigureGroup(
   };
   buildArm('left', -1);
   buildArm('right', 1);
-
-  // 髋关节（左右各一）
-  const hipY = 5.7 * headFactor + neckH + torsoH;
-  const hipR = 0.4 * bodyFactor;
-  const leftHip = new THREE.Mesh(new THREE.SphereGeometry(hipR, 12, 10), bottomMat);
-  leftHip.position.set(-0.4 * bodyFactor, hipY, 0);
-  leftHip.userData = { figureId: figure.id, isFigurePart: true };
-  group.add(leftHip);
-  const rightHip = leftHip.clone();
-  rightHip.position.x = 0.4 * bodyFactor;
-  group.add(rightHip);
-
-  // ===== 腿（大腿 + 膝关节 + 小腿 + 脚） =====
-  const buildLeg = (side: 'leftLeg' | 'rightLeg', offsetX: number) => {
-    const legPivot = new THREE.Group();
-    legPivot.position.set(offsetX, hipY, 0);
-    legPivot.userData = { partRole: side };
-
-    // 大腿 cylinder
-    const upper = new THREE.Mesh(
-      new THREE.CylinderGeometry(limbR * 1.1, limbR * 1.0, upperLegL, 12),
-      bottomMat
-    );
-    upper.position.y = -upperLegL / 2;
-    upper.userData = { figureId: figure.id, isFigurePart: true };
-    upper.castShadow = true;
-    legPivot.add(upper);
-
-    // 膝关节 sphere
-    const knee = new THREE.Mesh(new THREE.SphereGeometry(limbR * 1.05, 10, 10), bottomMat);
-    knee.position.y = -upperLegL;
-    knee.userData = { figureId: figure.id, isFigurePart: true };
-    legPivot.add(knee);
-
-    // 小腿 cylinder（略细）
-    const lower = new THREE.Mesh(
-      new THREE.CylinderGeometry(limbR * 0.95, limbR * 0.8, lowerLegL, 12),
-      bottomMat
-    );
-    lower.position.y = -upperLegL - lowerLegL / 2;
-    lower.userData = { figureId: figure.id, isFigurePart: true };
-    legPivot.add(lower);
-
-    // 脚踝 sphere
-    const ankle = new THREE.Mesh(new THREE.SphereGeometry(footR, 10, 10), shoeMat);
-    ankle.position.y = -upperLegL - lowerLegL;
-    ankle.userData = { figureId: figure.id, isFigurePart: true };
-    legPivot.add(ankle);
-
-    // 鞋（box，从脚踝向前延伸）
-    const shoe = new THREE.Mesh(
-      new THREE.BoxGeometry(shoeH, 0.5, shoeL),
-      shoeMat
-    );
-    shoe.position.set(0, -upperLegL - lowerLegL - 0.05, shoeL * 0.3);
-    shoe.userData = { figureId: figure.id, isFigurePart: true };
-    legPivot.add(shoe);
-
-    group.add(legPivot);
-  };
-  buildLeg('leftLeg', -0.4 * bodyFactor);
-  buildLeg('rightLeg', 0.4 * bodyFactor);
 
   // 应用初始姿势
   applyFigurePose(group, pose);
@@ -1875,7 +1888,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       image: '',
       x: 50, // 场景中心
       y: 50, // 场景中心
-      scale: 2, // 默认缩放2倍
+      scale: 1, // 默认 1:1（人偶约 8.6 单位高，与 1000x1000 网格比例协调）
       rotation: 0,
       presetId: preset.id,
       poseId: FIGURE_POSES[0].id,
