@@ -2383,7 +2383,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       {/* 机位栏：5 档预设景别 + 自定义机位保存/应用 */}
       <div className="border border-[#333] rounded-lg p-2 bg-[#1a1a1a] flex flex-col gap-1.5">
         <div className="flex items-center justify-between">
-          <span className="text-[15px] text-gray-400">机位</span>
+          <span className="text-[30px] text-gray-400">机位</span>
           <div className="flex gap-1">
             {CAMERA_SHOT_PRESETS.map((s) => {
               const active = s.fov === currentView.fov && s.cameraDistance === currentView.cameraDistance;
@@ -2392,7 +2392,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                   key={s.kind}
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => applyShotPreset(s)}
-                  className={`py-0.5 px-1.5 rounded text-[15px] ${
+                  className={`py-0.5 px-1.5 rounded text-[30px] ${
                     active
                       ? 'bg-pink-600 text-white'
                       : 'bg-[#333] hover:bg-[#444] text-gray-300'
@@ -2406,7 +2406,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
             <button
               onPointerDown={(e) => e.stopPropagation()}
               onClick={saveCurrentCamera}
-              className="py-0.5 px-1.5 rounded text-[15px] bg-emerald-700 hover:bg-emerald-600 text-white"
+              className="py-0.5 px-1.5 rounded text-[30px] bg-emerald-700 hover:bg-emerald-600 text-white"
               title="保存当前机位为自定义预设"
             >
               保存机位
@@ -2419,7 +2419,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
             {(node.cameras ?? []).map((c) => (
               <div
                 key={c.id}
-                className={`group flex items-center gap-1 pl-2 pr-1 py-0.5 rounded text-[15px] cursor-pointer ${
+                className={`group flex items-center gap-1 pl-2 pr-1 py-0.5 rounded text-[30px] cursor-pointer ${
                   node.activeCameraId === c.id
                     ? 'bg-pink-600/30 border border-pink-500/60 text-pink-200'
                     : 'bg-[#252525] hover:bg-[#333] border border-transparent text-gray-300'
@@ -2430,13 +2430,13 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                 }}
               >
                 <input
-                  className="bg-transparent outline-none w-16 text-[15px]"
+                  className="bg-transparent outline-none w-16 text-[30px]"
                   value={c.name}
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => e.stopPropagation()}
                   onChange={(e) => renameCameraPreset(c.id, e.target.value)}
                 />
-                <span className="text-[14px] text-gray-500">
+                <span className="text-[28px] text-gray-500">
                   {c.fov}°/{Math.round(c.cameraDistance)}
                 </span>
                 <button
