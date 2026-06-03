@@ -551,6 +551,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
   const controlsRef = useRef<any>(null);
   const transformControlsRef = useRef<TransformControls | null>(null);
   const gridRef = useRef<THREE.GridHelper | null>(null);
+  const axesRef = useRef<THREE.AxesHelper | null>(null);
   const sphereRef = useRef<THREE.Mesh | null>(null);
   const materialRef = useRef<THREE.MeshBasicMaterial | null>(null);
   const textureRef = useRef<THREE.Texture | null>(null);
@@ -597,6 +598,12 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
   useEffect(() => {
     if (gridRef.current) gridRef.current.visible = showGrid;
   }, [showGrid]);
+
+  // 是否显示 xyz 轴线（AxesHelper）：默认显示，方便对齐；可手动隐藏（截图时常用）
+  const [showAxes, setShowAxes] = useState(true);
+  useEffect(() => {
+    if (axesRef.current) axesRef.current.visible = showAxes;
+  }, [showAxes]);
 
   // 是否显示 720 全景的"脚底地面平面"（半透明纹理大圆面）：默认隐藏
   //   ⚠️ sphere 模式下 groundMesh 永远隐藏（球壳内壁已包含整张 720 图，包括下半部分，
@@ -689,6 +696,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       gridRef.current = gridHelper;
 
       const axesHelper = new THREE.AxesHelper(50);
+      axesRef.current = axesHelper;
       scene.add(axesHelper);
 
       const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -1629,10 +1637,30 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
     const scene = sceneRef.current;
     const camera = cameraRef.current;
 
-    renderer.render(scene, camera);
-    const dataURL = renderer.domElement.toDataURL('image/png');
-    const base64 = dataURL.split(',')[1];
-    setFullscreenCapture({ type: 'single', base64 });
+    // 截图时临时隐藏辅助元素（xyz 轴、网格、地面平面、TransformControls 操纵轴），
+    // 渲染后恢复，不污染画面
+    const helperToRestore: { obj: { visible: boolean }; wasVisible: boolean }[] = [];
+    const helpersToHide: { visible: boolean }[] = [];
+    if (axesRef.current) helpersToHide.push(axesRef.current);
+    if (gridRef.current) helpersToHide.push(gridRef.current);
+    if (groundRef.current) helpersToHide.push(groundRef.current);
+    const tcHelper = transformControlsRef.current?.getHelper();
+    if (tcHelper) helpersToHide.push(tcHelper as unknown as { visible: boolean });
+    helpersToHide.forEach((h) => {
+      helperToRestore.push({ obj: h, wasVisible: h.visible });
+      h.visible = false;
+    });
+
+    try {
+      renderer.render(scene, camera);
+      const dataURL = renderer.domElement.toDataURL('image/png');
+      const base64 = dataURL.split(',')[1];
+      setFullscreenCapture({ type: 'single', base64 });
+    } finally {
+      helperToRestore.forEach(({ obj, wasVisible }) => {
+        obj.visible = wasVisible;
+      });
+    }
   };
 
   /**
@@ -2341,6 +2369,14 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
           title="刷新渲染"
         >
           刷新
+        </button>
+        <button
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => setShowAxes((v) => !v)}
+          className={`py-1 px-2 rounded text-[10px] ${showAxes ? 'bg-pink-600 text-white' : 'bg-[#333] text-gray-300 hover:bg-[#444]'}`}
+          title={showAxes ? '隐藏 xyz 轴线（截图前必关）' : '显示 xyz 轴线（默认显示，方便对齐）'}
+        >
+          轴线
         </button>
         <button
           onPointerDown={(e) => e.stopPropagation()}
