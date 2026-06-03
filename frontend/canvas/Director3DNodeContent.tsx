@@ -886,9 +886,90 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         renderer.render(scene, camera);
       });
 
+      // 跟踪 Alt 键状态：用于 "alt + 拖动 gizmo = 复制一个角色" 的交互
+      // （与现有"alt+点击 = 减选"互不冲突：减选走 canvas onMouseDown 射线，
+      //  复制走 transformControls.mouseDown —— 后者在用户点中 gizmo 轴时才会触发）
+      // 注意：不要起名 onKeyDown / onKeyUp，避免与下方"快捷键切换变换模式"同名冲突
+      let altKeyDown = false;
+      const onAltKeyDown = (e: KeyboardEvent) => {
+        if (e.altKey) altKeyDown = true;
+      };
+      const onAltKeyUp = (e: KeyboardEvent) => {
+        if (!e.altKey) altKeyDown = false;
+      };
+      // 兜底：窗口失焦时清掉状态，避免 alt 一直被记忆
+      const onAltWindowBlur = () => { altKeyDown = false; };
+      window.addEventListener('keydown', onAltKeyDown);
+      window.addEventListener('keyup', onAltKeyUp);
+      window.addEventListener('blur', onAltWindowBlur);
+
       transformControls.addEventListener('mouseDown', () => {
         isDragging = false;
         isPanning = false;
+
+        // alt + 拖动 gizmo = 复制一份新角色，并把新角色接上 gizmo 继续拖
+        if (altKeyDown && transformControls.object) {
+          const obj = transformControls.object as THREE.Group;
+          const srcFigureId = obj.userData?.figureId as string | undefined;
+          if (srcFigureId) {
+            const currentFigures = nodeRef.current.figures ?? [];
+            const srcFigure = currentFigures.find((f) => f.id === srcFigureId);
+            if (srcFigure) {
+              // 1) 立即克隆一份 Three.js Group（同步、不走 React state）
+              //    这样本帧 transformControls 就能立刻把它接上、继续响应鼠标拖动
+              //    React 端的 figures state 在下一帧由 onUpdate 推入，渲染 effect
+              //    看到 figuresRef 已有这个 id，会跳过重建，仅同步标签 / 选中态
+              const newFigureId = `figure-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+              const newFigure: Figure3D = {
+                ...srcFigure,
+                id: newFigureId,
+                // name 留空，让渲染端按 index 兜底为「角色A / 角色B …」
+                name: '',
+                // 位置 / 旋转 / 缩放暂用"源角色当前 group 的世界值"，
+                // 真实状态由后续 gizmo 拖动 + change 事件统一写回
+                x: srcFigure.x,
+                y: srcFigure.y,
+                y3d: obj.position.y,
+                scale: obj.scale.x,
+                rotation: (obj.rotation.y * 180) / Math.PI,
+              };
+              const newIndex = currentFigures.length; // 新角色插到末尾
+              const newLabelText = newFigure.name || `角色${indexToCharLabel(newIndex)}`;
+              const newGroup = buildFigureGroup(newFigure, newIndex, newLabelText, buildFigureColor);
+              newGroup.position.copy(obj.position);
+              newGroup.rotation.copy(obj.rotation);
+              newGroup.scale.copy(obj.scale);
+              scene.add(newGroup);
+              figuresRef.current.set(newFigureId, newGroup);
+              figureRenderMetaRef.current.set(newFigureId, {
+                presetId: newFigure.presetId ?? PERSON_PRESETS[0].id,
+                poseId: newFigure.poseId ?? FIGURE_POSES[0].id,
+              });
+
+              // 2) gizmo 改接新角色，后续拖动直接作用于新角色
+              transformControls.attach(newGroup);
+
+              // 3) 选中态切到新角色（单选）
+              setSelectedFigureId(newFigureId);
+              setSelectedFigureIds(new Set([newFigureId]));
+
+              // 4) 立刻把新角色写入 nodeRef.current.figures，
+              //    让本帧内触发的 change 事件能在 map() 里找到 newFigureId 并正确写回位置
+              //    （React state 还没刷新、node prop 也还没拿到新数组，先就地补一份）
+              nodeRef.current = {
+                ...nodeRef.current,
+                figures: [...currentFigures, newFigure],
+              };
+
+              // 5) 把新角色推入 React state，触发后续 effect（标签 / 选中高亮 / 持久化）
+              onUpdate({ figures: [...currentFigures, newFigure] });
+
+              // 6) 标记正在变换，抑制 change 事件回写位置（位置由拖动自然产生）
+              isTransforming = true;
+              setTimeout(() => { isTransforming = false; }, 50);
+            }
+          }
+        }
       });
 
       let isDragging = false;
@@ -1298,6 +1379,9 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       cleanupFn = () => {
         io.disconnect();
         document.removeEventListener('visibilitychange', syncAnimState);
+        window.removeEventListener('keydown', onAltKeyDown);
+        window.removeEventListener('keyup', onAltKeyUp);
+        window.removeEventListener('blur', onAltWindowBlur);
         stopAnim();
         controlsRef.current?.dispose();
         if (textureRef.current) {
