@@ -900,7 +900,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
           updateCamera();
         } else if (isDragging) {
           theta -= dx * 0.01;
-          phi = Math.max(0.2, Math.min(Math.PI / 2 - 0.1, phi + dy * 0.01));
+          phi = Math.max(0.01, Math.min(Math.PI - 0.01, phi + dy * 0.01));
           updateCamera();
 
           const yawDeg = ((theta * 180 / Math.PI) % 360 + 360) % 360;
@@ -1008,7 +1008,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
           cameraTarget?: { x: number; y: number; z: number };
         }) => {
           theta = (view.yaw * Math.PI) / 180;
-          phi = Math.max(0.2, Math.min(Math.PI / 2 - 0.1, (Math.PI / 2) - (view.pitch * Math.PI) / 180));
+          phi = Math.max(0.01, Math.min(Math.PI - 0.01, (Math.PI / 2) - (view.pitch * Math.PI) / 180));
           cameraDistance = Math.max(10, Math.min(200, view.cameraDistance));
           if (view.cameraTarget) {
             cameraTarget.set(view.cameraTarget.x, view.cameraTarget.y, view.cameraTarget.z);
