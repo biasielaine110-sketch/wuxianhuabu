@@ -72,11 +72,16 @@ export function createEnvironmentWall(envType: EnvironmentType): EnvironmentWall
   return { root, skyMaterial, groundMaterial };
 }
 
-/** 球形穹顶：贴图时 backSide，让相机在内部可见 */
+/** 球形穹顶：720 全景图作为 equirectangular 纹理贴在球内壁。
+ *  - Three.js SphereGeometry 默认 UV 已是 equirectangular 风格（u: 经度 0~1，v: 纬度 0~1），
+ *    但「外部观察」时正反面正常，「内部观察」需要用 BackSide 渲染。
+ *  - 不翻转法线，避免 UV 镜像造成左右颠倒。
+ *  - 720 全景图约定：图宽:高 = 2:1，赤道居中。
+ */
 function addSphereDome(root: THREE.Group, skyMaterial: THREE.MeshBasicMaterial) {
   const geom = new THREE.SphereGeometry(ENV_RADIUS, 64, 40);
-  geom.scale(-1, 1, 1); // 翻转法线 → 内部观察
-  // 球壳单独用 BackSide
+  // 不 scale(-1, 1, 1)：保留默认 UV，让水平方向（左右经度）正确；
+  // 仅靠 BackSide 即可让相机从球内看到纹理。
   const mat = skyMaterial.clone();
   mat.side = THREE.BackSide;
   const mesh = new THREE.Mesh(geom, mat);

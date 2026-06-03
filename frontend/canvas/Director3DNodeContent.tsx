@@ -656,7 +656,8 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       sceneRef.current = scene;
 
       const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 2000);
-      camera.position.set(0, 25, 50);
+      // 相机初始在 y=0 地平线高度（贴近 720 全景图查看器体验）
+      camera.position.set(0, 0, 50);
       camera.lookAt(0, 0, 0);
       cameraRef.current = camera;
 
@@ -1179,6 +1180,9 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       skyTexture.colorSpace = THREE.SRGBColorSpace;
       skyTexture.minFilter = THREE.LinearFilter;
       skyTexture.magFilter = THREE.LinearFilter;
+      // 720 全景图水平方向必须 wrap（经度 0° / 360° 重合），否则球面左右接缝
+      skyTexture.wrapS = THREE.RepeatWrapping;
+      skyTexture.wrapT = THREE.ClampToEdgeWrapping;
       skyTexture.generateMipmaps = false;
       skyTexture.needsUpdate = true;
       textureRef.current = skyTexture;
@@ -1186,7 +1190,9 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       skyMaterial.map = skyTexture;
       skyMaterial.color.setHex(0xffffff);
       skyMaterial.needsUpdate = true;
-      scene.background = skyTexture;
+      // scene.background 不再贴 skyTexture（避免全屏 2D 背景与球壳内壁冲突，
+      // 同时也避免贴图绕场造成视觉错乱）。球壳本身就是环境。
+      scene.background = new THREE.Color(0x333333);
 
       // sphere 模式下整张 720 图已经贴在球壳内壁（含下半部分），
       // 不再单独生成 groundTexture，避免"地面 + 球壳下半"画面重复
