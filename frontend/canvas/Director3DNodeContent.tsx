@@ -2097,21 +2097,21 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
           <div className="flex gap-1">
             <button
               onPointerDown={(e) => { e.stopPropagation(); setTransformMode('translate'); }}
-              className={`px-1.5 py-0.5 rounded text-[9px] ${transformMode === 'translate' ? 'bg-pink-600 text-white' : 'bg-[#444] text-gray-300 hover:bg-[#555]'}`}
+              className={`pointer-events-auto px-1.5 py-0.5 rounded text-[9px] ${transformMode === 'translate' ? 'bg-pink-600 text-white' : 'bg-[#444] text-gray-300 hover:bg-[#555]'}`}
               title="移动模式"
             >
               移动
             </button>
             <button
               onPointerDown={(e) => { e.stopPropagation(); setTransformMode('rotate'); }}
-              className={`px-1.5 py-0.5 rounded text-[9px] ${transformMode === 'rotate' ? 'bg-pink-600 text-white' : 'bg-[#444] text-gray-300 hover:bg-[#555]'}`}
+              className={`pointer-events-auto px-1.5 py-0.5 rounded text-[9px] ${transformMode === 'rotate' ? 'bg-pink-600 text-white' : 'bg-[#444] text-gray-300 hover:bg-[#555]'}`}
               title="旋转模式"
             >
               旋转
             </button>
             <button
               onPointerDown={(e) => { e.stopPropagation(); setTransformMode('scale'); }}
-              className={`px-1.5 py-0.5 rounded text-[9px] ${transformMode === 'scale' ? 'bg-pink-600 text-white' : 'bg-[#444] text-gray-300 hover:bg-[#555]'}`}
+              className={`pointer-events-auto px-1.5 py-0.5 rounded text-[9px] ${transformMode === 'scale' ? 'bg-pink-600 text-white' : 'bg-[#444] text-gray-300 hover:bg-[#555]'}`}
               title="缩放模式"
             >
               缩放
