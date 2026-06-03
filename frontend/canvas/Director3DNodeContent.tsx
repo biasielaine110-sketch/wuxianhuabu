@@ -2619,8 +2619,8 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       {/* 小人管理区 */}
       <div className="border border-[#333] rounded-lg p-2 bg-[#1a1a1a]">
         <div className="flex items-center justify-between mb-2 gap-1">
-          <span className="text-[18px] text-gray-300 font-medium flex items-center gap-1">
-            <PersonIcon size={12} /> 角色管理 ({figures.length})
+          <span className="text-[36px] text-gray-300 font-medium flex items-center gap-1">
+            <PersonIcon size={24} /> 角色管理 ({figures.length})
           </span>
           <div className="flex items-center gap-1">
             <button
@@ -2667,7 +2667,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                   <div className="w-8 h-8 rounded border border-[#444] bg-gradient-to-br from-pink-500 to-purple-500 flex items-center justify-center text-white">
                     <PersonIcon size={16} />
                   </div>
-                  <span className="flex-1 text-[15px] text-gray-300 truncate">{displayName}</span>
+                  <span className="flex-1 text-[30px] text-gray-300 truncate">{displayName}</span>
 
                   {/* 操作按钮：选中时一直显示，否则 hover 时显示 */}
                   <div className={`flex items-center gap-1 ${isSelected ? '' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
