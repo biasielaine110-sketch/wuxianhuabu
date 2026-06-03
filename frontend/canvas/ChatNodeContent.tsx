@@ -15,6 +15,7 @@ import {
   readStoredChatFontPx,
 } from './chatNodeUtils';
 import { resolveCanvasImageSource } from '../services/canvasAssetResolver';
+import { loadChatPromptPresets, getLatestChatPromptPresets } from './loadChatPromptPresets';
 const LoaderIcon = ({ size = 16 }: { size?: number }) => (
   <svg className="animate-spin" xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
 );
@@ -42,17 +43,18 @@ type ChatFeatureButtonSpec = {
   label: string;
   title: string;
   icon?: 'video' | 'wand' | 'message';
+  tone?: 'green' | 'blue' | 'purple' | 'rose';
+};
+
+const CHAT_FEATURE_BUTTON_TONE_CLASSES: Record<'green' | 'blue' | 'purple' | 'rose', string> = {
+  green: 'border-emerald-700/60 bg-emerald-950/45 text-emerald-100 hover:bg-emerald-900/55',
+  blue: 'border-sky-700/60 bg-sky-950/45 text-sky-100 hover:bg-sky-900/55',
+  purple: 'border-violet-700/60 bg-violet-950/45 text-violet-100 hover:bg-violet-900/55',
+  rose: 'border-rose-800/55 bg-rose-950/45 text-rose-100 hover:bg-rose-900/55',
 };
 
 const CHAT_FEATURE_BUTTON_SPECS: ChatFeatureButtonSpec[] = [
-  {
-    id: 'aaaa-all-asset',
-    presetKey: 'AAAA_全能资产',
-    label: 'AAAA_全能资产',
-    icon: 'wand',
-    title:
-      'AAAA_全能资产：AI短视频故事生成提示词模板（剧本直出角色设定+场景设定+15秒图像/视频提示词）。发送前请填入剧本正文。',
-  },
+  // —— 玫红组（默认色）——
   {
     id: 'reverse-prompt',
     presetKey: '反推提示词',
@@ -62,44 +64,12 @@ const CHAT_FEATURE_BUTTON_SPECS: ChatFeatureButtonSpec[] = [
       '',
   },
   {
-    id: 'bbbb-all-asset',
-    presetKey: 'BBBB_全能资产',
-    label: 'BBBB_全能资产',
-    icon: 'wand',
-    title:
-      'BBBB_全能资产：根据剧本与视觉风格生成全中文 AI 绘画提示词（人物 2x2·9:16；场景与关键帧 3x3·16:9）。发送前请填入剧本、风格与可选面部参考说明，并可连接参考图。',
-  },
-  {
     id: 'eeee-alt-universal-asset',
     presetKey: 'EEEE_备选万能资产',
     label: 'EEEE_备选万能资产',
     icon: 'wand',
     title:
       'EEEE_备选万能资产：与 BBBB 相同规范的全中文 AI 绘画提示词模板（人物 2x2·9:16；场景与关键帧 3x3·16:9）。发送前请填入剧本、风格与可选面部参考说明，并可连接参考图。',
-  },
-  {
-    id: 'jimeng-ccc-assets-storyboard',
-    presetKey: 'CCC即梦分镜',
-    label: 'CCC即梦分镜',
-    icon: 'wand',
-    title:
-      'CCC_资产分镜提示词_即梦：一键填入即梦 agent 分镜工程规范（Shot/计时表/Clip/角色与场景资产/音频）。发送前请在占位处粘贴完整剧本或连接文本节点。',
-  },
-  {
-    id: 'jimeng-ccc-seedance-video',
-    presetKey: 'CCC即梦视频',
-    label: 'CCC即梦视频',
-    icon: 'message',
-    title:
-      'CCC_视频提示词_即梦（Seedance 2.0）：单镜标准化提示词工程模板。发送前请连接或粘贴分镜工程文件要点，并在参考区绑定角色/场景参考图。',
-  },
-  {
-    id: 'cccc-storyboard-simplified',
-    presetKey: 'CCCC_故事板简化版',
-    label: 'CCCC_故事板简化版',
-    icon: 'wand',
-    title:
-      'CCCC_故事板简化版：根据剧本生成3:4画幅的分镜图，包含4个分镜、运镜说明、主体/动作/描述/台词/音效标注。发送前请填入剧本正文。',
   },
   {
     id: 'ddd-15s-timeline',
@@ -124,6 +94,72 @@ const CHAT_FEATURE_BUTTON_SPECS: ChatFeatureButtonSpec[] = [
     icon: 'wand',
     title:
       'FFFF_全能提示词：即梦AI视频生成工具的竖屏短剧专属分镜提示词工程文件。发送前请填入剧本正文。',
+  },
+  // —— 绿色组 ——
+  {
+    id: 'aaaa-all-asset',
+    presetKey: 'AAAA_全能资产',
+    label: 'AAAA_全能资产',
+    icon: 'wand',
+    tone: 'green',
+    title:
+      'AAAA_全能资产：AI短视频故事生成提示词模板（剧本直出角色设定+场景设定+15秒图像/视频提示词）。发送前请填入剧本正文。',
+  },
+  {
+    id: 'bbbb-all-asset',
+    presetKey: 'BBBB_全能资产',
+    label: 'BBBB_全能资产',
+    icon: 'wand',
+    tone: 'green',
+    title:
+      'BBBB_全能资产：根据剧本与视觉风格生成全中文 AI 绘画提示词（人物 2x2·9:16；场景与关键帧 3x3·16:9）。发送前请填入剧本、风格与可选面部参考说明，并可连接参考图。',
+  },
+  {
+    id: 'jimeng-ccc-assets-storyboard',
+    presetKey: 'CCC即梦分镜',
+    label: 'CCC即梦分镜',
+    icon: 'wand',
+    tone: 'green',
+    title:
+      'CCC_资产分镜提示词_即梦：一键填入即梦 agent 分镜工程规范（Shot/计时表/Clip/角色与场景资产/音频）。发送前请在占位处粘贴完整剧本或连接文本节点。',
+  },
+  // —— 蓝色组 ——
+  {
+    id: 'jimeng-ccc-seedance-video',
+    presetKey: 'CCC即梦视频',
+    label: 'CCC即梦视频',
+    icon: 'message',
+    tone: 'blue',
+    title:
+      'CCC_视频提示词_即梦（Seedance 2.0）：单镜标准化提示词工程模板。发送前请连接或粘贴分镜工程文件要点，并在参考区绑定角色/场景参考图。',
+  },
+  {
+    id: 'gggg-six-grid-storyboard-video',
+    presetKey: 'GGGG_6宫格分镜视频',
+    label: '6宫格分镜视频',
+    icon: 'video',
+    tone: 'blue',
+    title:
+      'GGGG_6宫格分镜视频：工业级AI漫剧视效总监模板，六宫格 2×3 横屏关键帧 + 15秒视频提示词（零帧硬切、零黑屏废帧、角色外貌锁 P0 级、台词逐字零遗漏）。发送前请填入输入文案/故事情节/前后分镜/角色库/场景与物品库。',
+  },
+  {
+    id: 'hhhh-grok-four-grid-storyboard-video',
+    presetKey: 'HHHH_grok_4宫格分镜视频',
+    label: 'grok_4宫格分镜视频',
+    icon: 'video',
+    tone: 'blue',
+    title:
+      'HHHH_grok_4宫格分镜视频：工业级AI漫剧视效总监模板，10秒四宫格·零帧硬切·无黑图（台词来源唯一性 P0 级、角色外貌锁 P0 级、反串镜硬校验、反凑数条款）。发送前请填入输入文案/前置分镜/角色库/场景与物品库。',
+  },
+  // —— 紫色组 ——
+  {
+    id: 'cccc-storyboard-simplified',
+    presetKey: 'CCCC_故事板简化版',
+    label: 'CCCC_故事板简化版',
+    icon: 'wand',
+    tone: 'purple',
+    title:
+      'CCCC_故事板简化版：根据剧本生成3:4画幅的分镜图，包含4个分镜、运镜说明、主体/动作/描述/台词/音效标注。发送前请填入剧本正文。',
   },
 ];
 
@@ -267,6 +303,30 @@ export function ChatNodeContent({
       onSendMessage();
     }
   };
+
+  /** 功能按钮：把对应预设全文填入输入框（懒加载最新预设，避开 HMR 缓存） */
+  const handleFeatureButtonClick = useCallback(
+    (presetKey: string) => {
+      // 优先用 state 中已有的合并结果（用户在「设置 → 预设 → AI对话」改过的话）
+      const fromState = promptPresets[presetKey];
+      if (fromState) {
+        onUpdate({ prompt: fromState, error: undefined });
+        return;
+      }
+      // 兜底：直接 import 最新模块，跳过模块级 promise 缓存，
+      // 避免 HMR 链中 promise 仍指向旧模块实例导致新键缺失
+      void getLatestChatPromptPresets().then((presets) => {
+        const body = presets[presetKey] ?? '';
+        onUpdate({ prompt: body, error: undefined });
+        if (import.meta.env?.DEV) {
+          // 调试辅助：dev 模式下若仍空，说明键名拼错或模板未注册
+          // eslint-disable-next-line no-console
+          console.debug('[chat-feature-button]', presetKey, 'len=', body.length);
+        }
+      });
+    },
+    [promptPresets, onUpdate]
+  );
 
   const chatErrorDiagnosis = (() => {
     if (!node.error) return null;
@@ -946,7 +1006,7 @@ export function ChatNodeContent({
         <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-md border border-[#333] bg-[#3A3A3A] px-2 py-1.5" style={{ fontSize: 50 }}>
           <span className="shrink-0 text-gray-500">功能</span>
           {CHAT_FEATURE_BUTTON_SPECS.map((btn) => {
-            const presetBody = promptPresets[btn.presetKey] ?? '';
+            const toneClass = CHAT_FEATURE_BUTTON_TONE_CLASSES[btn.tone ?? 'rose'];
             return (
             <button
               key={btn.id}
@@ -955,9 +1015,9 @@ export function ChatNodeContent({
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
-                onUpdate({ prompt: presetBody, error: undefined });
+                handleFeatureButtonClick(btn.presetKey);
               }}
-              className="inline-flex items-center gap-0.5 rounded-md border border-rose-800/55 bg-rose-950/45 px-2 py-0.5 font-medium text-rose-100 hover:bg-rose-900/55 disabled:cursor-not-allowed disabled:opacity-40"
+              className={`inline-flex items-center gap-0.5 rounded-md border px-2 py-0.5 font-medium disabled:cursor-not-allowed disabled:opacity-40 ${toneClass}`}
               title={btn.title}
             >
               {btn.icon === 'wand' ? (
