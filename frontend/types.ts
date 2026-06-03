@@ -12,6 +12,8 @@ export interface Director3DNode extends CanvasNode {
   cameraDistance?: number;
   /** 相机注视目标点（场景坐标） */
   cameraTarget?: { x: number; y: number; z: number };
+  /** 全景环境墙的世界坐标位移（用户可拖动） */
+  environmentOffset?: { x: number; y: number; z: number };
   figures?: Figure3D[]; // 3D小人列表
   selectedFigureId?: string; // 当前选中的小人ID
   /** 保存的机位预设（特写/近景/中景/全景/远景/自定义） */
@@ -70,8 +72,10 @@ export interface Figure3D {
   id: string;
   name: string;
   image: string; // 小人图片 / GLB 模型 base64
-  x: number; // 在场景中的X位置 (0-100百分比)
-  y: number; // 在场景中的Y位置 (0-100百分比)
+  x: number; // 在场景中的X位置 (网格百分比，允许为负或 >100 以脱出网格)
+  y: number; // 在场景中的Y位置 (网格百分比，允许为负或 >100 以脱出网格)
+  /** 3D 高度（世界坐标 y 轴）。默认 0 = 站在地面，可拖到负值以"埋到地底" */
+  y3d?: number;
   scale: number; // 缩放比例
   rotation: number; // 旋转角度
   /** 人物预设 id（与 PERSON_PRESETS 中某项对应），用于选择人物造型 */

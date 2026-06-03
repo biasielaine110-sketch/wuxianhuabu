@@ -309,7 +309,7 @@ function buildFigureGroup(
   group.scale.setScalar(figure.scale || 1);
   const worldX = (figure.x / 100) * 1000 - 500;
   const worldZ = (figure.y / 100) * 1000 - 500;
-  group.position.set(worldX, 0, worldZ);
+  group.position.set(worldX, figure.y3d ?? 0, worldZ);
 
   // 顶部标签
   const labelSprite = buildFigureLabelSprite(labelText, paletteAccent);
@@ -473,7 +473,7 @@ async function loadGlbFigureIntoGroup(
   root.scale.setScalar(figure.scale || 1);
   const worldX = (figure.x / 100) * 1000 - 500;
   const worldZ = (figure.y / 100) * 1000 - 500;
-  root.position.set(worldX, 0, worldZ);
+  root.position.set(worldX, figure.y3d ?? 0, worldZ);
 
   // 加 label sprite
   const accent = buildFigureColor(index);
@@ -712,6 +712,11 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       // 720全景图背景（默认 sphere 球形穹顶；后续 effect 可切换为 photoWall/7字/U字/O字/圆圈墙）
       const envType: EnvironmentType = nodeRef.current.environmentType ?? 'sphere';
       const envWall = createEnvironmentWall(envType);
+      // 应用用户保存的背景图位移（可拖动）
+      const envOff = nodeRef.current.environmentOffset;
+      if (envOff) {
+        envWall.root.position.set(envOff.x, envOff.y, envOff.z);
+      }
       scene.add(envWall.root);
       envWallRef.current = envWall;
       // 兼容旧代码：把"主 sky material"指到 root 子 mesh 的 material 上（取第一个）
@@ -753,25 +758,40 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         console.log('TransformControls change 事件触发');
         if (isTransforming) return;
         if (transformControls.object) {
-          const figureId = (transformControls.object as THREE.Group).userData.figureId;
+          const obj = transformControls.object as THREE.Object3D;
+          // 1) 角色
+          const figureId = obj.userData.figureId as string | undefined;
           if (figureId) {
             isTransforming = true;
 
             // 直接更新 Three.js 中的角色位置
-            const worldX = transformControls.object.position.x;
-            const worldZ = transformControls.object.position.z;
-            const rotation = transformControls.object.rotation.y * 180 / Math.PI;
-            const scale = transformControls.object.scale.x;
+            const worldX = obj.position.x;
+            const worldZ = obj.position.z;
+            const worldY3d = obj.position.y; // 3D 高度，可拖到 < 0
+            const rotation = obj.rotation.y * 180 / Math.PI;
+            const scale = obj.scale.x;
 
             // 使用 nodeRef.current 获取最新的 figures 数据
+            // x/y 不再 clamp 到 [0,100]：允许脱出网格（甚至 y<0 拖到地底）
             const newFigures = (nodeRef.current.figures || []).map((f: Figure3D) => f.id === figureId
-              ? { ...f, x: Math.max(0, Math.min(100, ((worldX + 500) / 1000) * 100)), y: Math.max(0, Math.min(100, ((worldZ + 500) / 1000) * 100)), rotation, scale }
+              ? { ...f, x: ((worldX + 500) / 1000) * 100, y: ((worldZ + 500) / 1000) * 100, y3d: worldY3d, rotation, scale }
               : f);
 
             console.log('TransformControls change, figures数量从', (nodeRef.current.figures || []).length, '变为', newFigures.length);
 
             onUpdate({ figures: newFigures });
 
+            setTimeout(() => { isTransforming = false; }, 100);
+          } else if (envWallRef.current && obj === envWallRef.current.root) {
+            // 2) 背景环境墙：把 root.position 写回 environmentOffset
+            isTransforming = true;
+            onUpdate({
+              environmentOffset: {
+                x: obj.position.x,
+                y: obj.position.y,
+                z: obj.position.z,
+              },
+            });
             setTimeout(() => { isTransforming = false; }, 100);
           }
         }
@@ -844,7 +864,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
 
         const allObjects: THREE.Object3D[] = [];
         scene.traverse((obj) => {
-          if (obj.userData && (obj.userData.isFigure || obj.userData.isFigurePart)) {
+          if (obj.userData && (obj.userData.isFigure || obj.userData.isFigurePart || obj.userData.isEnvSky || obj.userData.isEnvGround)) {
             allObjects.push(obj);
           }
         });
@@ -873,6 +893,29 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
               // 选中后让 canvas 获取焦点，以便接收键盘事件
               renderer.domElement.focus();
               // attach 完成后，重置标志
+              setTimeout(() => { isTransforming = false; }, 100);
+              return;
+            }
+          }
+
+          // 没点到角色：尝试选中全景环境墙（背景图），挂上 TransformControls 即可平移
+          if (envWallRef.current) {
+            const envRoot = envWallRef.current.root;
+            // 命中对象在 envRoot 子树内
+            let node: THREE.Object3D | null = intersects[0].object;
+            let hitEnv = false;
+            while (node) {
+              if (node === envRoot) { hitEnv = true; break; }
+              node = node.parent;
+            }
+            if (hitEnv) {
+              isTransforming = true;
+              setSelectedFigureId(null);
+              // 强制 translate 模式（拖动背景墙用）
+              transformControls.setMode('translate');
+              setTransformMode('translate');
+              transformControls.attach(envRoot);
+              renderer.domElement.focus();
               setTimeout(() => { isTransforming = false; }, 100);
               return;
             }
@@ -1159,6 +1202,11 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
     // 创建新 wall
     const newWall = createEnvironmentWall(envType);
     (newWall.root.userData as { envType?: string }).envType = envType;
+    // 应用用户保存的背景图位移
+    const envOff2 = nodeRef.current.environmentOffset;
+    if (envOff2) {
+      newWall.root.position.set(envOff2.x, envOff2.y, envOff2.z);
+    }
     scene.add(newWall.root);
     envWallRef.current = newWall;
     const firstSkyMesh = newWall.root.children.find(
@@ -1430,7 +1478,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         // 将网格坐标转换为世界坐标
         const worldX = (figure.x / 100) * 1000 - 500;
         const worldZ = (figure.y / 100) * 1000 - 500;
-        group.position.set(worldX, 0, worldZ);
+        group.position.set(worldX, figure.y3d ?? 0, worldZ);
       }
 
       // 同步姿势（即使没 rebuild 也要把当前 poseId 应用上去）
@@ -1997,7 +2045,8 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
       image: '',
       x: 50, // 场景中心
       y: 50, // 场景中心
-      scale: 1, // 默认 1:1（人偶约 8.6 单位高，与 1000x1000 网格比例协调）
+      y3d: 0, // 3D 高度（地面）
+      scale: 50, // 默认 50 倍（人偶约 8.6 单位高 × 50 = 430 单位；1000×1000 网格比例下视觉饱满）
       rotation: 0,
       presetId: preset.id,
       poseId: FIGURE_POSES[0].id,
@@ -2022,7 +2071,8 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
         image: base64,
         x: 50,
         y: 50,
-        scale: 1.4,  // GLB 已 normalize 到 7 单位高，scale=1.4 ≈ 10 单位，与 preset scale=2 接近
+        y3d: 0,
+        scale: 50,  // 与 preset 默认 50 倍一致；GLB normalize 到 7 单位高 × 50 = 350 单位
         rotation: 0,
         modelType: 'glb',
         // GLB 模型没有"姿势 / 预设"概念，填占位
@@ -2484,7 +2534,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                     <button
                       onPointerDown={(e) => {
                         e.stopPropagation();
-                        updateFigure(figure.id, { scale: Math.max(0.2, (figure.scale || 1) - 0.1) });
+                        updateFigure(figure.id, { scale: Math.max(0.1, (figure.scale || 1) - 1) });
                       }}
                       className="p-1 rounded bg-[#444] hover:bg-[#555] text-white text-[10px]"
                       title="缩小"
@@ -2494,7 +2544,7 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
                     <button
                       onPointerDown={(e) => {
                         e.stopPropagation();
-                        updateFigure(figure.id, { scale: Math.min(3, (figure.scale || 1) + 0.1) });
+                        updateFigure(figure.id, { scale: Math.min(200, (figure.scale || 1) + 1) });
                       }}
                       className="p-1 rounded bg-[#444] hover:bg-[#555] text-white text-[10px]"
                       title="放大"
