@@ -427,31 +427,69 @@ function buildRenderPrompt(
 
 /** 在模块顶层：构造角色头顶的标签 sprite（不依赖任何组件内状态，buildFigureGroup 才可访问） */
 function buildFigureLabelSprite(labelText: string, color: string): THREE.Sprite | null {
+  const text = labelText || ' ';
+  // 1) 先量文字宽度（font 设完后 measureText 才准）
+  const fontSize = 28;
+  const paddingX = 14; // 文字距边框左右各 14px
+  const paddingY = 8;  // 文字距边框上下各 8px
+  const height = fontSize + paddingY * 2; // 64 高度不变
+  // 临时 canvas 量文字宽
+  const measure = document.createElement('canvas').getContext('2d');
+  if (!measure) return null;
+  measure.font = `bold ${fontSize}px sans-serif`;
+  const textW = Math.ceil(measure.measureText(text).width);
+  const width = Math.max(48, textW + paddingX * 2);
+  // DPR 让边缘更清晰
+  const dpr = 2;
   const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 64;
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = 'rgba(0,0,0,0.65)';
-  ctx.fillRect(6, 10, canvas.width - 12, canvas.height - 20);
+  ctx.scale(dpr, dpr);
+  // 圆角矩形边框（深色背景 + 描边）
+  const radius = 8;
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
   ctx.strokeStyle = color;
   ctx.lineWidth = 2;
-  ctx.strokeRect(6, 10, canvas.width - 12, canvas.height - 20);
+  roundRect(ctx, 1, 1, width - 2, height - 2, radius);
+  ctx.fill();
+  ctx.stroke();
+  // 文字
   ctx.fillStyle = color;
-  ctx.font = 'bold 24px sans-serif';
+  ctx.font = `bold ${fontSize}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(labelText, canvas.width / 2, canvas.height / 2);
+  ctx.fillText(text, width / 2, height / 2);
   const texture = new THREE.CanvasTexture(canvas);
   texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
   const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false });
   const sprite = new THREE.Sprite(material);
-  sprite.scale.set(12, 3, 1);
+  // sprite 缩放：宽 1 世界单位 ≈ 0.2 字符（经验值），按 textW 等比
+  // 保持原大尺度（≈3 高），宽按比例
+  const baseH = 3;
+  const scaleW = baseH * (width / height);
+  sprite.scale.set(scaleW, baseH, 1);
   sprite.position.set(0, 9.5, 0);
   sprite.userData = { isFigureLabel: true, labelText };
   return sprite;
+}
+
+/** 圆角矩形路径 */
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  const radius = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + w - radius, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+  ctx.lineTo(x + w, y + h - radius);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+  ctx.lineTo(x + radius, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
 }
 
 /**
