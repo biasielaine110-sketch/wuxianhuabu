@@ -47,6 +47,7 @@ export const I2I_PRESETS_BY_CATEGORY: Record<I2iPresetCategoryId, { key: string;
     { key: '故事板_B', label: '故事板_B' },
     { key: '故事板_CCC', label: '故事板_CCC' },
     { key: 'CCCC_故事板简化版', label: 'CCCC_故事板简化版' },
+    { key: '线稿故事板', label: '线稿故事板' },
   ],
   other: [
     { key: '故事九宫格', label: '故事九宫格' },
@@ -65,6 +66,7 @@ export const T2I_PRESETS_BY_CATEGORY: Record<T2iPresetCategoryId, { key: string;
     { key: '故事板_B', label: '故事板_B' },
     { key: '故事板_CCC', label: '故事板_CCC' },
     { key: 'CCCC_故事板简化版', label: 'CCCC_故事板简化版' },
+    { key: '线稿故事板', label: '线稿故事板' },
   ],
 };
 
@@ -165,7 +167,7 @@ export function i2iPresetListForCategory(
 }
 
 /** 预设是否属于「故事板」分类（故事板预设可同时出现在文生图和图生图窗口） */
-export const STORYBOARD_PRESET_KEYS = new Set(['故事板_A', '故事板_B', '故事板_CCC', 'CCCC_故事板简化版']);
+export const STORYBOARD_PRESET_KEYS = new Set(['故事板_A', '故事板_B', '故事板_CCC', 'CCCC_故事板简化版', '线稿故事板']);
 export function isStoryboardPreset(name: string): boolean {
   return STORYBOARD_PRESET_KEYS.has(name);
 }
