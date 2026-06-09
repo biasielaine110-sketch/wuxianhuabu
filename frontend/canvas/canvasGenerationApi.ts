@@ -607,14 +607,18 @@ ${text}`,
 
       // 在当前文本节点右侧创建新的文本节点，填入优化后的提示词
       const newId = `text-${Date.now()}`;
-      const defaultSize = { width: 420, height: 300 };
+      // 新节点尺寸与源文本节点保持一致（用户调整过尺寸也能跟随）
+      const newSize = {
+        width: sourceNode?.width ?? 1000,
+        height: sourceNode?.height ?? 2000,
+      };
       const newNode: CanvasNode = {
         id: newId,
         type: 'text',
-        x: (sourceNode?.x || 0) + defaultSize.width + 50,
+        x: (sourceNode?.x || 0) + newSize.width + 50,
         y: sourceNode?.y || 0,
-        width: defaultSize.width,
-        height: defaultSize.height,
+        width: newSize.width,
+        height: newSize.height,
         prompt: result.trim(),
         images: [],
         aspectRatio: '1:1',

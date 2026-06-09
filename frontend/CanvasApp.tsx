@@ -602,7 +602,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     'director3d': { width: 4000, height: 4700 },
     /** AI 对话：竖向更高；内容区消息列表:底部输入带 = 2:1 */
     'chat': { width: 1560, height: 2760 },
-    'text': { width: 1050, height: 750 },
+    'text': { width: 1000, height: 2000 },
     'image': { width: 960, height: 1056 },
     'gridSplit': { width: 1680, height: 1200 },
     'gridMerge': { width: 1680, height: 1200 },
