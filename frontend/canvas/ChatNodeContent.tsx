@@ -241,6 +241,50 @@ export function ChatNodeContent({
   const chatPromptRef = useRef<HTMLTextAreaElement>(null);
   const bigInputLastClickTimeRef = useRef(0);
   const refSlots = useMemo(() => buildIncomingRefSlots(node.id, edges, nodes), [node.id, edges, nodes]);
+  /** 消息列表容器（用于恢复/保存滚动位置） */
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
+  /** 标记本次挂载是否已应用过 chatScrollTop，避免用户已手动滚动时再被覆盖 */
+  const chatScrollRestoredRef = useRef(false);
+  /** 节流：scroll 事件触发时不立刻写 store，攒一帧 */
+  const chatScrollWriteTimerRef = useRef<number | null>(null);
+
+  // 组件挂载后立即把上次保存的 scrollTop 应用到容器（一次性，避免覆盖用户后续手动滚动）
+  useEffect(() => {
+    const el = messagesScrollRef.current;
+    if (!el) return;
+    const saved = node.chatScrollTop;
+    if (typeof saved === 'number' && saved > 0) {
+      // requestAnimationFrame 防止 ref 还没 layout 完成
+      requestAnimationFrame(() => {
+        el.scrollTop = saved;
+        chatScrollRestoredRef.current = true;
+      });
+    } else {
+      chatScrollRestoredRef.current = true;
+    }
+  }, [node.id]);
+
+  // 用户滚动消息列表时，节流地把 scrollTop 写回 node.chatScrollTop
+  useEffect(() => {
+    const el = messagesScrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      if (!chatScrollRestoredRef.current) return;
+      if (chatScrollWriteTimerRef.current != null) return;
+      chatScrollWriteTimerRef.current = window.setTimeout(() => {
+        chatScrollWriteTimerRef.current = null;
+        onUpdate({ chatScrollTop: el.scrollTop });
+      }, 200);
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      if (chatScrollWriteTimerRef.current != null) {
+        window.clearTimeout(chatScrollWriteTimerRef.current);
+        chatScrollWriteTimerRef.current = null;
+      }
+    };
+  }, [onUpdate]);
 
   const [editingUserMessageId, setEditingUserMessageId] = useState<string | null>(null);
   const [editUserDraft, setEditUserDraft] = useState('');
@@ -657,6 +701,7 @@ export function ChatNodeContent({
         style={{ order: 1 }}
       >
       <div
+        ref={messagesScrollRef}
         className={`chat-messages overflow-y-scroll p-3 space-y-3 overscroll-contain ${isSelected ? 'min-h-0' : 'flex-1 min-h-0'}`}
         style={{ userSelect: 'text' }}
         onPointerDown={(e) => {

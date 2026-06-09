@@ -48,6 +48,8 @@ export function PanoramaNodeContent({
   // 720全景图模式（上下360度，即垂直720度）
   const [is720Mode, setIs720Mode] = useState((node as any).is720Mode ?? false);
   const [forceTextureReload, setForceTextureReload] = useState(0);
+  // 左右翻转画面（水平镜像纹理）
+  const isFlipped = node.flipped ?? false;
 
   const panoramaImage = node.panoramaImage ?? '';
   const panoramaImageAssetId = node.panoramaImageAssetId;
@@ -320,7 +322,7 @@ export function PanoramaNodeContent({
   useEffect(() => {
     let cancelled = false;
 
-    const applyTextureFromSrc = (src: string, cacheKey: string) => {
+    const applyTextureFromSrc = (src: string, cacheKey: string, flipped: boolean) => {
       const material = materialRef.current;
       if (!material || cancelled) return;
 
@@ -337,6 +339,10 @@ export function PanoramaNodeContent({
         texture.minFilter = THREE.LinearFilter;
         texture.magFilter = THREE.LinearFilter;
         texture.generateMipmaps = false;
+        // 水平翻转：repeat.x = -1 后需要 offset.x = 1 才能看到图像
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.repeat.set(flipped ? -1 : 1, 1);
+        texture.offset.set(flipped ? 1 : 0, 0);
         texture.needsUpdate = true;
 
         if (textureRef.current) {
@@ -391,7 +397,7 @@ export function PanoramaNodeContent({
       const { resolveCanvasImageSource } = await import('../services/canvasAssetResolver');
       const src = await resolveCanvasImageSource(panoramaImage, panoramaImageAssetId);
       if (cancelled || !src) return;
-      applyTextureFromSrc(src, cacheKey);
+      applyTextureFromSrc(src, cacheKey, isFlipped);
     };
 
     void loadTexture();
@@ -399,6 +405,19 @@ export function PanoramaNodeContent({
       cancelled = true;
     };
   }, [panoramaImage, panoramaImageAssetId, is720Mode, forceTextureReload]);
+
+  // 左右翻转：仅更新现有纹理的 repeat/offset，避免重新加载图片
+  useEffect(() => {
+    const texture = textureRef.current;
+    if (!texture) return;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.repeat.set(isFlipped ? -1 : 1, 1);
+    texture.offset.set(isFlipped ? 1 : 0, 0);
+    texture.needsUpdate = true;
+    if (rendererRef.current && sceneRef.current && cameraRef.current) {
+      rendererRef.current.render(sceneRef.current, cameraRef.current);
+    }
+  }, [isFlipped]);
 
   // 监听 WebGL 上下文丢失/恢复
   useEffect(() => {
@@ -1067,6 +1086,13 @@ export function PanoramaNodeContent({
             title={is720Mode ? "当前: 720°全景图模式" : "切换到720°全景图模式"}
           >
             {is720Mode ? '720°' : '360°'}
+          </button>
+          <button
+            onPointerDown={(e) => { e.stopPropagation(); onUpdate({ flipped: !isFlipped }); }}
+            className={`py-1 px-2 rounded text-[10px] flex items-center gap-1 ${isFlipped ? 'bg-purple-600 text-white' : 'bg-[#333] hover:bg-[#444] text-gray-300'}`}
+            title={isFlipped ? '当前: 画面已左右翻转（点击恢复正常）' : '左右翻转画面（水平镜像）'}
+          >
+            左右翻转
           </button>
         </div>
       </div>
