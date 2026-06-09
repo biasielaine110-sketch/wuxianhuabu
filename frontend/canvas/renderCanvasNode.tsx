@@ -22,6 +22,7 @@ import { NodeGenerateBar } from './NodeGenerateBar';
 import { GenerationTimer } from './GenerationTimer';
 import { ThreeEngineGate } from './ThreeEngineGate';
 import { TextNodeFontSizeSelect } from './TextNodeFontSizeSelect';
+import { TextNodeWordLibrarySelect } from './TextNodeWordLibrarySelect';
 import { I2iPresetCategorySelect } from './I2iPresetCategorySelect';
 import { I2iAspectRatioSelect } from './I2iAspectRatioSelect';
 import { T2iPresetCategorySelect } from './T2iPresetCategorySelect';
@@ -529,6 +530,14 @@ return (
               presetDomainOverrides={s.promptPresetDomainOverrides}
               onTogglePreset={s.handleTogglePreset}
               onClearPreset={s.handleClearPreset}
+            />
+          )}
+          {/* 词库下拉 - 文本节点：将所选词库的提示词插入到 textarea 光标处 */}
+          {node.type === 'text' && (
+            <TextNodeWordLibrarySelect
+              nodeId={node.id}
+              promptPresets={s.promptPresets}
+              onUpdateNode={s.handleUpdateNode}
             />
           )}
           <div className="relative flex flex-col flex-1 min-h-0">
