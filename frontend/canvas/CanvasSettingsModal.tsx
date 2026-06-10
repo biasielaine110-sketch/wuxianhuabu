@@ -5,6 +5,7 @@ import {
   DEFAULT_CODESONLINE_CHAT_BASE_URL,
   DEFAULT_CODESONLINE_IMAGE_BASE_URL,
   DEFAULT_DEEPSEEK_BASE_URL,
+  DEFAULT_HFSY_IMAGE_BASE_URL,
   DEFAULT_JUNLAN_BASE_URL,
   DEFAULT_MANXUE_BASE_URL,
   DEFAULT_MINIMAX_BASE_URL,
@@ -100,6 +101,8 @@ export type CanvasSettingsModalProps = {
   setCodesonlineKeyInput: Dispatch<SetStateAction<string>>;
   codesonlineChatKeyInput: string;
   setCodesonlineChatKeyInput: Dispatch<SetStateAction<string>>;
+  hfsyKeyInput: string;
+  setHfsyKeyInput: Dispatch<SetStateAction<string>>;
   manxueBaseInput: string;
   manxueKeyInput: string;
   setManxueKeyInput: Dispatch<SetStateAction<string>>;
@@ -177,6 +180,8 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
     setCodesonlineKeyInput,
     codesonlineChatKeyInput,
     setCodesonlineChatKeyInput,
+    hfsyKeyInput,
+    setHfsyKeyInput,
     manxueBaseInput,
     manxueKeyInput,
     setManxueKeyInput,
@@ -338,6 +343,26 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                     />
                   </div>
 
+                  {/* ②b hfsyapi.cn（GPT Image 2） */}
+                  <div className="mt-5 pt-4 border-t border-[#333]">
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">hfsyapi.cn（GPT Image 2）</h3>
+                    <div className="text-xs text-gray-500 mb-2">Base URL：<code className="text-gray-400">{DEFAULT_HFSY_IMAGE_BASE_URL}</code>（固定）</div>
+                    <label className="text-xs text-gray-500 block mb-1">hfsyapi.cn API Key</label>
+                    <input
+                      type="password"
+                      value={hfsyKeyInput}
+                      onChange={(e) => setHfsyKeyInput(e.target.value)}
+                      placeholder="sk-..."
+                      className="w-full bg-[#222222] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-sky-600 transition-colors text-sm"
+                    />
+                    <a
+                      href="https://www.hfsyapi.cn/docs"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block mt-2 text-xs text-sky-500 hover:text-sky-400"
+                    >文档：https://www.hfsyapi.cn/docs</a>
+                  </div>
+
                   {/* codesonline GPT-5.5 对话 */}
                   <div className="mt-5 pt-4 border-t border-[#333]">
                     <h3 className="text-sm font-semibold text-gray-200 mb-2">codesonline (GPT-5.5 对话)</h3>
@@ -468,6 +493,8 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                                 junlanBaseUrl: junlanBaseInput.trim() || DEFAULT_JUNLAN_BASE_URL,
                                 codesonlineApiKey: codesonlineKeyInput.trim(),
                                 codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
+                                hfsyApiKey: hfsyKeyInput.trim(),
+                                hfsyBaseUrl: DEFAULT_HFSY_IMAGE_BASE_URL,
                                 deepSeekApiKey: deepSeekKeyInput.trim(),
                                 deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
                                 manxueApiKey: manxueKeyInput.trim(),
@@ -503,6 +530,8 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                                 junlanBaseUrl: junlanBaseInput.trim() || DEFAULT_JUNLAN_BASE_URL,
                                 codesonlineApiKey: codesonlineKeyInput.trim(),
                                 codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
+                                hfsyApiKey: hfsyKeyInput.trim(),
+                                hfsyBaseUrl: DEFAULT_HFSY_IMAGE_BASE_URL,
                                 deepSeekApiKey: deepSeekKeyInput.trim(),
                                 deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
                                 manxueApiKey: manxueKeyInput.trim(),
@@ -550,6 +579,8 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                             junlanBaseUrl: junlanBaseInput.trim() || DEFAULT_JUNLAN_BASE_URL,
                             codesonlineApiKey: codesonlineKeyInput.trim(),
                             codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
+                            hfsyApiKey: hfsyKeyInput.trim(),
+                            hfsyBaseUrl: DEFAULT_HFSY_IMAGE_BASE_URL,
                             deepSeekApiKey: deepSeekKeyInput.trim(),
                             deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
                             manxueApiKey: manxueKeyInput.trim(),
@@ -587,6 +618,8 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                           junlanBaseUrl: junlanBaseInput.trim() || DEFAULT_JUNLAN_BASE_URL,
                           codesonlineApiKey: codesonlineKeyInput.trim(),
                           codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
+                          hfsyApiKey: hfsyKeyInput.trim(),
+                          hfsyBaseUrl: DEFAULT_HFSY_IMAGE_BASE_URL,
                           deepSeekApiKey: deepSeekKeyInput.trim(),
                           deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
                           manxueApiKey: manxueKeyInput.trim(),

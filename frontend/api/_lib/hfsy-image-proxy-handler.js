@@ -1,0 +1,117 @@
+/**
+ * hfsyapi.cn 图像 API 同源代理（https://www.hfsyapi.cn）。
+ * 与 codesonline 同源代理同结构，避开 Vercel 边缘 rewrite 直连外站时的
+ * ROUTER_EXTERNAL_TARGET_ERROR / 502。
+ */
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+
+const UPSTREAM_ORIGIN = 'https://www.hfsyapi.cn';
+
+function isHopByHopHeader(name) {
+  const n = String(name).toLowerCase();
+  return new Set([
+    'connection',
+    'keep-alive',
+    'proxy-authenticate',
+    'proxy-authorization',
+    'te',
+    'trailers',
+    'transfer-encoding',
+    'upgrade',
+    'host',
+  ]).has(n);
+}
+
+async function handler(req, res) {
+  const host = req.headers.host || 'localhost';
+  const url = new URL(req.url || '/', `http://${host}`);
+  const pathFromQuery = url.searchParams.get('path')?.replace(/^\/+/, '') ?? '';
+  let sub = pathFromQuery;
+  if (!sub) {
+    sub = url.pathname.replace(/^\/api\/hfsy-image-proxy\/?/, '').replace(/^\/+/, '');
+  }
+  if (!sub) {
+    res.statusCode = 400;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify({ error: 'missing path after /api/hfsy-image-proxy' }));
+    return;
+  }
+  const upstreamSearch = new URLSearchParams(url.searchParams);
+  upstreamSearch.delete('path');
+  const qs = upstreamSearch.toString();
+  const targetUrl = `${UPSTREAM_ORIGIN}/${sub}${qs ? `?${qs}` : ''}`;
+
+  const headers = new Headers();
+  for (const [k, v] of Object.entries(req.headers)) {
+    if (!v || isHopByHopHeader(k)) continue;
+    if (k.toLowerCase() === 'host') continue;
+    if (Array.isArray(v)) {
+      for (const item of v) headers.append(k, item);
+    } else {
+      headers.set(k, v);
+    }
+  }
+
+  const method = req.method || 'GET';
+  const hasBody = !['GET', 'HEAD'].includes(method);
+  const body = hasBody ? Readable.toWeb(Readable.from(req)) : undefined;
+
+  let upstream;
+  try {
+    upstream = await fetch(targetUrl, {
+      method,
+      headers,
+      body,
+      ...(hasBody ? { duplex: 'half' } : {}),
+    });
+  } catch (e) {
+    console.error('[api/hfsy-image-proxy] upstream fetch failed', targetUrl, e);
+    res.statusCode = 502;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(
+      JSON.stringify({
+        error: 'hfsy_image_upstream_unreachable',
+        message: e instanceof Error ? e.message : String(e),
+      })
+    );
+    return;
+  }
+
+  res.statusCode = upstream.status;
+  upstream.headers.forEach((value, key) => {
+    if (isHopByHopHeader(key)) return;
+    try {
+      res.setHeader(key, value);
+    } catch {
+      /* ignore */
+    }
+  });
+
+  if (!upstream.body) {
+    res.end();
+    return;
+  }
+
+  try {
+    const out = Readable.fromWeb(upstream.body);
+    await pipeline(out, res);
+  } catch (e) {
+    if (!res.writableEnded) {
+      try {
+        res.destroy(e);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
+export const config = {
+  maxDuration: 300,
+  api: {
+    bodyParser: false,
+  },
+};
+
+export default handler;

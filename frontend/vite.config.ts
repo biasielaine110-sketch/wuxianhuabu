@@ -140,6 +140,37 @@ const toapisFileCdnProxy = {
     secure: true,
     rewrite: (p: string) => p.replace(/^\/codesonline-chat-api/, ''),
   },
+  /** hfsyapi.cn 图像 API 未开放 CORS；经同源转发到 www.hfsyapi.cn（OpenAI 兼容 /v1/images/*） */
+  '/api/hfsy-image-proxy': {
+    target: 'https://www.hfsyapi.cn',
+    changeOrigin: true,
+    secure: true,
+    timeout: 1_800_000,
+    proxyTimeout: 1_800_000,
+    rewrite: (p: string) => {
+      const path = p.startsWith('/') ? p : `/${p}`;
+      const stripped = path.replace(/^\/api\/hfsy-image-proxy(?=\/|$)/, '');
+      return stripped.length ? stripped : '/';
+    },
+  },
+  '/hfsy-image-api': {
+    target: 'https://www.hfsyapi.cn',
+    changeOrigin: true,
+    secure: true,
+    timeout: 1_800_000,
+    proxyTimeout: 1_800_000,
+    configure(proxy) {
+      proxy.on('error', (err, _req, res) => {
+        console.error('[vite proxy /hfsy-image-api]', err);
+        const r = res as { headersSent?: boolean; writeHead?: (c: number, h?: unknown) => void; end?: (s?: string) => void };
+        if (r && !r.headersSent && typeof r.writeHead === 'function') {
+          r.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
+          r.end?.(`hfsyapi.cn 图像代理错误: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      });
+    },
+    rewrite: (p: string) => p.replace(/^\/hfsy-image-api/, ''),
+  },
   /** 满 e（manxueapi.com）未开放 CORS；图生图 multipart 经同源转发 */
   '/manxue-api': {
     target: 'https://manxueapi.com',

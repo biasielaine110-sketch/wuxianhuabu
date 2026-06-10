@@ -7,6 +7,8 @@ import {
   getAiProvider,
   getCodesonlineBaseUrl,
   getCodesonlineSavedKey,
+  getHfsyBaseUrl,
+  getHfsySavedKey,
   getJunlanBaseUrl,
   getJunlanSavedKey,
   getManxueBaseUrl,
@@ -45,6 +47,14 @@ function codesonlineImageProxyPathPrefix(): '/api/codesonline-image-proxy' | '/c
   return '/codesonline-image-api';
 }
 
+/** 生产构建直接请求 /api/hfsy-image-proxy，与 yunzhi/codesonline 同理避免 rewrite 404 */
+function hfsyImageProxyPathPrefix(): '/api/hfsy-image-proxy' | '/hfsy-image-api' {
+  if (typeof import.meta !== 'undefined' && import.meta.env?.PROD) {
+    return '/api/hfsy-image-proxy';
+  }
+  return '/hfsy-image-api';
+}
+
 /** manxueapi.com 未开放 CORS；生产走 Vercel rewrite、开发走 Vite 同源代理 /manxue-api */
 function rewriteManxueBaseForBrowserCors(baseNormalized: string): string {
   if (typeof window === 'undefined') return baseNormalized;
@@ -81,6 +91,23 @@ function rewriteCodesonlineImageBaseForBrowserCors(baseNormalized: string): stri
   } catch {
     return baseNormalized;
   }
+}
+
+/** www.hfsyapi.cn 图像 API 未对浏览器开放 CORS；走 /hfsy-image-api（同源代理） */
+function rewriteHfsyImageBaseForBrowserCors(baseNormalized: string): string {
+  if (typeof window === 'undefined') return baseNormalized;
+  try {
+    const u = new URL(baseNormalized);
+    if (u.hostname.toLowerCase() !== 'www.hfsyapi.cn') return baseNormalized;
+    const pathname = u.pathname.replace(/\/+$/, '') || '/v1';
+    return `${window.location.origin}${hfsyImageProxyPathPrefix()}${pathname}`;
+  } catch {
+    return baseNormalized;
+  }
+}
+
+function hfsyFetchBase(): string {
+  return rewriteHfsyImageBaseForBrowserCors(normalizeBaseUrl(getHfsyBaseUrl()));
 }
 
 function rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNormalized: string): string {
@@ -427,6 +454,9 @@ function rewriteKnownImageCdnToSameOrigin(imageUrl: string): string {
     }
     if (host === 'manxueapi.com' || host.endsWith('.manxueapi.com')) {
       return `${origin}/manxue-api${u.pathname}${u.search}`;
+    }
+    if (host === 'www.hfsyapi.cn' || host === 'hfsyapi.cn') {
+      return `${origin}${hfsyImageProxyPathPrefix()}${u.pathname}${u.search}`;
     }
   } catch {
     /* ignore */
@@ -2264,6 +2294,7 @@ function aspectRatioToOpenAiSize(aspectRatio: string, model: string): string {
 function resolveT2iModel(modelName: string): string {
   const m = (modelName || '').trim();
   if (m === 'gpt-image-2-codesonline') return 'gpt-image-2';
+  if (m === 'gpt-image-2-hfsy') return 'gpt-image-2';
   if (m === 'gpt-image-2-junlan') return 'gpt-image-2';
   if (m === 'dall-e-2' || m === 'dall-e-3' || m === 'gpt-image-2' || m === 'gpt-image-1') return m;
   return 'dall-e-3';
@@ -2272,6 +2303,7 @@ function resolveT2iModel(modelName: string): string {
 function resolveEditModel(modelName: string): string {
   const m = (modelName || '').trim();
   if (m === 'gpt-image-2-codesonline') return 'gpt-image-2';
+  if (m === 'gpt-image-2-hfsy') return 'gpt-image-2';
   if (m === 'gpt-image-2-junlan') return 'gpt-image-2';
   if (m === 'gpt-image-2') return 'gpt-image-2';
   if (m === 'dall-e-2' || m === 'gpt-image-1') return m;
@@ -2475,6 +2507,66 @@ async function codesonlineEditImage(
   }
   return editImagesAtOpenAiCompatibleBase(
     codesonlineFetchBase(),
+    apiKey,
+    base64Images,
+    prompt,
+    numberOfImages,
+    'gpt-image-2',
+    aspectRatio,
+    quality,
+    pixelSize,
+    signal
+  );
+}
+
+/** hfsyapi.cn GPT Image 2 文生图：OpenAI 兼容 /v1/images/generations（同步或异步依官方） */
+async function hfsyGenerateNewImage(
+  prompt: string,
+  aspectRatio: string,
+  numberOfImages: number,
+  nodeResolution?: string,
+  quality?: string,
+  signal?: AbortSignal
+): Promise<string[]> {
+  const apiKey = getHfsySavedKey().trim();
+  if (!apiKey) {
+    throw new Error(
+      '未配置 hfsyapi.cn 图像通道。请在「设置 → API」填写「hfsyapi.cn（GPT Image 2）」API Key；文档：https://www.hfsyapi.cn/docs'
+    );
+  }
+  return generateImagesAtOpenAiCompatibleBase(
+    hfsyFetchBase(),
+    apiKey,
+    prompt,
+    aspectRatio,
+    numberOfImages,
+    'gpt-image-2',
+    nodeResolution,
+    quality,
+    signal
+  );
+}
+
+/** hfsyapi.cn GPT Image 2 图生图：POST /v1/images/edits */
+async function hfsyEditImage(
+  base64Images: string[],
+  prompt: string,
+  numberOfImages: number,
+  aspectRatio: string,
+  nodeResolution?: string,
+  quality?: string,
+  pixelSize?: string,
+  signal?: AbortSignal
+): Promise<string[]> {
+  if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
+  const apiKey = getHfsySavedKey().trim();
+  if (!apiKey) {
+    throw new Error(
+      '未配置 hfsyapi.cn 图像通道。请在「设置 → API」填写「hfsyapi.cn（GPT Image 2）」API Key；文档：https://www.hfsyapi.cn/docs'
+    );
+  }
+  return editImagesAtOpenAiCompatibleBase(
+    hfsyFetchBase(),
     apiKey,
     base64Images,
     prompt,
@@ -2729,6 +2821,21 @@ function isCodesonlineOpenAiCompatBase(baseNormalized: string): boolean {
     return (
       path.startsWith('/codesonline-image-api') ||
       path.startsWith('/api/codesonline-image-proxy')
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** hfsyapi.cn 图像 API：域名 www.hfsyapi.cn 或前端同源代理 /hfsy-image-api / /api/hfsy-image-proxy */
+function isHfsyOpenAiCompatBase(baseNormalized: string): boolean {
+  try {
+    const u = new URL(baseNormalized);
+    if (u.hostname.toLowerCase() === 'www.hfsyapi.cn' || u.hostname.toLowerCase() === 'hfsyapi.cn') return true;
+    const path = u.pathname.replace(/\/+$/, '') || '/';
+    return (
+      path.startsWith('/hfsy-image-api') ||
+      path.startsWith('/api/hfsy-image-proxy')
     );
   } catch {
     return false;
@@ -3363,6 +3470,17 @@ export async function openAiGenerateNewImage(
     );
   }
 
+  if (rawModel === 'gpt-image-2-hfsy') {
+    return hfsyGenerateNewImage(
+      prompt,
+      aspectRatio,
+      numberOfImages,
+      nodeResolution,
+      quality,
+      signal
+    );
+  }
+
   // 满 eAPI 图像模型
   if (isManxueImageModel(rawModel)) {
     const mxKey = getManxueSavedKey().trim();
@@ -3441,6 +3559,19 @@ export async function openAiEditImage(
       );
     }
     return codesonlineEditImage(
+      base64Images,
+      prompt,
+      numberOfImages,
+      aspectRatio,
+      nodeResolution,
+      quality,
+      pixelSize,
+      signal
+    );
+  }
+
+  if (rawModel === 'gpt-image-2-hfsy') {
+    return hfsyEditImage(
       base64Images,
       prompt,
       numberOfImages,

@@ -45,6 +45,14 @@
       "destination": "/api/codesonline-image-proxy?path=$1"
     },
     {
+      "source": "/hfsy-image-api/(.*)",
+      "destination": "/api/hfsy-image-proxy?path=$1"
+    },
+    {
+      "source": "/api/hfsy-image-proxy/(.*)",
+      "destination": "/api/hfsy-image-proxy?path=$1"
+    },
+    {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
