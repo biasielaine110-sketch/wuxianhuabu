@@ -68,6 +68,7 @@ const CHAT_FEATURE_BUTTON_SPECS: ChatFeatureButtonSpec[] = [
     presetKey: 'EEEE_备选万能资产',
     label: 'EEEE_备选万能资产',
     icon: 'wand',
+    tone: 'green',
     title:
       'EEEE_备选万能资产：与 BBBB 相同规范的全中文 AI 绘画提示词模板（人物 2x2·9:16；场景与关键帧 3x3·16:9）。发送前请填入剧本、风格与可选面部参考说明，并可连接参考图。',
   },
