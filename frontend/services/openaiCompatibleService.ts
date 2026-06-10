@@ -2547,7 +2547,11 @@ async function hfsyGenerateNewImage(
   );
 }
 
-/** hfsyapi.cn GPT Image 2 图生图：POST /v1/images/edits */
+/** hfsyapi.cn GPT Image 2 图生图：
+ * hfsyapi.cn 不支持 OpenAI 标准的 `/v1/images/edits`（multipart 端点）。
+ * 它家图生图是 POST /v1/images/generations，参考图用 `reference_images: [base64, ...]` 字段一并传过去。
+ * 与文生图共用 OpenAI 兼容响应（`{ data: [{ b64_json / url }] }`）。参考影刀社区示例。
+ */
 async function hfsyEditImage(
   base64Images: string[],
   prompt: string,
@@ -2565,18 +2569,40 @@ async function hfsyEditImage(
       '未配置 hfsyapi.cn 图像通道。请在「设置 → API」填写「hfsyapi.cn（GPT Image 2）」API Key；文档：https://www.hfsyapi.cn/docs'
     );
   }
-  return editImagesAtOpenAiCompatibleBase(
-    hfsyFetchBase(),
-    apiKey,
-    base64Images,
-    prompt,
-    numberOfImages,
-    'gpt-image-2',
-    aspectRatio,
-    quality,
-    pixelSize,
-    signal
-  );
+  const base = hfsyFetchBase();
+  const size = pixelSize || aspectRatioToOpenAiSize(aspectRatio, 'gpt-image-2');
+  const enhancedPrompt = pixelSize ? prompt : buildPromptWithDimensions(prompt, aspectRatio);
+
+  // 提取裸 base64（去掉 data:image/...;base64, 前缀），与服务端 reference_images 字段约定一致
+  const referenceImages: string[] = base64Images.map((img) => {
+    const trimmed = (img || '').trim();
+    const parsed = parseBase64ImageInput(trimmed);
+    return parsed.raw;
+  });
+
+  const count = Math.min(Math.max(numberOfImages, 1), 4);
+  const out: string[] = [];
+
+  for (let i = 0; i < count; i++) {
+    assertNotAborted(signal);
+    const body: Record<string, unknown> = {
+      model: 'gpt-image-2',
+      prompt: enhancedPrompt,
+      n: 1,
+      size,
+      response_format: 'b64_json',
+      reference_images: referenceImages,
+    };
+    if (quality) body.quality = quality;
+    const json = await postJsonAtBase<Record<string, unknown>>(
+      base,
+      '/images/generations',
+      body,
+      apiKey
+    );
+    out.push(await openAiStyleGenerationJsonToBase64(json, signal, apiKey, base));
+  }
+  return out;
 }
 
 /** 满 eAPI Gemini 图生图：使用 Vertex AI 风格的 generateContent 接口 */
