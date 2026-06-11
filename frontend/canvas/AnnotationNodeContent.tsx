@@ -199,6 +199,12 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
   const fsImageRef = useRef<{img: HTMLImageElement, x: number, y: number, w: number, h: number} | null>(null);
   /** 全屏初次适配窗口时的显示尺寸，用于滚轮缩放上下限 */
   const fsFitDisplayRef = useRef<{ w: number; h: number } | null>(null);
+  /**
+   * 全屏模式下用户上次主动设置的缩放百分比（key = sourceImage|sourceImageAssetId）。
+   * 离开全屏再次进入、容器尺寸变化触发 useEffect 重跑时，恢复这个值而不是无脑回到 100%。
+   * 切换 source image 时 key 不匹配，相当于清空。
+   */
+  const fsSavedZoomPercentRef = useRef<{ key: string; percent: number } | null>(null);
   const [fsZoomPercent, setFsZoomPercent] = useState(100);
   const fsPenPointsRef = useRef<{x: number, y: number}[]>([]);
   const fsIsDrawingRef = useRef(false);
@@ -335,6 +341,10 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
   const sourceImage = node.sourceImage ?? '';
   const sourceImageAssetId = node.sourceImageAssetId;
   const hasSourceImage = !!(sourceImage || sourceImageAssetId);
+  // source image 变化时清空 saved zoom：缩放比例是按图片分别记忆的，避免不同图片串味
+  useEffect(() => {
+    fsSavedZoomPercentRef.current = null;
+  }, [sourceImage, sourceImageAssetId]);
   const annotations = node.annotations ?? [];
   const selectedId = node.selectedAnnotationId;
   const annotationsRef = useRef(annotations);
@@ -1615,9 +1625,15 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       const oldR: FsImageRect = { x: cached.x, y: cached.y, w: cached.w, h: cached.h };
       const newR: FsImageRect = { x: newX, y: newY, w: newW, h: newH };
       syncFsImageDisplayRect(oldR, newR);
-      setFsZoomPercent(Math.round((newW / fit.w) * 100));
+      const newPercent = Math.round((newW / fit.w) * 100);
+      setFsZoomPercent(newPercent);
+      // 记录本次用户主动缩放，便于离开/重开全屏后恢复
+      fsSavedZoomPercentRef.current = {
+        key: `${sourceImage ?? ''}::${sourceImageAssetId ?? ''}`,
+        percent: newPercent,
+      };
     },
-    [syncFsImageDisplayRect]
+    [syncFsImageDisplayRect, sourceImage, sourceImageAssetId]
   );
 
   const applyFsDisplayPan = useCallback(
@@ -1654,7 +1670,10 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
     fsSpaceDownRef.current = false;
     fsIsPanningRef.current = false;
     setIsFsPanning(false);
-    setFsZoomPercent(100);
+    // 同一 source image 重复进入全屏时，恢复用户上次主动缩放比例，避免 UI 闪一下回到 100%
+    const saved = fsSavedZoomPercentRef.current;
+    const currentKey = `${sourceImage ?? ''}::${sourceImageAssetId ?? ''}`;
+    setFsZoomPercent(saved && saved.key === currentKey ? saved.percent : 100);
     setIsFullscreenAnnotation(true);
   };
 
@@ -1694,7 +1713,25 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
           const fy = (rh - h) / 2;
           fsImageRef.current = { img, x: fx, y: fy, w, h };
           fsFitDisplayRef.current = { w, h };
-          setFsZoomPercent(100);
+
+          // 离开/重开全屏后，恢复用户上次主动设置的缩放比例；
+          // 首次进入或切换 source image 时回到 100%。
+          const saved = fsSavedZoomPercentRef.current;
+          const currentKey = `${sourceImage ?? ''}::${sourceImageAssetId ?? ''}`;
+          const restoredPercent = saved && saved.key === currentKey ? saved.percent : 100;
+          if (restoredPercent !== 100) {
+            const factor = restoredPercent / 100;
+            const newW = w * factor;
+            const newH = h * factor;
+            const newX = (rw - newW) / 2;
+            const newY = (rh - newH) / 2;
+            const oldR: FsImageRect = { x: fx, y: fy, w, h };
+            const newR: FsImageRect = { x: newX, y: newY, w: newW, h: newH };
+            fsImageRef.current = { img, x: newX, y: newY, w: newW, h: newH };
+            // 同步给其它依赖 cached.x/y/w/h 的渲染函数
+            syncFsImageDisplayRect(oldR, newR);
+          }
+          setFsZoomPercent(restoredPercent);
 
           const emb = imageCacheRef.current ?? ensureEmbeddedImageLayout();
           const list = annotationsRef.current;
