@@ -65,6 +65,7 @@ export type CanvasNodeRenderState = {
   promptPresetDomainOverrides: Record<string, PresetDomainId>;
   promptPresetCategoryOverrides: Record<string, I2iPresetCategoryId>;
   thumbResolutionPct: number;
+  downloadImage: (imageSrc: string) => Promise<void>;
   downloadVideoFromUrl: (url: string, filename?: string) => void;
   appendNodesWithUndo: (
     newNodes: CanvasNode[],

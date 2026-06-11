@@ -149,6 +149,7 @@ return (
               s.setImportTargetNodeId(nodeId);
               s.fileInputRef.current?.click();
             }}
+            onDownloadImage={(src) => { void s.downloadImage(src); }}
           />
         </Suspense>
       )}

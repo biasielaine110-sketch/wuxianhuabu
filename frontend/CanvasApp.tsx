@@ -1682,6 +1682,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     eyedropperTargetNodeIdRef,
     promptPresetDomainOverrides,
     promptPresetCategoryOverrides,
+    downloadImage,
     downloadVideoFromUrl,
     appendNodesWithUndo,
   }));

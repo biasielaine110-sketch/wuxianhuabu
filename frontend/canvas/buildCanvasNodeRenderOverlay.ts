@@ -52,6 +52,7 @@ export type BuildCanvasNodeRenderOverlayInput = {
   eyedropperTargetNodeIdRef: MutableRefObject<string | null>;
   promptPresetDomainOverrides: Record<string, PresetDomainId>;
   promptPresetCategoryOverrides: Record<string, I2iPresetCategoryId>;
+  downloadImage: (imageSrc: string) => Promise<void>;
   downloadVideoFromUrl: (url: string, filename?: string) => void;
   appendNodesWithUndo: (
     newNodes: CanvasNode[],

@@ -37,6 +37,8 @@ export interface CanvasImageGenAreaProps {
   openFullscreenImage: (nodeId: string, img: string, idx: number) => void;
   setEyedropperTargetNodeId: React.Dispatch<React.SetStateAction<string | null>>;
   onImportImage: (nodeId: string) => void;
+  /** 与「最大化图片」下载走同一条 saveImageDownload 路径（含固定目录 / 草稿目录 / 另存为 流程） */
+  onDownloadImage: (imageSrc: string) => void;
 }
 
 export function CanvasImageGenArea({
@@ -57,6 +59,7 @@ export function CanvasImageGenArea({
   openFullscreenImage,
   setEyedropperTargetNodeId,
   onImportImage,
+  onDownloadImage,
 }: CanvasImageGenAreaProps) {
   const isImageNode = node.type === 'image';
 
@@ -129,24 +132,7 @@ export function CanvasImageGenArea({
                     e.stopPropagation();
                     const imgData = images[currentIndex];
                     if (!imgData) return;
-                    try {
-                      // 解析 dataURL (data:image/...;base64,xxxx) 或裸 base64 / URL
-                      let href = imgData;
-                      if (!/^data:|^https?:\/\//.test(href)) {
-                        href = `data:image/png;base64,${href}`;
-                      }
-                      const a = document.createElement('a');
-                      a.href = href;
-                      const extMatch = href.match(/^data:image\/(\w+);/);
-                      const ext = extMatch ? extMatch[1] : 'png';
-                      a.download = `${node.type}-${node.id}-${currentIndex + 1}.${ext}`;
-                      document.body.appendChild(a);
-                      a.click();
-                      document.body.removeChild(a);
-                    } catch (err: unknown) {
-                      const msg = err instanceof Error ? err.message : String(err);
-                      alert(`下载图片失败: ${msg}`);
-                    }
+                    onDownloadImage(imgData);
                   }}
                   className="p-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg text-white backdrop-blur-sm shadow-lg flex items-center justify-center"
                   title="下载图片"
