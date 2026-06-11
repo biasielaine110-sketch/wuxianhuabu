@@ -163,6 +163,33 @@ const CHAT_FEATURE_BUTTON_SPECS: ChatFeatureButtonSpec[] = [
     title:
       'HHHH_grok_4宫格分镜视频：工业级AI漫剧视效总监模板，10秒四宫格·零帧硬切·无黑图（台词来源唯一性 P0 级、角色外貌锁 P0 级、反串镜硬校验、反凑数条款）。发送前请填入输入文案/前置分镜/角色库/场景与物品库。',
   },
+  {
+    id: 'ddd-script-revise',
+    presetKey: 'DDD_剧本修改',
+    label: 'DDD_剧本修改',
+    icon: 'message',
+    tone: 'purple',
+    title:
+      'DDD_剧本修改：DeepWhite 中文影视编剧 v1 一键填入。从零开发、分场、诊断评分、精准修改中文影视剧本。集成山音超级编剧大师的中文全流程、视听化写作、分步骤自检机制 + 麦基/坎贝尔/亚里士多德结构审计、场景价值转变、因果性审计、精准 edit 机制 + 10 分制量化评分表与修改优先级。点击后请在输入框中追加或粘贴你的素材（灵感、梗概、分场大纲或剧本片段），模型会先判断任务类型与体量，再按八步流程逐级推进，每完成一步等待你回复「通过 / 修改 / 自检」再继续。',
+  },
+  {
+    id: 'ddd-asset-gen',
+    presetKey: 'DDD_资产生成',
+    label: 'DDD_资产生成',
+    icon: 'wand',
+    tone: 'purple',
+    title:
+      'DDD_资产生成：DeepWhite Image Prompt Builder 一键填入。仅服务于静态图片（人物、场景、道具、海报、概念图），输出成对的双语提示词（English Prompt + 中文提示词）。结构：主体+动作 → 地点/背景 → 构图 → 光线 → 风格/美学 → 相机/镜头 → 色彩分级。禁止出现视频元素（时间码、运镜随时间变化、音效、转场、对白时机）、禁止推荐具体图像生成模型/平台、未要求时不写 negative prompt、不堆砌与题材无关的风格标签、不改动用户提供的角色/品牌/产品特征。点击后请在输入框中追加或粘贴任务类型、画幅、主体、风格简报与可选参考图说明，多图时按 Still 01 / Still 02 编号成片。',
+  },
+  {
+    id: 'ddd-shotlist',
+    presetKey: 'DDD_站位视频提示词',
+    label: 'DDD_站位视频提示词',
+    icon: 'video',
+    tone: 'purple',
+    title:
+      'DDD_站位视频提示词：DeepWhite Shotlist Builder ZH User v2.7 一键填入。专为中文 Seedance 2.0 视频生成器设计，把剧本/场景拆为带空间调度、摄影机、表演微节拍、防错警告的中文视频提示词。严格走 6 个不可跳过 Gate：资产确认 → 空间确认 → 时间划分 → 提示词结构 → 交付形式 → HTML QA。提示词结构：固定开头「不要出现BGM，不要出现字幕」→ 【全局画质】/【人物材质】/【灯光与风格】/【核心特效】四段 → @image1+ 素材句柄 → 故事板参考（条件字段）→ 空间与镜头数量警告 → 【镜头N】段落（画面动作概述→画面构图→机位→动作→音效）→ 环境活动/全场音效 → ⚠️ 防错。每条提示词 ≤15 秒、可复制正文 ≤2200 字、HTML 网页禁止 rowspan/colspan。点击后请在输入框中粘贴任务目标、场景范围、剧本文本、画幅、是否使用故事板、交付形式等 12 项输入。',
+  },
   // —— 紫色组 ——
   {
     id: 'cccc-storyboard-simplified',
@@ -643,6 +670,7 @@ export function ChatNodeContent({
           </optgroup>
           <optgroup label="MiniMax">
             <option value="minimax-m2.7">MiniMax M2.7</option>
+            <option value="minimax-m3">MiniMax M3</option>
           </optgroup>
           <optgroup label="君澜 AI">
             <option value="gpt-5.5-junlan">GPT-5.5（君澜）</option>
