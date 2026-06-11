@@ -114,7 +114,7 @@ const CHAT_FEATURE_BUTTON_SPECS: ChatFeatureButtonSpec[] = [
     presetKey: 'CCC即梦视频',
     label: 'CCC即梦视频',
     icon: 'message',
-    tone: 'blue',
+    tone: 'purple',
     title:
       'CCC_视频提示词_即梦（Seedance 2.0）：单镜标准化提示词工程模板。发送前请连接或粘贴分镜工程文件要点，并在参考区绑定角色/场景参考图。',
   },
