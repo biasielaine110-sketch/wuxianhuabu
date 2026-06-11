@@ -1,12 +1,12 @@
 import type { CanvasNode } from '../types';
 import { cloneImageSlotForNewNode } from '../services/canvasAssetResolver';
 
-export const SPAWNED_IMAGE_NODE_WIDTH = 480;
-export const SPAWNED_IMAGE_NODE_HEIGHT = 528;
+export const SPAWNED_IMAGE_NODE_WIDTH = 960;
+export const SPAWNED_IMAGE_NODE_HEIGHT = 1056;
 /** 水平排开时相邻图片节点之间的间距（拖入/粘贴多图） */
-export const SPAWNED_IMAGE_NODE_GAP = 90;
+export const SPAWNED_IMAGE_NODE_GAP = 180;
 /** 叠压导出时每张图相对上一张的错开偏移（宫格拆分等） */
-export const SPAWNED_IMAGE_STACK_STAGGER = 90;
+export const SPAWNED_IMAGE_STACK_STAGGER = 180;
 
 export type ImageSlotInput = { base64?: string; assetId?: string };
 

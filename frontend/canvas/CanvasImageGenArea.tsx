@@ -9,13 +9,13 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   CopyIcon,
+  DownloadIcon,
   EyedropperIcon,
   GridIcon,
   LoaderIcon,
   MaximizeIcon,
   PlusIcon,
   SingleIcon,
-  SparklesIcon,
   TextIcon,
 } from './canvasIcons';
 
@@ -63,7 +63,7 @@ export function CanvasImageGenArea({
   return (
     <div
       className={`w-full bg-[#2a2a2a] relative border-b border-[#333] overflow-hidden group flex flex-col min-h-0 ${
-        isImageNode ? 'flex-1 min-h-[160px]' : 'flex-[5] min-h-[240px] basis-0 min-w-0'
+        isImageNode ? 'flex-1 min-h-[320px]' : 'flex-[5] min-h-[240px] basis-0 min-w-0'
       }`}
     >
       {node.isGenerating && <GenerationHoloOverlay />}
@@ -125,31 +125,34 @@ export function CanvasImageGenArea({
             {hasDisplayableImages && (
               <div className="relative">
                 <button
-                  onPointerDown={async (e) => {
+                  onPointerDown={(e) => {
                     e.stopPropagation();
-                    const scale = window.prompt('请输入超清倍数 (2 或 4):', '2');
-                    if (!scale) return;
-                    const scaleNum = parseInt(scale, 10);
-                    if (![2, 4].includes(scaleNum)) {
-                      alert('仅支持 2x 或 4x 超清');
-                      return;
-                    }
                     const imgData = images[currentIndex];
                     if (!imgData) return;
                     try {
-                      const { upscaleJimengImage } = await import('../integrations/jimeng/jimengClient');
-                      const result = await upscaleJimengImage(imgData, scaleNum);
-                      onUpdateNode(node.id, { images: [...(node.images || []), result.imageUrl] });
+                      // 解析 dataURL (data:image/...;base64,xxxx) 或裸 base64 / URL
+                      let href = imgData;
+                      if (!/^data:|^https?:\/\//.test(href)) {
+                        href = `data:image/png;base64,${href}`;
+                      }
+                      const a = document.createElement('a');
+                      a.href = href;
+                      const extMatch = href.match(/^data:image\/(\w+);/);
+                      const ext = extMatch ? extMatch[1] : 'png';
+                      a.download = `${node.type}-${node.id}-${currentIndex + 1}.${ext}`;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
                     } catch (err: unknown) {
                       const msg = err instanceof Error ? err.message : String(err);
-                      alert(`智能超清失败: ${msg}`);
+                      alert(`下载图片失败: ${msg}`);
                     }
                   }}
                   className="p-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg text-white backdrop-blur-sm shadow-lg flex items-center justify-center"
-                  title="智能超清 (2x/4x)"
+                  title="下载图片"
                   style={{ minWidth: '48px', minHeight: '48px' }}
                 >
-                  <SparklesIcon size={30} />
+                  <DownloadIcon size={30} />
                 </button>
               </div>
             )}
