@@ -73,22 +73,6 @@ const CHAT_FEATURE_BUTTON_SPECS: ChatFeatureButtonSpec[] = [
       'EEEE_备选万能资产：与 BBBB 相同规范的全中文 AI 绘画提示词模板（人物 2x2·9:16；场景与关键帧 3x3·16:9）。发送前请填入剧本、风格与可选面部参考说明，并可连接参考图。',
   },
   {
-    id: 'ddd-15s-timeline',
-    presetKey: 'DDD_15秒剧本时间轴',
-    label: 'DDD_15秒剧本时间轴',
-    icon: 'message',
-    title:
-      'DDD_15秒剧本时间轴：即梦 Seedance 2.0 · 导演讲戏分镜时间轴模板。发送前请填入剧本正文。',
-  },
-  {
-    id: 'ddd-15s-9grid-beatboard',
-    presetKey: 'DDD_15秒九宫格定调板',
-    label: 'DDD_15秒九宫格定调板',
-    icon: 'wand',
-    title:
-      'DDD_15秒九宫格定调板：专业影视视觉开发设计师，将15s剧情转化为九宫格场景情绪定调板（Beat Board）。发送前请填入剧本正文。',
-  },
-  {
     id: 'ffff-universal-prompt',
     presetKey: 'FFFF_全能提示词',
     label: 'FFFF_全能提示词',
