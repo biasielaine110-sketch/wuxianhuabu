@@ -116,6 +116,15 @@ export function getVideoModelSwitchUpdates(m: string, node: CanvasNode): Partial
     updates.videoResolution = '720p';
     const ar = node.aspectRatio || '16:9';
     if (!['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].includes(ar)) updates.aspectRatio = '16:9';
+  } else if (m === 'grok-imagine-video-1.5-preview-aiid') {
+    // AIID grok-imagine-video-1.5-preview：xAI Grok Imagine Video 1.5 Preview
+    // **只能图生视频**（必须连参考图）；时长 1-15 秒，分辨率 720p
+    // 7 种画幅都支持：1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3
+    const d = node.videoDuration ?? 10;
+    updates.videoDuration = d >= 1 && d <= 15 ? d : 10;
+    updates.videoResolution = '720p';
+    const ar = node.aspectRatio || '16:9';
+    if (!['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].includes(ar)) updates.aspectRatio = '16:9';
   } else if (m === MANXUE_GROK_IMAGINE_VIDEO_MODEL) {
     const d = node.videoDuration ?? 10;
     updates.videoDuration = [10, 15].includes(d) ? d : 10;
@@ -151,6 +160,7 @@ export function videoNodeModelToToApis(m?: string): ToApisVideoModelId {
   if (vm === 'seedance-2' || vm === 'seedance-2-fast') return vm as ToApisVideoModelId;
   if (vm === 'gemini-omni-flash') return 'gemini-omni-flash';
   if (vm === 'grok-video-1.5-preview') return 'grok-video-1.5-preview';
+  if (vm === 'grok-imagine-video-1.5-preview-aiid') return 'grok-imagine-video-1.5-preview-aiid';
   if (isManxueGrokImagineVideoModel(vm)) return MANXUE_GROK_IMAGINE_VIDEO_MODEL as ToApisVideoModelId;
   if (vm === 'jimeng-video-v3' || vm === 'jimeng-image-to-video') return vm as ToApisVideoModelId;
   return 'grok-video-3';

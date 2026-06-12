@@ -1585,7 +1585,7 @@ async function toApisUploadVideoReferenceImageUrls(
   return imageUrls;
 }
 
-export type ToApisVideoModelId = 'grok-video-3' | 'grok-video-1.5-preview' | 'sora-2-vvip' | 'veo3.1-fast' | 'doubao-seedance-1-5-pro' | 'jimeng-video-v3' | 'jimeng-image-to-video' | 'gemini-omni-flash' | 'seedance-2' | 'seedance-2-fast' | 'doubao-seedance-2-0-260128' | 'doubao-seedance-2-0-fast-260128' | 'grok-imagine-video-1.5-preview';
+export type ToApisVideoModelId = 'grok-video-3' | 'grok-video-1.5-preview' | 'sora-2-vvip' | 'veo3.1-fast' | 'doubao-seedance-1-5-pro' | 'jimeng-video-v3' | 'jimeng-image-to-video' | 'gemini-omni-flash' | 'seedance-2' | 'seedance-2-fast' | 'doubao-seedance-2-0-260128' | 'doubao-seedance-2-0-fast-260128' | 'grok-imagine-video-1.5-preview' | 'grok-imagine-video-1.5-preview-aiid';
 
 function isHttpUrlString(v: unknown): v is string {
   if (typeof v !== 'string') return false;
@@ -2447,6 +2447,133 @@ async function toApisDoubaoSeedance2VideoGenerate(params: {
 }
 
 /**
+ * AIID (api.aiid.edu.kg)：`grok-imagine-video-1.5-preview`（xAI Grok Imagine Video 1.5 Preview，**只支持图生视频**）。
+ * - `duration`：1-15 秒（xAI 文档：https://docs.x.ai/developers/model-capabilities/video/generation）
+ * - `aspect_ratio`：1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3
+ * - 1.5 preview **必须**有参考图（xAI 文档：text-to-video is not yet available on that model）
+ * - 走 AIID 标准异步任务端点 `/api/v3/contents/generations/tasks`（与 doubao-seedance-2-0 协议一致）
+ * - 与满 e grok-imagine-video-1.5-preview（chat 路由，画幅/时长不可控）的关键差异：
+ *   AIID 走异步任务 + 标准字段，aspect_ratio 字段会被尊重
+ */
+export const AIID_GROK_IMAGINE_VIDEO_MODEL = 'grok-imagine-video-1.5-preview';
+
+export function isAiidGrokImagineVideoModel(m?: string): boolean {
+  return m === 'grok-imagine-video-1.5-preview-aiid';
+}
+
+export async function aiidGrokImagineVideoGenerate(params: {
+  prompt: string;
+  durationSeconds: number;
+  aspectRatio: string;
+  resolution: '480p' | '720p' | '1080p';
+  referenceImagesBase64?: string[];
+  signal?: AbortSignal;
+}): Promise<string> {
+  const apiKey = getAiidSavedKey();
+  if (!apiKey) {
+    throw new Error('AIID 视频生成：未配置 API Key，请在「设置 → API → AIID」中填写。');
+  }
+  // 1.5 preview **必须**有参考图
+  const refs = (params.referenceImagesBase64 || []).filter(Boolean);
+  if (refs.length === 0) {
+    throw new Error('Grok Imagine Video 1.5 Preview 仅支持图生视频（I2V），请连接至少一张参考图。');
+  }
+
+  // 使用同源代理路径避免 CORS 问题（开发环境 Vite proxy / 生产环境 vercel.json rewrite）
+  const base = (() => {
+    const saved = getAiidBaseUrl();
+    if (saved && saved !== DEFAULT_AIID_BASE_URL) return saved.replace(/\/v1$/, '').replace(/\/+$/, '');
+    return '/api/aiid';
+  })();
+
+  // 构建 content 数组（AIID 专用格式）
+  // AIID 的 image_url 可以直接接收 data URI（base64），无需预先上传
+  const content: Array<{ type: string; text?: string; image_url?: { url: string }; role?: string }> = [
+    { type: 'text', text: params.prompt },
+  ];
+  for (let i = 0; i < refs.length; i++) {
+    const { raw, mime } = parseBase64ImageInput(refs[i]);
+    const dataUri = `data:${mime};base64,${raw}`;
+    content.push({ type: 'image_url', image_url: { url: dataUri }, role: 'first_frame' });
+    // grok-imagine-video 1.5 只用首帧；不再 push last_frame
+    break;
+  }
+
+  // duration 1-15 秒，UI 默认 10
+  const validDuration = (() => {
+    const d = Number(params.durationSeconds) || 10;
+    if (d < 1) return 1;
+    if (d > 15) return 15;
+    return Math.round(d);
+  })();
+
+  const ratioMap: Record<string, string> = {
+    '1:1': '1:1', '16:9': '16:9', '9:16': '9:16',
+    '4:3': '4:3', '3:4': '3:4', '3:2': '3:2', '2:3': '2:3',
+  };
+  const ratio = ratioMap[params.aspectRatio] || '16:9';
+
+  const body: Record<string, unknown> = {
+    model: AIID_GROK_IMAGINE_VIDEO_MODEL,
+    mode: 'reference_material',
+    content,
+    duration: validDuration,
+    size: params.resolution === '1080p' ? '1920x1080' : params.resolution === '480p' ? '854x480' : '1280x720',
+    aspect_ratio: ratio,
+  };
+
+  // 提交任务到 AIID /api/v3/contents/generations/tasks
+  const taskRes = await fetch(`${base}/api/v3/contents/generations/tasks`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey.trim()}`,
+    },
+    body: JSON.stringify(body),
+    signal: params.signal,
+  });
+  if (!taskRes.ok) {
+    const t = await taskRes.text();
+    throw new Error(`AIID Grok Imagine 视频任务提交失败 (${taskRes.status}): ${t.slice(0, 800)}`);
+  }
+  let taskJson: unknown;
+  try { taskJson = JSON.parse(await taskRes.text()); } catch { throw new Error(`AIID 提交响应无效: ${await taskRes.text().slice(0, 200)}`); }
+  const taskData = taskJson as Record<string, unknown>;
+  const taskId = taskData.id as string;
+  if (!taskId) throw new Error(`AIID 未返回任务 id：${await taskRes.text().slice(0, 400)}`);
+
+  // 轮询结果
+  const deadline = Date.now() + TOAPIS_VIDEO_TASK_MAX_WAIT_MS;
+  await sleepInterruptible(5000, params.signal);
+  while (Date.now() < deadline) {
+    assertNotAborted(params.signal);
+    const pollRes = await fetch(`${base}/api/v3/contents/generations/tasks/${encodeURIComponent(taskId)}`, {
+      headers: { Authorization: `Bearer ${apiKey.trim()}` },
+      signal: params.signal,
+    });
+    const pollText = await pollRes.text();
+    if (!pollRes.ok) throw new Error(`AIID 查询任务失败 (${pollRes.status}): ${pollText.slice(0, 500)}`);
+    let pollJson: unknown;
+    try { pollJson = JSON.parse(pollText); } catch { throw new Error(`AIID 轮询响应无效: ${pollText.slice(0, 200)}`); }
+    const pollData = pollJson as Record<string, unknown>;
+    const items = Array.isArray(pollData.items) ? pollData.items : [];
+    const item = (items[0] as Record<string, unknown>) || {};
+    const status = String(item.status || '').toLowerCase();
+    if (status === 'succeeded' || status === 'completed' || status === 'done') {
+      const videoUrl = (item.content as Record<string, unknown>)?.video_url as string || item.video_url as string;
+      if (!videoUrl) throw new Error(`AIID 任务完成但未返回视频 URL`);
+      return videoUrl;
+    }
+    if (status === 'failed' || status === 'error') {
+      const errMsg = (item.error as string) || JSON.stringify(item.error) || pollText.slice(0, 400);
+      throw new Error(`AIID Grok Imagine 视频任务失败: ${errMsg}`);
+    }
+    await sleepInterruptible(5000, params.signal);
+  }
+  throw new Error('AIID Grok Imagine 视频任务超时');
+}
+
+/**
  * ToAPIs：`seedance-2` / `seedance-2-fast`（Seedance 2 视频生成）。
  * 文档：https://docs.toapis.com/docs/cn/api-reference/videos/seedance-2/generation
  * - `duration`：5–10 秒
@@ -2517,6 +2644,17 @@ export async function toApisCanvasVideoGenerate(params: {
   referenceAudioBase64?: string;
   signal?: AbortSignal;
 }): Promise<string> {
+  // AIID grok-imagine-video 优先拦截（避免后续 toapis 校验误伤）
+  if (isAiidGrokImagineVideoModel(params.videoModel)) {
+    return aiidGrokImagineVideoGenerate({
+      prompt: params.prompt,
+      durationSeconds: params.durationSeconds,
+      aspectRatio: params.aspectRatio,
+      resolution: params.resolution === '1080p' ? '1080p' : params.resolution === '480p' ? '480p' : '720p',
+      referenceImagesBase64: params.referenceImagesBase64,
+      signal: params.signal,
+    });
+  }
   // 满 e 视频优先拦截（避免后续 isToApisHost 校验误伤）
   if (isManxueVideoModel(params.videoModel)) {
     return manxueVideoGenerate({
