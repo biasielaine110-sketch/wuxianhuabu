@@ -2482,10 +2482,15 @@ export async function aiidGrokImagineVideoGenerate(params: {
   }
 
   // 使用同源代理路径避免 CORS 问题（开发环境 Vite proxy / 生产环境 vercel.json rewrite）
-  // 注意：AIID grok-imagine 走的是 xAI 原生 /v1/videos，base URL 必须含 /v1
+  // AIID grok-imagine 走的是 xAI 原生 /v1/videos，base URL 必须含 /v1
+  // 默认用同源代理（saved base 为默认时），避免浏览器 CORS
   const base = (() => {
     const saved = getAiidBaseUrl();
-    const norm = (saved || DEFAULT_AIID_BASE_URL).replace(/\/+$/, '');
+    if (!saved || saved === DEFAULT_AIID_BASE_URL) {
+      // 同源代理路径（Vite proxy / Vercel rewrite 都会剥 /api/aiid 前缀转发到 https://api.aiid.edu.kg）
+      return '/api/aiid/v1';
+    }
+    const norm = saved.replace(/\/+$/, '');
     return norm.endsWith('/v1') ? norm : `${norm}/v1`;
   })();
 
