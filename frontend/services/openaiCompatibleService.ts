@@ -218,6 +218,81 @@ const TOAPIS_VIDEO_TASK_MAX_WAIT_MS = 1_800_000;
 /** 满 eAPI（manxueapi.com）任务轮询最长等待 */
 const MANXUE_TASK_MAX_WAIT_MS = 1_800_000;
 
+/**
+ * 满 eAPI 上游瞬时错误（Google 408 timeout / 500 "system under load" / submit failed 包装）：
+ * 检测到时自动退避重试，缓解上游短暂过载；非瞬时错误（4xx 鉴权、参数错等）立即抛出。
+ */
+const MANXUE_TRANSIENT_RETRY_DELAYS_MS = [0, 6_000, 12_000];
+
+function isManxueTransientError(status: number, bodyText: string): boolean {
+  if (status >= 500 && status < 600) {
+    // 5xx 一律视为瞬时（含网关包装的 500 / 502 / 503 / 504）
+    if (/timeout_error|system under load|submit failed|upstream_error|service unavailable|bad gateway|gateway timeout/i.test(bodyText)) {
+      return true;
+    }
+  }
+  if (status === 408) return true;
+  if (status === 429) return true; // 限流
+  if (status === 200) {
+    // 上游 200 但 body 含 timeout_error 的极端情况
+    if (/timeout_error|system under load|submit failed/i.test(bodyText)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function manxueFetchWithRetry(
+  url: string,
+  init: RequestInit,
+  label: string,
+  signal?: AbortSignal
+): Promise<Response> {
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < MANXUE_TRANSIENT_RETRY_DELAYS_MS.length; attempt++) {
+    if (MANXUE_TRANSIENT_RETRY_DELAYS_MS[attempt] > 0) {
+      await sleepInterruptible(MANXUE_TRANSIENT_RETRY_DELAYS_MS[attempt], signal);
+    }
+    assertNotAborted(signal);
+    try {
+      const res = await fetch(url, { ...init, signal });
+      if (res.ok) return res;
+      const text = await res.text();
+      if (isManxueTransientError(res.status, text) && attempt < MANXUE_TRANSIENT_RETRY_DELAYS_MS.length - 1) {
+        lastErr = new Error(`${label} 瞬时错误 (${res.status})，${MANXUE_TRANSIENT_RETRY_DELAYS_MS[attempt + 1] / 1000}s 后重试… (attempt ${attempt + 1}/${MANXUE_TRANSIENT_RETRY_DELAYS_MS.length})`);
+        // 把上游 body 透传以便最终失败时给出可读错误
+        lastErr = Object.assign(lastErr, { _lastBody: text, _lastStatus: res.status });
+        continue;
+      }
+      // 非瞬时或最后一次尝试：抛错
+      const err: Error & { _lastBody?: string; _lastStatus?: number } = new Error(
+        `${label}失败 (${res.status}): ${text.slice(0, 800)}`
+      );
+      err._lastBody = text;
+      err._lastStatus = res.status;
+      throw err;
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') throw e;
+      if (e && typeof e === 'object' && '_lastBody' in (e as object)) {
+        // 上一步包装过的瞬时错误，要么继续重试，要么最终抛
+        if (attempt < MANXUE_TRANSIENT_RETRY_DELAYS_MS.length - 1) {
+          lastErr = e;
+          continue;
+        }
+        throw e;
+      }
+      // fetch 网络错误（非 abort）→ 当作瞬时重试
+      if (attempt < MANXUE_TRANSIENT_RETRY_DELAYS_MS.length - 1) {
+        lastErr = e;
+        continue;
+      }
+      throw e;
+    }
+  }
+  // 走到这里说明所有重试都用完但都被 catch 后继续：抛出最后错误
+  throw lastErr instanceof Error ? lastErr : new Error(`${label} 重试耗尽`);
+}
+
 function assertNotAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException('已取消生成', 'AbortError');
 }
@@ -339,19 +414,18 @@ async function manxueGeminiGenerateImage(
     };
 
     const url = `${base}/${encodeURIComponent(model)}:generateContent?key=${key}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+    const res = await manxueFetchWithRetry(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
       },
-      body: JSON.stringify(body),
-      signal,
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`满 eAPI Gemini 生成失败 (${res.status}): ${text.slice(0, 800)}`);
-    }
+      '满 eAPI Gemini 生成',
+      signal
+    );
 
     const json = await res.json() as {
       candidates?: Array<{
@@ -445,16 +519,15 @@ export async function manxueGeminiChatGenerate(
     body.systemInstruction = { role: 'system', parts: [{ text: systemParts.join('\n\n') }] };
   }
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`满 eAPI Gemini 对话失败 (${res.status}): ${text.slice(0, 800)}`);
-  }
+  const res = await manxueFetchWithRetry(
+    url,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    '满 eAPI Gemini 对话'
+  );
 
   const json = (await res.json()) as {
     candidates?: Array<{
