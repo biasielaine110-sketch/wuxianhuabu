@@ -20,14 +20,19 @@ function hasMediaPayload(value: string | undefined): boolean {
   return typeof value === 'string' && value.length > 0;
 }
 
-/** 剥离节点中所有图片/媒体 base64，用于撤销栈存储（防止 OOM） */
-export function stripImagesFromNodes(nodes: CanvasNode[]): CanvasNode[] {
+/** 剥离节点中所有图片/媒体 base64，用于撤销栈存储（防止 OOM）
+ * options.keepVideos: true 时保留 videos[]（远程 https URL 非 base64，应原样保存以供刷新后回放） */
+export function stripImagesFromNodes(
+  nodes: CanvasNode[],
+  options?: { keepVideos?: boolean }
+): CanvasNode[] {
+  const keepVideos = options?.keepVideos === true;
   return nodes.map((n) => {
     const n2 = { ...n } as CanvasNode;
     if (n2.images?.length) {
       n2.images = n2.images.map(() => '');
     }
-    if (n2.videos?.length) {
+    if (n2.videos?.length && !keepVideos) {
       n2.videos = n2.videos.map(() => '');
     }
     if (n2.audio) n2.audio = '';

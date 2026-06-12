@@ -69,7 +69,9 @@ export function mergeCurrentCanvasIntoProjectList(
   auditModeData?: AuditModeData
 ): CanvasProject[] {
   if (!activeId) return projects;
-  const nodesForPersist = stripImagesFromNodes(nodes);
+  // 持久化时保留 videos[]（远程 https URL 非 base64，应原样保存以供刷新后回放）；
+  // 撤销栈调用方仍按默认 strip 行为以防 OOM。
+  const nodesForPersist = stripImagesFromNodes(nodes, { keepVideos: true });
   const { nodes: nc, edges: ec, transform: tc } = cloneCanvasForProject(
     nodesForPersist,
     edges,
