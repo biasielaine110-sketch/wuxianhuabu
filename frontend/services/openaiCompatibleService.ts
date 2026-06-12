@@ -1953,15 +1953,15 @@ export async function manxueVideoGenerate(params: {
   // 3) user 末尾强提示（防止 system 丢失）
   const systemText =
     '你是视频生成助手，必须严格遵守用户给定的画幅、时长与分辨率参数，' +
-    `强制输出 ${effectiveAspectRatio} 画幅、${duration} 秒、${resolution} 分辨率。` +
+    `强制输出 size=${size}（${effectiveAspectRatio}）、${duration} 秒、${resolution} 分辨率。` +
     (probedAspect
       ? `当前是图生视频：参考图 ${probedAspect.width}×${probedAspect.height}（约 ${probedAspect.canonical}）。` +
-        `请按 aspect_ratio=${effectiveAspectRatio} 拉伸输出，不要按参考图原画幅。`
+        `请按 size=${size} 拉伸输出，不要按参考图原画幅。`
       : '') +
     '完成后只返回一行可播放的视频 URL（Markdown 链接或裸 URL），不要任何其他文字。';
   const userHint =
-    `\n\n[params] aspect_ratio=${effectiveAspectRatio}, duration=${duration}, resolution=${resolution}。` +
-    `请生成 ${effectiveAspectRatio} 画幅、${duration} 秒、${resolution} 的视频，` +
+    `\n\n[params] size=${size} (${effectiveAspectRatio}), duration=${duration}, resolution=${resolution}。` +
+    `请生成 ${effectiveAspectRatio}（${size} 像素）、${duration} 秒、${resolution} 的视频，` +
     '完成后只返回一行可播放的视频 URL（Markdown 链接或裸 URL）。';
   const userText = prompt + userHint;
   const userContentParts: Array<{ type: 'image_url'; image_url: { url: string } } | { type: 'text'; text: string }> = [];
@@ -1973,8 +1973,28 @@ export async function manxueVideoGenerate(params: {
   userContentParts.push({ type: 'text', text: userText });
   const userContent: string | typeof userContentParts = imageUrls.length ? userContentParts : userText;
 
-  // 字段命名兼容：xAI 原生 = duration / aspect_ratio / resolution；
-  // 部分聚合网关认 seconds / size / aspect_ratio_name；同时附双字段兜底
+  // 字段命名兼容（基于 xAI 原生 + 满 e 网关实测反馈）：
+  // - duration: 数字 1-15（xAI 原生，default=6）
+  // - size: 像素字符串，必须命中 [720x1280, 1280x720, 1024x1024, 1024x1792, 1792x1024] 白名单
+  //   满 e 网关要求 size 字段，不是 aspect_ratio；与 resolution 无关
+  // - 分辨率 720p 对应 size=1280x720 / 720x1280；480p 对应 1024x1024 / 1024x1792 / 1792x1024
+  //   （具体映射以网关为准，这里按常规猜：720p 走 1280x720 / 720x1280，1024 系列走 480p）
+  // 实际我们一律走 1280x720 / 720x1280（720p 高清），与所选画幅对应
+  const aspectToSize: Record<string, string> = {
+    '16:9': '1280x720',
+    '9:16': '720x1280',
+    '1:1': '1024x1024',
+    '4:3': '1280x720',  // 4:3 无对应，兜底走 16:9
+    '3:4': '720x1280',  // 3:4 无对应，兜底走 9:16
+    '3:2': '1280x720',  // 3:2 无对应
+    '2:3': '720x1280',  // 2:3 无对应
+  };
+  const size = aspectToSize[effectiveAspectRatio] || '1280x720';
+
+  // 字段命名兼容：xAI 原生 + 满 e 网关实测
+  // - duration: 数字（xAI 原生，default=6；字符串或字段名错都会回退 6 秒）
+  // - size: 像素字符串（满 e 网关要求，aspect_ratio 字段被忽略）
+  // - resolution: 720p（保留供网关作参考，无白名单风险）
   const body: Record<string, unknown> = {
     model: MANXUE_GROK_IMAGINE_VIDEO_MODEL_ID,
     messages: [
@@ -1985,10 +2005,10 @@ export async function manxueVideoGenerate(params: {
     duration,
     duration_name: duration,
     seconds: duration,
+    size,
     aspect_ratio: effectiveAspectRatio,
     aspect_ratio_name: effectiveAspectRatio,
     aspectRatio: effectiveAspectRatio,
-    size: effectiveAspectRatio,
     resolution,
     resolution_name: resolution,
   };
