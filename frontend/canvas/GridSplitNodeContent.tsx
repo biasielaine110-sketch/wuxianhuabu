@@ -85,23 +85,55 @@ export function GridSplitNodeContent({
       const img = await loadImageElement(src);
 
       const { cols, rows } = getGridLayout(gridCount);
-      const targetRatio = frameAspectRatio === '9:16' ? 9 / 16 : 16 / 9;
-      const sourceRatio = img.width / img.height;
-      let frameWidth = img.width;
-      let frameHeight = img.height;
-      let frameX = 0;
-      let frameY = 0;
+      // 单格目标画幅 = node.aspectRatio（16:9 或 9:16）
+      // 整图 frame 比例 = 单格 × 宫格排布（4/9 宫方阵时 frame 也等于单格比例；
+      // 3/6 宫非方阵时 frame 会被拉长，例如 3 宫 1×3 + 16:9 → frame 16:3）
+      const cellRatio = frameAspectRatio === '9:16' ? 9 / 16 : 16 / 9;
+      // 整图 frame 像素：按 cols/rows 自然推算（让整图容纳 cols*rows 个 cell，
+      // 每个 cell 严格 cellRatio）
+      // 取较长边为 1536 等大基准，较小边按 cellRatio*cols/rows 推算
+      const longEdge = 1536;
+      let cellWidth: number;
+      let cellHeight: number;
+      if (cellRatio >= 1) {
+        cellWidth = longEdge / Math.max(cols, rows);
+        cellHeight = cellWidth / cellRatio;
+      } else {
+        cellHeight = longEdge / Math.max(cols, rows);
+        cellWidth = cellHeight * cellRatio;
+      }
+      const frameWidth = cellWidth * cols;
+      const frameHeight = cellHeight * rows;
 
-      if (sourceRatio > targetRatio) {
-        frameWidth = img.height * targetRatio;
-        frameX = (img.width - frameWidth) / 2;
-      } else if (sourceRatio < targetRatio) {
-        frameHeight = img.width / targetRatio;
-        frameY = (img.height - frameHeight) / 2;
+      // 源图按 frame 比例 letterbox 缩放（保持完整内容 + 黑边填白）
+      const sourceRatio = img.width / img.height;
+      const frameRatio = frameWidth / frameHeight;
+      let drawW = img.width;
+      let drawH = img.height;
+      let drawX = 0;
+      let drawY = 0;
+      if (sourceRatio > frameRatio) {
+        // 源图更宽 → 按高度缩放，左右填白
+        drawH = frameHeight * (img.height / frameHeight);
+        drawW = drawH * sourceRatio;
+        drawX = (frameWidth - drawW) / 2;
+        drawY = 0;
+      } else {
+        // 源图更高 → 按宽度缩放，上下填白
+        drawW = frameWidth * (img.width / frameWidth);
+        drawH = drawW / sourceRatio;
+        drawX = 0;
+        drawY = (frameHeight - drawH) / 2;
       }
 
-      const cellWidth = frameWidth / cols;
-      const cellHeight = frameHeight / rows;
+      // 渲染中间画布（letterbox 后整图）
+      const frameCanvas = document.createElement('canvas');
+      frameCanvas.width = Math.max(1, Math.round(frameWidth));
+      frameCanvas.height = Math.max(1, Math.round(frameHeight));
+      const frameCtx = frameCanvas.getContext('2d')!;
+      frameCtx.fillStyle = '#000';
+      frameCtx.fillRect(0, 0, frameCanvas.width, frameCanvas.height);
+      frameCtx.drawImage(img, drawX, drawY, drawW, drawH);
 
       const results: string[] = [];
       const canvas = document.createElement('canvas');
@@ -109,12 +141,12 @@ export function GridSplitNodeContent({
 
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
-          const sourceX = frameX + c * cellWidth;
-          const sourceY = frameY + r * cellHeight;
+          const sourceX = c * cellWidth;
+          const sourceY = r * cellHeight;
           canvas.width = Math.max(1, Math.round(cellWidth));
           canvas.height = Math.max(1, Math.round(cellHeight));
           ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(img, sourceX, sourceY, cellWidth, cellHeight, 0, 0, canvas.width, canvas.height);
+          ctx.drawImage(frameCanvas, sourceX, sourceY, cellWidth, cellHeight, 0, 0, canvas.width, canvas.height);
           results.push(canvas.toDataURL('image/jpeg', 0.95).split(',')[1]);
         }
       }

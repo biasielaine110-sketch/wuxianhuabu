@@ -638,8 +638,8 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
       ...(type === 'annotation'
         ? { sourceImage: '', annotations: [], isEditing: false, selectedAnnotationId: undefined }
         : {}),
-      ...(type === 'gridSplit' ? { inputImage: '', gridCount: 4 as const, outputImages: [] } : {}),
-      ...(type === 'gridMerge' ? { inputImages: [], gridCount: 4 as const, outputImage: '' } : {}),
+      ...(type === 'gridSplit' ? { inputImage: '', gridCount: 4 as const, aspectRatio: '16:9' as const, outputImages: [] } : {}),
+      ...(type === 'gridMerge' ? { inputImages: [], gridCount: 4 as const, aspectRatio: '16:9' as const, outputImage: '' } : {}),
       ...(type === 'director3d'
         ? { backgroundImage: '', yaw: 0, pitch: 0, fov: 75, figures: [], selectedFigureId: undefined }
         : {}),

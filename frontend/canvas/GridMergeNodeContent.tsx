@@ -112,37 +112,62 @@ export function GridMergeNodeContent({
         loadedImages.push(await loadImageElement(src));
       }
 
-      const cellWidth = loadedImages[0].width;
-      const cellHeight = loadedImages[0].height;
-      const canvas = document.createElement('canvas');
-      canvas.width = cellWidth * cols;
-      canvas.height = cellHeight * rows;
-      const ctx = canvas.getContext('2d')!;
+      // 单格目标画幅 = node.aspectRatio（16:9 或 9:16）
+      // 整图 frame 比例 = 单格 × 宫格排布（4/9 宫方阵时 frame 也等于单格比例；
+      // 3/6 宫非方阵时 frame 会被拉长，例如 3 宫 1×3 + 16:9 → frame 16:3）
+      const cellRatio = frameAspectRatio === '9:16' ? 9 / 16 : 16 / 9;
+      // 单格像素：取第一张输入图的实际像素作为基准（保持其分辨率感），
+      // 但强制 cellWidth/cellHeight 严格 cellRatio
+      const refImg = loadedImages[0];
+      let cellWidth: number;
+      let cellHeight: number;
+      if (cellRatio >= 1) {
+        cellWidth = refImg.width;
+        cellHeight = Math.round(refImg.width / cellRatio);
+      } else {
+        cellHeight = refImg.height;
+        cellWidth = Math.round(refImg.height * cellRatio);
+      }
+      const frameWidth = cellWidth * cols;
+      const frameHeight = cellHeight * rows;
 
+      const canvas = document.createElement('canvas');
+      canvas.width = frameWidth;
+      canvas.height = frameHeight;
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // 每个输入图按"中心裁剪到 cell 比例"再贴入对应 cell
       let idx = 0;
       for (let r = 0; r < rows && idx < gridCount; r++) {
         for (let c = 0; c < cols && idx < gridCount; c++) {
-          ctx.drawImage(loadedImages[idx], c * cellWidth, r * cellHeight, cellWidth, cellHeight);
+          const img = loadedImages[idx];
+          // cover 模式：把 img 缩放填满 cell，溢出部分裁掉
+          const imgRatio = img.width / img.height;
+          let sx = 0;
+          let sy = 0;
+          let sw = img.width;
+          let sh = img.height;
+          if (imgRatio > cellRatio) {
+            // img 更宽 → 裁左右
+            sw = img.height * cellRatio;
+            sx = (img.width - sw) / 2;
+          } else {
+            // img 更高 → 裁上下
+            sh = img.width / cellRatio;
+            sy = (img.height - sh) / 2;
+          }
+          ctx.drawImage(
+            img,
+            sx, sy, sw, sh,
+            c * cellWidth, r * cellHeight, cellWidth, cellHeight
+          );
           idx++;
         }
       }
 
-      const targetRatio = frameAspectRatio === '9:16' ? 9 / 16 : 16 / 9;
-      let cropWidth = canvas.width;
-      let cropHeight = canvas.height;
-      if (cropWidth / cropHeight > targetRatio) {
-        cropWidth = cropHeight * targetRatio;
-      } else {
-        cropHeight = cropWidth / targetRatio;
-      }
-      const cropX = (canvas.width - cropWidth) / 2;
-      const cropY = (canvas.height - cropHeight) / 2;
-      const outputCanvas = document.createElement('canvas');
-      outputCanvas.width = Math.max(1, Math.round(cropWidth));
-      outputCanvas.height = Math.max(1, Math.round(cropHeight));
-      const outputCtx = outputCanvas.getContext('2d')!;
-      outputCtx.drawImage(canvas, cropX, cropY, cropWidth, cropHeight, 0, 0, outputCanvas.width, outputCanvas.height);
-      const result = outputCanvas.toDataURL('image/jpeg', 0.95).split(',')[1];
+      const result = canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
       let update: Partial<GridMergeNode> = {
         outputImage: result,
         outputImageAssetId: undefined,

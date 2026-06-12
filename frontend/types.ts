@@ -265,6 +265,14 @@ export interface GridSplitNode extends CanvasNode {
   inputImage?: string;
   inputImageAssetId?: string;
   gridCount?: 3 | 4 | 6 | 9;
+  /**
+   * 单格目标画幅：决定 cellWidth/cellHeight 比例。
+   * - 4/9 宫（方阵）：整图比例 = 单格比例（16:9 → 16:9）
+   * - 3 宫（1×3 竖向）：整图比例 = 16:3
+   * - 6 宫（3×2 横排）：整图比例 = 8:3
+   * 拆分时按此比例裁剪输入图到 frame，再切 cell（cell 严格按此比例）。
+   */
+  aspectRatio?: '16:9' | '9:16';
   outputImages?: string[];
   outputImageAssetIds?: string[];
 }
@@ -275,6 +283,13 @@ export interface GridMergeNode extends CanvasNode {
   inputImages?: string[];
   inputImageAssetIds?: string[];
   gridCount?: 3 | 4 | 6 | 9;
+  /**
+   * 单格目标画幅：决定合并时每个 cell 的目标比例。
+   * 输入图若与目标比例不一致，先按"中心裁剪+letterbox"统一到目标比例。
+   * - 4/9 宫（方阵）：整图比例 = 单格比例
+   * - 3/6 宫（非方阵）：整图比例 ≠ 单格比例
+   */
+  aspectRatio?: '16:9' | '9:16';
   outputImage?: string;
   outputImageAssetId?: string;
 }
