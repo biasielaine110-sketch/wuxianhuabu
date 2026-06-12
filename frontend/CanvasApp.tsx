@@ -345,6 +345,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     projectSnapshotForJsonExport,
     handleSaveDraftJsonSaveAs,
     commitCenterProjectRename,
+    flushPendingProjectWrites,
   } = projectLibrary;
 
 
@@ -2144,7 +2145,12 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
           <div className={`absolute top-[70px] left-1/2 z-[35] -translate-x-1/2 flex items-center gap-[50px] ${canvasMode === 'audit' ? 'hidden' : ''}`}>
             <button
               onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => onBackToHome()}
+              onClick={() => {
+                // 返回首页前先等所有 pending saveProjectLibrary 落盘，
+                // 避免 HomeScreen mount 后立即 loadProjectLibrary 读到 IDB 旧值
+                // 导致画布内刚改的项目名（或其它字段）在首页上不同步。
+                void flushPendingProjectWrites().finally(() => onBackToHome());
+              }}
               className="bg-[#1e1e1e]/90 backdrop-blur-md p-2 rounded-xl shadow-2xl border border-[#333] hover:bg-[#9040F0]/30 transition-colors text-gray-400 hover:text-white flex items-center justify-center shrink-0"
               title="返回首页"
             >

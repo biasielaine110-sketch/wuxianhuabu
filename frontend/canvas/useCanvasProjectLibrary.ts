@@ -88,6 +88,22 @@ export function useCanvasProjectLibrary({
 
   useEffect(() => { activeProjectIdRef.current = activeProjectId; }, [activeProjectId]);
   useEffect(() => { projectsRef.current = projects; }, [projects]);
+
+  // 追踪所有进行中的 saveProjectLibrary Promise：返回首页前必须先 await 全部完成，
+  // 否则 HomeScreen mount 后立即 loadProjectLibrary 可能读到 IDB 旧值（race condition）。
+  const pendingProjectSavesRef = useRef<Set<Promise<unknown>>>(new Set());
+  const trackProjectSave = useCallback(<T,>(p: Promise<T>): Promise<T> => {
+    pendingProjectSavesRef.current.add(p);
+    void p.finally(() => {
+      pendingProjectSavesRef.current.delete(p);
+    });
+    return p;
+  }, []);
+  const flushPendingProjectWrites = useCallback(async (): Promise<void> => {
+    const list = Array.from(pendingProjectSavesRef.current);
+    if (list.length === 0) return;
+    await Promise.allSettled(list);
+  }, []);
   useEffect(() => { draftDiskModalRef.current = draftDiskModal; }, [draftDiskModal]);
   useEffect(() => { setCenterTitleEditValue(null); }, [activeProjectId]);
 
@@ -106,7 +122,7 @@ export function useCanvasProjectLibrary({
           x.id === pid ? { ...x, draftStoragePathNote: cleaned || undefined, updatedAt: Date.now() } : x
         );
         projectsRef.current = next;
-        void saveProjectLibrary(next, pid);
+        void trackProjectSave(saveProjectLibrary(next, pid));
         return next;
       });
     }
@@ -199,7 +215,7 @@ export function useCanvasProjectLibrary({
     setNodes(newProject.nodes);
     setEdges(newProject.edges);
     pendingDefaultViewportRef.current = true;
-    void saveProjectLibrary(nextList, projectId).then((ok) => {
+    void trackProjectSave(saveProjectLibrary(nextList, projectId)).then((ok) => {
       if (!ok) {
         alert('新建项目已生效，但写入本地草稿库（IndexedDB）失败。请检查浏览器存储权限或磁盘空间。');
       } else {
@@ -266,7 +282,7 @@ export function useCanvasProjectLibrary({
       const commitToIdb = (list: CanvasProject[]): Promise<boolean> => {
         setProjects(list);
         projectsRef.current = list;
-        return saveProjectLibrary(list, pid).then((ok) => {
+        return trackProjectSave(saveProjectLibrary(list, pid)).then((ok) => {
           if (!ok) {
             alert('保存失败：无法写入 IndexedDB 草稿库。请检查存储权限或尝试导出 ZIP/JSON 备份。');
           } else {
@@ -361,7 +377,7 @@ export function useCanvasProjectLibrary({
           p.id === pid ? { ...p, draftAutosaveIntervalMin: v, updatedAt: Date.now() } : p
         );
         projectsRef.current = next;
-        void saveProjectLibrary(next, pid);
+        void trackProjectSave(saveProjectLibrary(next, pid));
         return next;
       });
     }
@@ -377,7 +393,7 @@ export function useCanvasProjectLibrary({
       void (async () => {
         setProjects(mergedProjects);
         projectsRef.current = mergedProjects;
-        const ok = await saveProjectLibrary(mergedProjects, pid);
+        const ok = await trackProjectSave(saveProjectLibrary(mergedProjects, pid));
         if (!ok) alert('保存失败：无法写入 IndexedDB 草稿库。');
         else persistWarningShownRef.current = false;
         resolve?.(false);
@@ -489,7 +505,7 @@ export function useCanvasProjectLibrary({
 
     setProjects(updatedList);
     projectsRef.current = updatedList;
-    const ok = await saveProjectLibrary(updatedList, pid);
+    const ok = await trackProjectSave(saveProjectLibrary(updatedList, pid));
     if (!ok) alert('本地 JSON 已写入，但同步 IndexedDB 草稿库失败，请重试。');
     else persistWarningShownRef.current = false;
 
@@ -528,7 +544,7 @@ export function useCanvasProjectLibrary({
       };
       });
       projectsRef.current = next;
-      void saveProjectLibrary(next, pid).then((ok) => {
+      void trackProjectSave(saveProjectLibrary(next, pid)).then((ok) => {
         if (!ok) alert('草稿名称已更新，但写入草稿库失败，请重试。');
       });
       return next;
@@ -549,7 +565,7 @@ export function useCanvasProjectLibrary({
             : p
         );
         projectsRef.current = next;
-        void saveProjectLibrary(next, pid).then((ok) => {
+        void trackProjectSave(saveProjectLibrary(next, pid)).then((ok) => {
           if (!ok) alert('草稿存储位置已更新，但写入草稿库失败，请重试。');
         });
         return next;
@@ -604,7 +620,7 @@ export function useCanvasProjectLibrary({
     setProjects(next);
     projectsRef.current = next;
     setDraftNameInput(trimmed);
-    void saveProjectLibrary(next, pid).then((ok) => {
+    void trackProjectSave(saveProjectLibrary(next, pid)).then((ok) => {
       if (!ok) alert('名称已更新，但写入草稿库失败，请重试。');
     });
   }, []);
@@ -618,7 +634,7 @@ export function useCanvasProjectLibrary({
       const next = projectsRef.current.map((p) => (p.id === projectId ? normalizedTarget : p));
       setProjects(next);
       projectsRef.current = next;
-      void saveProjectLibrary(next, projectId).then((ok) => {
+      void trackProjectSave(saveProjectLibrary(next, projectId)).then((ok) => {
         if (!ok) console.warn('[canvas] 切换项目时已剥离旧版默认文生图占位，但写回草稿库失败');
       });
     }
@@ -667,7 +683,7 @@ export function useCanvasProjectLibrary({
         lastDiskWriteFormatRef.current = h ? 'json' : null;
         setLastJsonFilename(h?.name ?? '');
       });
-      void saveProjectLibrary(nextRemained, fbNorm.id).then((ok) => {
+      void trackProjectSave(saveProjectLibrary(nextRemained, fbNorm.id)).then((ok) => {
         if (!ok) alert('项目已删除，但更新草稿库失败，请尝试导出 ZIP/JSON 备份。');
       });
       return;
@@ -675,7 +691,7 @@ export function useCanvasProjectLibrary({
 
     setProjects(remained);
     projectsRef.current = remained;
-    void saveProjectLibrary(remained, curActive).then((ok) => {
+    void trackProjectSave(saveProjectLibrary(remained, curActive)).then((ok) => {
       if (!ok) alert('项目已删除，但更新草稿库失败，请尝试导出 ZIP/JSON 备份。');
     });
   }, []);
@@ -691,7 +707,7 @@ export function useCanvasProjectLibrary({
       setProjects((prev) => {
         const next = prev.map((p) => (p.id === pid ? { ...p, diskSaveEstablished: true as const } : p));
         projectsRef.current = next;
-        void saveProjectLibrary(next, activeProjectIdRef.current);
+        void trackProjectSave(saveProjectLibrary(next, activeProjectIdRef.current));
         return next;
       });
     },
@@ -778,7 +794,7 @@ export function useCanvasProjectLibrary({
         setProjects((prev) => {
           const next = prev.map((p) => (p.id === pid ? { ...p, diskSaveEstablished: true as const } : p));
           projectsRef.current = next;
-          void saveProjectLibrary(next, activeProjectIdRef.current);
+          void trackProjectSave(saveProjectLibrary(next, activeProjectIdRef.current));
           return next;
         });
       } catch (e) {
@@ -811,7 +827,7 @@ export function useCanvasProjectLibrary({
       setAuditImages([]);
       auditImagesRef.current = [];
     }
-    void saveProjectLibrary(nextList, newProject.id).then((ok) => {
+    void trackProjectSave(saveProjectLibrary(nextList, newProject.id)).then((ok) => {
       if (!ok) {
         alert('导入已生效，但写入草稿库失败。请导出 ZIP/JSON 备份后重试。');
       } else {
@@ -910,7 +926,7 @@ export function useCanvasProjectLibrary({
             auditImagesRef.current = [];
           }
           if (libStrippedLegacy) {
-            void saveProjectLibrary(patchedProjects, initial.id).then((ok) => {
+            void trackProjectSave(saveProjectLibrary(patchedProjects, initial.id)).then((ok) => {
               if (!ok) console.warn('[canvas] 已剥离旧版默认文生图占位，但写回草稿库失败');
             });
           }
@@ -939,7 +955,7 @@ export function useCanvasProjectLibrary({
     setProjects([defaultProject]);
       projectsRef.current = [defaultProject];
     setActiveProjectId(defaultProject.id);
-      await saveProjectLibrary([defaultProject], defaultProject.id);
+      await trackProjectSave(saveProjectLibrary([defaultProject], defaultProject.id));
     setProjectStoreReady(true);
       void getProjectBackupFileHandle(defaultProject.id).then((h) => {
         if (cancelled) return;
@@ -1000,6 +1016,7 @@ export function useCanvasProjectLibrary({
     projectSnapshotForJsonExport,
     handleSaveDraftJsonSaveAs,
     commitCenterProjectRename,
+    flushPendingProjectWrites,
   };
 }
 
