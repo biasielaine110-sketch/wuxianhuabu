@@ -80,7 +80,7 @@ export const useCanvasStore = create<CanvasStore>((set) => ({
         typeof updater === 'function' ? updater(s.eyedropperTargetNodeId) : updater,
     })),
   setThumbResolutionPct: (percent) => {
-    const next = Math.max(5, Math.min(100, percent));
+    const next = Math.max(5, Math.min(150, percent));
     setThumbResolutionPercent(next);
     clearCanvasThumbnailCache();
     set({ thumbResolutionPct: next });

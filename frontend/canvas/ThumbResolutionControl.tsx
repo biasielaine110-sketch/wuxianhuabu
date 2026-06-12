@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useCanvasStore } from '../stores/canvasStore';
 
-const OPTIONS = [5, 10, 20, 50, 70, 100] as const;
+const OPTIONS = [5, 10, 20, 50, 70, 100, 120, 150] as const;
 
 /** 预览分辨率控件：内部订阅 store，避免 App 因缩略图设置重渲染 */
 export function ThumbResolutionControl({ hidden = false }: { hidden?: boolean }) {
