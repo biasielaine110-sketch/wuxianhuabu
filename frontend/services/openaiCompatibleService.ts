@@ -1925,42 +1925,43 @@ export async function manxueVideoGenerate(params: {
   const imageUrls = await manxueUploadReferenceImageUrls(referenceImagesBase64, signal);
 
   // 拼装 user 消息：若带参考图，作为多模态 content；纯文生则直接文本。
-  const seconds = String(durationSeconds);
+  const duration = Number(durationSeconds) || 10;
   const resolution = '720p';
 
-  // 关键：xAI 官方 Grok 视频 API（image-to-video 模式）会忽略 aspect_ratio 字段、
-  // 强制按参考图宽高比生成——这是上游硬约束。满 eAPI 在 chat/completions 路由上
-  // 行为一致。处理方式：
-  //   图生视频：自动检测参考图实际画幅，覆盖 aspectRatio，并在 prompt 中明示。
-  //   纯文生视频：直接用用户选择的 aspectRatio。
-  let effectiveAspectRatio = aspectRatio;
-  let refAspectHint = '';
+  // xAI 官方 Grok 视频 API（grok-imagine-video-1.5-preview）：
+  //   - 字段名：duration（数字 1-15），aspect_ratio，resolution
+  //   - image-to-video 模式：默认按参考图画幅，但 aspect_ratio 字段**可 override**（拉伸）
+  //   - default duration = 6 秒（不传 duration 时回退）
+  // 满 eAPI 在 chat/completions 路由上是否解析这些字段取决于网关实现。
+  // 为最大化兼容：
+  //   - 图生视频：探测参考图实际画幅，aspect_ratio 仍按用户选择（不强制等于参考图），
+  //     提示中明示用户"图生时将按 aspect_ratio 拉伸"
+  //   - prompt 显式说明 duration（防 fallback 到 6 秒）
+  let probedAspect: { width: number; height: number; canonical: string } | null = null;
   if (imageUrls.length > 0 && referenceImagesBase64.length > 0) {
     const probed = await readImageBase64AspectRatio(referenceImagesBase64[0], signal);
     if (probed) {
-      effectiveAspectRatio = probed.canonical !== 'other' ? probed.canonical : aspectRatio;
-      refAspectHint =
-        `参考图实际画幅约 ${probed.width}×${probed.height}（已映射为 ${effectiveAspectRatio}）。` +
-        'image-to-video 模式必须按参考图画幅输出。';
-    } else {
-      refAspectHint = 'image-to-video 模式：必须按参考图宽高比生成视频（aspect_ratio 字段会被上游忽略）。';
+      probedAspect = { width: probed.width, height: probed.height, canonical: probed.canonical };
     }
   }
 
-  // 双向夹击保证画幅：
+  const effectiveAspectRatio = aspectRatio;
+
+  // 双向夹击保证画幅与时长：
   // 1) top-level body 字段（xAI 原生 /v1/videos/generations 风格，manxue 网关认就生效）
   // 2) system 强 prompt（chat/completions 路由唯一能识别的形式）
   // 3) user 末尾强提示（防止 system 丢失）
   const systemText =
-    '你是视频生成助手，必须严格遵守用户给定的画幅与时长参数，' +
-    `强制输出 ${effectiveAspectRatio} 画幅、${seconds} 秒、${resolution} 分辨率。` +
-    (imageUrls.length
-      ? `当前是图生视频：${refAspectHint}**不要**试图裁切或拉伸参考图。`
+    '你是视频生成助手，必须严格遵守用户给定的画幅、时长与分辨率参数，' +
+    `强制输出 ${effectiveAspectRatio} 画幅、${duration} 秒、${resolution} 分辨率。` +
+    (probedAspect
+      ? `当前是图生视频：参考图 ${probedAspect.width}×${probedAspect.height}（约 ${probedAspect.canonical}）。` +
+        `请按 aspect_ratio=${effectiveAspectRatio} 拉伸输出，不要按参考图原画幅。`
       : '') +
     '完成后只返回一行可播放的视频 URL（Markdown 链接或裸 URL），不要任何其他文字。';
   const userHint =
-    `\n\n[params] aspect_ratio=${effectiveAspectRatio}, seconds=${seconds}, resolution=${resolution}。` +
-    `请生成 ${effectiveAspectRatio} 画幅、${seconds} 秒、${resolution} 的视频，` +
+    `\n\n[params] aspect_ratio=${effectiveAspectRatio}, duration=${duration}, resolution=${resolution}。` +
+    `请生成 ${effectiveAspectRatio} 画幅、${duration} 秒、${resolution} 的视频，` +
     '完成后只返回一行可播放的视频 URL（Markdown 链接或裸 URL）。';
   const userText = prompt + userHint;
   const userContentParts: Array<{ type: 'image_url'; image_url: { url: string } } | { type: 'text'; text: string }> = [];
@@ -1972,6 +1973,8 @@ export async function manxueVideoGenerate(params: {
   userContentParts.push({ type: 'text', text: userText });
   const userContent: string | typeof userContentParts = imageUrls.length ? userContentParts : userText;
 
+  // 字段命名兼容：xAI 原生 = duration / aspect_ratio / resolution；
+  // 部分聚合网关认 seconds / size / aspect_ratio_name；同时附双字段兜底
   const body: Record<string, unknown> = {
     model: MANXUE_GROK_IMAGINE_VIDEO_MODEL_ID,
     messages: [
@@ -1979,9 +1982,13 @@ export async function manxueVideoGenerate(params: {
       { role: 'user', content: userContent },
     ],
     stream: true,
-    seconds,
+    duration,
+    duration_name: duration,
+    seconds: duration,
     aspect_ratio: effectiveAspectRatio,
     aspect_ratio_name: effectiveAspectRatio,
+    aspectRatio: effectiveAspectRatio,
+    size: effectiveAspectRatio,
     resolution,
     resolution_name: resolution,
   };

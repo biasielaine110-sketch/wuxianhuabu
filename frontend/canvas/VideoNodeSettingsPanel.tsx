@@ -188,7 +188,7 @@ export function VideoNodeSettingsPanel({
         >
           参考图：{refAspect.width}×{refAspect.height}（{refAspect.canonical}）。
           {aspectMismatch
-            ? `当前选 ${node.aspectRatio || '16:9'} ≠ 参考图 ${refAspect.canonical}，提交时将自动按参考图 ${refAspect.canonical} 生成（xAI 硬约束）。如需 ${node.aspectRatio || '16:9'}，请换参考图。`
+            ? `当前选 ${node.aspectRatio || '16:9'} ≠ 参考图 ${refAspect.canonical}，提交时将按所选 ${node.aspectRatio || '16:9'} 拉伸参考图（xAI image-to-video 默认按参考图画幅，需 aspect_ratio 显式 override）。若画幅仍不对，多为上游网关未解析 aspect_ratio 字段，需换参考图。`
             : '画幅与参考图一致。'}
         </div>
       )}
