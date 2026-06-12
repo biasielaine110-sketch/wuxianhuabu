@@ -343,6 +343,23 @@ export function VideoNodeSettingsPanel({
               <option value={10}>10 秒</option>
               <option value={15}>15 秒</option>
             </select>
+          ) : isAiidGrokImagine ? (
+            <select
+              className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+              value={node.videoDuration ?? 10}
+              onChange={(e) => onUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <option value={3}>3 秒</option>
+              <option value={4}>4 秒</option>
+              <option value={5}>5 秒</option>
+              <option value={6}>6 秒</option>
+              <option value={7}>7 秒</option>
+              <option value={8}>8 秒</option>
+              <option value={10}>10 秒</option>
+              <option value={12}>12 秒</option>
+              <option value={15}>15 秒</option>
+            </select>
           ) : isJimengVideoModel(node.model) ? (
             <select
               className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
