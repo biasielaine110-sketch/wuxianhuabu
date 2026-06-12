@@ -1585,7 +1585,7 @@ async function toApisUploadVideoReferenceImageUrls(
   return imageUrls;
 }
 
-export type ToApisVideoModelId = 'grok-video-3' | 'sora-2-vvip' | 'veo3.1-fast' | 'doubao-seedance-1-5-pro' | 'jimeng-video-v3' | 'jimeng-image-to-video' | 'gemini-omni-flash' | 'seedance-2' | 'seedance-2-fast' | 'doubao-seedance-2-0-260128' | 'doubao-seedance-2-0-fast-260128' | 'grok-imagine-video-1.5-preview';
+export type ToApisVideoModelId = 'grok-video-3' | 'grok-video-1.5-preview' | 'sora-2-vvip' | 'veo3.1-fast' | 'doubao-seedance-1-5-pro' | 'jimeng-video-v3' | 'jimeng-image-to-video' | 'gemini-omni-flash' | 'seedance-2' | 'seedance-2-fast' | 'doubao-seedance-2-0-260128' | 'doubao-seedance-2-0-fast-260128' | 'grok-imagine-video-1.5-preview';
 
 function isHttpUrlString(v: unknown): v is string {
   if (typeof v !== 'string') return false;
@@ -2060,6 +2060,8 @@ export async function toApisGrokVideoGenerate(params: {
   durationSeconds: number;
   aspectRatio: string;
   resolution: '480p' | '720p';
+  /** 模型 id；默认 grok-video-3，可选 grok-video-1.5-preview（xAI 1.5 Preview） */
+  videoModel?: 'grok-video-3' | 'grok-video-1.5-preview';
   /** 最多 3 张（ToAPIs 文档）；多张会先上传再传 URL */
   referenceImagesBase64?: string[];
   /** 语音参考：音频 base64 */
@@ -2080,6 +2082,7 @@ export async function toApisGrokVideoGenerate(params: {
 
   const seconds = toApisGrokVideoSeconds(params.durationSeconds);
   const aspect_ratio = toApisAspectSize(params.aspectRatio);
+  const modelId = params.videoModel || 'grok-video-3';
 
   const imageUrls = await toApisUploadVideoReferenceImageUrls(
     params.referenceImagesBase64 || [],
@@ -2097,7 +2100,7 @@ export async function toApisGrokVideoGenerate(params: {
 
   const resolution = params.resolution === '480p' ? '480p' : '720p';
   const body: Record<string, unknown> = {
-    model: 'grok-video-3',
+    model: modelId,
     prompt: params.prompt,
     seconds: String(seconds),
     aspect_ratio,
@@ -2607,6 +2610,22 @@ export async function toApisCanvasVideoGenerate(params: {
   if (params.videoModel.startsWith('jimeng-')) {
     throw new Error('即梦模型请通过前端即梦客户端调用，不支持直接走 ToAPIs');
   }
+  // grok-video-1.5-preview 走同一异步视频生成函数，但 body.model 不同
+  // 用户反馈样例：curl POST /v1/videos/generations  {model: "grok-video-1.5-preview",
+  //   images: [url], seconds: "10", aspect_ratio: "16:9"}
+  if (params.videoModel === 'grok-video-1.5-preview') {
+    return toApisGrokVideoGenerate({
+      prompt: params.prompt,
+      durationSeconds: params.durationSeconds,
+      aspectRatio: params.aspectRatio,
+      resolution: params.resolution === '480p' ? '480p' : '720p',
+      videoModel: 'grok-video-1.5-preview',
+      referenceImagesBase64: params.referenceImagesBase64,
+      referenceAudioBase64: params.referenceAudioBase64,
+      signal: params.signal,
+    });
+  }
+  // 默认兜底（grok-video-3）
   return toApisGrokVideoGenerate({
     prompt: params.prompt,
     durationSeconds: params.durationSeconds,

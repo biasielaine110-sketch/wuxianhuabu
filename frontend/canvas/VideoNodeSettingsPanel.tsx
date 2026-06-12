@@ -46,13 +46,16 @@ export function VideoNodeSettingsPanel({
   const isGemini = vm === 'gemini-omni-flash';
   const isDoubaoSeedance2 = isVideoDoubaoSeedance2Model(vm);
   const isManxueGrokImagine = isManxueGrokImagineVideoModel(vm);
+  const isToApisGrokVideo15 = vm === 'grok-video-1.5-preview';
+  // 任一 grok 视频模型都需要参考图画幅探测提示
+  const isGrokWithRefAspectDetect = isManxueGrokImagine || isToApisGrokVideo15;
 
   const vSlots = useMemo(() => buildIncomingRefSlots(node.id, edges, nodes), [node.id, edges, nodes]);
   const imageSlots = vSlots.filter((s) => s.kind === 'image');
   const videoSlots = vSlots.filter((s) => s.kind === 'video');
   const audioSlots = vSlots.filter((s) => s.kind === 'audio');
 
-  // 满 e Grok Imagine：图生视频时画幅由参考图实际比例决定，UI 探测并提示
+  // Grok 视频（满 e 1.5 / ToAPIs 1.5 Preview）：图生视频时画幅由参考图实际比例决定，UI 探测并提示
   const [refAspect, setRefAspect] = useState<{
     canonical: string;
     width: number;
@@ -61,7 +64,7 @@ export function VideoNodeSettingsPanel({
   useEffect(() => {
     let cancelled = false;
     setRefAspect(null);
-    if (!isManxueGrokImagine || imageSlots.length === 0) return;
+    if (!isGrokWithRefAspectDetect || imageSlots.length === 0) return;
     const firstSlot = imageSlots[0];
     const b64 =
       firstSlot.imageBase64 ||
@@ -77,10 +80,10 @@ export function VideoNodeSettingsPanel({
       cancelled = true;
       ctrl.abort();
     };
-  }, [isManxueGrokImagine, imageSlots]);
+  }, [isGrokWithRefAspectDetect, imageSlots]);
 
   const aspectMismatch =
-    isManxueGrokImagine && refAspect && refAspect.canonical !== 'other' &&
+    isGrokWithRefAspectDetect && refAspect && refAspect.canonical !== 'other' &&
     refAspect.canonical !== (node.aspectRatio || '16:9');
 
   return (
@@ -178,7 +181,7 @@ export function VideoNodeSettingsPanel({
           分辨率：Grok 系路径已随请求发送 resolution；若成品仍为 480p，多为上游默认。
         </div>
       )}
-      {isManxueGrokImagine && refAspect && (
+      {isGrokWithRefAspectDetect && refAspect && (
         <div
           className={`text-[10px] px-2 py-1.5 rounded leading-snug border ${
             aspectMismatch
@@ -188,7 +191,9 @@ export function VideoNodeSettingsPanel({
         >
           参考图：{refAspect.width}×{refAspect.height}（{refAspect.canonical}）。
           {aspectMismatch
-            ? `当前选 ${node.aspectRatio || '16:9'} ≠ 参考图 ${refAspect.canonical}，提交时将按所选 ${node.aspectRatio || '16:9'} 拉伸参考图（xAI image-to-video 默认按参考图画幅，需 aspect_ratio 显式 override）。若画幅仍不对，多为上游网关未解析 aspect_ratio 字段，需换参考图。`
+            ? isToApisGrokVideo15
+              ? `当前选 ${node.aspectRatio || '16:9'} ≠ 参考图 ${refAspect.canonical}，提交时将按所选 ${node.aspectRatio || '16:9'} 拉伸参考图（ToAPIs grok-video-1.5-preview 支持 aspect_ratio override）。`
+              : `当前选 ${node.aspectRatio || '16:9'} ≠ 参考图 ${refAspect.canonical}，提交时将按所选 ${node.aspectRatio || '16:9'} 拉伸参考图（满 e chat 路由需 prompt + 字段双管齐下，可能仍被忽略）。`
             : '画幅与参考图一致。'}
         </div>
       )}
@@ -204,6 +209,7 @@ export function VideoNodeSettingsPanel({
           <optgroup label="ToAPIs">
             <option value="veo3.1-fast">Veo 3.1 Fast</option>
             <option value="grok-video-3">Grok Video 3</option>
+            <option value="grok-video-1.5-preview">Grok Video 1.5 Preview</option>
             <option value="sora-2-vvip">Sora2 VVIP</option>
             <option value="doubao-seedance-1-5-pro">Doubao SeeDance 1.5 Pro</option>
             <option value="seedance-2">Seedance 2</option>

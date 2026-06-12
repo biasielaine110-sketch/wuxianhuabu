@@ -107,6 +107,15 @@ export function getVideoModelSwitchUpdates(m: string, node: CanvasNode): Partial
     const d = node.videoDuration ?? 6;
     updates.videoDuration = [6, 10].includes(d) ? d : 6;
     updates.videoResolution = '720p';
+  } else if (m === 'grok-video-1.5-preview') {
+    // ToAPIs grok-video-1.5-preview：xAI Grok Video 1.5（grok-video-3 同款接口）
+    // 时长档 6/10/15/20/25/30，分辨率 720p
+    const d = node.videoDuration ?? 10;
+    const allowed = [6, 10, 15, 20, 25, 30];
+    updates.videoDuration = allowed.includes(d) ? d : 10;
+    updates.videoResolution = '720p';
+    const ar = node.aspectRatio || '16:9';
+    if (!['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].includes(ar)) updates.aspectRatio = '16:9';
   } else if (m === MANXUE_GROK_IMAGINE_VIDEO_MODEL) {
     const d = node.videoDuration ?? 10;
     updates.videoDuration = [10, 15].includes(d) ? d : 10;
@@ -141,6 +150,7 @@ export function videoNodeModelToToApis(m?: string): ToApisVideoModelId {
   if (vm === 'doubao-seedance-2-0-260128' || vm === 'doubao-seedance-2-0-fast-260128') return vm as ToApisVideoModelId;
   if (vm === 'seedance-2' || vm === 'seedance-2-fast') return vm as ToApisVideoModelId;
   if (vm === 'gemini-omni-flash') return 'gemini-omni-flash';
+  if (vm === 'grok-video-1.5-preview') return 'grok-video-1.5-preview';
   if (isManxueGrokImagineVideoModel(vm)) return MANXUE_GROK_IMAGINE_VIDEO_MODEL as ToApisVideoModelId;
   if (vm === 'jimeng-video-v3' || vm === 'jimeng-image-to-video') return vm as ToApisVideoModelId;
   return 'grok-video-3';
