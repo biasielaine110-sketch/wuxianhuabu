@@ -1784,7 +1784,7 @@ const MANXUE_VIDEO_MAX_REFERENCE_IMAGES = 3;
  */
 async function manxueUploadReferenceImageUrls(
   refs: string[],
-  signal?: AbortSignal
+  _signal?: AbortSignal
 ): Promise<string[]> {
   if (!refs || refs.length === 0) return [];
   const apiKey = getManxueSavedKey();
@@ -1792,30 +1792,13 @@ async function manxueUploadReferenceImageUrls(
   const list = refs.filter(Boolean).slice(0, MANXUE_VIDEO_MAX_REFERENCE_IMAGES);
   const out: string[] = [];
   for (let i = 0; i < list.length; i++) {
-    assertNotAborted(signal);
     const { raw, mime } = parseBase64ImageInput(list[i]);
-    const blob = base64ToBlob(raw, mime);
-    const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : mime.includes('gif') ? 'gif' : 'jpg';
-    let uploaded = '';
-    try {
-      uploaded = await openAiCompatUploadImageBlob(
-        manxueFetchBase(),
-        apiKey,
-        blob,
-        `manxue-grok-imagine-ref-${i}.${ext}`,
-        signal
-      );
-    } catch (e) {
-      console.warn(`[manxue] 参考图上传失败，回退为 base64 data URI: ${(e as Error)?.message || e}`);
-      uploaded = '';
-    }
-    if (uploaded && /^https?:\/\//i.test(uploaded.trim())) {
-      out.push(uploaded.trim());
-    } else {
-      const cleanRaw = raw.replace(/\s/g, '');
-      const m = mime || sniffMimeFromBase64(cleanRaw) || 'image/jpeg';
-      out.push(`data:${m};base64,${cleanRaw}`);
-    }
+    // 满 e Grok Video 走 /v1/chat/completions，不暴露独立的 /upload/image 端点（实测 404）。
+    // 直接用 data URI 作为多模态 image_url，manxue 网关在 chat 路由可透传至上游。
+    // 若将来网关支持上传，可在此处插入 openAiCompatUploadImageBlob 优先路径。
+    const cleanRaw = raw.replace(/\s/g, '');
+    const m = mime || sniffMimeFromBase64(cleanRaw) || 'image/jpeg';
+    out.push(`data:${m};base64,${cleanRaw}`);
   }
   return out;
 }
