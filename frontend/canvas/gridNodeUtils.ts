@@ -3,9 +3,11 @@ import type { CanvasNode, Edge } from '../types';
 export type ResolvedGridImage = { base64?: string; assetId?: string };
 
 export function getGridLayout(gridCount: number): { cols: number; rows: number } {
-  const cols = gridCount <= 4 ? 2 : 3;
-  const rows = gridCount <= 4 ? 2 : gridCount === 6 ? 2 : 3;
-  return { cols, rows };
+  // 3 宫：横排 1 行 3 列（默认）；9 宫：3×3；6 宫：2×3；4 宫：2×2
+  if (gridCount === 3) return { cols: 3, rows: 1 };
+  if (gridCount <= 4) return { cols: 2, rows: 2 };
+  if (gridCount === 6) return { cols: 3, rows: 2 };
+  return { cols: 3, rows: 3 };
 }
 
 export function getNodeDisplayImage(n: CanvasNode): ResolvedGridImage | undefined {

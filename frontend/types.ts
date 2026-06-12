@@ -264,7 +264,7 @@ export interface GridSplitNode extends CanvasNode {
   type: 'gridSplit';
   inputImage?: string;
   inputImageAssetId?: string;
-  gridCount?: 4 | 6 | 9;
+  gridCount?: 3 | 4 | 6 | 9;
   outputImages?: string[];
   outputImageAssetIds?: string[];
 }
@@ -274,7 +274,7 @@ export interface GridMergeNode extends CanvasNode {
   type: 'gridMerge';
   inputImages?: string[];
   inputImageAssetIds?: string[];
-  gridCount?: 4 | 6 | 9;
+  gridCount?: 3 | 4 | 6 | 9;
   outputImage?: string;
   outputImageAssetId?: string;
 }

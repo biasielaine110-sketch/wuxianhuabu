@@ -251,7 +251,7 @@ export function GridMergeNodeContent({
       </div>
 
       <div className="flex gap-1">
-        {([4, 6, 9] as const).map((count) => (
+        {([3, 4, 6, 9] as const).map((count) => (
           <button
             key={count}
             onPointerDown={(e) => e.stopPropagation()}
