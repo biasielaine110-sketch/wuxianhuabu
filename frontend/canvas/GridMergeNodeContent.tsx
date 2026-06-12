@@ -259,7 +259,7 @@ export function GridMergeNodeContent({
             className={`flex-1 py-1 px-2 rounded text-[10px] ${
               gridCount === count ? 'bg-teal-600 text-white' : 'bg-[#333] hover:bg-[#444] text-gray-300'
             }`}
-            title={count === 3 ? '1×3 横排' : count === 4 ? '2×2' : count === 6 ? '2×3' : '3×3'}
+            title={count === 3 ? '3×1 竖向' : count === 4 ? '2×2' : count === 6 ? '2×3' : '3×3'}
           >
             {count}宫格
           </button>
