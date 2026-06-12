@@ -726,6 +726,64 @@ function parseBase64ImageInput(input: string): { raw: string; mime: string } {
   return { raw, mime: sniffMimeFromBase64(raw) };
 }
 
+/** 异步从 base64 读取图片宽高比（不压缩、纯测量，超时 5s）；返回 null 表示失败 */
+export function readImageBase64AspectRatio(
+  input: string,
+  signal?: AbortSignal
+): Promise<{ width: number; height: number; ratio: number; canonical: '16:9' | '9:16' | '1:1' | '3:2' | '2:3' | '4:3' | '3:4' | '21:9' | 'other' } | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (val: typeof result) => {
+      if (settled) return;
+      settled = true;
+      resolve(val);
+    };
+    const timer = window.setTimeout(() => done(null), 5000);
+    const onAbort = () => done(null);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+      const { raw, mime } = parseBase64ImageInput(input);
+      const img = new Image();
+      img.onload = () => {
+        window.clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+        const w = img.naturalWidth || img.width;
+        const h = img.naturalHeight || img.height;
+        if (!w || !h) {
+          done(null);
+          return;
+        }
+        const ratio = w / h;
+        // 标准化为常用画幅（容差 ±8%）
+        const match = (rw: number, rh: number) => {
+          const target = rw / rh;
+          return Math.abs(ratio - target) / target < 0.08;
+        };
+        let canonical: '16:9' | '9:16' | '1:1' | '3:2' | '2:3' | '4:3' | '3:4' | '21:9' | 'other' = 'other';
+        if (match(16, 9)) canonical = '16:9';
+        else if (match(9, 16)) canonical = '9:16';
+        else if (match(1, 1)) canonical = '1:1';
+        else if (match(3, 2)) canonical = '3:2';
+        else if (match(2, 3)) canonical = '2:3';
+        else if (match(4, 3)) canonical = '4:3';
+        else if (match(3, 4)) canonical = '3:4';
+        else if (match(21, 9)) canonical = '21:9';
+        done({ width: w, height: h, ratio, canonical });
+      };
+      img.onerror = () => {
+        window.clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+        done(null);
+      };
+      img.src = `data:${mime || 'image/jpeg'};base64,${raw}`;
+    } catch {
+      window.clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      done(null);
+    }
+  });
+}
+
 function base64ToBlob(raw: string, mime: string): Blob {
   // 清理可能的前缀
   const cleaned = raw.replace(/^data:[^;]+;base64,/, '').replace(/\s/g, '');
@@ -1869,22 +1927,40 @@ export async function manxueVideoGenerate(params: {
   // 拼装 user 消息：若带参考图，作为多模态 content；纯文生则直接文本。
   const seconds = String(durationSeconds);
   const resolution = '720p';
+
+  // 关键：xAI 官方 Grok 视频 API（image-to-video 模式）会忽略 aspect_ratio 字段、
+  // 强制按参考图宽高比生成——这是上游硬约束。满 eAPI 在 chat/completions 路由上
+  // 行为一致。处理方式：
+  //   图生视频：自动检测参考图实际画幅，覆盖 aspectRatio，并在 prompt 中明示。
+  //   纯文生视频：直接用用户选择的 aspectRatio。
+  let effectiveAspectRatio = aspectRatio;
+  let refAspectHint = '';
+  if (imageUrls.length > 0 && referenceImagesBase64.length > 0) {
+    const probed = await readImageBase64AspectRatio(referenceImagesBase64[0], signal);
+    if (probed) {
+      effectiveAspectRatio = probed.canonical !== 'other' ? probed.canonical : aspectRatio;
+      refAspectHint =
+        `参考图实际画幅约 ${probed.width}×${probed.height}（已映射为 ${effectiveAspectRatio}）。` +
+        'image-to-video 模式必须按参考图画幅输出。';
+    } else {
+      refAspectHint = 'image-to-video 模式：必须按参考图宽高比生成视频（aspect_ratio 字段会被上游忽略）。';
+    }
+  }
+
   // 双向夹击保证画幅：
   // 1) top-level body 字段（xAI 原生 /v1/videos/generations 风格，manxue 网关认就生效）
   // 2) system 强 prompt（chat/completions 路由唯一能识别的形式）
   // 3) user 末尾强提示（防止 system 丢失）
-  // xAI 文档：image-to-video 模式下 aspect_ratio 字段会被忽略（自动匹配参考图宽高比），
-  // 提示中显式说明需锁定画幅，避免被参考图覆盖。
   const systemText =
     '你是视频生成助手，必须严格遵守用户给定的画幅与时长参数，' +
-    `强制输出 ${aspectRatio} 画幅、${seconds} 秒、${resolution} 分辨率。` +
+    `强制输出 ${effectiveAspectRatio} 画幅、${seconds} 秒、${resolution} 分辨率。` +
     (imageUrls.length
-      ? '即使提供了参考图，也必须按上述画幅生成，**不要**根据参考图自动调整画幅。'
+      ? `当前是图生视频：${refAspectHint}**不要**试图裁切或拉伸参考图。`
       : '') +
     '完成后只返回一行可播放的视频 URL（Markdown 链接或裸 URL），不要任何其他文字。';
   const userHint =
-    `\n\n[params] aspect_ratio=${aspectRatio}, seconds=${seconds}, resolution=${resolution}。` +
-    `请生成 ${aspectRatio} 画幅、${seconds} 秒、${resolution} 的视频，` +
+    `\n\n[params] aspect_ratio=${effectiveAspectRatio}, seconds=${seconds}, resolution=${resolution}。` +
+    `请生成 ${effectiveAspectRatio} 画幅、${seconds} 秒、${resolution} 的视频，` +
     '完成后只返回一行可播放的视频 URL（Markdown 链接或裸 URL）。';
   const userText = prompt + userHint;
   const userContentParts: Array<{ type: 'image_url'; image_url: { url: string } } | { type: 'text'; text: string }> = [];
@@ -1904,8 +1980,8 @@ export async function manxueVideoGenerate(params: {
     ],
     stream: true,
     seconds,
-    aspect_ratio: aspectRatio,
-    aspect_ratio_name: aspectRatio,
+    aspect_ratio: effectiveAspectRatio,
+    aspect_ratio_name: effectiveAspectRatio,
     resolution,
     resolution_name: resolution,
   };

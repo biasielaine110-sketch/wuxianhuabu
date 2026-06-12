@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type { CanvasNode, Edge } from '../types';
 import { buildIncomingRefSlots } from '../referenceSlots';
 import { OptimizedImage } from './OptimizedImage';
@@ -14,6 +14,7 @@ import {
   isVideoVeoStyleModel,
   MANXUE_GROK_IMAGINE_VIDEO_MODEL,
 } from './videoModelUtils';
+import { readImageBase64AspectRatio } from '../services/openaiCompatibleService';
 
 export interface VideoNodeSettingsPanelProps {
   node: CanvasNode;
@@ -50,6 +51,37 @@ export function VideoNodeSettingsPanel({
   const imageSlots = vSlots.filter((s) => s.kind === 'image');
   const videoSlots = vSlots.filter((s) => s.kind === 'video');
   const audioSlots = vSlots.filter((s) => s.kind === 'audio');
+
+  // 满 e Grok Imagine：图生视频时画幅由参考图实际比例决定，UI 探测并提示
+  const [refAspect, setRefAspect] = useState<{
+    canonical: string;
+    width: number;
+    height: number;
+  } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setRefAspect(null);
+    if (!isManxueGrokImagine || imageSlots.length === 0) return;
+    const firstSlot = imageSlots[0];
+    const b64 =
+      firstSlot.imageBase64 ||
+      (firstSlot.imageBase64s && firstSlot.imageBase64s[0]) ||
+      '';
+    if (!b64) return;
+    const ctrl = new AbortController();
+    readImageBase64AspectRatio(b64, ctrl.signal).then((r) => {
+      if (cancelled) return;
+      if (r) setRefAspect({ canonical: r.canonical, width: r.width, height: r.height });
+    });
+    return () => {
+      cancelled = true;
+      ctrl.abort();
+    };
+  }, [isManxueGrokImagine, imageSlots]);
+
+  const aspectMismatch =
+    isManxueGrokImagine && refAspect && refAspect.canonical !== 'other' &&
+    refAspect.canonical !== (node.aspectRatio || '16:9');
 
   return (
     <div className="flex flex-col gap-3 p-3 bg-[#252525] border-b border-[#333] text-xs shrink-0">
@@ -144,6 +176,20 @@ export function VideoNodeSettingsPanel({
       {!isSora && !isVeo && isGroDur && (
         <div className="text-[9px] text-amber-600/95 px-1 leading-snug">
           分辨率：Grok 系路径已随请求发送 resolution；若成品仍为 480p，多为上游默认。
+        </div>
+      )}
+      {isManxueGrokImagine && refAspect && (
+        <div
+          className={`text-[10px] px-2 py-1.5 rounded leading-snug border ${
+            aspectMismatch
+              ? 'text-amber-200 bg-amber-950/40 border-amber-700/60'
+              : 'text-cyan-200/90 bg-cyan-950/30 border-cyan-800/40'
+          }`}
+        >
+          参考图：{refAspect.width}×{refAspect.height}（{refAspect.canonical}）。
+          {aspectMismatch
+            ? `当前选 ${node.aspectRatio || '16:9'} ≠ 参考图 ${refAspect.canonical}，提交时将自动按参考图 ${refAspect.canonical} 生成（xAI 硬约束）。如需 ${node.aspectRatio || '16:9'}，请换参考图。`
+            : '画幅与参考图一致。'}
         </div>
       )}
       <div className="flex flex-wrap items-center gap-3">
