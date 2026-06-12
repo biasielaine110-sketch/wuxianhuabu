@@ -1869,28 +1869,43 @@ export async function manxueVideoGenerate(params: {
   // 拼装 user 消息：若带参考图，作为多模态 content；纯文生则直接文本。
   const seconds = String(durationSeconds);
   const resolution = '720p';
-  const hint =
+  // 双向夹击保证画幅：
+  // 1) top-level body 字段（xAI 原生 /v1/videos/generations 风格，manxue 网关认就生效）
+  // 2) system 强 prompt（chat/completions 路由唯一能识别的形式）
+  // 3) user 末尾强提示（防止 system 丢失）
+  // xAI 文档：image-to-video 模式下 aspect_ratio 字段会被忽略（自动匹配参考图宽高比），
+  // 提示中显式说明需锁定画幅，避免被参考图覆盖。
+  const systemText =
+    '你是视频生成助手，必须严格遵守用户给定的画幅与时长参数，' +
+    `强制输出 ${aspectRatio} 画幅、${seconds} 秒、${resolution} 分辨率。` +
+    (imageUrls.length
+      ? '即使提供了参考图，也必须按上述画幅生成，**不要**根据参考图自动调整画幅。'
+      : '') +
+    '完成后只返回一行可播放的视频 URL（Markdown 链接或裸 URL），不要任何其他文字。';
+  const userHint =
     `\n\n[params] aspect_ratio=${aspectRatio}, seconds=${seconds}, resolution=${resolution}。` +
-    '请直接返回可播放的视频 URL（Markdown 链接或裸 URL）。';
-  const userText = prompt + hint;
-  let userContent: string | Array<{ type: 'image_url'; image_url: { url: string } } | { type: 'text'; text: string }>;
+    `请生成 ${aspectRatio} 画幅、${seconds} 秒、${resolution} 的视频，` +
+    '完成后只返回一行可播放的视频 URL（Markdown 链接或裸 URL）。';
+  const userText = prompt + userHint;
+  const userContentParts: Array<{ type: 'image_url'; image_url: { url: string } } | { type: 'text'; text: string }> = [];
   if (imageUrls.length) {
-    const parts: Array<{ type: 'image_url'; image_url: { url: string } } | { type: 'text'; text: string }> = [];
     for (const u of imageUrls) {
-      parts.push({ type: 'image_url', image_url: { url: u } });
+      userContentParts.push({ type: 'image_url', image_url: { url: u } });
     }
-    parts.push({ type: 'text', text: userText });
-    userContent = parts;
-  } else {
-    userContent = userText;
   }
+  userContentParts.push({ type: 'text', text: userText });
+  const userContent: string | typeof userContentParts = imageUrls.length ? userContentParts : userText;
 
   const body: Record<string, unknown> = {
     model: MANXUE_GROK_IMAGINE_VIDEO_MODEL_ID,
-    messages: [{ role: 'user', content: userContent }],
+    messages: [
+      { role: 'system', content: systemText },
+      { role: 'user', content: userContent },
+    ],
     stream: true,
     seconds,
     aspect_ratio: aspectRatio,
+    aspect_ratio_name: aspectRatio,
     resolution,
     resolution_name: resolution,
   };
