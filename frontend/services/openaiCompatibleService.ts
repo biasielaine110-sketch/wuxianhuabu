@@ -1930,21 +1930,33 @@ export async function manxueVideoGenerate(params: {
 
   const effectiveAspectRatio = aspectRatio;
 
-  // 双向夹击保证画幅与时长：
-  // 1) top-level body 字段（xAI 原生 /v1/videos/generations 风格，manxue 网关认就生效）
-  // 2) system 强 prompt（chat/completions 路由唯一能识别的形式）
+  // 双向夹击保证画幅与时长（满 e 网关不解析 aspect_ratio / duration top-level 字段）：
+  // 1) top-level body 字段（多字段兜底，万一网关某天支持就有用）
+  // 2) system 强 prompt（chat 路由唯一能识别的形式）
   // 3) user 末尾强提示（防止 system 丢失）
+  //
+  // 关键 prompt 策略：
+  //   - 不能说"按 aspect_ratio 拉伸"——上游 Grok video 默认就是拉伸，
+  //     但用户反馈 16:9→9:16 说明 chat 路由**根本没让上游拉伸**。
+  //   - 改为让 chat 模型**先在脑里把参考图重塑为 16:9 画幅**（左/右留白、画面主体居中），
+  //     再交给上游图生视频。这是 chat LLM 能听懂并影响其调用的指令。
+  //   - 时长同样：明确说"duration=15 秒"且禁止"自动缩短到 6 秒"。
   const systemText =
-    '你是视频生成助手，必须严格遵守用户给定的画幅与时长参数，' +
-    `强制输出 ${effectiveAspectRatio} 画幅、${duration} 秒。` +
+    '你是视频生成助手。' +
+    `本次任务必须生成：画幅=${effectiveAspectRatio}，时长=${duration} 秒。` +
+    `无论参考图是什么画幅，最终视频画幅必须是 ${effectiveAspectRatio}（不是参考图原画幅）。` +
     (probedAspect
-      ? `当前是图生视频：参考图 ${probedAspect.width}×${probedAspect.height}（约 ${probedAspect.canonical}）。` +
-        `请按 aspect_ratio=${effectiveAspectRatio} 拉伸输出，不要按参考图原画幅。`
+      ? `参考图是 ${probedAspect.width}×${probedAspect.height}（约 ${probedAspect.canonical}）。` +
+        `请把参考图"扩展/外推"为 ${effectiveAspectRatio} 画幅后再生成视频——` +
+        '比如 9:16 变 16:9：把参考图主体居中，左右各加黑边/场景外推，使其变成 16:9；' +
+        '16:9 变 9:16：把参考图主体居中，上下各加黑边/场景外推。' +
+        '**绝不能**直接生成与参考图同画幅的视频。'
       : '') +
+    `时长必须是 ${duration} 秒，**绝不能**自动缩短到 6 秒或默认时长。` +
     '完成后只返回一行可播放的视频 URL（Markdown 链接或裸 URL），不要任何其他文字。';
   const userHint =
     `\n\n[params] aspect_ratio=${effectiveAspectRatio}, duration=${duration}。` +
-    `请生成 ${effectiveAspectRatio} 画幅、${duration} 秒的视频，` +
+    `请生成 ${effectiveAspectRatio} 画幅（外推参考图到该画幅）、${duration} 秒的视频，` +
     '完成后只返回一行可播放的视频 URL（Markdown 链接或裸 URL）。';
   const userText = prompt + userHint;
   const userContentParts: Array<{ type: 'image_url'; image_url: { url: string } } | { type: 'text'; text: string }> = [];
