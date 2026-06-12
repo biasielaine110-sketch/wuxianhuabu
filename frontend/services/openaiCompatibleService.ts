@@ -389,6 +389,97 @@ async function manxueGeminiGenerateImage(
   return out;
 }
 
+/**
+ * 满 eAPI Gemini 对话：使用 Vertex AI 风格 /v1beta/models/{model}:generateContent 接口（?key= 鉴权）。
+ * 文档：https://manxueapi.com 上游同 Google Gemini generateContent（支持多轮 contents + system_instruction）。
+ * - 与满 eAPI 文生图（manxueGeminiGenerateImage）走同一个 base，鉴权方式与响应结构一致。
+ */
+export async function manxueGeminiChatGenerate(
+  turns: ChatCompletionHistoryTurn[],
+  modelName: string
+): Promise<string> {
+  const apiKey = getManxueSavedKey();
+  if (!apiKey) throw new Error('未配置满 eAPI Key，请在「设置 → API」中填写「满 e API Key」。');
+  const key = apiKey.trim();
+  if (!turns.length) throw new Error('对话内容为空。');
+  const model = (modelName || '').trim() || 'gemini-3.1-flash';
+  const base = manxueGeminiModelsBase();
+  const url = `${base}/${encodeURIComponent(model)}:generateContent?key=${key}`;
+
+  // 把多轮对话转 Vertex 风格 contents
+  const systemParts: string[] = [];
+  const contents: Array<{
+    role: 'user' | 'model';
+    parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }>;
+  }> = [];
+  for (const turn of turns) {
+    if (turn.role === 'system') {
+      if (turn.content) systemParts.push(turn.content);
+      continue;
+    }
+    if (turn.role === 'assistant') {
+      contents.push({ role: 'model', parts: [{ text: turn.content || '' }] });
+      continue;
+    }
+    // user
+    const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
+    const imgs: string[] = [];
+    if (turn.imageBase64s?.length) imgs.push(...turn.imageBase64s);
+    if (turn.imageBase64) imgs.push(turn.imageBase64);
+    for (const b64 of imgs) {
+      const cleaned = b64.replace(/^data:[^;]+;base64,/, '').replace(/\s/g, '');
+      const mime = sniffMimeFromBase64(cleaned);
+      parts.push({ inlineData: { mimeType: mime || 'image/jpeg', data: cleaned } });
+    }
+    parts.push({ text: turn.content || '' });
+    contents.push({ role: 'user', parts });
+  }
+
+  const body: Record<string, unknown> = {
+    contents,
+    generationConfig: {
+      responseModalities: ['TEXT'],
+    },
+  };
+  if (systemParts.length > 0) {
+    body.systemInstruction = { role: 'system', parts: [{ text: systemParts.join('\n\n') }] };
+  }
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`满 eAPI Gemini 对话失败 (${res.status}): ${text.slice(0, 800)}`);
+  }
+
+  const json = (await res.json()) as {
+    candidates?: Array<{
+      content?: { parts?: Array<{ text?: string; inlineData?: { data?: string; mimeType?: string } }> };
+      finishReason?: string;
+    }>;
+    error?: { message?: string };
+  };
+
+  if (json.error?.message) {
+    throw new Error(`满 eAPI Gemini: ${json.error.message}`);
+  }
+
+  const parts = json.candidates?.[0]?.content?.parts ?? [];
+  const text = parts
+    .map((p) => (typeof p.text === 'string' ? p.text : ''))
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+  if (!text) {
+    throw new Error('满 eAPI Gemini 对话响应中未找到文本内容。');
+  }
+  return text;
+}
+
 function toApisAspectSize(aspectRatio: string): string {
   const allowed = new Set(['1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '2:1', '1:2', '21:9', '9:21']);
   if (allowed.has(aspectRatio)) return aspectRatio;
@@ -2759,6 +2850,10 @@ function resolveChatModelForBase(baseNormalized: string, modelName: string): str
   if (isMiniMaxHost(baseNormalized)) {
     // MiniMax 原样透传 model id
     return m || 'minimax-m2.7';
+  }
+  if (isManxueHost(baseNormalized)) {
+    // 满 eAPI 原样透传上游 model id（含 gemini-3.1-flash / gemini-3.1-flash-preview 等）
+    return m || 'gemini-3.1-flash';
   }
   if (m.startsWith('gpt-') || m.startsWith('o1') || m.startsWith('o3')) return m;
   if (m.startsWith('deepseek-')) return m;

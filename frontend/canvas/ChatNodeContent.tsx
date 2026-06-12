@@ -430,7 +430,6 @@ export function ChatNodeContent({
           { label: '打开 API 设置', action: () => onOpenApiSettings() },
           { label: '切换到 DeepSeek-V4-Flash', action: () => onUpdate({ model: DEFAULT_DEEPSEEK_CHAT_MODEL_ID, error: undefined }) },
           { label: '切换到 GPT-5.5（君澜）', action: () => onUpdate({ model: 'gpt-5.5-junlan', error: undefined }) },
-          { label: '切换到 Claude Sonnet 4-6（君澜）', action: () => onUpdate({ model: 'claude-sonnet-4-6', error: undefined }) },
           { label: '清除报错', action: () => onUpdate({ error: undefined }) },
         ],
       };
@@ -674,7 +673,6 @@ export function ChatNodeContent({
           </optgroup>
           <optgroup label="君澜 AI">
             <option value="gpt-5.5-junlan">GPT-5.5（君澜）</option>
-            <option value="claude-sonnet-4-6">Claude Sonnet 4-6（君澜）</option>
           </optgroup>
           <optgroup label="Google Gemini / ToAPIs">
             <option value="gemini-2.0-flash-official">Gemini 2.0 Flash（ToAPIs）</option>

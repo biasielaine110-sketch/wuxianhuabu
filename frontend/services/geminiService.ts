@@ -17,6 +17,7 @@ import {
 } from './aiSettings';
 import {
   chatCompletionHistoryAtBase,
+  manxueGeminiChatGenerate,
   openAiEditImage,
   openAiGenerateNewImage,
   toApisCanvasVideoGenerate,
@@ -44,6 +45,23 @@ function isJunlanChatModelId(modelName: string): boolean {
 function isMiniMaxChatModelId(modelName: string): boolean {
   const m = (modelName || '').trim();
   return m === 'minimax-m2.7' || m.startsWith('minimax-');
+}
+
+/** 满 eAPI（manxueapi.com）对话模型 id；与 ToAPIs 的 gemini-3.1-flash-lite-preview-official 区分 */
+function isManxueChatModelId(modelName: string): boolean {
+  const m = (modelName || '').trim();
+  return m === 'gemini-3.1-flash-manxue' || m === 'gemini-3.1-flash-preview-manxue';
+}
+
+/**
+ * 满 eAPI 对话上游 model 名（UI id → 提交给 manxueapi.com 的 model 字段）。
+ * 经验：上游 `gemini-3.1-flash` 在 gemini 分组下无渠道（503 model_not_found），
+ * `gemini-3.1-flash-preview` 是纯对话走通的版本。
+ */
+function resolveManxueChatUpstreamModelId(modelName: string): string {
+  const m = (modelName || '').trim();
+  if (m === 'gemini-3.1-flash-preview-manxue') return 'gemini-3.1-flash-preview';
+  return 'gemini-3.1-flash-preview';
 }
 
 /** Google GenAI 官方模型 id；ToAPIs 等网关可使用带 -official 的别名，直连时需映射 */
@@ -323,6 +341,12 @@ export const callGeminiChatWithHistory = async (
 
   try {
     modelName = normalizeGcpVertexModelWhenDisabled(modelName);
+
+    if (isManxueChatModelId(modelName)) {
+      // 满 e 对话走 Vertex AI 风格 /v1beta/models/{model}:generateContent（?key= 鉴权），
+      // 不能用 OpenAI /chat/completions —— 上游 Gemini 网关不会识别 chat completions 格式
+      return { text: await manxueGeminiChatGenerate(slice, resolveManxueChatUpstreamModelId(modelName)) };
+    }
 
     if (isDeepSeekChatModelId(modelName)) {
       let key = getDeepSeekSavedKey();
