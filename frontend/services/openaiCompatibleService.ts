@@ -1699,8 +1699,15 @@ const MANXUE_VIDEO_TASK_MAX_WAIT_MS = 1_800_000;
 const MANXUE_VIDEO_MAX_REFERENCE_IMAGES = 3;
 
 /**
- * 满 eAPI（manxueapi.com）视频生成：`grok-imagine-video-1.5-preview`。
- * 走 OpenAI 兼容 `/videos/generations` 提交 + `/videos/generations/{id}` 轮询。
+ * 满 eAPI（manxueapi.com）视频生成参考图：`grok-imagine-video-1.5-preview` 需要的 image_urls。
+ *
+ * xAI 官方 Grok 视频 API（`/v1/videos/generations`）`image_urls` 字段接受「公网 HTTPS URL」或「base64 data URI」。
+ * 满 eAPI（New API 风格聚合网关）多数情况下不带公网文件托管；其 `/uploads/images`、`/upload/image` 端点
+ * 在该模型路由上不保证存在（实测 /v1/upload/image 返回 404）。为不再让上传 404 阻断整个视频生成：
+ *
+ * 1) 先尝试 `/v1/uploads/images`（标准 New API 上传端点）。
+ * 2) 失败时回退为 `data:image/...;base64,...` data URI（xAI Grok 视频 API 明确支持）。
+ *
  * CORS 已由 `/manxue-api` 同源代理处理（Vite dev + Vercel rewrite）。
  */
 async function manxueUploadReferenceImageUrls(
@@ -1710,18 +1717,37 @@ async function manxueUploadReferenceImageUrls(
   if (!refs || refs.length === 0) return [];
   const apiKey = getManxueSavedKey();
   if (!apiKey) throw new Error('未配置满 e API Key。请在「设置 → API → 满 e」填写。');
-  const base = manxueFetchBase();
   const list = refs.filter(Boolean).slice(0, MANXUE_VIDEO_MAX_REFERENCE_IMAGES);
-  const urls: string[] = [];
+  const out: string[] = [];
   for (let i = 0; i < list.length; i++) {
     assertNotAborted(signal);
     const { raw, mime } = parseBase64ImageInput(list[i]);
     const blob = base64ToBlob(raw, mime);
     const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : mime.includes('gif') ? 'gif' : 'jpg';
-    const url = await openAiCompatUploadImageBlob(base, apiKey, blob, `manxue-grok-imagine-ref-${i}.${ext}`, signal);
-    urls.push(url);
+    let uploaded = '';
+    try {
+      uploaded = await openAiCompatUploadImageBlob(
+        manxueFetchBase(),
+        apiKey,
+        blob,
+        `manxue-grok-imagine-ref-${i}.${ext}`,
+        signal
+      );
+    } catch (e) {
+      // 满 eAPI 视频路由不保证有 OpenAI 风格上传端点；xAI Grok 视频 API 同时支持 base64 data URI，
+      // 因此不再因 404 阻断视频提交，直接回退为 data URI。
+      console.warn(`[manxue] 参考图上传失败，回退为 base64 data URI: ${(e as Error)?.message || e}`);
+      uploaded = '';
+    }
+    if (uploaded && /^https?:\/\//i.test(uploaded.trim())) {
+      out.push(uploaded.trim());
+    } else {
+      const cleanRaw = raw.replace(/\s/g, '');
+      const m = mime || sniffMimeFromBase64(cleanRaw) || 'image/jpeg';
+      out.push(`data:${m};base64,${cleanRaw}`);
+    }
   }
-  return urls;
+  return out;
 }
 
 async function manxueSubmitVideoGeneration(
