@@ -1358,6 +1358,24 @@ function extractImageUrlFromManxueSseAccumulated(acc: string): string | null {
   return ext ? ext[1] : null;
 }
 
+/** 从满 eAPI Grok 视频 chat/completions 流式累积文本中提取视频 URL（.mp4 / .mov / .webm 后缀优先，否则取最后一个 https URL） */
+function extractVideoUrlFromManxueChatAccumulated(acc: string): string | null {
+  if (!acc) return null;
+  // Markdown 视频链接：[name](url.mp4 ...)
+  const mdVideo = acc.match(/\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/);
+  if (mdVideo) return mdVideo[1];
+  // Markdown 图片形式偶发被复用为视频
+  const mdImg = acc.match(/!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/);
+  if (mdImg) return mdImg[1];
+  // 显式视频后缀
+  const ext = acc.match(/(https?:\/\/[^\s"'<>)]+\.(?:mp4|mov|m4v|webm)(?:\?[^\s"'<>)]*)?)/i);
+  if (ext) return ext[1];
+  // 兜底：取最后一个 https URL（满 e 视频网关常把 URL 放在末尾或单独一行）
+  const all = acc.match(/https?:\/\/[^\s"'<>)]+/g);
+  if (all && all.length) return all[all.length - 1];
+  return null;
+}
+
 /**
  * 满 eAPI 文生图：使用 /v1/chat/completions + SSE 流式返回图片 URL
  */
@@ -1699,14 +1717,10 @@ const MANXUE_VIDEO_TASK_MAX_WAIT_MS = 1_800_000;
 const MANXUE_VIDEO_MAX_REFERENCE_IMAGES = 3;
 
 /**
- * 满 eAPI（manxueapi.com）视频生成参考图：`grok-imagine-video-1.5-preview` 需要的 image_urls。
- *
- * xAI 官方 Grok 视频 API（`/v1/videos/generations`）`image_urls` 字段接受「公网 HTTPS URL」或「base64 data URI」。
- * 满 eAPI（New API 风格聚合网关）多数情况下不带公网文件托管；其 `/uploads/images`、`/upload/image` 端点
- * 在该模型路由上不保证存在（实测 /v1/upload/image 返回 404）。为不再让上传 404 阻断整个视频生成：
- *
- * 1) 先尝试 `/v1/uploads/images`（标准 New API 上传端点）。
- * 2) 失败时回退为 `data:image/...;base64,...` data URI（xAI Grok 视频 API 明确支持）。
+ * 满 eAPI（manxueapi.com）视频生成参考图：`grok-imagine-video-1.5-preview` 在
+ * `/v1/chat/completions` 模式下直接接受「公网 HTTPS URL」或「base64 data URI」（同 xAI Grok 视频 API）。
+ * 该路由不强制走 `/uploads/images` 上传端点；满 eAPI 视频路由下 `/v1/upload/image` 实测返回 404。
+ * 旧实现：先尝试 `/uploads/images` 失败回退为 data URI（保留作为兜底）。
  *
  * CORS 已由 `/manxue-api` 同源代理处理（Vite dev + Vercel rewrite）。
  */
@@ -1734,8 +1748,6 @@ async function manxueUploadReferenceImageUrls(
         signal
       );
     } catch (e) {
-      // 满 eAPI 视频路由不保证有 OpenAI 风格上传端点；xAI Grok 视频 API 同时支持 base64 data URI，
-      // 因此不再因 404 阻断视频提交，直接回退为 data URI。
       console.warn(`[manxue] 参考图上传失败，回退为 base64 data URI: ${(e as Error)?.message || e}`);
       uploaded = '';
     }
@@ -1847,20 +1859,97 @@ export async function manxueVideoGenerate(params: {
   signal?: AbortSignal;
 }): Promise<string> {
   const { prompt, durationSeconds, aspectRatio, referenceImagesBase64 = [], signal } = params;
+  const apiKey = getManxueSavedKey();
+  if (!apiKey) throw new Error('未配置满 e API Key。请在「设置 → API → 满 e」填写。');
+  const key = apiKey.trim();
+  const base = manxueFetchBase();
+
   const imageUrls = await manxueUploadReferenceImageUrls(referenceImagesBase64, signal);
+
+  // 拼装 user 消息：若带参考图，作为多模态 content；纯文生则直接文本。
+  const seconds = String(durationSeconds);
+  const resolution = '720p';
+  const hint =
+    `\n\n[params] aspect_ratio=${aspectRatio}, seconds=${seconds}, resolution=${resolution}。` +
+    '请直接返回可播放的视频 URL（Markdown 链接或裸 URL）。';
+  const userText = prompt + hint;
+  let userContent: string | Array<{ type: 'image_url'; image_url: { url: string } } | { type: 'text'; text: string }>;
+  if (imageUrls.length) {
+    const parts: Array<{ type: 'image_url'; image_url: { url: string } } | { type: 'text'; text: string }> = [];
+    for (const u of imageUrls) {
+      parts.push({ type: 'image_url', image_url: { url: u } });
+    }
+    parts.push({ type: 'text', text: userText });
+    userContent = parts;
+  } else {
+    userContent = userText;
+  }
 
   const body: Record<string, unknown> = {
     model: MANXUE_GROK_IMAGINE_VIDEO_MODEL_ID,
-    prompt,
-    seconds: String(durationSeconds),
+    messages: [{ role: 'user', content: userContent }],
+    stream: true,
+    seconds,
     aspect_ratio: aspectRatio,
-    resolution: '720p',
-    resolution_name: '720p',
+    resolution,
+    resolution_name: resolution,
   };
-  if (imageUrls.length) body.image_urls = imageUrls;
 
-  const { id } = await manxueSubmitVideoGeneration(body, signal);
-  return manxuePollVideoTaskToPlayableUrl(id, signal);
+  const res = await fetch(`${base}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${key}`,
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`满 e 视频提交失败 (${res.status}): ${t.slice(0, 800)}`);
+  }
+  if (!res.body) throw new Error('满 e 视频响应不支持流式读取。');
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let lineBuf = '';
+  let acc = '';
+  try {
+    while (true) {
+      assertNotAborted(signal);
+      const { done, value } = await reader.read();
+      if (done) break;
+      lineBuf += decoder.decode(value, { stream: true });
+      const lines = lineBuf.split('\n');
+      lineBuf = lines.pop() ?? '';
+      for (const rawLine of lines) {
+        const s = rawLine.trim();
+        if (!s.startsWith('data:')) continue;
+        const data = s.slice(5).trim();
+        if (data === '[DONE]') continue;
+        try {
+          const chunk = JSON.parse(data) as {
+            error?: { message?: string };
+            choices?: Array<{ delta?: { content?: string } }>;
+          };
+          if (chunk.error?.message) throw new Error(`满 e 视频: ${chunk.error.message}`);
+          const content = chunk.choices?.[0]?.delta?.content;
+          if (typeof content === 'string' && content) {
+            acc += content;
+            const url = extractVideoUrlFromManxueChatAccumulated(acc);
+            if (url) return url;
+          }
+        } catch (e) {
+          if (e instanceof Error && e.message.startsWith('满 e 视频:')) throw e;
+        }
+      }
+    }
+    const tail = extractVideoUrlFromManxueChatAccumulated(acc);
+    if (tail) return tail;
+    throw new Error(`满 e 视频流式响应中未解析到视频 URL。文本片段：${acc.slice(0, 500)}`);
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 /**
