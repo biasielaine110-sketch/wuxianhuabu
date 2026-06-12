@@ -2451,9 +2451,11 @@ async function toApisDoubaoSeedance2VideoGenerate(params: {
  * - `duration`：1-15 秒（xAI 文档：https://docs.x.ai/developers/model-capabilities/video/generation）
  * - `aspect_ratio`：1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3
  * - 1.5 preview **必须**有参考图（xAI 文档：text-to-video is not yet available on that model）
- * - 走 AIID 标准异步任务端点 `/api/v3/contents/generations/tasks`（与 doubao-seedance-2-0 协议一致）
- * - 与满 e grok-imagine-video-1.5-preview（chat 路由，画幅/时长不可控）的关键差异：
- *   AIID 走异步任务 + 标准字段，aspect_ratio 字段会被尊重
+ * - 走 xAI 原生异步任务端点 `/v1/videos/generations` + 轮询 `/v1/videos/{request_id}`
+ *   （用户反馈：AIID 实际提供的视频端点是 `/v1/videos`，不是 `/api/v3/contents/generations/tasks`）
+ *   字段名：image（公网 URL 或 base64 data URI）、duration(数字)、aspect_ratio、resolution
+ * - 与满 e grok-imagine-video-1.5-preview（chat 路由）的关键差异：
+ *   AIID 走 xAI 原生异步任务，aspect_ratio / duration 字段会被尊重
  */
 export const AIID_GROK_IMAGINE_VIDEO_MODEL = 'grok-imagine-video-1.5-preview';
 
@@ -2480,26 +2482,14 @@ export async function aiidGrokImagineVideoGenerate(params: {
   }
 
   // 使用同源代理路径避免 CORS 问题（开发环境 Vite proxy / 生产环境 vercel.json rewrite）
+  // 注意：AIID grok-imagine 走的是 xAI 原生 /v1/videos，base URL 必须含 /v1
   const base = (() => {
     const saved = getAiidBaseUrl();
-    if (saved && saved !== DEFAULT_AIID_BASE_URL) return saved.replace(/\/v1$/, '').replace(/\/+$/, '');
-    return '/api/aiid';
+    const norm = (saved || DEFAULT_AIID_BASE_URL).replace(/\/+$/, '');
+    return norm.endsWith('/v1') ? norm : `${norm}/v1`;
   })();
 
-  // 构建 content 数组（AIID 专用格式）
-  // AIID 的 image_url 可以直接接收 data URI（base64），无需预先上传
-  const content: Array<{ type: string; text?: string; image_url?: { url: string }; role?: string }> = [
-    { type: 'text', text: params.prompt },
-  ];
-  for (let i = 0; i < refs.length; i++) {
-    const { raw, mime } = parseBase64ImageInput(refs[i]);
-    const dataUri = `data:${mime};base64,${raw}`;
-    content.push({ type: 'image_url', image_url: { url: dataUri }, role: 'first_frame' });
-    // grok-imagine-video 1.5 只用首帧；不再 push last_frame
-    break;
-  }
-
-  // duration 1-15 秒，UI 默认 10
+  // duration 1-15 秒
   const validDuration = (() => {
     const d = Number(params.durationSeconds) || 10;
     if (d < 1) return 1;
@@ -2512,18 +2502,25 @@ export async function aiidGrokImagineVideoGenerate(params: {
     '4:3': '4:3', '3:4': '3:4', '3:2': '3:2', '2:3': '2:3',
   };
   const ratio = ratioMap[params.aspectRatio] || '16:9';
+  const resolution = params.resolution === '1080p' ? '720p' : params.resolution === '480p' ? '480p' : '720p';
 
+  // 取首张参考图作为 image 字段（xAI image-to-video 模式：image 字段即可）
+  const firstRef = refs[0];
+  const { raw, mime } = parseBase64ImageInput(firstRef);
+  const dataUri = `data:${mime || 'image/jpeg'};base64,${raw}`;
+
+  // xAI 原生视频提交 body
   const body: Record<string, unknown> = {
     model: AIID_GROK_IMAGINE_VIDEO_MODEL,
-    mode: 'reference_material',
-    content,
+    prompt: params.prompt,
+    image: { url: dataUri },
     duration: validDuration,
-    size: params.resolution === '1080p' ? '1920x1080' : params.resolution === '480p' ? '854x480' : '1280x720',
     aspect_ratio: ratio,
+    resolution,
   };
 
-  // 提交任务到 AIID /api/v3/contents/generations/tasks
-  const taskRes = await fetch(`${base}/api/v3/contents/generations/tasks`, {
+  // 提交任务到 /v1/videos/generations
+  const taskRes = await fetch(`${base}/videos/generations`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -2534,20 +2531,20 @@ export async function aiidGrokImagineVideoGenerate(params: {
   });
   if (!taskRes.ok) {
     const t = await taskRes.text();
-    throw new Error(`AIID Grok Imagine 视频任务提交失败 (${taskRes.status}): ${t.slice(0, 800)}`);
+    throw new Error(`AIID Grok Imagine 视频提交失败 (${taskRes.status}): ${t.slice(0, 800)}`);
   }
   let taskJson: unknown;
   try { taskJson = JSON.parse(await taskRes.text()); } catch { throw new Error(`AIID 提交响应无效: ${await taskRes.text().slice(0, 200)}`); }
   const taskData = taskJson as Record<string, unknown>;
-  const taskId = taskData.id as string;
-  if (!taskId) throw new Error(`AIID 未返回任务 id：${await taskRes.text().slice(0, 400)}`);
+  const requestId = (taskData.request_id || taskData.id) as string;
+  if (!requestId) throw new Error(`AIID 未返回 request_id：${await taskRes.text().slice(0, 400)}`);
 
-  // 轮询结果
+  // 轮询结果（xAI 标准协议）
   const deadline = Date.now() + TOAPIS_VIDEO_TASK_MAX_WAIT_MS;
   await sleepInterruptible(5000, params.signal);
   while (Date.now() < deadline) {
     assertNotAborted(params.signal);
-    const pollRes = await fetch(`${base}/api/v3/contents/generations/tasks/${encodeURIComponent(taskId)}`, {
+    const pollRes = await fetch(`${base}/videos/${encodeURIComponent(requestId)}`, {
       headers: { Authorization: `Bearer ${apiKey.trim()}` },
       signal: params.signal,
     });
@@ -2556,17 +2553,20 @@ export async function aiidGrokImagineVideoGenerate(params: {
     let pollJson: unknown;
     try { pollJson = JSON.parse(pollText); } catch { throw new Error(`AIID 轮询响应无效: ${pollText.slice(0, 200)}`); }
     const pollData = pollJson as Record<string, unknown>;
-    const items = Array.isArray(pollData.items) ? pollData.items : [];
-    const item = (items[0] as Record<string, unknown>) || {};
-    const status = String(item.status || '').toLowerCase();
-    if (status === 'succeeded' || status === 'completed' || status === 'done') {
-      const videoUrl = (item.content as Record<string, unknown>)?.video_url as string || item.video_url as string;
-      if (!videoUrl) throw new Error(`AIID 任务完成但未返回视频 URL`);
+    // xAI 标准响应：{ status, video: { url }, ... }
+    const status = String(pollData.status || '').toLowerCase();
+    if (status === 'done' || status === 'succeeded' || status === 'completed') {
+      const video = pollData.video as Record<string, unknown> | undefined;
+      const videoUrl = (video?.url || pollData.video_url || pollData.url) as string | undefined;
+      if (!videoUrl) throw new Error(`AIID 任务完成但未返回视频 URL: ${pollText.slice(0, 400)}`);
       return videoUrl;
     }
-    if (status === 'failed' || status === 'error') {
-      const errMsg = (item.error as string) || JSON.stringify(item.error) || pollText.slice(0, 400);
-      throw new Error(`AIID Grok Imagine 视频任务失败: ${errMsg}`);
+    if (status === 'failed' || status === 'error' || status === 'expired') {
+      const errMsg =
+        (pollData.error as Record<string, unknown>)?.message ||
+        (pollData.error as string) ||
+        pollText.slice(0, 400);
+      throw new Error(`AIID Grok Imagine 视频任务${status}: ${errMsg}`);
     }
     await sleepInterruptible(5000, params.signal);
   }
