@@ -1,6 +1,6 @@
 import type { PresetDomainId, I2iPresetCategoryId } from './canvasNodeRenderState';
 
-export type T2iPresetCategoryId = 'storyboard';
+export type T2iPresetCategoryId = 'storyboard' | 'other';
 
 /** 图生图预设：按「角色 / 场景 / 道具 / 故事板 / 其他」分类，供下拉选择 */
 export const I2I_PRESET_CATEGORY_OPTIONS: { id: I2iPresetCategoryId; label: string }[] = [
@@ -17,6 +17,7 @@ export const COMMON_TEMPLATE_KEY = '通用模板';
 /** 文生图预设分类——只保留故事板，通用模板以独立下拉框存在 */
 export const T2I_PRESET_CATEGORY_OPTIONS: { id: T2iPresetCategoryId; label: string }[] = [
   { id: 'storyboard', label: '故事板' },
+  { id: 'other', label: '其他' },
 ];
 
 export const I2I_PRESETS_BY_CATEGORY: Record<I2iPresetCategoryId, { key: string; label: string }[]> = {
@@ -51,6 +52,7 @@ export const I2I_PRESETS_BY_CATEGORY: Record<I2iPresetCategoryId, { key: string;
   ],
   other: [
     { key: '故事九宫格', label: '故事九宫格' },
+    { key: '主图多机位', label: '主图多机位' },
     { key: '高清放大4K', label: '高清放大' },
   ],
 };
@@ -67,6 +69,9 @@ export const T2I_PRESETS_BY_CATEGORY: Record<T2iPresetCategoryId, { key: string;
     { key: '故事板_CCC', label: '故事板_CCC' },
     { key: 'CCCC_故事板简化版', label: 'CCCC_故事板简化版' },
     { key: '线稿故事板', label: '线稿故事板' },
+  ],
+  other: [
+    { key: '主图多机位', label: '主图多机位' },
   ],
 };
 
