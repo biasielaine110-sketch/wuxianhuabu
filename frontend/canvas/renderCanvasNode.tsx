@@ -712,40 +712,67 @@ return (
             <button
               onPointerDown={(e) => { e.stopPropagation(); }}
               onClick={async () => {
-                if ((node.images?.length ?? 0) === 0) {
-                  alert('该节点还没有图片可翻转');
-                  return;
-                }
                 const imgs = node.images ?? [];
                 const ids = node.imageAssetIds ?? [];
-                const nextImgs: string[] = [];
-                const nextIds: string[] = [];
-                for (let i = 0; i < imgs.length; i++) {
-                  const cur = imgs[i];
-                  const id = ids[i];
-                  if (!cur || cur.length <= 80) {
-                    if (id) {
-                      nextImgs.push('');
-                      nextIds.push(id);
-                    } else {
-                      nextImgs.push(cur ?? '');
-                      nextIds.push('');
+                // 1) 节点已有图 → 翻转所有
+                if (imgs.length > 0) {
+                  const nextImgs: string[] = [];
+                  const nextIds: string[] = [];
+                  for (let i = 0; i < imgs.length; i++) {
+                    const cur = imgs[i];
+                    const id = ids[i];
+                    if (!cur || cur.length <= 80) {
+                      if (id) {
+                        nextImgs.push('');
+                        nextIds.push(id);
+                      } else {
+                        nextImgs.push(cur ?? '');
+                        nextIds.push('');
+                      }
+                      continue;
                     }
-                    continue;
+                    const flipped = await flipAndStoreAsset({ base64: cur, assetId: id });
+                    if (flipped) {
+                      nextImgs.push(flipped.base64);
+                      nextIds.push(flipped.assetId ?? '');
+                    } else {
+                      nextImgs.push(cur);
+                      nextIds.push(id ?? '');
+                    }
                   }
-                  const flipped = await flipAndStoreAsset({ base64: cur, assetId: id });
-                  if (flipped) {
-                    nextImgs.push(flipped.base64);
-                    nextIds.push(flipped.assetId ?? '');
-                  } else {
-                    nextImgs.push(cur);
-                    nextIds.push(id ?? '');
-                  }
+                  s.handleUpdateNode(node.id, { images: nextImgs, imageAssetIds: nextIds });
+                  return;
                 }
-                s.handleUpdateNode(node.id, { images: nextImgs, imageAssetIds: nextIds });
+                // 2) 节点空 → 取 I2I 链接的第一张参考图翻
+                const incoming = canvasEdges.filter((e) => e.targetId === node.id);
+                const firstSrcNode = incoming
+                  .map((e) => canvasNodes.find((n) => n.id === e.sourceId))
+                  .find((n): n is CanvasNode => !!n);
+                if (!firstSrcNode) {
+                  alert('请先生成图片或先连接参考图');
+                  return;
+                }
+                const { getNodePrimaryImageRef } = await import('../referenceSlots');
+                const ref = getNodePrimaryImageRef(firstSrcNode);
+                if (!ref?.base64 && !ref?.assetId) {
+                  alert('参考图不可用');
+                  return;
+                }
+                const flipped = await flipAndStoreAsset({
+                  base64: ref.base64,
+                  assetId: ref.assetId,
+                });
+                if (flipped) {
+                  s.handleUpdateNode(node.id, {
+                    images: [flipped.base64],
+                    imageAssetIds: flipped.assetId ? [flipped.assetId] : [''],
+                  });
+                } else {
+                  console.warn('[panorama flip] 翻转失败');
+                }
               }}
               className="py-1 px-2 rounded text-[10px] bg-purple-700 hover:bg-purple-600 text-white flex items-center gap-1"
-              title="水平翻转所有图片（覆写原图）"
+              title="水平翻转所有图片（覆写原图），无图时翻 I2I 链接参考图"
             >
               <FlipHorizontalIcon size={10} /> 翻转
             </button>
