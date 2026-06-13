@@ -699,10 +699,7 @@ export function useCanvasProjectLibrary({
   const handleExportProjectJson = useCallback(
     async (project: CanvasProject) => {
       const filename = `${projectExportBasename(project)}.json`;
-      // 与「另存为 JSON」一致：若目标即当前打开的项目，附带内存中最新的画布（含 base64 图片）；
-      // 其他项目直接用项目快照（含 base64，因为 mergeCurrentCanvasIntoProjectList 不再 strip）
-      const snapshot = projectSnapshotForJsonExport(project);
-      const payload = { ...snapshot };
+      const payload = { ...project };
       delete (payload as { diskSaveEstablished?: boolean }).diskSaveEstablished;
       const r = await saveJsonToDisk(filename, payload, { backupProjectId: project.id });
       if (r !== 'saved') return;
@@ -714,7 +711,7 @@ export function useCanvasProjectLibrary({
         return next;
       });
     },
-    [saveJsonToDisk, projectSnapshotForJsonExport]
+    [saveJsonToDisk]
   );
 
   /** 项目管理「打开位置」：需已填「草稿存储位置」或已绑定另存为 JSON；再提示 IndexedDB 与参考路径 */
