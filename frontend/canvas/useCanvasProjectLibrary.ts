@@ -1,3 +1,4 @@
+// Build marker: 2026-06-13 c06003e rebuild trigger
 import { useState, useRef, useCallback, useEffect, type RefObject } from 'react';
 import type { AuditImage, CanvasNode, Edge, Transform } from '../types';
 import {
