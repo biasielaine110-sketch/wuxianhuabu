@@ -697,10 +697,27 @@ export function useCanvasProjectLibrary({
     });
   }, []);
 
+  /** 导出 JSON 时：若目标即当前打开的项目，附带内存中最新的画布（无需先点保存） */
+  const projectSnapshotForJsonExport = useCallback((project: CanvasProject): CanvasProject => {
+    if (project.id !== activeProjectIdRef.current) return project;
+    const { nodes: nc, edges: ec, transform: tc } = cloneCanvasForProject(
+      nodesRef.current,
+      edgesRef.current,
+      transformRef.current
+    );
+    return { ...project, nodes: nc, edges: ec, transform: tc, updatedAt: Date.now() };
+  }, []);
+
   const handleExportProjectJson = useCallback(
     async (project: CanvasProject) => {
       const filename = `${projectExportBasename(project)}.json`;
-      const payload = { ...project };
+      // 关键：state 中的 project 在 mergeCurrentCanvasIntoProjectList 阶段被 strip
+      // 掉了图片（IDB 容量控制），直接导出 { ...project } 会丢图。
+      // 走 projectSnapshotForJsonExport，它从 nodesRef.current（内存中带 base64）拿数据。
+      // - 目标 == 当前活跃项目：取内存最新（带图）
+      // - 目标 != 当前活跃项目：直接返回原 project（无法取到内存带图版本）
+      const snapshot = projectSnapshotForJsonExport(project);
+      const payload = { ...snapshot };
       delete (payload as { diskSaveEstablished?: boolean }).diskSaveEstablished;
       const r = await saveJsonToDisk(filename, payload, { backupProjectId: project.id });
       if (r !== 'saved') return;
@@ -713,6 +730,8 @@ export function useCanvasProjectLibrary({
       });
     },
     [saveJsonToDisk]
+    // projectSnapshotForJsonExport 故意不放 deps：它本身是无依赖的 useCallback，永远不变；
+    // 放进去会在 Vite dev HMR 下触发 TDZ（const 不 hoist，且它在本 useCallback 之后才声明）。
   );
 
   /** 项目管理「打开位置」：需已填「草稿存储位置」或已绑定另存为 JSON；再提示 IndexedDB 与参考路径 */
@@ -754,17 +773,6 @@ export function useCanvasProjectLibrary({
       lines.push('Chrome / Edge：按 F12 →「应用程序」(Application) →「IndexedDB」可查看库内数据。');
       window.alert(lines.join('\n'));
     })();
-  }, []);
-
-  /** 导出 JSON 时：若目标即当前打开的项目，附带内存中最新的画布（无需先点保存） */
-  const projectSnapshotForJsonExport = useCallback((project: CanvasProject): CanvasProject => {
-    if (project.id !== activeProjectIdRef.current) return project;
-    const { nodes: nc, edges: ec, transform: tc } = cloneCanvasForProject(
-      nodesRef.current,
-      edgesRef.current,
-      transformRef.current
-    );
-    return { ...project, nodes: nc, edges: ec, transform: tc, updatedAt: Date.now() };
   }, []);
 
   /** Ctrl+Alt+S：另存 JSON（选文件夹 + 文件名），不替换当前绑定的主草稿 */
