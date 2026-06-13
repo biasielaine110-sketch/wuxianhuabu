@@ -454,9 +454,27 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (isFullscreenAnnotation) return;
       const tag = (e.target as HTMLElement).tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      // 全屏标注模式：Delete/Backspace 删除选中的全屏标注；Ctrl/Cmd+Z 撤销全屏操作
+      if (isFullscreenAnnotation) {
+        if (isFsTextInputMode) return; // 全屏文本输入框聚焦时不拦截
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          fsUndo();
+          return;
+        }
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+          // 始终拦截 Delete/Backspace，避免冒泡到 useCanvasKeyboardShortcuts 把整个图片标注节点删除
+          e.preventDefault();
+          e.stopPropagation();
+          if (fullscreenSelectedId) {
+            deleteFsAnnotation(fullscreenSelectedId);
+          }
+        }
+        return;
+      }
       if (!annotationHotRef.current) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
         e.preventDefault();
@@ -474,7 +492,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [isFullscreenAnnotation, selectedId]);
+  }, [isFullscreenAnnotation, selectedId, fullscreenSelectedId, isFsTextInputMode]);
 
   const colors = ['#ffffff', '#000000', '#ff6b6b', '#feca57', '#48dbfb', '#1dd1a1', '#ff9ff3', '#54a0ff'];
 
@@ -3001,7 +3019,15 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
           className="fixed inset-0 z-[2000] bg-black/95 flex flex-col"
           onPointerDown={(e) => e.stopPropagation()}
           onKeyDown={(e) => {
+            // 全屏文字输入框 / 文本编辑区域里按 Delete/Backspace/Ctrl+Z 让浏览器/输入框自己处理（删字、撤销输入）
+            const tag = (e.target as HTMLElement).tagName;
+            const inEditable =
+              tag === 'INPUT' ||
+              tag === 'TEXTAREA' ||
+              tag === 'SELECT' ||
+              (e.target as HTMLElement).isContentEditable;
             if (e.key === 'Escape') closeFullscreenAnnotation();
+            if (inEditable) return;
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
               e.preventDefault();
               fsUndo();
@@ -3011,6 +3037,9 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
               if (fullscreenSelectedId) {
                 e.preventDefault();
                 deleteFsAnnotation(fullscreenSelectedId);
+              } else {
+                // 仍要 preventDefault 防止事件冒泡到 useCanvasKeyboardShortcuts 把整个图片标注节点删掉
+                e.preventDefault();
               }
             }
           }}
