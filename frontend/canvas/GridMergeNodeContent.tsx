@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { CanvasNode, Edge, GridMergeNode } from '../types';
 import { EyedropperIcon } from './canvasIcons';
 import {
@@ -56,6 +56,9 @@ export function GridMergeNodeContent({
   const gridCount = node.gridCount ?? 4;
   const frameAspectRatio = node.aspectRatio === '9:16' ? '9:16' : '16:9';
   const previewRef = useRef<HTMLDivElement>(null);
+  /** 拖动 swap: dragFromIdx 是按下时的 cell 下标; dragOverIdx 是当前 hover 的 cell 下标 */
+  const [dragFromIdx, setDragFromIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   const { cols, rows } = getGridLayout(gridCount);
   const connectedImages = getConnectedImages(node.id, nodes, edges);
@@ -63,6 +66,57 @@ export function GridMergeNodeContent({
   const filledSlotCount = Array.from({ length: gridCount }).filter((_, idx) =>
     hasResolvedImage(slotImage(inputImages, inputImageAssetIds, connectedImages, idx))
   ).length;
+
+  /**
+   * 拖动 swap: 把当前显示的 cell 顺序按 from/to 调换, 并把"已显示"的所有 slot 实体化写到 node.inputImages/inputImageAssetIds
+   * - 拖动一次后, connectedImages 链接的图也会被"固化"到 inputImages, 之后位置不再受 edges 顺序影响
+   * - 空 slot 拖动也允许 (用户可以拖动占位符), 但写回时保持空 (swap 不影响)
+   */
+  const handleSlotSwap = (fromIdx: number, toIdx: number) => {
+    if (fromIdx === toIdx) return;
+    // 1) 把当前显示的 slots 全部解析成数组
+    const currentSlots: ResolvedGridImage[] = Array.from({ length: gridCount }, (_, i) =>
+      slotImage(inputImages, inputImageAssetIds, connectedImages, i)
+    );
+    // 2) swap
+    const swapped = [...currentSlots];
+    [swapped[fromIdx], swapped[toIdx]] = [swapped[toIdx], swapped[fromIdx]];
+    // 3) 写回 inputImages / inputImageAssetIds (实体化)
+    const newImgs: string[] = swapped.map((s) => s?.base64 ?? '');
+    const newIds: string[] = swapped.map((s) => s?.assetId ?? '');
+    onUpdate({ inputImages: newImgs, inputImageAssetIds: newIds });
+  };
+
+  const onCellPointerDown = (e: React.PointerEvent, idx: number) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    setDragFromIdx(idx);
+    setDragOverIdx(idx);
+  };
+  const onCellPointerEnter = (idx: number) => {
+    if (dragFromIdx === null) return;
+    if (idx !== dragFromIdx) setDragOverIdx(idx);
+  };
+  const onCellPointerUp = () => {
+    if (dragFromIdx !== null && dragOverIdx !== null && dragFromIdx !== dragOverIdx) {
+      handleSlotSwap(dragFromIdx, dragOverIdx);
+    }
+    setDragFromIdx(null);
+    setDragOverIdx(null);
+  };
+  // 全局兜底: 鼠标在节点外释放也算松手
+  React.useEffect(() => {
+    if (dragFromIdx === null) return;
+    const onUp = () => {
+      if (dragFromIdx !== null && dragOverIdx !== null && dragFromIdx !== dragOverIdx) {
+        handleSlotSwap(dragFromIdx, dragOverIdx);
+      }
+      setDragFromIdx(null);
+      setDragOverIdx(null);
+    };
+    window.addEventListener('pointerup', onUp);
+    return () => window.removeEventListener('pointerup', onUp);
+  }, [dragFromIdx, dragOverIdx, inputImages, inputImageAssetIds, connectedImages, gridCount]);
 
   const handleImport = () => {
     const input = document.createElement('input');
@@ -224,10 +278,17 @@ export function GridMergeNodeContent({
               >
                 {Array.from({ length: gridCount }).map((_, idx) => {
                   const img = slotImage(inputImages, inputImageAssetIds, connectedImages, idx);
+                  const isDragging = dragFromIdx === idx;
+                  const isDragOver = dragOverIdx === idx && dragFromIdx !== null && dragFromIdx !== idx;
                   return (
                     <div
                       key={idx}
-                      className="relative bg-[#1a1a1a] rounded overflow-hidden flex items-center justify-center"
+                      onPointerDown={(e) => onCellPointerDown(e, idx)}
+                      onPointerEnter={() => onCellPointerEnter(idx)}
+                      onPointerUp={onCellPointerUp}
+                      className={`relative bg-[#1a1a1a] rounded overflow-hidden flex items-center justify-center select-none touch-none ${
+                        isDragging ? 'cursor-grabbing opacity-60' : 'cursor-grab'
+                      } ${isDragOver ? 'ring-2 ring-teal-400 ring-inset' : ''}`}
                     >
                       {hasResolvedImage(img) && img ? (
                         <>
@@ -236,15 +297,15 @@ export function GridMergeNodeContent({
                             assetId={img.assetId}
                             maxSide={1440}
                             quality={0.62}
-                            className="w-full h-full object-cover"
+                            className="w-full h-full object-cover pointer-events-none"
                             alt={`格${idx + 1}`}
                           />
-                          <div className="absolute top-0.5 left-0.5 text-[8px] font-bold text-teal-400 bg-black/60 px-1 rounded">
+                          <div className="absolute top-0.5 left-0.5 text-[8px] font-bold text-teal-400 bg-black/60 px-1 rounded pointer-events-none">
                             {idx + 1}
                           </div>
                         </>
                       ) : (
-                        <span className="text-gray-600 text-[10px]">{idx + 1}</span>
+                        <span className="text-gray-600 text-[10px] pointer-events-none">{idx + 1}</span>
                       )}
                     </div>
                   );

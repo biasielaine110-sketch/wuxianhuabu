@@ -163,6 +163,53 @@ export async function clearStoredDownloadDirectory(key: 'combined' | 'image' | '
   else cachedVideo = null;
 }
 
+/**
+ * 从已保存的 FileSystemFileHandle 解析其所在目录句柄。
+ * 用于：
+ *  1. 「另存为」拿到 json 文件句柄后，把同一目录注册为图片/视频下载目录
+ *  2. 老项目只存了文件句柄没存目录句柄时，回填目录句柄
+ * 失败（无权限 / 不支持 / 用户拒绝）时返回 null。
+ */
+export async function resolveDirectoryHandleFromFileHandle(
+  fileHandle: FileSystemFileHandle
+): Promise<FileSystemDirectoryHandle | null> {
+  if (!fileHandle) return null;
+  // 1) 先确保文件句柄本身有 readwrite 权限（getParent 通常需要）
+  try {
+    const w = fileHandle as unknown as {
+      queryPermission?: (opts: FileSystemHandlePermissionDescriptor) => Promise<PermissionState>;
+      requestPermission?: (opts: FileSystemHandlePermissionDescriptor) => Promise<PermissionState>;
+    };
+    if (typeof w.queryPermission === 'function') {
+      let st = await w.queryPermission({ mode: 'readwrite' });
+      if (st !== 'granted' && typeof w.requestPermission === 'function') {
+        st = await w.requestPermission({ mode: 'readwrite' });
+      }
+      if (st !== 'granted') {
+        // 退而求其次尝试 read（部分浏览器允许 read getParent）
+        let stRead = await w.queryPermission({ mode: 'read' });
+        if (stRead !== 'granted' && typeof w.requestPermission === 'function') {
+          stRead = await w.requestPermission({ mode: 'read' });
+        }
+        if (stRead !== 'granted') return null;
+      }
+    }
+  } catch {
+    return null;
+  }
+  // 2) 调 getParent
+  try {
+    const getParent = (fileHandle as unknown as {
+      getParent?: () => Promise<FileSystemDirectoryHandle>;
+    }).getParent;
+    if (typeof getParent !== 'function') return null;
+    const dir = await getParent.call(fileHandle);
+    return dir ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function verifyDirWritable(dir: FileSystemDirectoryHandle): Promise<boolean> {
   try {
     const opts: FileSystemHandlePermissionDescriptor = { mode: 'readwrite' };

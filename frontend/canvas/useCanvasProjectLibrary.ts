@@ -16,7 +16,7 @@ import {
   persistProjectDraftDirectoryHandle,
   removeProjectBackupFileHandle,
 } from '../services/projectBackupHandleStore';
-import { setActiveProjectDraftDownloadDirectory, supportsFileSystemAccess } from '../services/downloadPathSettings';
+import { setActiveProjectDraftDownloadDirectory, resolveDirectoryHandleFromFileHandle, supportsFileSystemAccess } from '../services/downloadPathSettings';
 import { DEFAULT_CANVAS_VIEW_SCALE, useCanvasStore } from '../stores/canvasStore';
 import {
   mergeCurrentCanvasIntoProjectList,
@@ -159,6 +159,20 @@ export function useCanvasProjectLibrary({
           );
         }
         setLastJsonFilename(handle?.name || filename);
+        // 拿到 JSON 文件句柄后, 主动解析出所在目录, 注册为图片/视频下载目录
+        // 这样后续点图片下载能自动写入 json 同路径, 不必再弹"另存为"
+        void (async () => {
+          try {
+            const dir = await resolveDirectoryHandleFromFileHandle(handle as FileSystemFileHandle);
+            if (!dir) return;
+            if (backupPid) {
+              await persistProjectDraftDirectoryHandle(backupPid, dir);
+            }
+            setActiveProjectDraftDownloadDirectory(dir);
+          } catch (e) {
+            console.warn('解析 json 所在目录失败, 图片下载将回退为弹窗', e);
+          }
+        })();
         return 'saved';
       } catch (err: any) {
         if (err?.name === 'AbortError') return 'aborted';
@@ -343,9 +357,30 @@ export function useCanvasProjectLibrary({
   useEffect(() => {
     if (!projectStoreReady || !activeProjectId) return;
     const pid = activeProjectId;
-    void getProjectDraftDirectoryHandle(pid).then((dir) => {
-      setActiveProjectDraftDownloadDirectory(dir ?? null);
-    });
+    void (async () => {
+      const existing = await getProjectDraftDirectoryHandle(pid);
+      if (existing) {
+        setActiveProjectDraftDownloadDirectory(existing);
+        return;
+      }
+      // 老项目: 只存了 fileHandle 没存 dirHandle, 从 fileHandle 推导
+      try {
+        const fh = await getProjectBackupFileHandle(pid);
+        if (!fh) {
+          setActiveProjectDraftDownloadDirectory(null);
+          return;
+        }
+        const dir = await resolveDirectoryHandleFromFileHandle(fh);
+        if (dir) {
+          await persistProjectDraftDirectoryHandle(pid, dir);
+          setActiveProjectDraftDownloadDirectory(dir);
+        } else {
+          setActiveProjectDraftDownloadDirectory(null);
+        }
+      } catch {
+        setActiveProjectDraftDownloadDirectory(null);
+      }
+    })();
     const p = projectsRef.current.find((x) => x.id === pid);
     if (p?.diskSaveEstablished) {
       setAutosaveIntervalMin((p.draftAutosaveIntervalMin ?? 5) as 0 | 5 | 10 | 20 | 30);
