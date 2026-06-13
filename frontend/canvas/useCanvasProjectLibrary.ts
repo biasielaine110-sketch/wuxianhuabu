@@ -1,6 +1,6 @@
-// Build marker: 2026-06-13 c06003e rebuild trigger
 import { useState, useRef, useCallback, useEffect, type RefObject } from 'react';
 import type { AuditImage, CanvasNode, Edge, Transform } from '../types';
+import { hydrateNodesMediaFromAssets } from './jsonExportMediaHydrate';
 import {
   loadProjectLibrary,
   saveProjectLibrary,
@@ -716,8 +716,12 @@ export function useCanvasProjectLibrary({
       // 走 projectSnapshotForJsonExport，它从 nodesRef.current（内存中带 base64）拿数据。
       // - 目标 == 当前活跃项目：取内存最新（带图）
       // - 目标 != 当前活跃项目：直接返回原 project（无法取到内存带图版本）
+      // 第二步：hydrate —— 把被 offload 到 IDB 资产库的大图（images[i]='' + imageAssetIds[i] 有值）
+      // 反向从 IDB 读回 base64 填到对应字段。这是确保 JSON 文件**真的**包含图片的关键。
+      // 之前 fa85a22 / 29d673d 不够，因为大图被自动 offload 后 images 数组里就是空字符串。
       const snapshot = projectSnapshotForJsonExport(project);
-      const payload = { ...snapshot };
+      const hydratedNodes = await hydrateNodesMediaFromAssets(snapshot.nodes || []);
+      const payload = { ...snapshot, nodes: hydratedNodes };
       delete (payload as { diskSaveEstablished?: boolean }).diskSaveEstablished;
       const r = await saveJsonToDisk(filename, payload, { backupProjectId: project.id });
       if (r !== 'saved') return;
