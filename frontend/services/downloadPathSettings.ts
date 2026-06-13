@@ -198,16 +198,39 @@ export async function resolveDirectoryHandleFromFileHandle(
     return null;
   }
   // 2) 调 getParent
+  let dir: FileSystemDirectoryHandle | null = null;
   try {
     const getParent = (fileHandle as unknown as {
       getParent?: () => Promise<FileSystemDirectoryHandle>;
     }).getParent;
     if (typeof getParent !== 'function') return null;
-    const dir = await getParent.call(fileHandle);
-    return dir ?? null;
+    dir = (await getParent.call(fileHandle)) ?? null;
   } catch {
     return null;
   }
+  if (!dir) return null;
+  // 3) 主动给目录句柄请求 readwrite 权限（getParent 只保证 inherited read，
+  //    不一定有 readwrite；显式触发一次授权弹窗，让用户一次性确认，
+  //    后续图片/视频下载才能直接写入而不再静默回退到另存为）
+  try {
+    const dw = dir as unknown as {
+      queryPermission?: (opts: FileSystemHandlePermissionDescriptor) => Promise<PermissionState>;
+      requestPermission?: (opts: FileSystemHandlePermissionDescriptor) => Promise<PermissionState>;
+    };
+    if (typeof dw.queryPermission === 'function') {
+      let stDir = await dw.queryPermission({ mode: 'readwrite' });
+      if (stDir !== 'granted' && typeof dw.requestPermission === 'function') {
+        stDir = await dw.requestPermission({ mode: 'readwrite' });
+      }
+      if (stDir !== 'granted') {
+        // 用户拒绝授权，目录写入不可用
+        return null;
+      }
+    }
+  } catch {
+    return null;
+  }
+  return dir;
 }
 
 async function verifyDirWritable(dir: FileSystemDirectoryHandle): Promise<boolean> {

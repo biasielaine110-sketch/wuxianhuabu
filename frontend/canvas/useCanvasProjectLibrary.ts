@@ -360,6 +360,27 @@ export function useCanvasProjectLibrary({
     void (async () => {
       const existing = await getProjectDraftDirectoryHandle(pid);
       if (existing) {
+        // 已存的目录句柄：浏览器重启/权限过期时主动 requestPermission 重新授权，
+        // 避免后续下载时静默回退到另存为对话框（用户没注意系统弹窗）
+        try {
+          const w = existing as unknown as {
+            queryPermission?: (opts: FileSystemHandlePermissionDescriptor) => Promise<PermissionState>;
+            requestPermission?: (opts: FileSystemHandlePermissionDescriptor) => Promise<PermissionState>;
+          };
+          if (typeof w.queryPermission === 'function') {
+            let st = await w.queryPermission({ mode: 'readwrite' });
+            if (st !== 'granted' && typeof w.requestPermission === 'function') {
+              st = await w.requestPermission({ mode: 'readwrite' });
+            }
+            if (st !== 'granted') {
+              // 权限被撤销/拒绝：清掉，下次保存 json 时重新让用户选择目录
+              setActiveProjectDraftDownloadDirectory(null);
+              return;
+            }
+          }
+        } catch {
+          // ignore - 仍尝试保留句柄，下载时再 verify
+        }
         setActiveProjectDraftDownloadDirectory(existing);
         return;
       }
