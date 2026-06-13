@@ -699,7 +699,14 @@ export function useCanvasProjectLibrary({
   const handleExportProjectJson = useCallback(
     async (project: CanvasProject) => {
       const filename = `${projectExportBasename(project)}.json`;
-      const payload = { ...project };
+      // JSON 导出必须带图：state 中 project 是 strip 过的（mergeCurrentCanvasIntoProjectList
+      // 主动 strip 以减小 IDB 写入量），所以这里用内存中当前画布（带 base64）作为数据源。
+      // - 若目标项目 == 当前活跃项目：直接用 projectSnapshotForJsonExport
+      // - 若目标项目 != 当前活跃项目：尝试用 activeProjectId 闭包内的 nodesRef.current 中
+      //   同 id 节点（一般情况下只有当前活跃项目会在内存里；非活跃项目拿不到带图版本）
+      // 最小变更：不动 mergeCurrentCanvasIntoProjectList（保持 IDB 容量控制）。
+      const snapshot = projectSnapshotForJsonExport(project);
+      const payload = { ...snapshot };
       delete (payload as { diskSaveEstablished?: boolean }).diskSaveEstablished;
       const r = await saveJsonToDisk(filename, payload, { backupProjectId: project.id });
       if (r !== 'saved') return;
@@ -711,7 +718,7 @@ export function useCanvasProjectLibrary({
         return next;
       });
     },
-    [saveJsonToDisk]
+    [saveJsonToDisk, projectSnapshotForJsonExport]
   );
 
   /** 项目管理「打开位置」：需已填「草稿存储位置」或已绑定另存为 JSON；再提示 IndexedDB 与参考路径 */
