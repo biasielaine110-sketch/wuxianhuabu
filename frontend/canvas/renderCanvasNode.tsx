@@ -573,12 +573,31 @@ return (
               <div
                 className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] overflow-y-auto leading-relaxed whitespace-pre-wrap break-words text-node-content relative cursor-grab active:cursor-grabbing"
                 style={{ fontSize: textNodeFontSizeLocal + 'px', minHeight: '120px' }}
-                onDoubleClick={(e) => {
-                  if (!isSelected) {
+                onPointerDown={(e) => {
+                  // pointerdown 时间戳 + 位置 dblclick 检测 (兼容 node 拖拽干扰浏览器原生 dblclick 的场景)
+                  if (e.button !== 0) return;
+                  const now = Date.now();
+                  const dx = Math.abs(e.clientX - s.textNodeLastClickPosRef.current.x);
+                  const dy = Math.abs(e.clientY - s.textNodeLastClickPosRef.current.y);
+                  const inTime = now - s.textNodeLastClickAtRef.current < 380;
+                  const inPlace = dx < 12 && dy < 12;
+                  if (inTime && inPlace) {
+                    // 二次按下: 触发"双击进入编辑"（不走浏览器 dblclick, 避免被 node 拖拽/选区等行为干扰）
+                    s.textNodeLastClickAtRef.current = 0;
                     e.stopPropagation();
-                    s.setSelectedIds([node.id]);
+                    e.preventDefault();
+                    if (!isSelected) s.setSelectedIds([node.id]);
                     s.setEditingTextNodeIds(prev => { const next = new Set(prev); next.add(node.id); return next; });
+                  } else {
+                    s.textNodeLastClickAtRef.current = now;
+                    s.textNodeLastClickPosRef.current = { x: e.clientX, y: e.clientY };
                   }
+                }}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  s.textNodeLastClickAtRef.current = 0;
+                  if (!isSelected) s.setSelectedIds([node.id]);
+                  s.setEditingTextNodeIds(prev => { const next = new Set(prev); next.add(node.id); return next; });
                 }}
               >
                 {node.isGenerating ? (
@@ -617,6 +636,7 @@ return (
             ) : (
             <textarea
               data-node-prompt={node.id}
+              autoFocus={node.type === 'text'}
               className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] focus:outline-none focus:border-blue-500 transition-colors resize-none leading-relaxed text-node-textarea" style={{ fontSize: textNodeFontSizeLocal + 'px', minHeight: node.type === 'i2i' ? '80px' : '120px' }}
               value={node.prompt}
               onChange={(e) => s.handleUpdateNode(node.id, { prompt: e.target.value })}

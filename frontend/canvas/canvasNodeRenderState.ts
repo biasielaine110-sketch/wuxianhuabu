@@ -30,6 +30,10 @@ export type CanvasNodeRenderState = {
   generationStartedAtRef: MutableRefObject<Map<string, number>>;
   fileInputRef: MutableRefObject<HTMLInputElement | null>;
   bigEditorLastClickRef: MutableRefObject<number>;
+  /** 文本节点 pointerdown dblclick 兜底检测: 上次点击时间戳 (ms) */
+  textNodeLastClickAtRef: MutableRefObject<number>;
+  /** 文本节点 pointerdown dblclick 兜底检测: 上次点击 clientX/Y */
+  textNodeLastClickPosRef: MutableRefObject<{ x: number; y: number }>;
   canReceiveConnection: (node: CanvasNode) => boolean;
   handleUpdateNode: (id: string, updates: Partial<CanvasNode>) => void;
   handleNodePointerDown: (e: PointerEvent, id: string) => void;

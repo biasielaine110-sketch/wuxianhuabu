@@ -260,6 +260,8 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
   const [bigEditorValue, setBigEditorValue] = useState('');
   const bigEditorOnSaveRef = useRef<((v: string) => void) | null>(null);
   const bigEditorLastClickRef = useRef(0);
+  const textNodeLastClickAtRef = useRef(0);
+  const textNodeLastClickPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   /** 双击 textarea 时调用：打开全局大编辑框 */
   const openBigEditor = useCallback((current: string, onSave: (v: string) => void) => {
@@ -1647,6 +1649,8 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     generationStartedAtRef,
     fileInputRef,
     bigEditorLastClickRef,
+    textNodeLastClickAtRef,
+    textNodeLastClickPosRef,
     canReceiveConnection,
     handleUpdateNode,
     handleNodePointerDown,
