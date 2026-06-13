@@ -156,6 +156,8 @@ export interface AnnotationNode extends CanvasNode {
   annotations?: Annotation[];
   isEditing?: boolean;
   selectedAnnotationId?: string;
+  /** 导出缩放比例（100/70/50），脱离视野/失焦后保留 */
+  exportScale?: number;
 }
 
 export interface Annotation {

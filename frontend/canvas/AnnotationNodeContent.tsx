@@ -1,7 +1,8 @@
 ﻿import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Annotation, AnnotationNode, CanvasNode, Edge } from '../types';
-import { CopyIcon, EyedropperIcon, FullscreenIcon, ImageIcon } from './canvasIcons';
+import { CopyIcon, EyedropperIcon, FullscreenIcon, ImageIcon, FlipHorizontalIcon } from './canvasIcons';
+import { flipAndStoreAsset } from './imageFlipUtils';
 import { OptimizedImage } from './OptimizedImage';
 import { getNodePrimaryImageRef } from '../referenceSlots';
 import { findAnnotationAtPoint, translateAnnotation } from './annotationTransform';
@@ -31,7 +32,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
   const containerRef = useRef<HTMLDivElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentTool, setCurrentTool] = useState<'rect' | 'circle' | 'arrow' | 'pen' | 'text' | 'fillRect' | 'fillCircle' | 'crop' | 'move'>('rect');
-  const [exportScale, setExportScale] = useState(100);
+  const [exportScale, setExportScale] = useState<number>(node.exportScale ?? 100);
   const [currentColor, setCurrentColor] = useState('#ff6b6b');
   const [fillOpacity, setFillOpacity] = useState(0.45);
   const fillOpacityRef = useRef(0.45);
@@ -2738,7 +2739,11 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
         <select
           value={exportScale}
           onPointerDown={(e) => e.stopPropagation()}
-          onChange={(e) => setExportScale(Number(e.target.value))}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            setExportScale(v);
+            onUpdate({ exportScale: v });
+          }}
           className="rounded border border-[#444] bg-[#333] px-1 py-0.5 text-[10px] text-gray-200 outline-none cursor-pointer"
         >
           <option value="100">100%</option>
@@ -2895,6 +2900,29 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
           title="复制图片"
         >
           <CopyIcon size={12} />
+        </button>
+        <button
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={async () => {
+            if (!sourceImage) {
+              alert('请先导入图片');
+              return;
+            }
+            const flipped = await flipAndStoreAsset({
+              base64: sourceImage,
+              assetId: (node as AnnotationNode).sourceImageAssetId,
+            });
+            if (flipped) {
+              const patch: Partial<AnnotationNode> = { sourceImage: flipped.base64 };
+              if (flipped.assetId) patch.sourceImageAssetId = flipped.assetId;
+              onUpdate(patch);
+            }
+          }}
+          disabled={!hasSourceImage}
+          className="py-1 px-2 rounded text-[10px] bg-purple-700 hover:bg-purple-600 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+          title="水平翻转源图片（覆写原图）"
+        >
+          <FlipHorizontalIcon size={12} />
         </button>
         <button
           onPointerDown={(e) => e.stopPropagation()}

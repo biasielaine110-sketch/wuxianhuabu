@@ -27,7 +27,8 @@ import { I2iPresetCategorySelect } from './I2iPresetCategorySelect';
 import { I2iAspectRatioSelect } from './I2iAspectRatioSelect';
 import { T2iPresetCategorySelect } from './T2iPresetCategorySelect';
 import { PANORAMA_PRESET_KEYS } from './initialPromptPresets';
-import { EyedropperIcon, ImageIcon, CopyIcon, LoaderIcon } from './canvasIcons';
+import { EyedropperIcon, ImageIcon, CopyIcon, LoaderIcon, FlipHorizontalIcon } from './canvasIcons';
+import { flipAndStoreAsset } from './imageFlipUtils';
 import {
   defaultCanvasImageModel,
   isGptImage2CanvasModelId,
@@ -707,6 +708,46 @@ return (
               title="复制视口到图片节点"
             >
               <CopyIcon size={10} /> 复制
+            </button>
+            <button
+              onPointerDown={(e) => { e.stopPropagation(); }}
+              onClick={async () => {
+                if ((node.images?.length ?? 0) === 0) {
+                  alert('该节点还没有图片可翻转');
+                  return;
+                }
+                const imgs = node.images ?? [];
+                const ids = node.imageAssetIds ?? [];
+                const nextImgs: string[] = [];
+                const nextIds: string[] = [];
+                for (let i = 0; i < imgs.length; i++) {
+                  const cur = imgs[i];
+                  const id = ids[i];
+                  if (!cur || cur.length <= 80) {
+                    if (id) {
+                      nextImgs.push('');
+                      nextIds.push(id);
+                    } else {
+                      nextImgs.push(cur ?? '');
+                      nextIds.push('');
+                    }
+                    continue;
+                  }
+                  const flipped = await flipAndStoreAsset({ base64: cur, assetId: id });
+                  if (flipped) {
+                    nextImgs.push(flipped.base64);
+                    nextIds.push(flipped.assetId ?? '');
+                  } else {
+                    nextImgs.push(cur);
+                    nextIds.push(id ?? '');
+                  }
+                }
+                s.handleUpdateNode(node.id, { images: nextImgs, imageAssetIds: nextIds });
+              }}
+              className="py-1 px-2 rounded text-[10px] bg-purple-700 hover:bg-purple-600 text-white flex items-center gap-1"
+              title="水平翻转所有图片（覆写原图）"
+            >
+              <FlipHorizontalIcon size={10} /> 翻转
             </button>
           </div>
           {/* 内容区域 */}

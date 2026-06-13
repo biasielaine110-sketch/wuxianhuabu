@@ -113,14 +113,14 @@ export function GridSplitNodeContent({
       let drawX = 0;
       let drawY = 0;
       if (sourceRatio > frameRatio) {
-        // 源图更宽 → 按高度缩放，左右填白
-        drawH = frameHeight * (img.height / frameHeight);
+        // 源图更宽 → 按高度缩放，让源图高度 = frameHeight，左右填白
+        drawH = frameHeight;
         drawW = drawH * sourceRatio;
         drawX = (frameWidth - drawW) / 2;
         drawY = 0;
       } else {
-        // 源图更高 → 按宽度缩放，上下填白
-        drawW = frameWidth * (img.width / frameWidth);
+        // 源图更高/更方 → 按宽度缩放，让源图宽度 = frameWidth，上下填白
+        drawW = frameWidth;
         drawH = drawW / sourceRatio;
         drawX = 0;
         drawY = (frameHeight - drawH) / 2;
