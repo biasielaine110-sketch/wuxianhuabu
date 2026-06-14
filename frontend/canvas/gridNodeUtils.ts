@@ -3,10 +3,10 @@ import type { CanvasNode, Edge } from '../types';
 export type ResolvedGridImage = { base64?: string; assetId?: string };
 
 export function getGridLayout(gridCount: number): { cols: number; rows: number } {
-  // 3 宫：竖向 3 行 1 列；9 宫：3×3；6 宫：2×3；4 宫：2×2
+  // 3 宫：竖向 3 行 1 列；9 宫：3×3；6 宫：2×3（一行 2 个宫格，3 行）；4 宫：2×2
   if (gridCount === 3) return { cols: 1, rows: 3 };
   if (gridCount <= 4) return { cols: 2, rows: 2 };
-  if (gridCount === 6) return { cols: 3, rows: 2 };
+  if (gridCount === 6) return { cols: 2, rows: 3 };
   return { cols: 3, rows: 3 };
 }
 
