@@ -1,6 +1,6 @@
 import React from 'react';
 import type { CanvasNode } from '../types';
-import { hasCanvasImagePayload } from '../services/canvasAssetResolver';
+import { hasCanvasImagePayload, resolveCanvasImageSource } from '../services/canvasAssetResolver';
 import type { CopyToImageOptions } from './copyToImageOptions';
 import { GenerationHoloOverlay } from './GenerationHoloOverlay';
 import { GenerationTimer } from './GenerationTimer';
@@ -130,9 +130,12 @@ export function CanvasImageGenArea({
                 <button
                   onPointerDown={(e) => {
                     e.stopPropagation();
+                    const slotAssetId = imageAssetIds?.[currentIndex];
                     const imgData = images[currentIndex];
-                    if (!imgData) return;
-                    onDownloadImage(imgData);
+                    if (!hasCanvasImagePayload(imgData, slotAssetId)) return;
+                    void resolveCanvasImageSource(imgData, slotAssetId).then((src) => {
+                      if (src) onDownloadImage(src);
+                    });
                   }}
                   className="p-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg text-white backdrop-blur-sm shadow-lg flex items-center justify-center"
                   title="下载图片"
