@@ -2765,6 +2765,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
           className="rounded border border-[#444] bg-[#333] px-1 py-0.5 text-[10px] text-gray-200 outline-none cursor-pointer"
         >
           <option value="100">100%</option>
+          <option value="85">85%</option>
           <option value="70">70%</option>
           <option value="60">60%</option>
           <option value="50">50%</option>
