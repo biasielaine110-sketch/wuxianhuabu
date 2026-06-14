@@ -221,7 +221,27 @@ export function GridMergeNodeContent({
         }
       }
 
-      const result = canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
+      // 缩放：默认 100%（与原图同分辨率），用户可在 UI 上下拉调整并触发 rescale
+      const scalePercent = (() => {
+        const v = node.exportScale;
+        return Number.isFinite(v) && v! > 0 ? (v as number) : 100;
+      })();
+      const scaleRatio = scalePercent / 100;
+      const outW = Math.max(1, Math.round(canvas.width * scaleRatio));
+      const outH = Math.max(1, Math.round(canvas.height * scaleRatio));
+      let result: string;
+      if (scaleRatio === 1) {
+        result = canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
+      } else {
+        const scaled = document.createElement('canvas');
+        scaled.width = outW;
+        scaled.height = outH;
+        const sctx = scaled.getContext('2d')!;
+        sctx.imageSmoothingEnabled = true;
+        sctx.imageSmoothingQuality = 'high';
+        sctx.drawImage(canvas, 0, 0, outW, outH);
+        result = scaled.toDataURL('image/jpeg', 0.95).split(',')[1];
+      }
       let update: Partial<GridMergeNode> = {
         outputImage: result,
         outputImageAssetId: undefined,
@@ -251,6 +271,56 @@ export function GridMergeNodeContent({
     if (outputImageAssetId) {
       onCreateImageNode('', node.x + node.width + 50, node.y, outputImageAssetId);
     }
+  };
+
+  /**
+   * 把已有的 outputImage（或 outputImageAssetId）按给定比例重新缩放写出。
+   * 仅走一遍 canvas decode → drawImage → toDataURL，避开重新跑合并/letterbox 流程。
+   * 用于用户调整「缩放」下拉后立即按新比例重写 output。
+   */
+  const handleRescaleOutput = async (scalePercent: number) => {
+    if (!outputImage && !outputImageAssetId) return;
+    if (!Number.isFinite(scalePercent) || scalePercent <= 0) return;
+    setIsProcessing(true);
+    try {
+      const src = await resolveImageSrc(outputImage, outputImageAssetId);
+      const img = await loadImageElement(src);
+      const ratio = scalePercent / 100;
+      const outW = Math.max(1, Math.round(img.width * ratio));
+      const outH = Math.max(1, Math.round(img.height * ratio));
+      const scaled = document.createElement('canvas');
+      scaled.width = outW;
+      scaled.height = outH;
+      const ctx = scaled.getContext('2d')!;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, outW, outH);
+      const result = scaled.toDataURL('image/jpeg', 0.95).split(',')[1];
+      let update: Partial<GridMergeNode> = {
+        exportScale: scalePercent,
+        outputImage: result,
+        outputImageAssetId: undefined,
+      };
+      const patch = await buildNodeMediaOffloadPatch({ ...node, ...update });
+      if (patch) {
+        update = { ...update, ...(patch as Partial<GridMergeNode>) };
+      }
+      onUpdate(update);
+    } catch (error) {
+      console.error('缩放失败:', error);
+      alert('缩放失败');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const onChangeExportScale = (v: number) => {
+    if (!outputImage && !outputImageAssetId) {
+      // 还没有合并结果, 仅持久化用户选择, 等下次合并时生效
+      onUpdate({ exportScale: v });
+      return;
+    }
+    void handleRescaleOutput(v);
   };
 
   const hasPreviewSlots =
@@ -405,6 +475,29 @@ export function GridMergeNodeContent({
             className="w-16 h-16 object-cover rounded border border-[#444]"
             alt="合并结果"
           />
+          <div className="flex items-center gap-1 shrink-0">
+            <span className="text-[10px] text-gray-400">缩放:</span>
+            <select
+              value={node.exportScale ?? 100}
+              onPointerDown={(e) => e.stopPropagation()}
+              onChange={(e) => onChangeExportScale(Number(e.target.value))}
+              disabled={isProcessing}
+              className="rounded border border-[#444] bg-[#333] px-1 py-0.5 text-[10px] text-gray-200 outline-none cursor-pointer disabled:opacity-50"
+              title="合并后再次按比例缩放导出（不必重新合并）"
+            >
+              <option value="100">100%</option>
+              <option value="85">85%</option>
+              <option value="70">70%</option>
+              <option value="60">60%</option>
+              <option value="50">50%</option>
+              <option value="40">40%</option>
+              <option value="35">35%</option>
+              <option value="25">25%</option>
+              <option value="10">10%</option>
+              <option value="5">5%</option>
+              <option value="2">2%</option>
+            </select>
+          </div>
           <button
             onPointerDown={(e) => e.stopPropagation()}
             onClick={() => void handleExport()}

@@ -294,6 +294,12 @@ export interface GridMergeNode extends CanvasNode {
   aspectRatio?: '16:9' | '9:16';
   outputImage?: string;
   outputImageAssetId?: string;
+  /**
+   * 合并结果导出时的缩放比例（与「图片标注节点」的 exportScale 字段语义一致）。
+   * 用户可在合并后再调整此值，节点会用新比例重新缩放 outputImage 写出，
+   * 无需重新执行合并。
+   */
+  exportScale?: number;
 }
 
 // 全景图生成节点（21:9 画幅）
