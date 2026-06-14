@@ -2929,6 +2929,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
             // 优先用 node 自身的 sourceImage，没有再从链接图取
             let base64: string | undefined = sourceImage || undefined;
             let assetId: string | undefined = (node as AnnotationNode).sourceImageAssetId;
+            // offload 后 base64 可能为空但 assetId 还有效；只要二者有其一即可
             if ((!base64 || base64.length <= 80) && !assetId) {
               const firstSrcNode = sourceNodes.find((sn) => getNodePrimaryImageRef(sn) !== null);
               if (firstSrcNode) {
@@ -2943,24 +2944,30 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
               alert('请先导入或连接一张图片');
               return;
             }
-            const flipped = await flipAndStoreAsset({
-              base64: base64,
-              assetId: assetId,
-            });
-            if (flipped) {
-              // 翻转后写回 node.sourceImage（链接图时也"实体化"到 annotation 节点）
-              const patch: Partial<AnnotationNode> = { sourceImage: flipped.base64 };
-              if (flipped.assetId) patch.sourceImageAssetId = flipped.assetId;
-              onUpdate(patch);
-            } else {
-              console.warn('[annotation flip] 翻转失败，未获取到新图');
+            try {
+              const flipped = await flipAndStoreAsset({
+                base64: base64,
+                assetId: assetId,
+              });
+              if (flipped) {
+                // 翻转后写回 node.sourceImage（链接图时也"实体化"到 annotation 节点）
+                const patch: Partial<AnnotationNode> = { sourceImage: flipped.base64 };
+                if (flipped.assetId) patch.sourceImageAssetId = flipped.assetId;
+                onUpdate(patch);
+              } else {
+                console.warn('[annotation flip] 翻转失败，未获取到新图', { base64Len: base64?.length, hasAssetId: !!assetId });
+                alert('翻转失败：未读取到原图（assetId 可能已失效）。请重新导入图片后重试。');
+              }
+            } catch (err) {
+              console.warn('[annotation flip] 翻转异常', err);
+              alert(`翻转失败：${err instanceof Error ? err.message : '未知错误'}`);
             }
           }}
           disabled={!hasSourceImage && connectedRefCount === 0}
           className="py-1 px-2 rounded text-[10px] bg-purple-700 hover:bg-purple-600 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
           title="水平翻转源图片（覆写原图，支持链接图）"
         >
-          <FlipHorizontalIcon size={12} />
+          <FlipHorizontalIcon size={24} />
         </button>
         <button
           onPointerDown={(e) => e.stopPropagation()}
