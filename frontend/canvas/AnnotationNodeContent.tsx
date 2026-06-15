@@ -2367,17 +2367,15 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       alert('请先导入图片');
       return;
     }
-    if (exportScale === 100 && currentAnnots.length === 0) {
-      alert('请先添加标注');
-      return;
-    }
+    // 无标注时强制按 100% 输出（标注为空再缩放没意义，且允许用户翻转后直接生成图节点）
+    const effectiveScale = currentAnnots.length === 0 ? 100 : exportScale;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const img = new Image();
     img.onload = () => {
-      const scaleRatio = exportScale / 100;
+      const scaleRatio = effectiveScale / 100;
       const outW = Math.round(img.width * scaleRatio);
       const outH = Math.round(img.height * scaleRatio);
       const tempCanvas = document.createElement('canvas');
@@ -3039,7 +3037,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       <button
         onPointerDown={(e) => e.stopPropagation()}
         onClick={confirmAnnotations}
-        disabled={!hasSourceImage || (exportScale === 100 && annotations.length === 0)}
+        disabled={!hasSourceImage}
         className="w-full py-1 px-2 rounded text-[10px] bg-green-700 hover:bg-green-600 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1 shrink-0"
       >
         确认标注 ({annotations.length})
