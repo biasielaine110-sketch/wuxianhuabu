@@ -213,6 +213,8 @@ export interface CanvasNode {
   activePresets?: string[]; // 当前激活的预设名称列表（用于多选预设）
   chatInputHeight?: number; // 对话节点输入框高度
   panoramaPromptHeight?: number; // 全景图生成节点提示词高度
+  /** 缩略图重渲染节流：图片写入后 bump 一次，触发 OptimizedImage / ResponsiveImagePreview 重新挂载 */
+  _thumbTick?: number;
   /** 视频生成节点：成品 mp4 等 URL（ToAPIs 返回，24h 内有效） */
   videos?: string[];
   currentVideoIndex?: number;

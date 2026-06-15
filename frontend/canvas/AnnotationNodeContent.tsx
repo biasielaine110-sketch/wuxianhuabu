@@ -1,7 +1,7 @@
 ﻿import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Annotation, AnnotationNode, CanvasNode, Edge } from '../types';
-import { CopyIcon, EyedropperIcon, FullscreenIcon, ImageIcon, FlipHorizontalIcon } from './canvasIcons';
+import { CopyIcon, EyedropperIcon, FullscreenIcon, ImageIcon, FlipHorizontalIcon, LoaderIcon } from './canvasIcons';
 import { flipAndStoreAsset } from './imageFlipUtils';
 import { OptimizedImage } from './OptimizedImage';
 import { getNodePrimaryImageRef } from '../referenceSlots';
@@ -31,6 +31,8 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
+  /** 翻转源图片进行中（防连点 + 视觉反馈） */
+  const [isFlipping, setIsFlipping] = useState(false);
   const [currentTool, setCurrentTool] = useState<'rect' | 'circle' | 'arrow' | 'pen' | 'text' | 'fillRect' | 'fillCircle' | 'crop' | 'move'>('rect');
   const [exportScale, setExportScale] = useState<number>(node.exportScale ?? 100);
   const [currentColor, setCurrentColor] = useState('#ff6b6b');
@@ -2926,6 +2928,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
         <button
           onPointerDown={(e) => e.stopPropagation()}
           onClick={async () => {
+            if (isFlipping) return;
             // 优先用 node 自身的 sourceImage，没有再从链接图取
             let base64: string | undefined = sourceImage || undefined;
             let assetId: string | undefined = (node as AnnotationNode).sourceImageAssetId;
@@ -2940,34 +2943,49 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
                 }
               }
             }
-            if ((!base64 || base64.length <= 80) && !assetId) {
+            const hasBase64 = !!(base64 && base64.length > 80);
+            if (!hasBase64 && !assetId) {
               alert('请先导入或连接一张图片');
               return;
             }
+            setIsFlipping(true);
             try {
               const flipped = await flipAndStoreAsset({
-                base64: base64,
-                assetId: assetId,
+                base64: hasBase64 ? base64 : undefined,
+                assetId,
               });
-              if (flipped) {
-                // 翻转后写回 node.sourceImage（链接图时也"实体化"到 annotation 节点）
-                const patch: Partial<AnnotationNode> = { sourceImage: flipped.base64 };
-                if (flipped.assetId) patch.sourceImageAssetId = flipped.assetId;
-                onUpdate(patch);
-              } else {
-                console.warn('[annotation flip] 翻转失败，未获取到新图', { base64Len: base64?.length, hasAssetId: !!assetId });
-                alert('翻转失败：未读取到原图（assetId 可能已失效）。请重新导入图片后重试。');
-              }
+              // 翻转后写回 node.sourceImage（链接图时也"实体化"到 annotation 节点）
+              const patch: Partial<AnnotationNode> = {
+                sourceImage: flipped.base64,
+                // bump _thumbTick 强制 OptimizedImage 重新挂载，避免部分浏览器缓存旧图
+                _thumbTick: ((node as AnnotationNode & { _thumbTick?: number })._thumbTick ?? 0) + 1,
+              } as Partial<AnnotationNode>;
+              if (flipped.assetId) patch.sourceImageAssetId = flipped.assetId;
+              onUpdate(patch);
             } catch (err) {
               console.warn('[annotation flip] 翻转异常', err);
-              alert(`翻转失败：${err instanceof Error ? err.message : '未知错误'}`);
+              const reasonMap: Record<string, string> = {
+                'asset-missing': '原图资产在 IndexedDB 中已失效（可能草稿清理时被删除）。请重新导入图片后重试。',
+                'decode-failed': '原图解码失败（可能格式不兼容或浏览器内存不足）。请尝试重新导入图片。',
+                'canvas-failed': '画布读取失败（可能跨域或浏览器 Canvas 被禁用）。',
+                'no-source': '未找到可用原图。',
+              };
+              const reason =
+                err && typeof err === 'object' && 'reason' in err
+                  ? reasonMap[(err as { reason: string }).reason] ?? (err as unknown as Error).message
+                  : err instanceof Error
+                    ? err.message
+                    : '未知错误';
+              alert(`翻转失败：${reason}`);
+            } finally {
+              setIsFlipping(false);
             }
           }}
-          disabled={!hasSourceImage && connectedRefCount === 0}
+          disabled={(!hasSourceImage && connectedRefCount === 0) || isFlipping}
           className="py-1 px-2 rounded text-[10px] bg-purple-700 hover:bg-purple-600 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
-          title="水平翻转源图片（覆写原图，支持链接图）"
+          title={isFlipping ? '翻转中…' : '水平翻转源图片（覆写原图，支持链接图）'}
         >
-          <FlipHorizontalIcon size={24} />
+          {isFlipping ? <LoaderIcon size={12} /> : <FlipHorizontalIcon size={24} />}
         </button>
         <button
           onPointerDown={(e) => e.stopPropagation()}

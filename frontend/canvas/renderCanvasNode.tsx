@@ -734,61 +734,91 @@ return (
               onClick={async () => {
                 const imgs = node.images ?? [];
                 const ids = node.imageAssetIds ?? [];
-                // 1) 节点已有图 → 翻转所有
-                if (imgs.length > 0) {
-                  const nextImgs: string[] = [];
-                  const nextIds: string[] = [];
-                  for (let i = 0; i < imgs.length; i++) {
-                    const cur = imgs[i];
-                    const id = ids[i];
-                    if (!cur || cur.length <= 80) {
-                      if (id) {
-                        nextImgs.push('');
-                        nextIds.push(id);
-                      } else {
-                        nextImgs.push(cur ?? '');
-                        nextIds.push('');
-                      }
-                      continue;
-                    }
-                    const flipped = await flipAndStoreAsset({ base64: cur, assetId: id });
-                    if (flipped) {
-                      nextImgs.push(flipped.base64);
-                      nextIds.push(flipped.assetId ?? '');
-                    } else {
-                      nextImgs.push(cur);
-                      nextIds.push(id ?? '');
-                    }
+                const reasonMap: Record<string, string> = {
+                  'asset-missing': '原图资产在 IndexedDB 中已失效（可能草稿清理时被删除）。请重新导入图片后重试。',
+                  'decode-failed': '原图解码失败（可能格式不兼容或浏览器内存不足）。请尝试重新导入图片。',
+                  'canvas-failed': '画布读取失败（可能跨域或浏览器 Canvas 被禁用）。',
+                  'no-source': '未找到可用原图。',
+                };
+                const reasonText = (err: unknown) => {
+                  if (err && typeof err === 'object' && 'reason' in err) {
+                    const r = (err as { reason: string }).reason;
+                    return reasonMap[r] ?? (err as unknown as Error).message;
                   }
-                  s.handleUpdateNode(node.id, { images: nextImgs, imageAssetIds: nextIds });
-                  return;
-                }
-                // 2) 节点空 → 取 I2I 链接的第一张参考图翻
-                const incoming = canvasEdges.filter((e) => e.targetId === node.id);
-                const firstSrcNode = incoming
-                  .map((e) => canvasNodes.find((n) => n.id === e.sourceId))
-                  .find((n): n is CanvasNode => !!n);
-                if (!firstSrcNode) {
-                  alert('请先生成图片或先连接参考图');
-                  return;
-                }
-                const { getNodePrimaryImageRef } = await import('../referenceSlots');
-                const ref = getNodePrimaryImageRef(firstSrcNode);
-                if (!ref?.base64 && !ref?.assetId) {
-                  alert('参考图不可用');
-                  return;
-                }
-                const flipped = await flipAndStoreAsset({
-                  base64: ref.base64,
-                  assetId: ref.assetId,
-                });
-                if (flipped) {
+                  return err instanceof Error ? err.message : '未知错误';
+                };
+                try {
+                  // 1) 节点已有图 → 翻转所有
+                  if (imgs.length > 0) {
+                    const nextImgs: string[] = [];
+                    const nextIds: string[] = [];
+                    let failureCount = 0;
+                    for (let i = 0; i < imgs.length; i++) {
+                      const cur = imgs[i];
+                      const id = ids[i];
+                      const hasBase64 = !!(cur && cur.length > 80);
+                      if (!hasBase64 && !id) {
+                        nextImgs.push(cur ?? '');
+                        nextIds.push(id ?? '');
+                        continue;
+                      }
+                      try {
+                        const flipped = await flipAndStoreAsset({
+                          base64: hasBase64 ? cur : undefined,
+                          assetId: id,
+                        });
+                        nextImgs.push(flipped.base64);
+                        nextIds.push(flipped.assetId ?? id ?? '');
+                      } catch (e) {
+                        console.warn('[panorama flip] 单图翻转失败', i, e);
+                        // 翻转失败保留原值，但记录失败次数
+                        nextImgs.push(cur ?? '');
+                        nextIds.push(id ?? '');
+                        failureCount++;
+                      }
+                    }
+                    // bump _thumbTick 强制 OptimizedImage / ResponsiveImagePreview 重新挂载
+                    s.handleUpdateNode(node.id, {
+                      images: nextImgs,
+                      imageAssetIds: nextIds,
+                      _thumbTick: ((node as CanvasNode & { _thumbTick?: number })._thumbTick ?? 0) + 1,
+                    });
+                    if (failureCount > 0 && failureCount === imgs.length) {
+                      alert(
+                        `翻转失败：${imgs.length} 张图全部翻转失败。\n首条原因：${reasonText('asset-missing')}\n请打开 F12 控制台查看 [panorama flip] 详细日志。`
+                      );
+                    } else if (failureCount > 0) {
+                      console.warn(`[panorama flip] ${imgs.length} 张图中 ${failureCount} 张翻转失败`);
+                    }
+                    return;
+                  }
+                  // 2) 节点空 → 取 I2I 链接的第一张参考图翻
+                  const incoming = canvasEdges.filter((e) => e.targetId === node.id);
+                  const firstSrcNode = incoming
+                    .map((e) => canvasNodes.find((n) => n.id === e.sourceId))
+                    .find((n): n is CanvasNode => !!n);
+                  if (!firstSrcNode) {
+                    alert('请先生成图片或先连接参考图');
+                    return;
+                  }
+                  const { getNodePrimaryImageRef } = await import('../referenceSlots');
+                  const ref = getNodePrimaryImageRef(firstSrcNode);
+                  if (!ref?.base64 && !ref?.assetId) {
+                    alert('参考图不可用');
+                    return;
+                  }
+                  const flipped = await flipAndStoreAsset({
+                    base64: ref.base64,
+                    assetId: ref.assetId,
+                  });
                   s.handleUpdateNode(node.id, {
                     images: [flipped.base64],
                     imageAssetIds: flipped.assetId ? [flipped.assetId] : [''],
+                    _thumbTick: ((node as CanvasNode & { _thumbTick?: number })._thumbTick ?? 0) + 1,
                   });
-                } else {
-                  console.warn('[panorama flip] 翻转失败');
+                } catch (err) {
+                  console.warn('[panorama flip] 翻转异常', err);
+                  alert(`翻转失败：${reasonText(err)}\n请打开 F12 控制台查看 [panorama flip] 详细日志。`);
                 }
               }}
               className="py-1 px-2 rounded text-[10px] bg-purple-700 hover:bg-purple-600 text-white flex items-center gap-1"

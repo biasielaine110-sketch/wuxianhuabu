@@ -5,6 +5,16 @@ import { getCanvasAssetRecord, putCanvasAssetFromBase64 } from '../services/canv
  * 支持 base64（纯 base64 或 data URI） / blob / assetId。
  * 返回新的 base64 + mime（无 data URI 前缀）。
  */
+export class FlipError extends Error {
+  /** 'no-source'：没有可用原图（既无 base64 也无 assetId） */
+  /** 'asset-missing'：有 assetId 但 IDB 中找不到对应记录 */
+  /** 'decode-failed'：createImageBitmap 解码失败 */
+  /** 'canvas-failed'：canvas toDataURL 失败 */
+  constructor(public reason: 'no-source' | 'asset-missing' | 'decode-failed' | 'canvas-failed', message?: string) {
+    super(message ?? reason);
+  }
+}
+
 export async function flipImageHorizontal(input: {
   base64?: string;
   assetId?: string;
@@ -13,6 +23,7 @@ export async function flipImageHorizontal(input: {
   let blob: Blob | null = null;
   let rawBase64: string | null = null;
   let mime = 'image/jpeg';
+  let assetIdMissing = false;
 
   if (input.base64 && input.base64.length > 80) {
     rawBase64 = input.base64;
@@ -24,21 +35,37 @@ export async function flipImageHorizontal(input: {
     if (rec?.blob) {
       blob = rec.blob;
       mime = rec.mime || blob.type || 'image/jpeg';
+    } else {
+      assetIdMissing = true;
     }
   }
 
   if (!blob && rawBase64) {
     blob = base64ToBlob(rawBase64, mime);
   }
-  if (!blob) return null;
+  if (!blob) {
+    if (assetIdMissing) {
+      throw new FlipError('asset-missing', '原图资产在 IndexedDB 中已失效');
+    }
+    if (rawBase64) {
+      // 有 base64 但 base64ToBlob / 解码失败
+      throw new FlipError('decode-failed', '原图 base64 解码失败');
+    }
+    throw new FlipError('no-source', '未提供原图 base64 或 assetId');
+  }
 
   // 2) 画到 canvas，水平翻转，再 toDataURL
-  const bitmap = await blobToBitmap(blob);
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await blobToBitmap(blob);
+  } catch (e) {
+    throw new FlipError('decode-failed', `ImageBitmap 解码失败：${e instanceof Error ? e.message : String(e)}`);
+  }
   const canvas = document.createElement('canvas');
   canvas.width = bitmap.width;
   canvas.height = bitmap.height;
   const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
+  if (!ctx) throw new FlipError('canvas-failed', 'Canvas 2D 上下文不可用');
   ctx.save();
   ctx.translate(canvas.width, 0);
   ctx.scale(-1, 1);
@@ -48,7 +75,7 @@ export async function flipImageHorizontal(input: {
 
   const dataUrl = canvas.toDataURL(mime);
   const m = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
-  if (!m) return null;
+  if (!m) throw new FlipError('canvas-failed', 'canvas.toDataURL 未返回有效 data URL');
   return { base64: m[2], mime: m[1] };
 }
 
@@ -105,13 +132,16 @@ function sniffImageMimeFromBase64(b64: string): string | null {
   return null;
 }
 
-/** 翻转后写回 IDB 资产库（如果原图有 assetId） */
+/** 翻转后写回 IDB 资产库（如果原图有 assetId）。失败时抛出 FlipError。 */
 export async function flipAndStoreAsset(input: {
   base64?: string;
   assetId?: string;
-}): Promise<{ base64: string; assetId?: string } | null> {
+}): Promise<{ base64: string; assetId?: string }> {
   const flipped = await flipImageHorizontal(input);
-  if (!flipped) return null;
+  if (!flipped) {
+    // 理论上 flipImageHorizontal 失败时会抛 FlipError；这里兜底
+    throw new FlipError('decode-failed', '翻转失败：flipImageHorizontal 返回 null');
+  }
   const out: { base64: string; assetId?: string } = { base64: flipped.base64 };
   if (input.assetId) {
     try {
@@ -119,6 +149,7 @@ export async function flipAndStoreAsset(input: {
       const newAssetId = await putCanvasAssetFromBase64(dataUrl);
       out.assetId = newAssetId;
     } catch (e) {
+      // IDB 写回失败：原 assetId 已不可用，但仍返回 base64 供调用方使用
       console.warn('[imageFlipUtils] 反向写回资产库失败，仅返回 base64', e);
     }
   }
