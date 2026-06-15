@@ -372,7 +372,29 @@ export function setMiniMaxKey(apiKey: string): void {
 export function getMiniMaxBaseUrl(): string {
   try {
     const raw = localStorage.getItem(MINIMAX_BASE_URL_STORAGE_KEY)?.trim();
-    return raw || DEFAULT_MINIMAX_BASE_URL;
+    if (!raw) return DEFAULT_MINIMAX_BASE_URL;
+    // 静默迁移：老用户 localStorage 里可能仍存着旧域名 api.minimax.io/v1，
+    // 旧域名已失效（401 invalid api key）。读到旧域名时自动改写到新域名 api.minimaxi.com/v1。
+    const normalized = raw.replace(/\/+$/, '').toLowerCase();
+    const LEGACY = 'https://api.minimax.io/v1';
+    if (
+      normalized === LEGACY ||
+      normalized.endsWith('.minimax.io')
+    ) {
+      try {
+        localStorage.setItem(MINIMAX_BASE_URL_STORAGE_KEY, DEFAULT_MINIMAX_BASE_URL);
+        console.info(
+          '[aiSettings] MiniMax base url 已自动迁移：',
+          raw,
+          '→',
+          DEFAULT_MINIMAX_BASE_URL
+        );
+      } catch {
+        /* 忽略 */
+      }
+      return DEFAULT_MINIMAX_BASE_URL;
+    }
+    return raw;
   } catch {
     return DEFAULT_MINIMAX_BASE_URL;
   }
