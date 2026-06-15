@@ -4,6 +4,7 @@ import { EyedropperIcon } from './canvasIcons';
 import {
   getConnectedImages,
   getGridLayout,
+  getNodeDisplayImage,
   loadImageElement,
   resolveImageSrc,
   type ResolvedGridImage,
@@ -74,6 +75,9 @@ export function GridMergeNodeContent({
    * 删除单个格子：清空该 idx 的 inputImages/inputImageAssetIds。
    * 如果该格当前显示的图来自 connectedImages (即未实体化)，需要把对应的入边也删掉，
    * 否则空 inputImages[idx] 仍会回退到 connectedImages[idx] 继续显示。
+   *
+   * 注意：connectedImages[idx] 与 incomingEdges[idx] 的 idx 含义是 "按 edges 数组顺序的第 N 个连接"，
+   * 并不一定对应用户拖入时的视觉位置。因此删边时必须按"当前 slot 显示的图"反查提供它的源边。
    */
   const handleClearSlot = (idx: number) => {
     const currentInputB64 = inputImages[idx];
@@ -86,11 +90,29 @@ export function GridMergeNodeContent({
     newImgs[idx] = '';
     newIds[idx] = '';
     onUpdate({ inputImages: newImgs, inputImageAssetIds: newIds });
-    // 2) 如果该格的图来自连接源，删掉对应的入边（connectedImages[idx] ↔ incomingEdges[idx]）
+    // 2) 如果该格的图来自连接源，按"当前显示的图"反查是哪条 source 边提供的，删掉那条边
     if (!fromInput) {
-      const incomingEdges = edges.filter((e) => e.targetId === node.id);
-      const edge = incomingEdges[idx];
-      if (edge && onDeleteEdge) onDeleteEdge(edge.id);
+      // 当前 slot 显示的图（来自 connectedImages[idx]）
+      const displayed = connectedImages[idx];
+      if (displayed) {
+        const incomingEdges = edges.filter((e) => e.targetId === node.id);
+        // 遍历所有入边，找其 source 节点提供的图 == displayed 的那条
+        const matchedEdge = incomingEdges.find((edge) => {
+          const sourceNode = nodes.find((n) => n.id === edge.sourceId);
+          if (!sourceNode) return false;
+          const sourceImg = getNodeDisplayImage(sourceNode);
+          if (!sourceImg) return false;
+          // 优先按 assetId 精确匹配（最稳），其次按 base64 内容匹配
+          if (displayed.assetId && sourceImg.assetId) {
+            return displayed.assetId === sourceImg.assetId;
+          }
+          if (displayed.base64 && sourceImg.base64) {
+            return displayed.base64 === sourceImg.base64;
+          }
+          return false;
+        });
+        if (matchedEdge && onDeleteEdge) onDeleteEdge(matchedEdge.id);
+      }
     }
   };
 
