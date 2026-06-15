@@ -69,7 +69,12 @@ export function GridMergeNodeContent({
 
   /**
    * 计算每个 slot 当前位置对应的入边 ID（用于精确删边）。
-   * 优先级：node._slotEdgeMap（用户 swap 之后） > 从 incomingEdges 顺序推导（未 swap 过）。
+   * 优先级：node._slotEdgeMap（用户 swap 之后） > 从与 getConnectedImages 同源的 source 列表推导（未 swap 过）。
+   *
+   * 重要：connectedImages 与 incomingEdges 的顺序约定不同——
+   * - incomingEdges：按 edges 数组顺序（=连线先后顺序）
+   * - connectedImages：按 nodes 数组顺序过滤 sourceIds（保证每次渲染稳定，与"视觉显示顺序"一致）
+   * 推导时必须使用与 connectedImages 完全相同的 source 顺序，否则删的边 ≠ 显示的图。
    */
   const incomingEdges = edges.filter((e) => e.targetId === node.id);
   const slotEdgeMap: Record<number, string> = (() => {
@@ -84,10 +89,27 @@ export function GridMergeNodeContent({
       }
       return result;
     }
-    // 未 swap 过：按 edges 数组顺序对齐到 slot 0..n-1
+    // 未 swap 过：按与 getConnectedImages 完全一致的 source 顺序（先按 edges 拿 sourceId 列表，再按 nodes 顺序过滤）
+    // 1) 收集入边的 sourceId 集合（保持 edges 数组顺序以去重）
+    const edgeSourceIdsInOrder: string[] = [];
+    const seen = new Set<string>();
+    for (const e of incomingEdges) {
+      if (!seen.has(e.sourceId)) {
+        seen.add(e.sourceId);
+        edgeSourceIdsInOrder.push(e.sourceId);
+      }
+    }
+    // 2) 按 nodes 数组顺序过滤（与 getConnectedImages 行为一致）
+    const sourceIdSet = new Set(edgeSourceIdsInOrder);
+    const sourceIdsByNodeOrder = nodes
+      .filter((n) => sourceIdSet.has(n.id))
+      .map((n) => n.id);
+    // 3) 用 sourceId → edgeId 映射，对齐到 slot 0..n-1
+    const edgeIdBySource = new Map(incomingEdges.map((e) => [e.sourceId, e.id]));
     const result: Record<number, string> = {};
     for (let i = 0; i < gridCount; i++) {
-      result[i] = incomingEdges[i]?.id ?? '';
+      const srcId = sourceIdsByNodeOrder[i];
+      result[i] = srcId ? (edgeIdBySource.get(srcId) ?? '') : '';
     }
     return result;
   })();
