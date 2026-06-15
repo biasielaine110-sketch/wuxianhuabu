@@ -5,10 +5,12 @@ import type { CanvasNode, PanoramaNode } from '../types';
 import {
   CopyIcon,
   EyedropperIcon,
+  FlipHorizontalIcon,
   FullscreenIcon,
   ImageIcon,
   PanoramaIcon,
 } from './canvasIcons';
+import { flipAndStoreAsset } from './imageFlipUtils';
 
 export interface PanoramaNodeContentProps {
   node: PanoramaNode;
@@ -1093,6 +1095,48 @@ export function PanoramaNodeContent({
             title={isFlipped ? '当前: 画面已左右翻转（点击恢复正常）' : '左右翻转画面（水平镜像）'}
           >
             左右翻转
+          </button>
+          <button
+            onPointerDown={(e) => { e.stopPropagation(); }}
+            onClick={async () => {
+              if (!panoramaImage && !panoramaImageAssetId) {
+                alert('请先导入全景图或从其他节点连线');
+                return;
+              }
+              try {
+                const flipped = await flipAndStoreAsset({
+                  base64: panoramaImage || undefined,
+                  assetId: panoramaImageAssetId,
+                });
+                const patch: Partial<PanoramaNode> = {
+                  panoramaImage: flipped.base64,
+                  _thumbTick: ((node as PanoramaNode & { _thumbTick?: number })._thumbTick ?? 0) + 1,
+                } as Partial<PanoramaNode>;
+                if (flipped.assetId) patch.panoramaImageAssetId = flipped.assetId;
+                onUpdate(patch);
+                // 强制重载纹理（texture cache key 变了）
+                setForceTextureReload((n) => n + 1);
+              } catch (err) {
+                console.warn('[panorama flip-image] 翻转异常', err);
+                const reasonMap: Record<string, string> = {
+                  'asset-missing': '原图资产在 IndexedDB 中已失效（可能草稿清理时被删除）。请重新导入图片后重试。',
+                  'decode-failed': '原图解码失败（可能格式不兼容或浏览器内存不足）。请尝试重新导入图片。',
+                  'canvas-failed': '画布读取失败（可能跨域或浏览器 Canvas 被禁用）。',
+                  'no-source': '未找到可用原图。',
+                };
+                const reason =
+                  err && typeof err === 'object' && 'reason' in err
+                    ? reasonMap[(err as { reason: string }).reason] ?? (err as unknown as Error).message
+                    : err instanceof Error
+                      ? err.message
+                      : '未知错误';
+                alert(`翻转图片失败：${reason}`);
+              }
+            }}
+            className="py-1 px-2 rounded text-[10px] flex items-center gap-1 bg-[#333] hover:bg-[#444] text-gray-300"
+            title="水平翻转全景图（覆写原图，跟画面镜像不同）"
+          >
+            <FlipHorizontalIcon size={12} /> 翻转图片
           </button>
         </div>
       </div>

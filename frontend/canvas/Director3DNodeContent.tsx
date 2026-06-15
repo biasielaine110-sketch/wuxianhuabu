@@ -17,6 +17,7 @@ import {
   DeleteIcon,
   CopyIcon,
   EyedropperIcon,
+  FlipHorizontalIcon,
   FullscreenIcon,
   ImageIcon,
   PersonIcon,
@@ -24,6 +25,7 @@ import {
   SparklesIcon,
   ViewIcon,
 } from './canvasIcons';
+import { flipAndStoreAsset } from './imageFlipUtils';
 
 export interface Director3DNodeContentProps {
   node: Director3DNode;
@@ -3147,6 +3149,46 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
           title="绕当前注视点旋转 360° 每 40° 一张（3×3）拼图"
         >
           9宫格
+        </button>
+        <button
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={async () => {
+            if (!backgroundImage && !backgroundImageAssetId) {
+              alert('请先导入背景图或从其他节点连线');
+              return;
+            }
+            try {
+              const flipped = await flipAndStoreAsset({
+                base64: backgroundImage || undefined,
+                assetId: backgroundImageAssetId,
+              });
+              const patch: Partial<Director3DNode> = {
+                backgroundImage: flipped.base64,
+                _thumbTick: ((node as Director3DNode & { _thumbTick?: number })._thumbTick ?? 0) + 1,
+              } as Partial<Director3DNode>;
+              if (flipped.assetId) patch.backgroundImageAssetId = flipped.assetId;
+              onUpdate(patch);
+            } catch (err) {
+              console.warn('[director3d flip-image] 翻转异常', err);
+              const reasonMap: Record<string, string> = {
+                'asset-missing': '原图资产在 IndexedDB 中已失效（可能草稿清理时被删除）。请重新导入图片后重试。',
+                'decode-failed': '原图解码失败（可能格式不兼容或浏览器内存不足）。请尝试重新导入图片。',
+                'canvas-failed': '画布读取失败（可能跨域或浏览器 Canvas 被禁用）。',
+                'no-source': '未找到可用原图。',
+              };
+              const reason =
+                err && typeof err === 'object' && 'reason' in err
+                  ? reasonMap[(err as { reason: string }).reason] ?? (err as unknown as Error).message
+                  : err instanceof Error
+                    ? err.message
+                    : '未知错误';
+              alert(`翻转背景图失败：${reason}`);
+            }
+          }}
+          className="flex-1 min-w-[60px] py-1 px-2 rounded text-[15px] bg-purple-700 hover:bg-purple-600 text-white flex items-center justify-center gap-1"
+          title="水平翻转背景图（覆写原图）"
+        >
+          <FlipHorizontalIcon size={12} /> 翻转图片
         </button>
       </div>
     </div>
