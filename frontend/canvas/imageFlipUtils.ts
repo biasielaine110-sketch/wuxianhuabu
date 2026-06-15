@@ -28,8 +28,15 @@ export async function flipImageHorizontal(input: {
   if (input.base64 && input.base64.length > 80) {
     rawBase64 = input.base64;
     // 节点 images[] / sourceImage / panoramaImage 存的是 raw base64（去 data URI 前缀）
-    // 推断 mime（粗略）：从 base64 头字节读
-    mime = sniffImageMimeFromBase64(rawBase64) ?? 'image/jpeg';
+    // 但外部调用可能直接传 data URI（"data:image/...;base64,..."），atob 之前需要剥前缀
+    const dataUriMatch = /^data:([^;]+);base64,(.+)$/.exec(rawBase64);
+    if (dataUriMatch) {
+      mime = dataUriMatch[1] || mime;
+      rawBase64 = dataUriMatch[2];
+    } else {
+      // 推断 mime（粗略）：从 base64 头字节读
+      mime = sniffImageMimeFromBase64(rawBase64) ?? 'image/jpeg';
+    }
   } else if (input.assetId) {
     const rec = await getCanvasAssetRecord(input.assetId);
     if (rec?.blob) {

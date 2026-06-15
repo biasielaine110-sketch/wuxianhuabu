@@ -146,3 +146,4 @@ if (typeof import.meta !== 'undefined' && (import.meta as { env?: { DEV?: boolea
     (window as unknown as { __useCanvasStore?: typeof useCanvasStore }).__useCanvasStore = useCanvasStore;
   }
 }
+
