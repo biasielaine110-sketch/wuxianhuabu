@@ -67,17 +67,41 @@ export function GridMergeNodeContent({
   const { cols, rows } = getGridLayout(gridCount);
   const connectedImages = getConnectedImages(node.id, nodes, edges);
 
+  /**
+   * 计算每个 slot 当前位置对应的入边 ID（用于精确删边）。
+   * 优先级：node._slotEdgeMap（用户 swap 之后） > 从 incomingEdges 顺序推导（未 swap 过）。
+   */
+  const incomingEdges = edges.filter((e) => e.targetId === node.id);
+  const slotEdgeMap: Record<number, string> = (() => {
+    const persisted = node._slotEdgeMap;
+    if (persisted && Object.keys(persisted).length > 0) {
+      // 过滤已失效的边（外部手动删了对应 edge）
+      const validIncomingIds = new Set(incomingEdges.map((e) => e.id));
+      const result: Record<number, string> = {};
+      for (let i = 0; i < gridCount; i++) {
+        const edgeId = persisted[i];
+        result[i] = edgeId && validIncomingIds.has(edgeId) ? edgeId : '';
+      }
+      return result;
+    }
+    // 未 swap 过：按 edges 数组顺序对齐到 slot 0..n-1
+    const result: Record<number, string> = {};
+    for (let i = 0; i < gridCount; i++) {
+      result[i] = incomingEdges[i]?.id ?? '';
+    }
+    return result;
+  })();
+
   const filledSlotCount = Array.from({ length: gridCount }).filter((_, idx) =>
     hasResolvedImage(slotImage(inputImages, inputImageAssetIds, connectedImages, idx))
   ).length;
 
   /**
    * 删除单个格子：清空该 idx 的 inputImages/inputImageAssetIds。
-   * 如果该格当前显示的图来自 connectedImages (即未实体化)，需要把对应的入边也删掉，
+   * 如果该格当前显示的图来自 connectedImages 或 swap 后固化自某条入边，需要把对应的入边也删掉，
    * 否则空 inputImages[idx] 仍会回退到 connectedImages[idx] 继续显示。
    *
-   * 注意：connectedImages[idx] 与 incomingEdges[idx] 的 idx 含义是 "按 edges 数组顺序的第 N 个连接"，
-   * 并不一定对应用户拖入时的视觉位置。因此删边时必须按"当前 slot 显示的图"反查提供它的源边。
+   * 优先用 slotEdgeMap[idx] 精确定位入边；若 map 没记录则回退到按"当前显示的图"反查源边。
    */
   const handleClearSlot = (idx: number) => {
     const currentInputB64 = inputImages[idx];
@@ -89,20 +113,20 @@ export function GridMergeNodeContent({
     const newIds: string[] = Array.from({ length: gridCount }, (_, i) => inputImageAssetIds?.[i] ?? '');
     newImgs[idx] = '';
     newIds[idx] = '';
-    onUpdate({ inputImages: newImgs, inputImageAssetIds: newIds });
-    // 2) 如果该格的图来自连接源，按"当前显示的图"反查是哪条 source 边提供的，删掉那条边
-    if (!fromInput) {
-      // 当前 slot 显示的图（来自 connectedImages[idx]）
+    // 2) 计算要写回的 slotEdgeMap：清空 idx 位
+    const newMap: Record<number, string> = { ...slotEdgeMap };
+    newMap[idx] = '';
+    onUpdate({ inputImages: newImgs, inputImageAssetIds: newIds, _slotEdgeMap: newMap });
+    // 3) 尝试删边：优先用 slotEdgeMap[idx]；若没有则按"当前显示的图"反查源边
+    let edgeIdToDelete = slotEdgeMap[idx] || '';
+    if (!edgeIdToDelete) {
       const displayed = connectedImages[idx];
       if (displayed) {
-        const incomingEdges = edges.filter((e) => e.targetId === node.id);
-        // 遍历所有入边，找其 source 节点提供的图 == displayed 的那条
         const matchedEdge = incomingEdges.find((edge) => {
           const sourceNode = nodes.find((n) => n.id === edge.sourceId);
           if (!sourceNode) return false;
           const sourceImg = getNodeDisplayImage(sourceNode);
           if (!sourceImg) return false;
-          // 优先按 assetId 精确匹配（最稳），其次按 base64 内容匹配
           if (displayed.assetId && sourceImg.assetId) {
             return displayed.assetId === sourceImg.assetId;
           }
@@ -111,15 +135,17 @@ export function GridMergeNodeContent({
           }
           return false;
         });
-        if (matchedEdge && onDeleteEdge) onDeleteEdge(matchedEdge.id);
+        if (matchedEdge) edgeIdToDelete = matchedEdge.id;
       }
     }
+    if (edgeIdToDelete && onDeleteEdge) onDeleteEdge(edgeIdToDelete);
   };
 
   /**
    * 拖动 swap: 把当前显示的 cell 顺序按 from/to 调换, 并把"已显示"的所有 slot 实体化写到 node.inputImages/inputImageAssetIds
    * - 拖动一次后, connectedImages 链接的图也会被"固化"到 inputImages, 之后位置不再受 edges 顺序影响
    * - 空 slot 拖动也允许 (用户可以拖动占位符), 但写回时保持空 (swap 不影响)
+   * - 同步交换 _slotEdgeMap，保证删边时能精确定位
    */
   const handleSlotSwap = (fromIdx: number, toIdx: number) => {
     if (fromIdx === toIdx) return;
@@ -133,7 +159,13 @@ export function GridMergeNodeContent({
     // 3) 写回 inputImages / inputImageAssetIds (实体化)
     const newImgs: string[] = swapped.map((s) => s?.base64 ?? '');
     const newIds: string[] = swapped.map((s) => s?.assetId ?? '');
-    onUpdate({ inputImages: newImgs, inputImageAssetIds: newIds });
+    // 4) 同步交换 _slotEdgeMap（缺失的位补空字符串）
+    const newMap: Record<number, string> = {};
+    for (let i = 0; i < gridCount; i++) {
+      newMap[i] = slotEdgeMap[i] ?? '';
+    }
+    [newMap[fromIdx], newMap[toIdx]] = [newMap[toIdx], newMap[fromIdx]];
+    onUpdate({ inputImages: newImgs, inputImageAssetIds: newIds, _slotEdgeMap: newMap });
   };
 
   const onCellPointerDown = (e: React.PointerEvent, idx: number) => {

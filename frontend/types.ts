@@ -286,6 +286,12 @@ export interface GridMergeNode extends CanvasNode {
   type: 'gridMerge';
   inputImages?: string[];
   inputImageAssetIds?: string[];
+  /**
+   * 记录每个 slot 当前位置对应的入边 ID。swap 时同步交换 map 项，删除时按 map 删边。
+   * - 未移动过：map 中只有被填充的 slot 会有 edgeId，position 由 edges 数组顺序隐式决定
+   * - 一旦发生 swap，整个 map 会按 gridCount 长度齐平（空 slot 对应空字符串）
+   */
+  _slotEdgeMap?: Record<number, string>;
   gridCount?: 3 | 4 | 6 | 9;
   /**
    * 单格目标画幅：决定合并时每个 cell 的目标比例。
