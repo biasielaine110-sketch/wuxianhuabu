@@ -1946,7 +1946,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     {contextMenu && canvasMode !== 'audit' && (
       <div
         className="absolute z-50 bg-[#252525] border border-[#444] rounded-lg shadow-2xl py-1 min-w-[160px] overflow-hidden canvas-chrome-150"
-        style={{ left: contextMenu.x, top: contextMenu.y, transform: 'scale(0.55)', transformOrigin: 'top left' }}
+        style={{ left: contextMenu.x, top: contextMenu.y, transform: 'scale(0.73)', transformOrigin: 'top left' }}
         onPointerDown={e => e.stopPropagation()}
       >
         <button className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-rose-600 hover:text-white flex items-center gap-2" onPointerDown={() => handleAddNode('chat')}>

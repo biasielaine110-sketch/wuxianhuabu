@@ -366,6 +366,7 @@ return (
             addNodes([newNode]);
           }}
           onCopyToImage={() => s.handleCopyToImage(node.id, { primaryOnly: true })}
+          onDeleteEdge={s.handleDeleteEdge}
         />
       )}
 

@@ -139,3 +139,10 @@ export function syncCanvasStoreToRefs(refs: {
   refs.transformRef.current = s.transform;
   refs.selectedIdsRef.current = s.selectedIds;
 }
+
+/** Dev-only: 暴露 useCanvasStore 到 window 便于 e2e 测试注入。生产构建会被 Vite 摇树剔除。 */
+if (typeof import.meta !== 'undefined' && (import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
+  if (typeof window !== 'undefined') {
+    (window as unknown as { __useCanvasStore?: typeof useCanvasStore }).__useCanvasStore = useCanvasStore;
+  }
+}

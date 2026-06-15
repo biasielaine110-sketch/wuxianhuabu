@@ -20,6 +20,8 @@ export interface GridMergeNodeContentProps {
   onUpdate: (updates: Partial<GridMergeNode>) => void;
   onCreateImageNode: (image: string, nodeX: number, nodeY: number, assetId?: string) => void;
   onCopyToImage?: () => void;
+  /** 删除一条连线（用于删除宫格中来自链接源的格子） */
+  onDeleteEdge?: (edgeId: string) => void;
 }
 
 function slotImage(
@@ -47,6 +49,7 @@ export function GridMergeNodeContent({
   onUpdate,
   onCreateImageNode,
   onCopyToImage,
+  onDeleteEdge,
 }: GridMergeNodeContentProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const inputImages = node.inputImages ?? [];
@@ -66,6 +69,30 @@ export function GridMergeNodeContent({
   const filledSlotCount = Array.from({ length: gridCount }).filter((_, idx) =>
     hasResolvedImage(slotImage(inputImages, inputImageAssetIds, connectedImages, idx))
   ).length;
+
+  /**
+   * 删除单个格子：清空该 idx 的 inputImages/inputImageAssetIds。
+   * 如果该格当前显示的图来自 connectedImages (即未实体化)，需要把对应的入边也删掉，
+   * 否则空 inputImages[idx] 仍会回退到 connectedImages[idx] 继续显示。
+   */
+  const handleClearSlot = (idx: number) => {
+    const currentInputB64 = inputImages[idx];
+    const currentInputAsset = inputImageAssetIds?.[idx];
+    const fromInput = !!(currentInputB64 || currentInputAsset);
+    // 1) 总是把该 idx 实体化为空（避免后续 swap 把它带回来）
+    //    这里以当前 gridCount 为目标长度补齐，保留其它位置的实体化结果
+    const newImgs: string[] = Array.from({ length: gridCount }, (_, i) => inputImages[i] ?? '');
+    const newIds: string[] = Array.from({ length: gridCount }, (_, i) => inputImageAssetIds?.[i] ?? '');
+    newImgs[idx] = '';
+    newIds[idx] = '';
+    onUpdate({ inputImages: newImgs, inputImageAssetIds: newIds });
+    // 2) 如果该格的图来自连接源，删掉对应的入边（connectedImages[idx] ↔ incomingEdges[idx]）
+    if (!fromInput) {
+      const incomingEdges = edges.filter((e) => e.targetId === node.id);
+      const edge = incomingEdges[idx];
+      if (edge && onDeleteEdge) onDeleteEdge(edge.id);
+    }
+  };
 
   /**
    * 拖动 swap: 把当前显示的 cell 顺序按 from/to 调换, 并把"已显示"的所有 slot 实体化写到 node.inputImages/inputImageAssetIds
@@ -356,7 +383,7 @@ export function GridMergeNodeContent({
                       onPointerDown={(e) => onCellPointerDown(e, idx)}
                       onPointerEnter={() => onCellPointerEnter(idx)}
                       onPointerUp={onCellPointerUp}
-                      className={`relative bg-[#1a1a1a] rounded overflow-hidden flex items-center justify-center select-none touch-none ${
+                      className={`group relative bg-[#1a1a1a] rounded overflow-hidden flex items-center justify-center select-none touch-none ${
                         isDragging ? 'cursor-grabbing opacity-60' : 'cursor-grab'
                       } ${isDragOver ? 'ring-2 ring-teal-400 ring-inset' : ''}`}
                     >
@@ -373,9 +400,24 @@ export function GridMergeNodeContent({
                           <div className="absolute top-0.5 left-0.5 text-[8px] font-bold text-teal-400 bg-black/60 px-1 rounded pointer-events-none">
                             {idx + 1}
                           </div>
+                          <button
+                            type="button"
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleClearSlot(idx);
+                            }}
+                            className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-red-600/80 hover:bg-red-500 text-white text-[12px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="删除该格图片（取消该图片的链接）"
+                          >
+                            ×
+                          </button>
                         </>
                       ) : (
-                        <span className="text-gray-600 text-[10px] pointer-events-none">{idx + 1}</span>
+                        <div className="w-full h-full bg-[#2a2a2a] border border-dashed border-[#555] rounded flex flex-col items-center justify-center gap-0.5 pointer-events-none">
+                          <span className="text-[9px] text-[#888]">已移除</span>
+                          <span className="text-[10px] text-[#666]">{idx + 1}</span>
+                        </div>
                       )}
                     </div>
                   );
