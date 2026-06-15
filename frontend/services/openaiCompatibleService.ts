@@ -199,11 +199,11 @@ export function isManxueVideoModel(m?: string): boolean {
   return m === MANXUE_GROK_IMAGINE_VIDEO_MODEL_ID || m.endsWith('-manxue-video');
 }
 
-/** 判断是否为 MiniMax 域名（api.minimax.io） */
+/** 判断是否为 MiniMax 域名（api.minimaxi.com） */
 function isMiniMaxHost(baseNormalized: string): boolean {
   try {
     const host = new URL(baseNormalized).hostname.toLowerCase();
-    return host === 'api.minimax.io' || host.endsWith('.minimax.io');
+    return host === 'api.minimaxi.com' || host.endsWith('.minimaxi.com');
   } catch {
     return false;
   }

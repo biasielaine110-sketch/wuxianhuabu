@@ -44,7 +44,7 @@ export const DEFAULT_CODESONLINE_CHAT_BASE_URL = 'https://ai.codesonline.dev/v1'
 /** 满 eAPI manxueapi.com OpenAI 兼容入口（Base URL 须含 /v1） */
 export const DEFAULT_MANXUE_BASE_URL = 'https://manxueapi.com/v1';
 /** MiniMax API MiniMax OpenAI 兼容入口（Base URL 须含 /v1） */
-export const DEFAULT_MINIMAX_BASE_URL = 'https://api.minimax.io/v1';
+export const DEFAULT_MINIMAX_BASE_URL = 'https://api.minimaxi.com/v1';
 
 /** 旧版存盘中的 model id → 当前官方命名（不在界面展示旧名） */
 export function normalizeDeepSeekChatModelId(modelId: string): string {

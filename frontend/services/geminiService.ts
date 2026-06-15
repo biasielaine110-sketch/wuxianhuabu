@@ -400,7 +400,7 @@ export const callGeminiChatWithHistory = async (
       const mxKey = getMiniMaxSavedKey().trim();
       if (!mxKey) {
         throw new Error(
-          '使用 MiniMax M2.7：请在「设置 → API」中填写「MiniMax API Key」，并确认 Base URL 为 https://api.minimax.io/v1。'
+          '使用 MiniMax M2.7：请在「设置 → API」中填写「MiniMax API Key」，并确认 Base URL 为 https://api.minimaxi.com/v1。'
         );
       }
       return { text: await chatCompletionHistoryAtBase(
