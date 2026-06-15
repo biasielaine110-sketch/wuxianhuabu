@@ -11,6 +11,7 @@ import {
   CopyIcon,
   DownloadIcon,
   EyedropperIcon,
+  FlipHorizontalIcon,
   GridIcon,
   LoaderIcon,
   MaximizeIcon,
@@ -18,6 +19,7 @@ import {
   SingleIcon,
   TextIcon,
 } from './canvasIcons';
+import { flipAndStoreAsset } from './imageFlipUtils';
 
 export interface CanvasImageGenAreaProps {
   node: CanvasNode;
@@ -115,6 +117,82 @@ export function CanvasImageGenArea({
             >
               <CopyIcon size={25} />
             </button>
+            {(node.type === 't2i' || node.type === 'i2i' || node.type === 'image' || node.type === 'panoramaT2i') && (
+              <button
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                }}
+                onClick={async () => {
+                  const imgs = images;
+                  const ids = imageAssetIds ?? [];
+                  if (imgs.length === 0) {
+                    alert('当前节点没有图片可翻转');
+                    return;
+                  }
+                  const reasonMap: Record<string, string> = {
+                    'asset-missing': '原图资产在 IndexedDB 中已失效（可能草稿清理时被删除）。请重新导入图片后重试。',
+                    'decode-failed': '原图解码失败（可能格式不兼容或浏览器内存不足）。请尝试重新导入图片。',
+                    'canvas-failed': '画布读取失败（可能跨域或浏览器 Canvas 被禁用）。',
+                    'no-source': '未找到可用原图。',
+                  };
+                  const reasonText = (err: unknown) => {
+                    if (err && typeof err === 'object' && 'reason' in err) {
+                      const r = (err as { reason: string }).reason;
+                      return reasonMap[r] ?? (err as unknown as Error).message;
+                    }
+                    return err instanceof Error ? err.message : '未知错误';
+                  };
+                  try {
+                    const nextImgs: string[] = [];
+                    const nextIds: string[] = [];
+                    let failureCount = 0;
+                    for (let i = 0; i < imgs.length; i++) {
+                      const cur = imgs[i];
+                      const id = ids[i];
+                      const hasBase64 = !!(cur && cur.length > 80);
+                      if (!hasBase64 && !id) {
+                        nextImgs.push('');
+                        nextIds.push('');
+                        failureCount++;
+                        continue;
+                      }
+                      try {
+                        const flipped = await flipAndStoreAsset({
+                          base64: hasBase64 ? cur : undefined,
+                          assetId: id,
+                        });
+                        nextImgs.push(flipped.base64);
+                        nextIds.push(flipped.assetId ?? '');
+                      } catch (err) {
+                        console.warn(`[image flip] 第 ${i + 1} 张图翻转失败`, err);
+                        nextImgs.push(cur ?? '');
+                        nextIds.push(id ?? '');
+                        failureCount++;
+                      }
+                    }
+                    onUpdateNode(node.id, {
+                      images: nextImgs,
+                      imageAssetIds: nextIds,
+                      _thumbTick: ((node as CanvasNode & { _thumbTick?: number })._thumbTick ?? 0) + 1,
+                    });
+                    if (failureCount > 0 && failureCount === imgs.length) {
+                      alert(
+                        `翻转失败：${imgs.length} 张图全部翻转失败。\n首条原因：${reasonText('asset-missing')}\n请打开 F12 控制台查看 [image flip] 详细日志。`
+                      );
+                    } else if (failureCount > 0) {
+                      console.warn(`[image flip] ${imgs.length} 张图中 ${failureCount} 张翻转失败`);
+                    }
+                  } catch (err) {
+                    console.warn('[image flip] 翻转异常', err);
+                    alert(`翻转失败：${reasonText(err)}\n请打开 F12 控制台查看 [image flip] 详细日志。`);
+                  }
+                }}
+                className="p-1.5 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
+                title="水平翻转所有图片（覆写原图）"
+              >
+                <FlipHorizontalIcon size={25} />
+              </button>
+            )}
             <button
               onPointerDown={(e) => {
                 e.stopPropagation();
