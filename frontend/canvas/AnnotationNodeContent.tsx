@@ -761,6 +761,10 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
         const img = new Image();
         img.crossOrigin = 'anonymous';
         img.onload = () => {
+          if (imageCacheRef.current?.src === imgSrc) {
+            // 已被更晚的 renderCanvas 覆盖，跳过旧图绘制
+            return;
+          }
           const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
           const w = img.width * scale;
           const h = img.height * scale;
@@ -770,6 +774,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
           ctx.drawImage(img, x, y, w, h);
           renderAnnotations(ctx);
           drawCropOverlay(ctx, canvas.width, canvas.height);
+          console.log('[annotation canvas] 新图绘制完成, src 前 40 字=', imgSrc.slice(0, 40));
         };
         img.src = imgSrc;
       }
@@ -988,6 +993,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       resolveCanvasImageSource(sourceImage, sourceImageAssetId).then((url) => {
         if (cancelled) return;
         resolvedSourceUrlRef.current = url;
+        console.log('[annotation canvas] useEffect 重跑: sourceImage.length=', sourceImage?.length, 'resolved url.length=', url.length);
         renderCanvas();
       })
     );
@@ -995,6 +1001,15 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       cancelled = true;
     };
   }, [sourceImage, sourceImageAssetId, hasSourceImage]);
+
+  // 兜底：_thumbTick 变化时强制重渲（防止 sourceImage 引用变化但 useEffect 没识别的极端情况）
+  const thumbTick = (node as AnnotationNode & { _thumbTick?: number })._thumbTick ?? 0;
+  useEffect(() => {
+    imageCacheRef.current = null;
+    console.log('[annotation canvas] _thumbTick effect 触发 tick=', thumbTick);
+    renderCanvas();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [thumbTick]);
 
   // 当标注变化时重新渲染
   useEffect(() => {
@@ -2928,6 +2943,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
         <button
           onPointerDown={(e) => e.stopPropagation()}
           onClick={async () => {
+            console.log('[annotation flip] click, isFlipping=', isFlipping);
             if (isFlipping) return;
             // 优先用 node 自身的 sourceImage，没有再从链接图取
             let base64: string | undefined = sourceImage || undefined;
@@ -2944,6 +2960,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
               }
             }
             const hasBase64 = !!(base64 && base64.length > 80);
+            console.log('[annotation flip] 输入 base64.length=', base64?.length, 'assetId=', assetId, 'hasBase64=', hasBase64);
             if (!hasBase64 && !assetId) {
               alert('请先导入或连接一张图片');
               return;
@@ -2954,13 +2971,16 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
                 base64: hasBase64 ? base64 : undefined,
                 assetId,
               });
+              console.log('[annotation flip] 翻转成功，输出 base64.length=', flipped.base64.length, 'assetId=', flipped.assetId);
               // 翻转后写回 node.sourceImage（链接图时也"实体化"到 annotation 节点）
+              const oldSrc = (node as AnnotationNode & { _thumbTick?: number })._thumbTick ?? 0;
               const patch: Partial<AnnotationNode> = {
                 sourceImage: flipped.base64,
                 // bump _thumbTick 强制 OptimizedImage 重新挂载，避免部分浏览器缓存旧图
-                _thumbTick: ((node as AnnotationNode & { _thumbTick?: number })._thumbTick ?? 0) + 1,
+                _thumbTick: oldSrc + 1,
               } as Partial<AnnotationNode>;
               if (flipped.assetId) patch.sourceImageAssetId = flipped.assetId;
+              console.log('[annotation flip] 调 onUpdate，_thumbTick', oldSrc, '→', oldSrc + 1);
               onUpdate(patch);
             } catch (err) {
               console.warn('[annotation flip] 翻转异常', err);

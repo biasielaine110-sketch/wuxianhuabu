@@ -732,6 +732,7 @@ return (
             <button
               onPointerDown={(e) => { e.stopPropagation(); }}
               onClick={async () => {
+                console.log('[panorama flip] click, imgs.length=', (node.images ?? []).length);
                 const imgs = node.images ?? [];
                 const ids = node.imageAssetIds ?? [];
                 const reasonMap: Record<string, string> = {
