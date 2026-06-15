@@ -2972,7 +2972,15 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
                 assetId,
               });
               console.log('[annotation flip] 翻转成功，输出 base64.length=', flipped.base64.length, 'assetId=', flipped.assetId);
-              // 翻转后写回 node.sourceImage（链接图时也"实体化"到 annotation 节点）
+              // === 紧急修复：直接更新本地 ref + 重画，绕开 React 渲染链路 ===
+              // 翻转后，先同步把缓存清掉 + 解析新 url + 重画（不依赖 store 回流）
+              imageCacheRef.current = null;
+              const { resolveCanvasImageSource } = await import('../services/canvasAssetResolver');
+              const newUrl = await resolveCanvasImageSource(flipped.base64, flipped.assetId);
+              resolvedSourceUrlRef.current = newUrl;
+              renderCanvas();
+              console.log('[annotation flip] 紧急：直接 renderCanvas，新 url 前 40 字=', newUrl.slice(0, 40));
+              // 同时把翻转结果写回 store（持久化、跨刷新用）
               const oldSrc = (node as AnnotationNode & { _thumbTick?: number })._thumbTick ?? 0;
               const patch: Partial<AnnotationNode> = {
                 sourceImage: flipped.base64,
