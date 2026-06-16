@@ -258,7 +258,10 @@ export function useCanvasProjectLibrary({
       try {
         const forWrite = { ...p };
         delete (forWrite as { diskSaveEstablished?: boolean }).diskSaveEstablished;
-        const json = JSON.stringify(forWrite, null, 2);
+        // 把被 offload 到 IDB 资产库的大图反向读回 base64 写进文件，否则换电脑打开 JSON 全是空图。
+        const hydratedNodes = await hydrateNodesMediaFromAssets(forWrite.nodes || []);
+        const payload = { ...forWrite, nodes: hydratedNodes };
+        const json = JSON.stringify(payload, null, 2);
         const writable = await h.createWritable();
         await writable.write(json);
         await writable.close();
@@ -481,7 +484,12 @@ export function useCanvasProjectLibrary({
 
     const payload = { ...snap };
     delete (payload as { diskSaveEstablished?: boolean }).diskSaveEstablished;
-    const json = JSON.stringify(payload, null, 2);
+    // 把被 offload 到 IDB 资产库的大图反向读回 base64，否则 JSON 文件里 images 数组全是空字符串。
+    // 覆盖：首次保存弹窗 / Ctrl+Alt+S 另存为 这两条路径之前只接了 projectSnapshotForJsonExport
+    // 不够，因为大图 offload 后内存 nodes[i].images[j] 也是空。
+    const hydratedNodes = await hydrateNodesMediaFromAssets(payload.nodes || []);
+    const payloadForDisk = { ...payload, nodes: hydratedNodes };
+    const json = JSON.stringify(payloadForDisk, null, 2);
 
     const w = window as unknown as {
       showDirectoryPicker?: (opts?: { mode?: 'readwrite' }) => Promise<FileSystemDirectoryHandle>;
@@ -853,7 +861,13 @@ export function useCanvasProjectLibrary({
   const handleExportProjectZip = useCallback(
     async (project: CanvasProject) => {
       try {
-        const r = await exportProjectZipToDisk(projectSnapshotForJsonExport(project));
+        // 与 JSON 导出走同一份 hydrate：把 offload 到 IDB 的大图反向读回 base64。
+        // ZIP 内 assets/ 也会再存一份作为冗余，这里 hydrate 是为了 project.json 自包含
+        // （用户偶尔只拷贝 project.json 出来时也能恢复）。
+        const snapshot = projectSnapshotForJsonExport(project);
+        const hydratedNodes = await hydrateNodesMediaFromAssets(snapshot.nodes || []);
+        const payload = { ...snapshot, nodes: hydratedNodes };
+        const r = await exportProjectZipToDisk(payload);
         if (r.kind === 'aborted') return;
         if (r.kind === 'handle') {
           lastZipFileHandleRef.current = r.handle;
