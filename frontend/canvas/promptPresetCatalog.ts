@@ -33,12 +33,14 @@ export const I2I_PRESETS_BY_CATEGORY: Record<I2iPresetCategoryId, { key: string;
   scene: [
     { key: '场景四视图', label: '场景四视图' },
     { key: '场景9视图', label: '场景9视图' },
+    { key: '场景9宫格_1人', label: '场景9宫格_1人' },
     { key: '场景九视图', label: '场景九视图' },
     { key: '场景反打及细节', label: '场景反打及细节' },
   ],
   props: [
     { key: '道具拆分', label: '道具拆分' },
     { key: '道具5视图', label: '道具5视图' },
+    { key: '道具9宫格_1人', label: '道具9宫格_1人' },
     { key: '道具转线稿色块', label: '道具转线稿色块' },
     { key: '道具转超写实', label: '道具转超写实' },
     { key: '道具转白模', label: '道具转白模' },
