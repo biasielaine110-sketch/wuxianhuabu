@@ -2367,8 +2367,8 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       alert('请先导入图片');
       return;
     }
-    // 无标注时强制按 100% 输出（标注为空再缩放没意义，且允许用户翻转后直接生成图节点）
-    const effectiveScale = currentAnnots.length === 0 ? 100 : exportScale;
+    // 始终尊重用户在下拉里选的 exportScale，无标注时也按比例缩放
+    const effectiveScale = exportScale;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
