@@ -148,7 +148,7 @@ const CHAT_FEATURE_BUTTON_SPECS: ChatFeatureButtonSpec[] = [
   {
     id: 'kkkk-batch-shot-video-reasoning',
     presetKey: 'KKKK_批量_分镜视频推理',
-    label: '批量_分镜视频推理',
+    label: 'vidu_分镜视频',
     icon: 'video',
     tone: 'blue',
     title:
