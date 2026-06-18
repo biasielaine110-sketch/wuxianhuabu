@@ -1,7 +1,9 @@
-import React, { memo, startTransition } from 'react';
+import React, { memo, startTransition, useEffect, useState } from 'react';
 import type { CanvasProjectSnapshot } from '../services/projectPersistence';
 import { HomeCarousel3D } from './HomeCarousel3D';
 import { loadProjectLibrary, saveProjectLibrary } from '../services/projectPersistence';
+import { hasCanvasImagePayload, resolveCanvasImageSource } from '../services/canvasAssetResolver';
+import type { CanvasNode } from '../types';
 
 export type HomePageProps = {
   homeProjects: CanvasProjectSnapshot[];
@@ -283,23 +285,7 @@ export const HomePage = memo(function HomePage({
                     className="relative w-full aspect-video rounded-xl bg-[#282828] border border-[#3A3A3A] group-hover:border-[#484848] overflow-hidden transition-all"
                     onClick={() => onOpenProject(p)}
                   >
-                    {(() => {
-                      const firstImg = (p.nodes || []).reduce<string | null>(
-                        (found, n) => found || ((n.images?.length || 0) > 0 ? n.images![0] : null),
-                        null,
-                      );
-                      return firstImg ? (
-                        <img src={`data:image/jpeg;base64,${firstImg}`} alt="" className="w-full h-full object-cover" draggable={false} />
-                      ) : (
-                        <div className="absolute inset-0 bg-gradient-to-br from-[#2E2E2E] via-[#2C2C2C] to-[#222222] flex items-center justify-center">
-                          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#5a5a5a" strokeWidth="1.2" className="group-hover:stroke-[#6a6a6a] transition-colors">
-                            <rect x="3" y="3" width="18" height="18" rx="3" />
-                            <circle cx="8.5" cy="8.5" r="1.5" />
-                            <path d="m21 15-5-5L5 21" />
-                          </svg>
-                        </div>
-                      );
-                    })()}
+                    <ProjectThumb nodes={p.nodes || []} />
                     <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[#9040F0]/0 group-hover:via-[#9040F0]/30 to-transparent transition-all duration-500" />
                   </div>
                   <div className="flex flex-col gap-1" onClick={() => onOpenProject(p)}>
@@ -483,3 +469,68 @@ export const HomePage = memo(function HomePage({
     </div>
   );
 });
+
+/** 取项目里第一张可显示图片的 base64 / assetId（覆盖被 offload 到 IDB 的情况） */
+function findFirstProjectImage(
+  nodes: CanvasNode[]
+): { base64?: string; assetId?: string } | null {
+  for (const n of nodes) {
+    const imgs = n.images || [];
+    const ids = n.imageAssetIds || [];
+    for (let i = 0; i < Math.max(imgs.length, ids.length); i++) {
+      const base64 = imgs[i];
+      const assetId = ids[i];
+      if (hasCanvasImagePayload(base64, assetId)) {
+        return { base64, assetId };
+      }
+    }
+  }
+  return null;
+}
+
+/** 首页项目卡片缩略图：offload 后 images[i] 为空 + imageAssetIds[i] 有值也能从 IDB 异步拉回来 */
+function ProjectThumb({ nodes }: { nodes: CanvasNode[] }) {
+  const [src, setSrc] = useState<string>('');
+  const first = findFirstProjectImage(nodes);
+  const base64 = first?.base64;
+  const assetId = first?.assetId;
+  useEffect(() => {
+    let cancelled = false;
+    if (!first) {
+      setSrc('');
+      return;
+    }
+    if (base64 && base64.length > 80) {
+      // base64 已在内存里
+      const mime = base64.startsWith('/9j/') ? 'image/jpeg' : 'image/png';
+      setSrc(`data:${mime};base64,${base64}`);
+      return;
+    }
+    // offload 后只剩 assetId，从 IDB 异步反查
+    void resolveCanvasImageSource(undefined, assetId).then((url) => {
+      if (!cancelled) setSrc(url || '');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [base64, assetId, first]);
+  if (!src) {
+    return (
+      <div className="absolute inset-0 bg-gradient-to-br from-[#2E2E2E] via-[#2C2C2C] to-[#222222] flex items-center justify-center">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#5a5a5a" strokeWidth="1.2" className="group-hover:stroke-[#6a6a6a] transition-colors">
+          <rect x="3" y="3" width="18" height="18" rx="3" />
+          <circle cx="8.5" cy="8.5" r="1.5" />
+          <path d="m21 15-5-5L5 21" />
+        </svg>
+      </div>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt=""
+      className="w-full h-full object-cover"
+      draggable={false}
+    />
+  );
+}

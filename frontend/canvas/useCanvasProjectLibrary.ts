@@ -930,9 +930,14 @@ export function useCanvasProjectLibrary({
 
       if (isZip) {
         void parseProjectFromZipFile(file)
-          .then((parsed) => {
+          .then(async (parsed) => {
+            // ZIP 路径：hydrateProjectAssetsFromZip 已把 ZIP 内的资产写回 IDB，
+            // 这里再 hydrate 一次把 nodes 里被 offload 的图反向读回 base64，
+            // 解决「旧 ZIP 导入后画布图丢」的问题（与 8d82dad 导出 hydrate 对称）。
+            const hydratedNodes = await hydrateNodesMediaFromAssets(parsed.nodes || []);
             const newProject: CanvasProject = {
               ...parsed,
+              nodes: hydratedNodes,
               id: `project-${Date.now()}`,
               name: parsed.name || file.name.replace(/\.(wxcanvas\.)?zip$/i, '') || '导入项目',
       updatedAt: Date.now(),
@@ -948,7 +953,7 @@ export function useCanvasProjectLibrary({
       }
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
         const raw = event.target?.result as string;
         const imported = JSON.parse(raw) as Partial<CanvasProject>;
@@ -958,11 +963,15 @@ export function useCanvasProjectLibrary({
         }
           const impNodes = imported.nodes as CanvasNode[];
           const impEdges = imported.edges as Edge[];
+          // JSON 路径：hydrate 尝试从 IDB 反向回填；
+          // 8d82dad 之后导出的 JSON 自身已含 base64，hydrate 是 no-op；
+          // 8d82dad 之前的旧 JSON（含 imageAssetIds 但 images 为空）+ 本机 IDB 资产仍在 → 救回来
+          const hydratedNodes = await hydrateNodesMediaFromAssets(impNodes);
         const newProject: CanvasProject = {
           id: `project-${Date.now()}`,
           name: (imported.name || file.name.replace(/\.json$/i, '') || '导入项目').toString(),
           updatedAt: Date.now(),
-            nodes: impNodes,
+            nodes: hydratedNodes,
             edges: impEdges,
           transform: (imported.transform || { x: 0, y: 0, scale: DEFAULT_CANVAS_VIEW_SCALE }) as Transform,
             diskSaveEstablished: false,
@@ -993,10 +1002,21 @@ export function useCanvasProjectLibrary({
           const { next: patchedProjects, changed: libStrippedLegacy } =
             normalizeLibraryProjectsStripLegacyAutoT2i(lib.projects);
           const activeId = lib.activeProjectId || patchedProjects[0].id;
+          // 草稿库恢复：把被 offload 到 IDB 资产库的图反向读回 base64 写进内存 nodes
+          // 解决「8d82dad 之前保存的旧草稿 / 早期 JSON 在 IDB 资产被回收后刷新丢图」的问题
+          // （对称于导出路径的 hydrate；hydrate 失败/IDB 找不到的项静默保留空串）
+          const hydratedProjects = await Promise.all(
+            patchedProjects.map(async (p) => ({
+              ...p,
+              nodes: await hydrateNodesMediaFromAssets(p.nodes || []),
+            }))
+          );
+          if (cancelled) return;
+          const activeIdx = hydratedProjects.findIndex((p) => p.id === activeId);
           const initial =
-            patchedProjects.find((p) => p.id === activeId) || patchedProjects[0];
-          setProjects(patchedProjects);
-          projectsRef.current = patchedProjects;
+            (activeIdx >= 0 ? hydratedProjects[activeIdx] : hydratedProjects[0]);
+          setProjects(hydratedProjects);
+          projectsRef.current = hydratedProjects;
           setActiveProjectId(initial.id);
           setNodes(initial.nodes || []);
           setEdges(initial.edges || []);
@@ -1009,7 +1029,7 @@ export function useCanvasProjectLibrary({
             auditImagesRef.current = [];
           }
           if (libStrippedLegacy) {
-            void trackProjectSave(saveProjectLibrary(patchedProjects, initial.id)).then((ok) => {
+            void trackProjectSave(saveProjectLibrary(hydratedProjects, initial.id)).then((ok) => {
               if (!ok) console.warn('[canvas] 已剥离旧版默认文生图占位，但写回草稿库失败');
             });
           }
