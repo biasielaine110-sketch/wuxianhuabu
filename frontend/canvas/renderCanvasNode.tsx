@@ -575,6 +575,13 @@ return (
                 className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] overflow-y-auto leading-relaxed whitespace-pre-wrap break-words text-node-content relative cursor-grab active:cursor-grabbing"
                 style={{ fontSize: textNodeFontSizeLocal + 'px', minHeight: '120px' }}
                 onPointerDown={(e) => {
+                  // 滚动条 thumb 区域（容器右侧 72px 内、且确实可滚）：交给浏览器原生滚动，
+                  // 不要进双击检测/选中/拖拽逻辑，否则仅拖动滚动条会把文本节点置为选中。
+                  if (e.button === 0) {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const inScrollbar = e.clientX > rect.right - 72 && e.currentTarget.scrollHeight > e.currentTarget.clientHeight;
+                    if (inScrollbar) return;
+                  }
                   // pointerdown 时间戳 + 位置 dblclick 检测 (兼容 node 拖拽干扰浏览器原生 dblclick 的场景)
                   if (e.button !== 0) return;
                   const now = Date.now();
@@ -646,6 +653,13 @@ return (
               onPointerDown={(e) => {
                 // 吸管模式激活时，允许事件冒泡触发吸管连线
                 if (eyedropperId) return;
+                // 编辑态 textarea 自定义滚动条（右侧 72px、且内容可滚）：交给浏览器原生滚动，
+                // 不要进双击检测逻辑，否则仅拖动滚动条会被误判为二次点击 → 错误打开大编辑器。
+                if (e.button === 0) {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const inScrollbar = e.clientX > rect.right - 72 && e.currentTarget.scrollHeight > e.currentTarget.clientHeight;
+                  if (inScrollbar) return;
+                }
                 e.stopPropagation();
                 // 双击检测：基于时间戳
                 const now = Date.now();

@@ -402,6 +402,18 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
     if (targetEl?.closest('[data-resize-handle]')) return;
 
     const pickedNode = nodesRef.current.find(n => n.id === id);
+    /** 滚动条 thumb 区域（容器右侧 72px、且内容可滚）：交给浏览器原生滚动，不应触发节点选中/拖动 */
+    const isScrollbarThumb = (() => {
+      if (e.button !== 0 || !targetEl) return false;
+      const el = targetEl.closest('[data-node-root="true"]') as HTMLElement | null;
+      if (!el) return false;
+      // 找最近的 overflow:auto/scroll 容器
+      const scrollHost = (el.querySelector('.text-node-textarea, .text-node-content, textarea') as HTMLElement | null);
+      if (!scrollHost) return false;
+      const rect = scrollHost.getBoundingClientRect();
+      const inBar = e.clientX > rect.right - 72 && scrollHost.scrollHeight > scrollHost.clientHeight;
+      return inBar;
+    })();
     /** 节点内表单控件：不应触发整块节点拖拽；文本节点预览区（.text-node-content）除外，未选中时可拖动 */
     const isInteractiveSurface =
       !!targetEl?.closest(
@@ -412,12 +424,17 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
     /** 吸管模式：点击节点窗口任意非表单区域即可与「吸取目标」节点连线（与预览区点击行为一致） */
     const eyeT = eyedropperTargetNodeIdRef.current;
     const isEyedropperPickable = eyeT && eyeT !== id && (pickedNode?.type === 'text' ? true : !isInteractiveSurface);
-    if (isEyedropperPickable) {
+    if (isEyedropperPickable && !isScrollbarThumb) {
       if (handleCanvasEyedropper(id, eyeT)) {
         e.preventDefault();
         e.stopPropagation();
         return;
       }
+    }
+
+    /** 滚动条 thumb：原生浏览器接管滚动，不进节点选中/拖拽逻辑 */
+    if (isScrollbarThumb) {
+      return;
     }
     
     // 如果正在拖拽其他节点，取消当前拖拽并切换到新节点
