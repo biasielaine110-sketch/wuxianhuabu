@@ -1533,18 +1533,53 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
                 updates.backgroundImageAssetId = assetId;
               }
 
-              const changed =
+              const currentByType: [string | undefined, string | undefined] =
                 node.type === 'panorama'
-                  ? !singleImageFieldsMatch(node.panoramaImage, node.panoramaImageAssetId, { base64, assetId })
+                  ? [node.panoramaImage, node.panoramaImageAssetId]
                   : node.type === 'annotation'
-                    ? !singleImageFieldsMatch(node.sourceImage, node.sourceImageAssetId, { base64, assetId })
+                    ? [node.sourceImage, node.sourceImageAssetId]
                     : node.type === 'director3d'
-                      ? !singleImageFieldsMatch(node.backgroundImage, node.backgroundImageAssetId, { base64, assetId })
+                      ? [node.backgroundImage, node.backgroundImageAssetId]
                       : node.type === 'panoramaT2i'
-                        ? !singleImageFieldsMatch(node.images?.[0], node.imageAssetIds?.[0], { base64, assetId })
-                        : false;
+                        ? [node.images?.[0], node.imageAssetIds?.[0]]
+                        : [undefined, undefined];
+              const [curBase64, curAssetId] = currentByType;
+              /**
+               * syncConnectedMedia 写入保护：
+               * - next.base64 长度>80（上游有完整 base64）→ 正常同步
+               * - next.base64 为空但 next.assetId 有值（上游已被 offload）
+               *   → 只在「当前节点连 assetId 都没有」时写入，避免把已有 base64 强制清空
+               *   （曾经让 panorama/annotation/director3d/panoramaT2i 在操作画布后图丢）
+               * - next 啥都没有 → 不写
+               */
+              const nextIsEmpty = !base64 && !assetId;
+              const nextHasBase64 = !!base64 && base64.length > 80;
+              const curHasBase64 = !!curBase64 && curBase64.length > 80;
+              const curHasAssetId = !!curAssetId && curAssetId.length > 0;
+              let allowWrite = false;
+              if (nextIsEmpty) {
+                allowWrite = false;
+              } else if (nextHasBase64) {
+                allowWrite = !singleImageFieldsMatch(curBase64, curAssetId, { base64, assetId });
+              } else {
+                // next.base64 空但有 assetId
+                if (curHasBase64) {
+                  // 当前节点已有完整 base64 → 不要被空 base64 覆盖
+                  allowWrite = false;
+                  // 但如果当前 assetId 不同，可以补一个（不删 base64）
+                  if (curAssetId !== assetId) {
+                    if (node.type === 'panorama') updates.panoramaImageAssetId = assetId;
+                    else if (node.type === 'annotation') updates.sourceImageAssetId = assetId;
+                    else if (node.type === 'director3d') updates.backgroundImageAssetId = assetId;
+                    else if (node.type === 'panoramaT2i') updates.imageAssetIds = [assetId];
+                    handleUpdateNode(node.id, updates);
+                  }
+                } else {
+                  allowWrite = !singleImageFieldsMatch(curBase64, curAssetId, { base64, assetId });
+                }
+              }
 
-              if (changed) {
+              if (allowWrite) {
                 handleUpdateNode(node.id, updates);
               }
             }
