@@ -280,7 +280,7 @@ export function useCanvasProjectLibrary({
   );
 
   const saveCurrentProject = useCallback(
-    (options?: { skipDiskPrompt?: boolean }): Promise<boolean> => {
+    async (options?: { skipDiskPrompt?: boolean }): Promise<boolean> => {
       const pid = activeProjectIdRef.current;
       if (!pid) {
         alert('项目数据仍在加载，请稍后再试保存。');
@@ -294,7 +294,20 @@ export function useCanvasProjectLibrary({
         transformRef.current,
         auditImagesRef.current.length > 0 ? { images: auditImagesRef.current } : undefined
       );
-      const cur = nextProjects.find((p) => p.id === pid);
+      /**
+       * 关键：autosave / 任何保存路径写入 IDB 前，强制把每个项目的 nodes 用 hydrateNodesMediaFromAssets
+       * 反向从 IDB 资产库补回 base64。即使内存中 nodes 已被 canvasAssetSync offload 清成空串 + assetId，
+       * 只要 IDB 资产还在，写入 IDB 的 projects 仍然是「完整 base64 版本」，刷新后 hydrate 必然能救回。
+       * 解决「半小时后图裂开/丢图」的根因——之前 autosave 直接写入了带空 base64 + assetId 的版本，
+       * 一旦 IDB 资产库被浏览器回收（夸克浏览器的 IDB 清理策略），刷新就彻底没图了。
+       */
+      const hydratedNextProjects = await Promise.all(
+        nextProjects.map(async (p) => ({
+          ...p,
+          nodes: await hydrateNodesMediaFromAssets(p.nodes || []),
+        }))
+      );
+      const cur = hydratedNextProjects.find((p) => p.id === pid);
       const needsDiskPrompt = !options?.skipDiskPrompt && cur != null && !cur.diskSaveEstablished;
 
       const commitToIdb = (list: CanvasProject[]): Promise<boolean> => {
@@ -312,9 +325,9 @@ export function useCanvasProjectLibrary({
 
       if (!needsDiskPrompt) {
         return (async () => {
-          const ok = await commitToIdb(nextProjects);
+          const ok = await commitToIdb(hydratedNextProjects);
           if (!ok) return false;
-          await flushBoundDraftJsonToDisk(pid, nextProjects, {
+          await flushBoundDraftJsonToDisk(pid, hydratedNextProjects, {
             alertOnFailure: !options?.skipDiskPrompt,
             onSaved: (filename) => {
               setSaveSuccessMsg(`已保存至: ${filename}`);
@@ -330,7 +343,7 @@ export function useCanvasProjectLibrary({
         draftDiskFlowResolveRef.current = resolve;
         setDraftDiskModal({
           mode: 'firstSave',
-          mergedProjects: nextProjects,
+          mergedProjects: hydratedNextProjects,
           pid,
           basenameDraft: projectExportBasename(cur as CanvasProject),
         });
