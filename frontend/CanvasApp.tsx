@@ -596,8 +596,8 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
   const DEFAULT_NODE_SIZES: Record<string, { width: number, height: number }> = {
     /** 文生图：竖向窗，宽:高 = 3:4（与常见文生图界面比例接近） */
     't2i': { width: 900, height: 1200 },
-    /** 图生图：高:宽 ≈ 1.4:1（较 2:3 略矮，贴近参考界面） */
-    'i2i': { width: 900, height: 1260 },
+    /** 图生图：高:宽 ≈ 1.39:1（较 2:3 略宽，参考条放大后横向更舒展） */
+    'i2i': { width: 1150, height: 1600 },
     'panorama': { width: 1300, height: 1000 },
     'panoramaT2i': { width: 2000, height: 1800 },
     /** 图片标注：近方形略竖长，宽:高 = 4:5（介于 4:5～5:6） */
@@ -620,8 +620,8 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     gridMerge: { width: 720, height: 560 },
     /** 文生图：与默认 3:4 比例一致 */
     t2i: { width: 720, height: 960 },
-    /** 图生图：与默认 高:宽≈1.4 一致 */
-    i2i: { width: 600, height: 840 },
+    /** 图生图：与默认 高:宽≈1.78 一致 */
+    i2i: { width: 600, height: 1067 },
     /** 图片标注：与默认 4:5 比例一致 */
     annotation: { width: 640, height: 800 },
     chat: { width: 640, height: 1200 },

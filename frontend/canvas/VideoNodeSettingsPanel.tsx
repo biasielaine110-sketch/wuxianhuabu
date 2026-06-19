@@ -103,35 +103,35 @@ export function VideoNodeSettingsPanel({
         <div className="flex gap-2 ml-2 flex-wrap">
           {vSlots.slice(0, 12).map((slot) => (
             <div key={`${node.id}-vslot-${slot.n}`} className="relative group">
-              <div className="absolute -top-1 left-0 z-[1] rounded bg-black/70 px-1 text-[8px] font-bold leading-none text-cyan-300">
+              <div className="absolute -top-1.5 left-0 z-[1] rounded bg-black/70 px-1.5 text-[10px] font-bold leading-none text-cyan-300">
                 R{slot.n}
               </div>
               {slot.kind === 'image' && slot.imageBase64 ? (
                 <OptimizedImage
                   base64={slot.imageBase64}
-                  maxSide={80}
+                  maxSide={160}
                   quality={0.72}
                   alt={slot.label}
-                  className="w-9 h-9 rounded border border-[#444] object-cover"
+                  className="w-[72px] h-[72px] rounded border border-[#444] object-cover"
                 />
               ) : slot.kind === 'video' && slot.videoUrl ? (
                 <video
                   src={slot.videoUrl}
-                  className="w-9 h-9 rounded border border-[#444] object-cover"
+                  className="w-[72px] h-[72px] rounded border border-[#444] object-cover"
                   muted
                   playsInline
                   preload="metadata"
                 />
               ) : slot.kind === 'audio' ? (
-                <div className="w-9 h-9 rounded border border-[#444] bg-[#333] flex items-center justify-center" title={slot.label}>
-                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <div className="w-[72px] h-[72px] rounded border border-[#444] bg-[#333] flex items-center justify-center" title={slot.label}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
                     <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
                     <line x1="12" x2="12" y1="19" y2="22"/>
                   </svg>
                 </div>
               ) : (
-                <div className="w-9 h-9 rounded border border-[#444] bg-[#333]" title={slot.label} />
+                <div className="w-[72px] h-[72px] rounded border border-[#444] bg-[#333]" title={slot.label} />
               )}
               <button
                 onPointerDown={(e) => {
@@ -141,10 +141,10 @@ export function VideoNodeSettingsPanel({
                   e.stopPropagation();
                   onDeleteEdge(slot.edgeId);
                 }}
-                className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-600 hover:bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute -top-2 -right-2 w-6 h-6 bg-red-600 hover:bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow"
                 title="取消引用"
               >
-                <svg viewBox="0 0 10 10" className="w-2.5 h-2.5 fill-white"><path d="M1 1L9 9M9 1L1 9" stroke="white" strokeWidth="1.5" strokeLinecap="round" /></svg>
+                <svg viewBox="0 0 10 10" className="w-3.5 h-3.5 fill-white"><path d="M1 1L9 9M9 1L1 9" stroke="white" strokeWidth="1.5" strokeLinecap="round" /></svg>
               </button>
             </div>
           ))}

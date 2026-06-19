@@ -549,9 +549,9 @@ export function ChatNodeContent({
       }}
     >
       {/* 参考区：图片 + 视频 + 文本 */}
-      <div className={`flex items-center gap-2 px-2 py-1.5 bg-[#252525] border-b border-[#333] shrink-0 ${isSelected ? '' : 'hidden'}`} style={{ fontSize: fs(10), order: 2 }}>
-        <span className="text-gray-400 shrink-0">参考:</span>
-        <span className="text-green-400 font-medium shrink-0">
+      <div className={`flex items-start gap-2 px-2 py-2 bg-[#252525] border-b border-[#333] shrink-0 ${isSelected ? '' : 'hidden'}`} style={{ fontSize: fs(10), order: 2 }}>
+        <span className="text-gray-400 shrink-0 mt-1">参考:</span>
+        <span className="text-green-400 font-medium shrink-0 mt-1">
           {totalRefImages}图
           {refSlots.some((s) => s.kind === 'video') ? (
             <span className="text-amber-400"> · {refSlots.filter((s) => s.kind === 'video').length}视频</span>
@@ -560,26 +560,26 @@ export function ChatNodeContent({
             <span className="text-cyan-400"> · {refSlots.filter((s) => s.kind === 'text').length}文本</span>
           ) : null}
         </span>
-        <div className="flex gap-1 ml-1 flex-wrap max-w-[330px]">
+        <div className="flex gap-2 ml-1 flex-wrap max-w-[660px]">
           {(showAllRefs ? refSlots : refSlots.slice(0, 6)).map((slot) => (
             <div key={`${slot.edgeId}-slot-${slot.n}`} className="relative group">
-              <div className="absolute -top-0.5 left-0 z-[1] rounded bg-black/70 px-0.5 font-bold leading-none text-cyan-300" style={{ fontSize: fs(7) }}>
+              <div className="absolute -top-1 left-0 z-[1] rounded bg-black/70 px-1 font-bold leading-none text-cyan-300" style={{ fontSize: fs(9) }}>
                 R{slot.n}{slot.imageBase64s && slot.imageBase64s.length > 1 ? `(${slot.imageBase64s.length})` : ''}
               </div>
               {slot.imageBase64s && slot.imageBase64s.length > 0 ? (
-                <div className="flex gap-0.5">
+                <div className="flex gap-1">
                   {slot.imageBase64s.slice(0, 4).map((img, imgIdx) => (
                     <OptimizedImage
                       key={`${slot.edgeId}-img-${imgIdx}`}
                       base64={img}
-                      maxSide={80}
+                      maxSide={160}
                       quality={0.72}
                       alt={`${slot.label}图${imgIdx + 1}`}
-                      className="w-9 h-9 object-cover rounded border border-[#444]"
+                      className="w-[72px] h-[72px] object-cover rounded border border-[#444]"
                     />
                   ))}
                   {slot.imageBase64s.length > 4 && (
-                    <div className="w-9 h-9 rounded border border-[#444] bg-[#333] flex items-center justify-center text-gray-400 text-[8px]">
+                    <div className="w-[72px] h-[72px] rounded border border-[#444] bg-[#333] flex items-center justify-center text-gray-400 text-[12px]">
                       +{slot.imageBase64s.length - 4}
                     </div>
                   )}
@@ -587,26 +587,26 @@ export function ChatNodeContent({
               ) : slot.kind === 'image' && slot.imageBase64 ? (
                 <OptimizedImage
                   base64={slot.imageBase64}
-                  maxSide={80}
+                  maxSide={160}
                   quality={0.72}
                   alt={slot.label}
-                  className="w-9 h-9 object-cover rounded border border-[#444]"
+                  className="w-[72px] h-[72px] object-cover rounded border border-[#444]"
                 />
               ) : slot.kind === 'video' && slot.videoUrl ? (
                 <video
                   src={slot.videoUrl}
-                  className="w-9 h-9 rounded border border-[#444] object-cover"
+                  className="w-[72px] h-[72px] rounded border border-[#444] object-cover"
                   muted
                   playsInline
                   preload="metadata"
                 />
               ) : slot.kind === 'text' && slot.textContent ? (
-                <div className="w-9 h-9 rounded border border-cyan-700/50 bg-[#1a1a2e] flex items-center justify-center text-cyan-300 text-[7px] leading-tight px-0.5 overflow-hidden text-center"
+                <div className="w-[72px] h-[72px] rounded border border-cyan-700/50 bg-[#1a1a2e] flex items-center justify-center text-cyan-300 text-[11px] leading-tight px-1 overflow-hidden text-center"
                   title={slot.textContent}>
                   文本
                 </div>
               ) : (
-                <div className="w-9 h-9 rounded border border-[#444] bg-[#333]" title={slot.label} />
+                <div className="w-[72px] h-[72px] rounded border border-[#444] bg-[#333]" title={slot.label} />
               )}
               <button
                 onPointerDown={(e) => {
@@ -616,10 +616,10 @@ export function ChatNodeContent({
                   e.stopPropagation();
                   onDeleteEdge(slot.edgeId);
                 }}
-                className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-600 hover:bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute -top-2 -right-2 w-6 h-6 bg-red-600 hover:bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow"
                 title="取消引用"
               >
-                <svg viewBox="0 0 10 10" className="w-2.5 h-2.5 fill-white"><path d="M1 1L9 9M9 1L1 9" stroke="white" strokeWidth="1.5" strokeLinecap="round" /></svg>
+                <svg viewBox="0 0 10 10" className="w-3.5 h-3.5 fill-white"><path d="M1 1L9 9M9 1L1 9" stroke="white" strokeWidth="1.5" strokeLinecap="round" /></svg>
               </button>
             </div>
           ))}
@@ -641,7 +641,7 @@ export function ChatNodeContent({
             e.stopPropagation();
             onEyedropperSelect();
           }}
-          className={`ml-auto shrink-0 rounded px-2 py-0.5 text-white ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
+          className={`ml-auto self-center shrink-0 rounded px-2 py-0.5 text-white ${eyedropperTargetNodeId === node.id ? 'bg-cyan-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
           title={eyedropperTargetNodeId === node.id ? '取消吸取' : '吸取参考（图片 / 视频节点）'}
         >
           <EyedropperIcon size={fs(12)} />

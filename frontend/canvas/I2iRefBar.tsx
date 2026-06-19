@@ -36,10 +36,10 @@ export function I2iRefBar({
   if (incomingEdges.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-1 px-2 py-0.5 bg-[#1e1e1e] border-b border-[#333] text-[10px] shrink-0">
+    <div className="flex items-center gap-2 px-2 py-1 bg-[#1e1e1e] border-b border-[#333] text-[10px] shrink-0">
       <span className="text-gray-500">参考:</span>
       <span className="text-green-400 font-medium">{incomingEdges.length}张</span>
-      <div className="flex gap-0.5 ml-1 flex-wrap">
+      <div className="flex gap-1 ml-1 flex-wrap">
         {incomingEdges.slice(0, 12).map((edge, idx) => {
           const srcNode = sourceNodes[idx];
           const img = srcNode?.images?.[0];
@@ -50,10 +50,10 @@ export function I2iRefBar({
               <OptimizedImage
                 base64={img}
                 assetId={imgAssetId}
-                maxSide={64}
+                maxSide={128}
                 quality={0.72}
                 alt={`R${idx + 1}`}
-                className="w-9 h-9 object-cover rounded border border-[#444]"
+                className="w-[72px] h-[72px] object-cover rounded border border-[#444]"
               />
               <button
                 onPointerDown={(e) => {
@@ -63,10 +63,10 @@ export function I2iRefBar({
                   e.stopPropagation();
                   onDeleteEdge(edge.id);
                 }}
-                className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-600 hover:bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute -top-2 -right-2 w-6 h-6 bg-red-600 hover:bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow"
                 title="取消参考"
               >
-                <svg viewBox="0 0 10 10" className="w-2.5 h-2.5 fill-white">
+                <svg viewBox="0 0 10 10" className="w-3.5 h-3.5 fill-white">
                   <path d="M1 1L9 9M9 1L1 9" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
                 </svg>
               </button>
