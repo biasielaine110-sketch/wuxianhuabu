@@ -200,6 +200,15 @@ const CHAT_FEATURE_BUTTON_SPECS: ChatFeatureButtonSpec[] = [
     title:
       'CCCC_故事板简化版：根据剧本生成3:4画幅的分镜图，包含4个分镜、运镜说明、主体/动作/描述/台词/音效标注。发送前请填入剧本正文。',
   },
+  {
+    id: 'master-stillframe-15s',
+    presetKey: '主图静帧图_15秒',
+    label: '主图静帧图_15秒',
+    icon: 'wand',
+    tone: 'blue',
+    title:
+      '主图静帧图_15秒：AIGC 剧本镜头组拆解助手——按 15 秒段输出主图、多机位静帧、视频提示词、声音设计、场景台账。点击后请在输入框粘贴完整剧本。',
+  },
 ];
 
 export interface ChatNodeContentProps {
