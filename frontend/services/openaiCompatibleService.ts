@@ -3185,6 +3185,32 @@ function otuapiFetchBase(): string {
   return normalizeBaseUrl(getOtuapiBaseUrl());
 }
 
+/**
+ * 从 otuapi 任务查询响应中提取生成图片的 URL。
+ *
+ * 文档差异（同一 otuapi 不同时期文档返回结构不同）：
+ *   - 旧文档（apifox 447634846e0）：顶层 `url` 字段
+ *   - 新文档（apifox 455245131e0）：`results[0].url` 字段
+ *
+ * 这里两种结构都尝试，取到第一个非空字符串 URL 即返回。
+ */
+function extractOtuapiResultUrl(data: Record<string, unknown>): string {
+  const top = typeof data.url === 'string' ? data.url.trim() : '';
+  if (top) return top;
+  const results = data.results;
+  if (Array.isArray(results) && results.length > 0) {
+    const first = results[0];
+    if (first && typeof first === 'object') {
+      const r = first as Record<string, unknown>;
+      const u = typeof r.url === 'string' ? r.url.trim() : '';
+      if (u) return u;
+      const fu = typeof r.fallback_url === 'string' ? r.fallback_url.trim() : '';
+      if (fu) return fu;
+    }
+  }
+  return '';
+}
+
 /** otuapi 提交生图任务（图生图也用 POST /v1/videos），返回 task_id */
 async function otuapiSubmitImageTask(
   base: string,
@@ -3214,15 +3240,22 @@ async function otuapiSubmitImageTask(
   }
   const status = (typeof json.status === 'string' ? json.status : '').toLowerCase();
   if (status === 'failed' || status === 'error') {
-    // 兼容多种错误结构：{error:{message}}, {message}, {error_code,message}
+    // 兼容多种错误结构：
+    //   {error:{message}}
+    //   {message}
+    //   {error_code, message}
+    //   {error_code, error_message}
+    //   {error_message}
     const errObj = json.error;
     const errMsg =
       (errObj && typeof errObj === 'object' && typeof (errObj as { message?: string }).message === 'string'
         ? (errObj as { message?: string }).message
         : typeof json.message === 'string'
         ? json.message
+        : typeof (json as { error_message?: string }).error_message === 'string'
+        ? (json as { error_message?: string }).error_message
         : typeof (json as { error_code?: string }).error_code === 'string'
-        ? `${(json as { error_code?: string }).error_code}: ${typeof json.message === 'string' ? json.message : JSON.stringify(json)}`
+        ? `${(json as { error_code?: string }).error_code}: ${typeof (json as { error_message?: string }).error_message === 'string' ? (json as { error_message?: string }).error_message : typeof json.message === 'string' ? json.message : JSON.stringify(json)}`
         : JSON.stringify(json).slice(0, 400));
     throw new Error(`otuapi 任务直接失败: ${errMsg}`);
   }
@@ -3264,15 +3297,22 @@ async function otuapiPollImageTaskToBase64(
       if (onStatus) {
         if (status === 'queued' || status === 'dispatched' || status === 'pending') {
           onStatus('任务已提交，等待 otuapi 分配生图账号…');
-        } else if (status === 'in_progress' || status === 'running' || status === 'processing') {
+        } else if (
+          status === 'in_progress' ||
+          status === 'running' ||
+          status === 'processing' ||
+          status === 'generating'
+        ) {
           onStatus('otuapi 正在生成图片…');
+        } else if (status === 'completed' || status === 'succeeded' || status === 'success') {
+          onStatus('otuapi 生成完成，正在拉取图片…');
         } else {
           onStatus('正在查询 otuapi 生图任务状态…');
         }
       }
       if (status === 'completed' || status === 'succeeded' || status === 'success') {
-        // 文档：completed 时返回顶层 url
-        const url = typeof data.url === 'string' ? data.url.trim() : '';
+        // otuapi 文档差异：旧文档顶层 url，新文档 results[0].url
+        const url = extractOtuapiResultUrl(data);
         if (!url) {
           throw new Error('otuapi 任务已完成但未返回图片链接，请稍后重试。');
         }
@@ -3280,16 +3320,34 @@ async function otuapiPollImageTaskToBase64(
         return await fetchUrlAsBase64(url, signal, apiKey);
       }
       if (status === 'failed' || status === 'error') {
-        // 兼容多种错误结构：{error:{message}}, {message}, {error_code,message}
+        // 兼容多种错误结构：
+        //   {error:{message}}
+        //   {message}
+        //   {error_code, message}
+        //   {error_message}
+        //   {error_code, error_message}
         const errObj = data.error;
+        const errMessageField =
+          typeof (data as { error_message?: string }).error_message === 'string'
+            ? (data as { error_message?: string }).error_message
+            : '';
+        const errCodeField =
+          typeof (data as { error_code?: string }).error_code === 'string'
+            ? (data as { error_code?: string }).error_code
+            : '';
         const msg =
           (errObj &&
             typeof errObj === 'object' &&
             typeof (errObj as { message?: string }).message === 'string' &&
             (errObj as { message?: string }).message) ||
           (typeof data.message === 'string' && data.message) ||
-          (typeof (data as { error_code?: string }).error_code === 'string'
-            ? `${(data as { error_code?: string }).error_code}: ${typeof data.message === 'string' ? data.message : JSON.stringify(data).slice(0, 200)}`
+          errMessageField ||
+          (errCodeField
+            ? `${errCodeField}: ${
+                typeof data.message === 'string'
+                  ? data.message
+                  : errMessageField || JSON.stringify(data).slice(0, 200)
+              }`
             : '') ||
           JSON.stringify(data).slice(0, 400);
         throw new Error(`otuapi 任务失败: ${msg}`);
