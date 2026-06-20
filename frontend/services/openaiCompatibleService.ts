@@ -3214,10 +3214,16 @@ async function otuapiSubmitImageTask(
   }
   const status = (typeof json.status === 'string' ? json.status : '').toLowerCase();
   if (status === 'failed' || status === 'error') {
+    // 兼容多种错误结构：{error:{message}}, {message}, {error_code,message}
+    const errObj = json.error;
     const errMsg =
-      (typeof (json as { error?: { message?: string } }).error?.message === 'string' &&
-        (json as { error?: { message?: string } }).error?.message) ||
-      JSON.stringify(json).slice(0, 400);
+      (errObj && typeof errObj === 'object' && typeof (errObj as { message?: string }).message === 'string'
+        ? (errObj as { message?: string }).message
+        : typeof json.message === 'string'
+        ? json.message
+        : typeof (json as { error_code?: string }).error_code === 'string'
+        ? `${(json as { error_code?: string }).error_code}: ${typeof json.message === 'string' ? json.message : JSON.stringify(json)}`
+        : JSON.stringify(json).slice(0, 400));
     throw new Error(`otuapi 任务直接失败: ${errMsg}`);
   }
   return taskId;
@@ -3274,13 +3280,17 @@ async function otuapiPollImageTaskToBase64(
         return await fetchUrlAsBase64(url, signal, apiKey);
       }
       if (status === 'failed' || status === 'error') {
+        // 兼容多种错误结构：{error:{message}}, {message}, {error_code,message}
         const errObj = data.error;
         const msg =
           (errObj &&
             typeof errObj === 'object' &&
             typeof (errObj as { message?: string }).message === 'string' &&
             (errObj as { message?: string }).message) ||
-          (typeof data.error === 'string' ? data.error : '') ||
+          (typeof data.message === 'string' && data.message) ||
+          (typeof (data as { error_code?: string }).error_code === 'string'
+            ? `${(data as { error_code?: string }).error_code}: ${typeof data.message === 'string' ? data.message : JSON.stringify(data).slice(0, 200)}`
+            : '') ||
           JSON.stringify(data).slice(0, 400);
         throw new Error(`otuapi 任务失败: ${msg}`);
       }
