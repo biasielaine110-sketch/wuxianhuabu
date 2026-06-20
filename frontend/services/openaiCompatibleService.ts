@@ -3186,29 +3186,13 @@ function otuapiFetchBase(): string {
 }
 
 /**
- * 从 otuapi 任务查询响应中提取生成图片的 URL。
+ * 从 otuapi 任务查询响应中提取生成结果的 URL。
  *
- * 文档差异（同一 otuapi 不同时期文档返回结构不同）：
- *   - 旧文档（apifox 447634846e0）：顶层 `url` 字段
- *   - 新文档（apifox 455245131e0）：`results[0].url` 字段
- *
- * 这里两种结构都尝试，取到第一个非空字符串 URL 即返回。
+ * 文档（apifox 447634846e0 + 455245131e0 统一）：completed 状态时，
+ * 结果 URL 位于响应顶层 `url` 字段。这里只取顶层 `url`。
  */
 function extractOtuapiResultUrl(data: Record<string, unknown>): string {
-  const top = typeof data.url === 'string' ? data.url.trim() : '';
-  if (top) return top;
-  const results = data.results;
-  if (Array.isArray(results) && results.length > 0) {
-    const first = results[0];
-    if (first && typeof first === 'object') {
-      const r = first as Record<string, unknown>;
-      const u = typeof r.url === 'string' ? r.url.trim() : '';
-      if (u) return u;
-      const fu = typeof r.fallback_url === 'string' ? r.fallback_url.trim() : '';
-      if (fu) return fu;
-    }
-  }
-  return '';
+  return typeof data.url === 'string' ? data.url.trim() : '';
 }
 
 /** otuapi 提交生图任务（图生图也用 POST /v1/videos），返回 task_id */
@@ -3396,7 +3380,8 @@ async function otuapiGenerateNewImage(
   numberOfImages: number,
   nodeResolution?: string,
   quality?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onStatus?: (message: string) => void
 ): Promise<string[]> {
   const enhancedPrompt = buildPromptWithDimensions(prompt, aspectRatio);
   const model = resolveOtuapiModelFromNodeResolution(nodeResolution);
@@ -3404,7 +3389,10 @@ async function otuapiGenerateNewImage(
   const out: string[] = [];
   for (let i = 0; i < count; i++) {
     assertNotAborted(signal);
-    out.push(await otuapiGenerateOneImage(model, enhancedPrompt, aspectRatio, undefined, signal));
+    if (onStatus) {
+      onStatus(`otuapi 提交第 ${i + 1}/${count} 张图…`);
+    }
+    out.push(await otuapiGenerateOneImage(model, enhancedPrompt, aspectRatio, undefined, signal, onStatus));
   }
   // 静默吞掉 quality：otuapi 当前不支持 quality 字段（按 aspect_ratio 控档），避免误导用户
   void quality;
@@ -3420,7 +3408,8 @@ async function otuapiEditImage(
   nodeResolution?: string,
   _quality?: string,
   _pixelSize?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onStatus?: (message: string) => void
 ): Promise<string[]> {
   if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
   // 文档：images[] 最多 5 张；保留完整 data URL（与 docs 示例一致），让 otuapi 网关自行解析
@@ -3431,7 +3420,10 @@ async function otuapiEditImage(
   const out: string[] = [];
   for (let i = 0; i < count; i++) {
     assertNotAborted(signal);
-    out.push(await otuapiGenerateOneImage(model, enhancedPrompt, aspectRatio, images, signal));
+    if (onStatus) {
+      onStatus(`otuapi 提交第 ${i + 1}/${count} 张图…`);
+    }
+    out.push(await otuapiGenerateOneImage(model, enhancedPrompt, aspectRatio, images, signal, onStatus));
   }
   return out;
 }
@@ -4294,7 +4286,8 @@ export async function openAiGenerateNewImage(
   modelName: string,
   nodeResolution?: string,
   quality?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onStatus?: (message: string) => void
 ): Promise<string[]> {
   const rawModel = (modelName || '').trim();
   if (rawModel === 'gpt-image-2-junlan') {
@@ -4357,7 +4350,8 @@ export async function openAiGenerateNewImage(
       numberOfImages,
       nodeResolution,
       quality,
-      signal
+      signal,
+      onStatus
     );
   }
 
@@ -4402,7 +4396,8 @@ export async function openAiEditImage(
   nodeResolution?: string,
   quality?: string,
   pixelSize?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onStatus?: (message: string) => void
 ): Promise<string[]> {
   const rawModel = (modelName || '').trim();
   if (rawModel === 'gpt-image-2-junlan') {
@@ -4472,7 +4467,8 @@ export async function openAiEditImage(
       nodeResolution,
       quality,
       pixelSize,
-      signal
+      signal,
+      onStatus
     );
   }
 
