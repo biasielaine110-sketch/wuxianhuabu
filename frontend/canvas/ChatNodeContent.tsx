@@ -1166,6 +1166,7 @@ export function ChatNodeContent({
             <option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option>
             <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
             <option value="gpt-image-2-manxue">GPT Image 2（满 e）</option>
+            <option value="gpt-image-2-otuapi">GPT Image 2（otuapi.com）</option>
             <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option>
             <option value="gemini-3.1-flash-image-preview-2k-manxue">Gemini 3.1 Flash Image 2K（满 e）</option>
             <option value="gemini-3-pro-image-preview-2k-manxue">Gemini 3 Pro Image 2K（满 e）</option>

@@ -8,6 +8,8 @@ import {
   getAiidBaseUrl,
   getAiidSavedKey,
   getHfsySavedKey,
+  getOtuapiSavedKey,
+  getOtuapiBaseUrl,
 } from '../services/aiSettings';
 import {
   getDownloadHandleCacheSnapshot,
@@ -105,6 +107,8 @@ export function useCanvasSettingsPanelState({
   const [codesonlineKeyInput, setCodesonlineKeyInput] = useState(() => getAiSettingsSnapshot().codesonlineKey);
   const [codesonlineChatKeyInput, setCodesonlineChatKeyInput] = useState(() => getCodesonlineChatSavedKey());
   const [hfsyKeyInput, setHfsyKeyInput] = useState(() => getHfsySavedKey());
+  const [otuapiKeyInput, setOtuapiKeyInput] = useState(() => getOtuapiSavedKey());
+  const [otuapiBaseInput, setOtuapiBaseInput] = useState(() => getOtuapiBaseUrl());
   const [manxueBaseInput, setManxueBaseInput] = useState(() => getAiSettingsSnapshot().manxueBaseUrl);
   const [manxueKeyInput, setManxueKeyInput] = useState(() => getAiSettingsSnapshot().manxueKey);
   const [minimaxBaseInput, setMiniMaxBaseInput] = useState(() => getAiSettingsSnapshot().minimaxBaseUrl);
@@ -125,6 +129,8 @@ export function useCanvasSettingsPanelState({
     setCodesonlineKeyInput(s.codesonlineKey);
     setCodesonlineChatKeyInput(getCodesonlineChatSavedKey());
     setHfsyKeyInput(getHfsySavedKey());
+    setOtuapiKeyInput(getOtuapiSavedKey());
+    setOtuapiBaseInput(getOtuapiBaseUrl());
     setManxueBaseInput(s.manxueBaseUrl);
     setManxueKeyInput(s.manxueKey);
     setMiniMaxBaseInput(s.minimaxBaseUrl);
@@ -158,6 +164,8 @@ export function useCanvasSettingsPanelState({
     setCodesonlineBaseInput(s.codesonlineBaseUrl);
     setCodesonlineKeyInput(s.codesonlineKey);
     setHfsyKeyInput(getHfsySavedKey());
+    setOtuapiKeyInput(getOtuapiSavedKey());
+    setOtuapiBaseInput(getOtuapiBaseUrl());
     setDownloadPathSettings(loadDownloadPathSettings());
     setCreditPricingRows(loadCreditPricingRows());
     void hydrateDownloadDirectoryHandlesFromIDB().then(() => refreshDownloadDirLabels());
@@ -383,6 +391,10 @@ export function useCanvasSettingsPanelState({
       setCodesonlineChatKeyInput,
       hfsyKeyInput,
       setHfsyKeyInput,
+      otuapiKeyInput,
+      setOtuapiKeyInput,
+      otuapiBaseInput,
+      setOtuapiBaseInput,
       manxueBaseInput,
       setManxueBaseInput,
       manxueKeyInput,

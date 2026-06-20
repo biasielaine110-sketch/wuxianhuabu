@@ -11,6 +11,7 @@ import {
   DEFAULT_MINIMAX_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
   DEFAULT_AIID_BASE_URL,
+  DEFAULT_OTUAPI_IMAGE_BASE_URL,
   persistAiSettings,
   setCodesonlineChatKey,
   getAiSettingsSnapshot,
@@ -103,6 +104,10 @@ export type CanvasSettingsModalProps = {
   setCodesonlineChatKeyInput: Dispatch<SetStateAction<string>>;
   hfsyKeyInput: string;
   setHfsyKeyInput: Dispatch<SetStateAction<string>>;
+  otuapiKeyInput: string;
+  setOtuapiKeyInput: Dispatch<SetStateAction<string>>;
+  otuapiBaseInput: string;
+  setOtuapiBaseInput: Dispatch<SetStateAction<string>>;
   manxueBaseInput: string;
   manxueKeyInput: string;
   setManxueKeyInput: Dispatch<SetStateAction<string>>;
@@ -182,6 +187,10 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
     setCodesonlineChatKeyInput,
     hfsyKeyInput,
     setHfsyKeyInput,
+    otuapiKeyInput,
+    setOtuapiKeyInput,
+    otuapiBaseInput,
+    setOtuapiBaseInput,
     manxueBaseInput,
     manxueKeyInput,
     setManxueKeyInput,
@@ -363,6 +372,33 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                     >文档：https://www.hfsyapi.cn/docs</a>
                   </div>
 
+                  {/* ②c otuapi.com（GPT Image 2 异步，POST /v1/videos + GET /v1/videos/{id} 轮询） */}
+                  <div className="mt-5 pt-4 border-t border-[#333]">
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">otuapi.com（GPT Image 2 异步）</h3>
+                    <label className="text-xs text-gray-500 block mb-1">otuapi.com Base URL</label>
+                    <input
+                      type="text"
+                      value={otuapiBaseInput}
+                      onChange={(e) => setOtuapiBaseInput(e.target.value)}
+                      placeholder={DEFAULT_OTUAPI_IMAGE_BASE_URL}
+                      className="w-full mb-3 bg-[#222222] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-sky-600 transition-colors text-sm"
+                    />
+                    <label className="text-xs text-gray-500 block mb-1">otuapi.com API Key</label>
+                    <input
+                      type="password"
+                      value={otuapiKeyInput}
+                      onChange={(e) => setOtuapiKeyInput(e.target.value)}
+                      placeholder="sk-..."
+                      className="w-full bg-[#222222] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-sky-600 transition-colors text-sm"
+                    />
+                    <a
+                      href="https://otuapi.com/"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block mt-2 text-xs text-sky-500 hover:text-sky-400"
+                    >文档：https://otuapi.com/ （含 gpt-image-2 / gpt-image-2-2K / gpt-image-2-4K）</a>
+                  </div>
+
                   {/* codesonline GPT-5.5 对话 */}
                   <div className="mt-5 pt-4 border-t border-[#333]">
                     <h3 className="text-sm font-semibold text-gray-200 mb-2">codesonline (GPT-5.5 对话)</h3>
@@ -495,6 +531,8 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                                 codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
                                 hfsyApiKey: hfsyKeyInput.trim(),
                                 hfsyBaseUrl: DEFAULT_HFSY_IMAGE_BASE_URL,
+                                otuapiApiKey: otuapiKeyInput.trim(),
+                                otuapiBaseUrl: otuapiBaseInput.trim() || DEFAULT_OTUAPI_IMAGE_BASE_URL,
                                 deepSeekApiKey: deepSeekKeyInput.trim(),
                                 deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
                                 manxueApiKey: manxueKeyInput.trim(),
@@ -532,6 +570,8 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                                 codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
                                 hfsyApiKey: hfsyKeyInput.trim(),
                                 hfsyBaseUrl: DEFAULT_HFSY_IMAGE_BASE_URL,
+                                otuapiApiKey: otuapiKeyInput.trim(),
+                                otuapiBaseUrl: otuapiBaseInput.trim() || DEFAULT_OTUAPI_IMAGE_BASE_URL,
                                 deepSeekApiKey: deepSeekKeyInput.trim(),
                                 deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
                                 manxueApiKey: manxueKeyInput.trim(),
@@ -581,6 +621,8 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                             codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
                             hfsyApiKey: hfsyKeyInput.trim(),
                             hfsyBaseUrl: DEFAULT_HFSY_IMAGE_BASE_URL,
+                            otuapiApiKey: otuapiKeyInput.trim(),
+                            otuapiBaseUrl: otuapiBaseInput.trim() || DEFAULT_OTUAPI_IMAGE_BASE_URL,
                             deepSeekApiKey: deepSeekKeyInput.trim(),
                             deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
                             manxueApiKey: manxueKeyInput.trim(),
@@ -620,6 +662,8 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                           codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
                           hfsyApiKey: hfsyKeyInput.trim(),
                           hfsyBaseUrl: DEFAULT_HFSY_IMAGE_BASE_URL,
+                          otuapiApiKey: otuapiKeyInput.trim(),
+                          otuapiBaseUrl: otuapiBaseInput.trim() || DEFAULT_OTUAPI_IMAGE_BASE_URL,
                           deepSeekApiKey: deepSeekKeyInput.trim(),
                           deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
                           manxueApiKey: manxueKeyInput.trim(),
