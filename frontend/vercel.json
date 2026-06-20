@@ -53,6 +53,14 @@
       "destination": "/api/hfsy-image-proxy?path=$1"
     },
     {
+      "source": "/otuapi-image-api/(.*)",
+      "destination": "/api/otuapi-image-proxy?path=$1"
+    },
+    {
+      "source": "/api/otuapi-image-proxy/(.*)",
+      "destination": "/api/otuapi-image-proxy?path=$1"
+    },
+    {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
