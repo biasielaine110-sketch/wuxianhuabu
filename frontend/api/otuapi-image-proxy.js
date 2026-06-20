@@ -1,0 +1,1 @@
+export { default, config } from './_lib/otuapi-image-proxy-handler.js';

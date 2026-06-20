@@ -1,0 +1,1 @@
+module.exports = require('./_lib/otuapi-image-proxy-handler.cjs');

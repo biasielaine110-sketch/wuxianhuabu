@@ -57,6 +57,14 @@ function hfsyImageProxyPathPrefix(): '/api/hfsy-image-proxy' | '/hfsy-image-api'
   return '/hfsy-image-api';
 }
 
+/** 生产构建直接请求 /api/otuapi-image-proxy；otuapi 生成图 CDN（oss-us.file-download.life）未开放 CORS */
+function otuapiImageProxyPathPrefix(): '/api/otuapi-image-proxy' | '/otuapi-image-api' {
+  if (typeof import.meta !== 'undefined' && import.meta.env?.PROD) {
+    return '/api/otuapi-image-proxy';
+  }
+  return '/otuapi-image-api';
+}
+
 /** manxueapi.com 未开放 CORS；生产走 Vercel rewrite、开发走 Vite 同源代理 /manxue-api */
 function rewriteManxueBaseForBrowserCors(baseNormalized: string): string {
   if (typeof window === 'undefined') return baseNormalized;
@@ -623,6 +631,10 @@ function rewriteKnownImageCdnToSameOrigin(imageUrl: string): string {
     }
     if (host === 'www.hfsyapi.cn' || host === 'hfsyapi.cn') {
       return `${origin}${hfsyImageProxyPathPrefix()}${u.pathname}${u.search}`;
+    }
+    // otuapi 异步任务返回的图片 URL 托管在 oss-us.file-download.life，未开放 CORS
+    if (host === 'oss-us.file-download.life' || host.endsWith('.oss-us.file-download.life')) {
+      return `${origin}${otuapiImageProxyPathPrefix()}${u.pathname}${u.search}`;
     }
   } catch {
     /* ignore */
