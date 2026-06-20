@@ -3294,20 +3294,26 @@ async function otuapiPollImageTaskToBase64(
       }
       const data = (await res.json()) as Record<string, unknown>;
       const status = (typeof data.status === 'string' ? data.status : '').toLowerCase();
+      // 旧文档：progress 字段 0-100，completed 时为 100
+      const progress =
+        typeof (data as { progress?: number }).progress === 'number'
+          ? Math.max(0, Math.min(100, Math.round((data as { progress?: number }).progress!)))
+          : null;
+      const progressText = progress != null ? `（${progress}%）` : '';
       if (onStatus) {
         if (status === 'queued' || status === 'dispatched' || status === 'pending') {
-          onStatus('任务已提交，等待 otuapi 分配生图账号…');
+          onStatus(`任务已提交，等待 otuapi 分配生图账号${progressText}…`);
         } else if (
           status === 'in_progress' ||
           status === 'running' ||
           status === 'processing' ||
           status === 'generating'
         ) {
-          onStatus('otuapi 正在生成图片…');
+          onStatus(`otuapi 正在生成图片${progressText}…`);
         } else if (status === 'completed' || status === 'succeeded' || status === 'success') {
           onStatus('otuapi 生成完成，正在拉取图片…');
         } else {
-          onStatus('正在查询 otuapi 生图任务状态…');
+          onStatus(`正在查询 otuapi 生图任务状态${progressText}…`);
         }
       }
       if (status === 'completed' || status === 'succeeded' || status === 'success') {
