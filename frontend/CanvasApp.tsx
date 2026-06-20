@@ -1740,19 +1740,43 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     let cancelled = false;
     let lastKey = buildMediaOffloadScanKey(useCanvasStore.getState().nodes);
     const runOffload = async (nodeList: CanvasNode[]) => {
-      const patches = new Map<string, Partial<CanvasNode>>();
+      const patches = new Map<string, { patch: Partial<CanvasNode>; snapshotImages: string[] | undefined; snapshotAssetIds: string[] | undefined }>();
       for (const node of nodeList) {
         if (cancelled || !nodeNeedsMediaOffload(node)) continue;
         const patch = await buildNodeMediaOffloadPatch(node);
         if (cancelled || !patch) continue;
-        patches.set(node.id, patch);
+        // 记录 patch 时刻的 images/imageAssetIds 快照，下游 setNodes 时用于
+        // 检测「在 offload 异步 IO 期间，节点是否被新一轮生成/上传改动过」。
+        // 若已改动，则丢弃旧 patch，避免用「上一轮的清空 base64」覆盖掉「新生成的图」。
+        patches.set(node.id, {
+          patch,
+          snapshotImages: Array.isArray(node.images) ? [...node.images] : undefined,
+          snapshotAssetIds: Array.isArray(node.imageAssetIds) ? [...node.imageAssetIds] : undefined,
+        });
       }
       if (cancelled || patches.size === 0) return;
       startTransition(() => {
         setNodes((prev) =>
           prev.map((n) => {
-            const patch = patches.get(n.id);
-            return patch ? { ...n, ...patch } : n;
+            const entry = patches.get(n.id);
+            if (!entry) return n;
+            const { patch, snapshotImages, snapshotAssetIds } = entry;
+            // 冲突检测：当前 images/imageAssetIds 任何一项与快照不一致，
+            // 说明异步 offload 期间用户又触发了新一轮生成/上传/连线注入。
+            // 此时绝不能用旧 patch 覆盖新内容——否则最新一批图会丢失。
+            if (snapshotImages && Array.isArray(n.images)) {
+              if (n.images.length !== snapshotImages.length) return n;
+              for (let i = 0; i < snapshotImages.length; i++) {
+                if ((n.images[i] ?? '') !== (snapshotImages[i] ?? '')) return n;
+              }
+            }
+            if (snapshotAssetIds && Array.isArray(n.imageAssetIds)) {
+              if (n.imageAssetIds.length !== snapshotAssetIds.length) return n;
+              for (let i = 0; i < snapshotAssetIds.length; i++) {
+                if ((n.imageAssetIds[i] ?? '') !== (snapshotAssetIds[i] ?? '')) return n;
+              }
+            }
+            return { ...n, ...patch };
           })
         );
       });

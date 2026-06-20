@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect, type RefObject } from 'react';
 import type { AuditImage, CanvasNode, Edge, Transform } from '../types';
 import { hydrateNodesMediaFromAssets } from './jsonExportMediaHydrate';
+import { flushAllNodeMediaOffload } from '../services/canvasAssetSync';
 import {
   loadProjectLibrary,
   saveProjectLibrary,
@@ -286,10 +287,39 @@ export function useCanvasProjectLibrary({
         alert('项目数据仍在加载，请稍后再试保存。');
         return Promise.resolve(false);
       }
+      /**
+       * 关键第一步：autosave 前强制 flush 媒体 offload 队列。
+       *
+       * 根因：CanvasApp 的 offload effect 是异步订阅式执行的，可能有部分大图
+       * 内存里仍是 base64、imageAssetIds 对应位置为空，且 IDB 里还没记录。
+       * 此时若直接走 merge → hydrate，hydrate 会按 imageAssetIds 查 IDB 查不到，
+       * 然后把 images[i] 永久置空——这就是用户描述的「突然丢一批最近生成的图」。
+       *
+       * flushAllNodeMediaOffload 会同步遍历所有节点，把「需要 offload」的大图全部
+       * 写入 IDB；返回的 patches 同步应用到 store + nodesRef，再走 merge + hydrate。
+       * 若 IDB 写入失败（quota exceeded 等），flush 内部会让对应格保持原 base64，
+       * 后续 merge 仍然能拿到完整 base64，丢图风险被切断。
+       */
+      const offloadPatches = await flushAllNodeMediaOffload(nodesRef.current);
+      let currentNodes = nodesRef.current;
+      if (offloadPatches.size > 0) {
+        // 把 offload 后的 patches 同步推到 zustand store，让 nodesRef 与 store 保持一致；
+        // 同时保存一份「patch 后」的最新 nodes 给 merge 用（避免等到 React 重渲染再去读 ref）。
+        currentNodes = nodesRef.current.map((n) => {
+          const p = offloadPatches.get(n.id);
+          return p ? { ...n, ...p } : n;
+        });
+        setNodes(currentNodes);
+        if (typeof console !== 'undefined') {
+          console.info(
+            `[saveCurrentProject] flush offload: ${offloadPatches.size} nodes patched before merge`
+          );
+        }
+      }
       const nextProjects = mergeCurrentCanvasIntoProjectList(
         projectsRef.current,
         pid,
-        nodesRef.current,
+        currentNodes,
         edgesRef.current,
         transformRef.current,
         auditImagesRef.current.length > 0 ? { images: auditImagesRef.current } : undefined

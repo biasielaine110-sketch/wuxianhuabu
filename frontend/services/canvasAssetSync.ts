@@ -279,3 +279,26 @@ export function nodeMediaOffloadSignature(node: CanvasNode): string {
 export function buildMediaOffloadScanKey(nodes: CanvasNode[]): string {
   return nodes.map(nodeMediaOffloadSignature).join('\x1e');
 }
+
+/**
+ * 同步强制把所有「需要 offload 但还未 offload」的大体积 base64 媒体写进 IDB，
+ * 并在节点上写入 assetId + 清空 base64。
+ *
+ * **autosave / saveCurrentProject 必须在保存前调用**，否则会出现：
+ *   - 内存里 `images[i]` 是新 base64 但 IDB 里没有对应记录
+ *   - hydrate 时按 imageAssetIds 找不到 → 把 `images[i]` 置空 → 图永久丢失
+ *
+ * 异常路径：若 IDB 写入失败（quota exceeded 等），对应格 images[i] 保持原 base64，
+ * 由调用方决定是否继续保存。
+ */
+export async function flushAllNodeMediaOffload(
+  nodes: CanvasNode[]
+): Promise<Map<string, Partial<CanvasNode>>> {
+  const patches = new Map<string, Partial<CanvasNode>>();
+  for (const node of nodes) {
+    if (!nodeNeedsMediaOffload(node)) continue;
+    const patch = await buildNodeMediaOffloadPatch(node);
+    if (patch) patches.set(node.id, patch);
+  }
+  return patches;
+}
