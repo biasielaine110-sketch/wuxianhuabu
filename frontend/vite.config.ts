@@ -278,6 +278,7 @@ export default defineConfig(({ mode }) => {
       envDir,
       cacheDir: path.resolve(envDir, 'node_modules/.vite'),
       build: {
+        chunkSizeWarningLimit: 1200,
         rollupOptions: {
           output: {
             /** three / genai / jszip 分 chunk，减小主包体积 */
