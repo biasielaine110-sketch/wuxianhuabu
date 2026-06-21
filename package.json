@@ -10,7 +10,7 @@
     "dev": "npm run dev-frontend"
   },
   "engines": {
-    "node": "20.x"
+    "node": "24.x"
   },
   "devDependencies": {
     "vercel": "^54.0.0"
