@@ -20,8 +20,10 @@ export type CanvasProjectModalProps = {
   onApplyDraftTitle: () => void;
   onApplyDraftStoragePath: () => void;
   onAutosaveIntervalChange: (v: 0 | 5 | 10 | 20 | 30) => void;
+  isRepairingImageAssets?: boolean;
   onCreateNewProject: (name?: string) => void;
   onSaveCurrentProject: () => void;
+  onRepairImageAssets: () => void;
   onImportProjectFile: (file: File) => void;
   onExportProjectJson: (project: CanvasProject) => void;
   onExportProjectZip: (project: CanvasProject) => void;
@@ -48,8 +50,10 @@ export const CanvasProjectModal = memo(function CanvasProjectModal({
   onApplyDraftTitle,
   onApplyDraftStoragePath,
   onAutosaveIntervalChange,
+  isRepairingImageAssets = false,
   onCreateNewProject,
   onSaveCurrentProject,
+  onRepairImageAssets,
   onImportProjectFile,
   onExportProjectJson,
   onExportProjectZip,
@@ -151,7 +155,7 @@ export const CanvasProjectModal = memo(function CanvasProjectModal({
             </span>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-2 mb-3 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 mb-3 sm:grid-cols-5">
           <button
             type="button"
             onClick={() => {
@@ -177,6 +181,15 @@ export const CanvasProjectModal = memo(function CanvasProjectModal({
             title="支持 .json 与 .wxcanvas.zip / .zip"
           >
             导入 JSON / ZIP
+          </button>
+          <button
+            type="button"
+            onClick={() => void onRepairImageAssets()}
+            disabled={isRepairingImageAssets}
+            className="px-3 py-2.5 text-xs rounded-lg bg-teal-700 hover:bg-teal-600 text-white font-medium disabled:opacity-50 disabled:cursor-wait"
+            title="\u4ece\u7ed1\u5b9a ZIP \u6216\u8282\u70b9\u91cc\u6b8b\u7559\u7684\u56fe\u7247/\u94fe\u63a5\u6062\u590d\u7f3a\u5931\u7684 IDB \u56fe\u7247\u8d44\u4ea7"
+          >
+            {isRepairingImageAssets ? '\u4fee\u590d\u4e2d...' : '\u4fee\u590d\u56fe\u7247\u8d44\u4ea7'}
           </button>
           <div className="relative">
             <button

@@ -21,6 +21,11 @@ function isHopByHopHeader(name) {
   ]).has(n);
 }
 
+function isUnsafeForwardedResponseHeader(name) {
+  const n = String(name).toLowerCase();
+  return isHopByHopHeader(n) || n === 'content-encoding' || n === 'content-length';
+}
+
 async function handler(req, res) {
   const host = req.headers.host || 'localhost';
   const url = new URL(req.url || '/', `http://${host}`);
@@ -44,12 +49,14 @@ async function handler(req, res) {
   for (const [k, v] of Object.entries(req.headers)) {
     if (!v || isHopByHopHeader(k)) continue;
     if (k.toLowerCase() === 'host') continue;
+    if (k.toLowerCase() === 'accept-encoding') continue;
     if (Array.isArray(v)) {
       for (const item of v) headers.append(k, item);
     } else {
       headers.set(k, v);
     }
   }
+  headers.set('accept-encoding', 'identity');
 
   const method = req.method || 'GET';
   const hasBody = !['GET', 'HEAD'].includes(method);
@@ -78,13 +85,14 @@ async function handler(req, res) {
 
   res.statusCode = upstream.status;
   upstream.headers.forEach((value, key) => {
-    if (isHopByHopHeader(key)) return;
+    if (isUnsafeForwardedResponseHeader(key)) return;
     try {
       res.setHeader(key, value);
     } catch {
       /* ignore */
     }
   });
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
 
   if (!upstream.body) {
     res.end();

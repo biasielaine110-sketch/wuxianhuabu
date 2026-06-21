@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect, type RefObject } from 'react'
 import type { AuditImage, CanvasNode, Edge, Transform } from '../types';
 import { hydrateNodesMediaFromAssets } from './jsonExportMediaHydrate';
 import { findMissingNodeMediaAssetIds, findMissingNodeWindowMedia, flushAllNodeMediaOffload } from '../services/canvasAssetSync';
+import { repairMissingNodeMediaAssetsFromNodeSources } from '../services/canvasAssetRepair';
 import {
   loadProjectLibrary,
   saveProjectLibrary,
@@ -18,6 +19,8 @@ import {
   getProjectBackupFileHandle,
   getProjectZipBackupFileHandle,
   getProjectDraftDirectoryHandle,
+  revealFolderViaDirectoryPicker,
+  revealBackupFolderViaFilePicker,
   persistProjectBackupFileHandle,
   persistProjectZipBackupFileHandle,
   persistProjectDraftDirectoryHandle,
@@ -65,6 +68,7 @@ export function useCanvasProjectLibrary({
   const [activeProjectId, setActiveProjectId] = useState<string>('');
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
+  const [isRepairingImageAssets, setIsRepairingImageAssets] = useState(false);
   const saveSuccessTimerRef = useRef<number | null>(null);
   const [projectExportMenuOpen, setProjectExportMenuOpen] = useState(false);
   const [projectStoreReady, setProjectStoreReady] = useState(false);
@@ -130,22 +134,31 @@ export function useCanvasProjectLibrary({
     lastDiskWriteFormatRef.current = h ? 'json' : null;
     setLastJsonFilename(h?.name ?? '');
   }, []);
-  const restoreProjectAssetsFromBoundZip = useCallback(async (project: CanvasProject | undefined | null): Promise<void> => {
-    if (!project?.id || project.draftDiskWriteFormat !== 'zip') return;
+  const restoreProjectAssetsFromBoundZip = useCallback(async (project: CanvasProject | undefined | null): Promise<number> => {
+    if (!project?.id || project.draftDiskWriteFormat !== 'zip') return 0;
     try {
       let h = lastZipFileHandleRef.current;
       if (!h) h = (await getProjectZipBackupFileHandle(project.id)) ?? null;
-      if (!h) return;
+      if (!h) return 0;
       const restored = await restoreProjectAssetsFromZipFileHandle(h);
       if (restored > 0) {
         lastZipFileHandleRef.current = h;
         lastDiskWriteFormatRef.current = 'zip';
         console.info(`[canvas] 已从绑定 ZIP 恢复 ${restored} 个图片资产`);
       }
+      return restored;
     } catch (e) {
       console.warn('[canvas] 从绑定 ZIP 恢复图片资产失败', e);
+      return 0;
     }
   }, []);
+  const restoreProjectsAssetsFromBoundZips = useCallback(async (projectList: CanvasProject[]): Promise<void> => {
+    for (const project of projectList) {
+      if (project?.diskSaveEstablished && project.draftDiskWriteFormat === 'zip') {
+        await restoreProjectAssetsFromBoundZip(project);
+      }
+    }
+  }, [restoreProjectAssetsFromBoundZip]);
   const restoreMissingMediaSlotsFromSavedProject = useCallback(
     async (currentNodes: CanvasNode[], savedProject: CanvasProject | undefined | null): Promise<CanvasNode[]> => {
       if (!savedProject?.nodes?.length) return currentNodes;
@@ -607,6 +620,63 @@ export function useCanvasProjectLibrary({
     saveCurrentProjectRef.current = saveCurrentProject;
   }, [saveCurrentProject]);
 
+  const repairCurrentProjectImageAssets = useCallback(async (): Promise<void> => {
+    if (isRepairingImageAssets) return;
+    const pid = activeProjectIdRef.current;
+    if (!pid) {
+      alert('项目还在加载，请稍后再修复图片资产。');
+      return;
+    }
+    setIsRepairingImageAssets(true);
+    try {
+      const project = projectsRef.current.find((p) => p.id === pid);
+      let currentNodes = nodesRef.current;
+      const before = await findMissingNodeWindowMedia(currentNodes);
+      const zipRestored = await restoreProjectAssetsFromBoundZip(project);
+      const nodeRepair = await repairMissingNodeMediaAssetsFromNodeSources(currentNodes);
+
+      if (zipRestored > 0 || nodeRepair.recoveredCount > 0) {
+        currentNodes = await hydrateNodesMediaFromAssets(currentNodes);
+        setNodes(currentNodes);
+      }
+
+      const after = await findMissingNodeWindowMedia(currentNodes);
+      if (after.slotCount === 0 && (before.slotCount > 0 || zipRestored > 0 || nodeRepair.recoveredCount > 0)) {
+        await saveCurrentProjectRef.current({ skipDiskPrompt: true });
+      }
+
+      if (after.slotCount === 0) {
+        const nextInterval = project?.draftDiskWriteFormat === 'zip' ? (project.draftAutosaveIntervalMin ?? 5) : autosaveIntervalMin;
+        if (nextInterval && nextInterval > 0) setAutosaveIntervalMin(nextInterval as 5 | 10 | 20 | 30);
+      }
+
+      const lines = [
+        '图片资产修复完成',
+        '',
+        `修复前缺失窗口图片：${before.slotCount}`,
+        `从绑定 ZIP 恢复资产：${zipRestored}`,
+        `从节点残留图片/链接恢复：${nodeRepair.recoveredCount}`,
+        `仍未恢复的窗口图片：${after.slotCount}`,
+      ];
+      if (after.slotCount > 0) {
+        lines.push('');
+        lines.push(`涉及节点：${after.nodeIds.slice(0, 12).join(', ')}${after.nodeIds.length > 12 ? '...' : ''}`);
+        lines.push('如果仍未恢复，说明当前节点和绑定 ZIP 里都没有图片本体，只能重新生成这些图片。');
+      }
+      alert(lines.join('\n'));
+    } catch (e) {
+      console.error(e);
+      alert('修复图片资产失败，请先确认本地 ZIP 仍然存在且浏览器有读取权限。');
+    } finally {
+      setIsRepairingImageAssets(false);
+    }
+  }, [
+    autosaveIntervalMin,
+    isRepairingImageAssets,
+    restoreProjectAssetsFromBoundZip,
+    setNodes,
+  ]);
+
   useEffect(() => {
     if (!projectStoreReady || autosaveIntervalMin <= 0) return;
     const ms = autosaveIntervalMin * 60 * 1000;
@@ -767,32 +837,47 @@ export function useCanvasProjectLibrary({
       }) => Promise<FileSystemFileHandle>;
     };
 
-    let fileHandle: FileSystemFileHandle;
+    let fileHandle: FileSystemFileHandle | null = null;
     let dirHandle: FileSystemDirectoryHandle | null = null;
 
     try {
       if (typeof w.showDirectoryPicker === 'function') {
-        dirHandle = await w.showDirectoryPicker({ mode: 'readwrite' });
-        fileHandle = await dirHandle.getFileHandle(filename, { create: true });
-      } else if (typeof w.showSaveFilePicker === 'function') {
+        try {
+          dirHandle = await w.showDirectoryPicker({ mode: 'readwrite' });
+          fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+          const writable = await fileHandle.createWritable();
+          await writable.write(diskBlob);
+          await writable.close();
+        } catch (dirWriteError: unknown) {
+          if ((dirWriteError as { name?: string })?.name === 'AbortError') return;
+          console.warn('[canvas] write to selected directory failed, falling back to save picker', dirWriteError);
+          dirHandle = null;
+          fileHandle = null;
+          if (typeof w.showSaveFilePicker !== 'function') throw dirWriteError;
+        }
+      }
+
+      if (!fileHandle && typeof w.showSaveFilePicker === 'function') {
         fileHandle = await w.showSaveFilePicker({
           suggestedName: filename,
           types: isFirstSave
-            ? [{ description: '画布备份 ZIP', accept: { 'application/zip': ['.wxcanvas.zip', '.zip'] } }]
-            : [{ description: 'JSON 文件', accept: { 'application/json': ['.json'] } }],
+            ? [{ description: 'Canvas backup ZIP', accept: { 'application/zip': ['.wxcanvas.zip', '.zip'] } }]
+            : [{ description: 'JSON file', accept: { 'application/json': ['.json'] } }],
         });
-      } else {
-        alert('当前浏览器不支持选择保存文件夹，请使用 Chrome / Edge（HTTPS 或 localhost）。');
-        return;
+        const writable = await fileHandle.createWritable();
+        await writable.write(diskBlob);
+        await writable.close();
       }
 
-      const writable = await fileHandle.createWritable();
-      await writable.write(diskBlob);
-      await writable.close();
+      if (!fileHandle) {
+        alert('Current browser cannot choose a save folder. Please use Chrome or Edge on HTTPS/localhost.');
+        return;
+      }
     } catch (e: unknown) {
       if ((e as { name?: string })?.name === 'AbortError') return;
       console.error(e);
-      alert('写入失败：可能无权限或磁盘已满。');
+      const detail = e instanceof Error && e.message ? `\n\nError: ${e.message}` : '';
+      alert(`Write failed. The folder may be read-only, the file may be in use, or the disk may be full. Please choose another folder or free disk space and try again.${detail}`);
       return;
     }
 
@@ -1085,6 +1170,20 @@ export function useCanvasProjectLibrary({
       const manualRaw = project.draftStoragePathNote?.trim() || '';
       const manual = manualRaw ? sanitizeDraftStoragePathNote(manualRaw) || manualRaw : '';
       const jsonHandle = await getProjectBackupFileHandle(project.id);
+      const zipHandle = await getProjectZipBackupFileHandle(project.id);
+      const draftDirHandle = await getProjectDraftDirectoryHandle(project.id);
+      if (draftDirHandle) {
+        const result = await revealFolderViaDirectoryPicker(draftDirHandle);
+        if (result === 'opened' || result === 'cancelled') return;
+      }
+      if (zipHandle) {
+        const result = await revealBackupFolderViaFilePicker(zipHandle);
+        if (result === 'opened' || result === 'cancelled') return;
+      }
+      if (jsonHandle) {
+        const result = await revealBackupFolderViaFilePicker(jsonHandle);
+        if (result === 'opened' || result === 'cancelled') return;
+      }
       if (!manual && !jsonHandle) {
         window.alert(
           [
@@ -1291,9 +1390,7 @@ export function useCanvasProjectLibrary({
           const { next: patchedProjects, changed: libStrippedLegacy } =
             normalizeLibraryProjectsStripLegacyAutoT2i(lib.projects);
           const activeId = lib.activeProjectId || patchedProjects[0].id;
-          const activeForAssetRestore =
-            patchedProjects.find((p) => p.id === activeId) || patchedProjects[0];
-          await restoreProjectAssetsFromBoundZip(activeForAssetRestore);
+          await restoreProjectsAssetsFromBoundZips(patchedProjects);
           if (cancelled) return;
           // 草稿库恢复：把被 offload 到 IDB 资产库的图反向读回 base64 写进内存 nodes
           // 解决「8d82dad 之前保存的旧草稿 / 早期 JSON 在 IDB 资产被回收后刷新丢图」的问题
@@ -1308,6 +1405,14 @@ export function useCanvasProjectLibrary({
           const activeIdx = hydratedProjects.findIndex((p) => p.id === activeId);
           const initial =
             (activeIdx >= 0 ? hydratedProjects[activeIdx] : hydratedProjects[0]);
+          const initialMissingAssets = await findMissingNodeMediaAssetIds(initial.nodes || []);
+          if (initialMissingAssets.length > 0) {
+            persistWarningShownRef.current = true;
+            window.alert(
+              `\u68c0\u6d4b\u5230\u5f53\u524d\u9879\u76ee\u6709 ${initialMissingAssets.length} \u4e2a\u56fe\u7247\u8d44\u4ea7\u5728\u6d4f\u89c8\u5668\u7f13\u5b58\u4e2d\u7f3a\u5931\u3002\n\n` +
+                '\u8bf7\u6253\u5f00\u201c\u9879\u76ee\u7ba1\u7406\u201d\uff0c\u70b9\u51fb\u201c\u4fee\u590d\u56fe\u7247\u8d44\u4ea7\u201d\u3002\u7cfb\u7edf\u4f1a\u4f18\u5148\u4ece\u7ed1\u5b9a ZIP \u6062\u590d\uff1b\u5982\u679c ZIP \u548c\u8282\u70b9\u91cc\u90fd\u6ca1\u6709\u56fe\u7247\u672c\u4f53\uff0c\u5219\u53ea\u80fd\u91cd\u65b0\u751f\u6210\u5bf9\u5e94\u56fe\u7247\u3002'
+            );
+          }
           setProjects(hydratedProjects);
           projectsRef.current = hydratedProjects;
           setActiveProjectId(initial.id);
@@ -1365,6 +1470,7 @@ export function useCanvasProjectLibrary({
     setShowProjectModal,
     saveSuccessMsg,
     setSaveSuccessMsg,
+    isRepairingImageAssets,
     projectExportMenuOpen,
     setProjectExportMenuOpen,
     projectStoreReady,
@@ -1399,6 +1505,7 @@ export function useCanvasProjectLibrary({
     openProjectLocationInfo,
     projectSnapshotForJsonExport,
     handleSaveDraftJsonSaveAs,
+    repairCurrentProjectImageAssets,
     commitCenterProjectRename,
     flushPendingProjectWrites,
   };

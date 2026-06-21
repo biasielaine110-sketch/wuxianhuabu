@@ -165,6 +165,36 @@ export function supportsOpenFilePickerWithStartIn(): boolean {
   return typeof (window as unknown as { showOpenFilePicker?: unknown }).showOpenFilePicker === 'function';
 }
 
+export async function revealFolderViaDirectoryPicker(
+  directoryHandle: FileSystemDirectoryHandle
+): Promise<'opened' | 'cancelled' | 'nopermission' | 'unsupported'> {
+  const w = window as unknown as {
+    showOpenFilePicker?: (opts: {
+      startIn?: FileSystemHandle;
+      multiple?: boolean;
+    }) => Promise<FileSystemFileHandle[]>;
+  };
+  if (typeof w.showOpenFilePicker !== 'function') return 'unsupported';
+
+  try {
+    let st = await directoryHandle.queryPermission?.({ mode: 'read' });
+    if (st !== 'granted') {
+      st = await directoryHandle.requestPermission?.({ mode: 'read' });
+    }
+    if (st !== 'granted') return 'nopermission';
+  } catch {
+    return 'nopermission';
+  }
+
+  try {
+    await w.showOpenFilePicker({ startIn: directoryHandle, multiple: false });
+    return 'opened';
+  } catch (e: unknown) {
+    if ((e as { name?: string })?.name === 'AbortError') return 'cancelled';
+    return 'unsupported';
+  }
+}
+
 /**
  * 弹出系统文件选择器并尽量从已保存的 JSON 文件所在目录开始浏览（依赖 Chromium 对 startIn 的支持）。
  */

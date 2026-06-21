@@ -229,6 +229,8 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
   /** 因体量过大未建立撤销栈时，只提示一次 */
   const canvasHistoryOversizedWarnedRef = useRef(false);
   const [canvasHistoryNotice, setCanvasHistoryNotice] = useState<string | null>(null);
+  const [canvasNoticeTone, setCanvasNoticeTone] = useState<'warning' | 'success'>('warning');
+  const canvasNoticeTimerRef = useRef<number | null>(null);
   const lastCanvasHistorySignatureRef = useRef('');
   const lastStructuralHistoryKeyRef = useRef('');
   const lastPromptHistoryKeyRef = useRef('');
@@ -312,6 +314,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     setShowProjectModal,
     saveSuccessMsg,
     setSaveSuccessMsg,
+    isRepairingImageAssets,
     projectExportMenuOpen,
     setProjectExportMenuOpen,
     projectStoreReady,
@@ -346,6 +349,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     openProjectLocationInfo,
     projectSnapshotForJsonExport,
     handleSaveDraftJsonSaveAs,
+    repairCurrentProjectImageAssets,
     commitCenterProjectRename,
     flushPendingProjectWrites,
   } = projectLibrary;
@@ -399,6 +403,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
         }
         if (warnedLevel === level) return;
         warnedLevel = level;
+        setCanvasNoticeTone('warning');
         setCanvasHistoryNotice(
           level === 'critical'
             ? `浏览器本地存储空间已接近上限：已用 ${Math.round(ratio * 100)}%，剩余约 ${formatBytes(remaining)}，画布图片缓存约 ${formatBytes(idbAssets)}。请先保存 ZIP、清理 C 盘空间或拆分项目，避免新生成图片写入失败。`
@@ -413,6 +418,14 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     return () => {
       cancelled = true;
       clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (canvasNoticeTimerRef.current) {
+        window.clearTimeout(canvasNoticeTimerRef.current);
+      }
     };
   }, []);
 
@@ -1164,6 +1177,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     const historyEmpty = canvasHistoryRef.current.length === 0;
     if (!historyEmpty && payloadChars > CANVAS_HISTORY_SKIP_PAYLOAD_CHARS) {
       lastCanvasHistorySignatureRef.current = signature;
+      setCanvasNoticeTone('warning');
       setCanvasHistoryNotice('画布数据过大，本步撤销已跳过。建议导出 ZIP 备份或拆分项目。');
       console.warn(
         '[canvas] 当前画布数据过大，已跳过本步撤销记录以降低崩溃风险（建议拆分项目或导出备份）。'
@@ -1257,6 +1271,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
           historyInitializedRef.current = true;
           if (!canvasHistoryOversizedWarnedRef.current) {
             canvasHistoryOversizedWarnedRef.current = true;
+            setCanvasNoticeTone('warning');
             setCanvasHistoryNotice('画布过大，无法建立撤销栈（Ctrl+Z 不可用）。建议导出 ZIP 或拆分项目。');
             console.warn('[canvas] 画布图片数据过大，无法建立撤销栈（Ctrl+Z 不可用）；建议拆分项目或导出后再编辑。');
           }
@@ -1661,6 +1676,12 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
       }
       const r = await saveImageDownload(raw.base64, raw.mime);
       if (!r.ok && r.message) window.alert(r.message);
+      if (r.ok) {
+        setCanvasNoticeTone('success');
+        setCanvasHistoryNotice('图片已保存完成');
+        if (canvasNoticeTimerRef.current) window.clearTimeout(canvasNoticeTimerRef.current);
+        canvasNoticeTimerRef.current = window.setTimeout(() => setCanvasHistoryNotice(null), 2600);
+      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '下载失败';
       window.alert(`${msg}。可尝试右键图片另存为。`);
@@ -1671,6 +1692,12 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     try {
       const r = await saveVideoDownloadFromUrl(url);
       if (!r.ok && r.message) window.alert(r.message);
+      if (r.ok) {
+        setCanvasNoticeTone('success');
+        setCanvasHistoryNotice('视频已保存完成');
+        if (canvasNoticeTimerRef.current) window.clearTimeout(canvasNoticeTimerRef.current);
+        canvasNoticeTimerRef.current = window.setTimeout(() => setCanvasHistoryNotice(null), 2600);
+      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '下载失败';
       window.alert(`${msg}。可直接右键视频「另存为」或复制链接。`);
@@ -2004,11 +2031,18 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
         style={{ touchAction: 'none' }}
       >
         {canvasHistoryNotice && (
-          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[120] max-w-[min(92vw,520px)] px-4 py-2 rounded-lg bg-amber-900/90 border border-amber-600/60 text-amber-100 text-xs flex items-start gap-2 shadow-lg pointer-events-auto canvas-chrome-150">
+          <div
+            className={`absolute top-3 left-1/2 -translate-x-1/2 z-[120] max-w-[min(92vw,520px)] px-4 py-2 rounded-lg text-xs flex items-start gap-2 shadow-lg pointer-events-auto canvas-chrome-150 ${
+              canvasNoticeTone === 'success'
+                ? 'bg-emerald-900/90 border border-emerald-500/60 text-emerald-100'
+                : 'bg-amber-900/90 border border-amber-600/60 text-amber-100'
+            }`}
+          >
+            {canvasNoticeTone === 'success' ? <span className="shrink-0 font-bold">✓</span> : null}
             <span className="flex-1">{canvasHistoryNotice}</span>
             <button
               type="button"
-              className="shrink-0 text-amber-200/80 hover:text-white"
+              className="shrink-0 opacity-80 hover:opacity-100"
               onClick={() => setCanvasHistoryNotice(null)}
             >
               ×
@@ -2355,8 +2389,10 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
             onApplyDraftTitle={handleApplyDraftTitle}
             onApplyDraftStoragePath={handleApplyDraftStoragePath}
             onAutosaveIntervalChange={handleAutosaveIntervalChange}
+            isRepairingImageAssets={isRepairingImageAssets}
             onCreateNewProject={createNewProject}
             onSaveCurrentProject={saveCurrentProject}
+            onRepairImageAssets={repairCurrentProjectImageAssets}
             onImportProjectFile={handleImportProjectFile}
             onExportProjectJson={handleExportProjectJson}
             onExportProjectZip={handleExportProjectZip}
