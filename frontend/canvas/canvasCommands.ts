@@ -22,6 +22,12 @@ export type DeleteNodeCommand = {
   edges: Edge[];
 };
 
+export type DeleteNodesCommand = {
+  type: 'deleteNodes';
+  nodes: CanvasNode[];
+  edges: Edge[];
+};
+
 export type AddNodesCommand = {
   type: 'addNodes';
   nodes: CanvasNode[];
@@ -34,10 +40,11 @@ export type CanvasCommand =
   | AddEdgeCommand
   | DeleteEdgeCommand
   | DeleteNodeCommand
+  | DeleteNodesCommand
   | AddNodesCommand;
 
 /** 命令栈最大深度，防止连续拖拽/连线占用过多内存 */
-export const CANVAS_COMMAND_STACK_MAX = 64;
+export const CANVAS_COMMAND_STACK_MAX = 1;
 
 export function buildMoveNodesCommand(
   fromMap: Map<string, { x: number; y: number }>,
@@ -94,6 +101,19 @@ export function reverseCanvasCommand(
         return restored.length ? [...prev, ...restored] : prev;
       });
       break;
+    case 'deleteNodes': {
+      setNodes((prev) => {
+        const existing = new Set(prev.map((n) => n.id));
+        const restored = cmd.nodes.filter((n) => !existing.has(n.id));
+        return restored.length ? [...prev, ...restored] : prev;
+      });
+      setEdges((prev) => {
+        const existing = new Set(prev.map((e) => e.id));
+        const restored = cmd.edges.filter((e) => !existing.has(e.id));
+        return restored.length ? [...prev, ...restored] : prev;
+      });
+      break;
+    }
     case 'addNodes': {
       const nodeIds = new Set(cmd.nodes.map((n) => n.id));
       const edgeIds = new Set(cmd.edges.map((e) => e.id));

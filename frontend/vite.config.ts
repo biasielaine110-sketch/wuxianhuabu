@@ -276,6 +276,7 @@ export default defineConfig(({ mode }) => {
     return {
       root: envDir,
       envDir,
+      cacheDir: path.resolve(envDir, 'node_modules/.vite'),
       build: {
         rollupOptions: {
           output: {

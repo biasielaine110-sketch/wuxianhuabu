@@ -7,7 +7,6 @@ import type {
   PanoramaNode,
   PanoramaT2iNode,
 } from '../types';
-import { deleteCanvasAsset } from './canvasAssetStore';
 import { revokeCanvasAssetUrl } from './canvasAssetResolver';
 
 /** 收集节点引用的所有 canvas assetId（用于删除时回收） */
@@ -30,7 +29,7 @@ export function collectNodeAssetIds(node: CanvasNode): string[] {
   return [...new Set(ids)];
 }
 
-/** 删除节点时释放 blob URL；若无其他节点引用则删除 IDB 记录 */
+/** 删除节点时只释放 blob URL；IDB 资产保留，避免撤销/多项目/草稿引用变成缺失 assetId。 */
 export function revokeNodeCanvasAssets(
   deletedNode: CanvasNode,
   remainingNodes: CanvasNode[]
@@ -38,17 +37,7 @@ export function revokeNodeCanvasAssets(
   const deletedIds = collectNodeAssetIds(deletedNode);
   if (deletedIds.length === 0) return;
 
-  const stillUsed = new Set<string>();
-  for (const n of remainingNodes) {
-    collectNodeAssetIds(n).forEach((id) => stillUsed.add(id));
-  }
-
   for (const id of deletedIds) {
     revokeCanvasAssetUrl(id);
-    if (!stillUsed.has(id)) {
-      void deleteCanvasAsset(id).catch((e) =>
-        console.warn('[canvasAssetCleanup] deleteCanvasAsset 失败', id, e)
-      );
-    }
   }
 }

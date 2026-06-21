@@ -99,6 +99,7 @@ import {
 import { buildNodeMediaOffloadPatch, buildMediaOffloadScanKey, nodeNeedsMediaOffload } from './services/canvasAssetSync';
 import { revokeNodeCanvasAssets } from './services/canvasAssetCleanup';
 import { imageSrcToRawBase64 } from './services/canvasAssetResolver';
+import { estimateCanvasAssetsBytes } from './services/canvasAssetStore';
 import {
   buildMoveNodesCommand,
   reverseCanvasCommand,
@@ -136,11 +137,10 @@ import {
   isManxueGptImage2Model,
 } from './canvas/canvasModelUtils';
 import {
-  getNodePrimaryImageRef,
   collectCopyableImageRefsFromNode,
   getNodePrimaryCopyRef,
   imageRefToSingleImageFields,
-  resolveImageProviderNodes,
+  resolveImageProviderRefs,
   singleImageFieldsMatch,
 } from './referenceSlots';
 import {
@@ -367,6 +367,55 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     return useCanvasStore.subscribe(syncStoreRefs);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    let warnedLevel: 'none' | 'high' | 'critical' = 'none';
+    const formatBytes = (bytes: number): string => {
+      if (!Number.isFinite(bytes) || bytes <= 0) return '0GB';
+      const gb = bytes / 1024 / 1024 / 1024;
+      if (gb >= 1) return `${gb.toFixed(gb >= 10 ? 0 : 1)}GB`;
+      const mb = bytes / 1024 / 1024;
+      return `${mb.toFixed(mb >= 100 ? 0 : 1)}MB`;
+    };
+    const checkStorage = async () => {
+      try {
+        const estimate = await navigator.storage?.estimate?.();
+        if (cancelled || !estimate?.quota || !estimate.usage) return;
+        const idbAssets = await estimateCanvasAssetsBytes().catch(() => 0);
+        if (cancelled) return;
+        const quota = estimate.quota;
+        const usage = estimate.usage;
+        const remaining = Math.max(0, quota - usage);
+        const ratio = usage / quota;
+        const level =
+          ratio >= 0.9 || remaining < 1.5 * 1024 * 1024 * 1024
+            ? 'critical'
+            : ratio >= 0.78 || remaining < 3 * 1024 * 1024 * 1024
+              ? 'high'
+              : 'none';
+        if (level === 'none') {
+          warnedLevel = 'none';
+          return;
+        }
+        if (warnedLevel === level) return;
+        warnedLevel = level;
+        setCanvasHistoryNotice(
+          level === 'critical'
+            ? `浏览器本地存储空间已接近上限：已用 ${Math.round(ratio * 100)}%，剩余约 ${formatBytes(remaining)}，画布图片缓存约 ${formatBytes(idbAssets)}。请先保存 ZIP、清理 C 盘空间或拆分项目，避免新生成图片写入失败。`
+            : `浏览器本地存储空间偏高：已用 ${Math.round(ratio * 100)}%，剩余约 ${formatBytes(remaining)}，画布图片缓存约 ${formatBytes(idbAssets)}。建议尽快保存 ZIP 并清理空间。`
+        );
+      } catch (e) {
+        console.warn('[canvas] storage estimate failed', e);
+      }
+    };
+    void checkStorage();
+    const timer = window.setInterval(checkStorage, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
+
   const commitTransformFromRef = useCallback(() => {
     setTransform({ ...transformRef.current });
   }, []);
@@ -542,18 +591,22 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     );
   }, [classifyError, handleUpdateNode]);
 
-  // Handle canvas click for eyedropper - 创建连线而非复制图片（成功返回 true）
-  const handleCanvasEyedropper = useCallback((sourceNodeId: string, targetNodeId: string): boolean => {
+  // Handle canvas click for eyedropper - create or update an edge.
+  const handleCanvasEyedropper = useCallback((sourceNodeId: string, targetNodeId: string, opts?: { sourceImageIndex?: number }): boolean => {
     if (!targetNodeId) return false;
     const sourceNode = nodesRef.current.find(n => n.id === sourceNodeId);
     const targetNode = nodesRef.current.find(n => n.id === targetNodeId);
     if (!sourceNode || !targetNode) return false;
+    const sourceImageLen = Math.max(sourceNode.images?.length ?? 0, sourceNode.imageAssetIds?.length ?? 0);
+    const sourceImageIndex =
+      sourceImageLen > 0
+        ? Math.min(Math.max(0, opts?.sourceImageIndex ?? sourceNode.currentImageIndex ?? 0), sourceImageLen - 1)
+        : undefined;
 
     const canReceiveConnection = (node: CanvasNode) => INPUT_NODE_TYPES.includes(node.type);
     const canConnectNodes = (source: CanvasNode, target: CanvasNode) => {
       if (source.id === target.id) return false;
       if (!canReceiveConnection(target)) return false;
-      // 对话节点只接收明确支持的上游类型，避免“能吸附但不生效”的不稳定体验
       if (target.type === 'chat') {
         return (
           source.type === 'text' ||
@@ -570,28 +623,32 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
       return false;
     }
 
-    // 检查是否已存在连线
     const existingEdge = edgesRef.current.find(
       e => e.sourceId === sourceNodeId && e.targetId === targetNodeId
     );
-    
+
     if (existingEdge) {
-      // 已存在连线，取消吸取模式
+      setEdges(prev =>
+        prev.map(edge =>
+          edge.id === existingEdge.id
+            ? { ...edge, sourceImageIndex }
+            : edge
+        )
+      );
       setEyedropperTargetNodeId(null);
-      return false;
+      return true;
     }
 
-    // 创建新的连线
     const newEdge: Edge = {
       id: `edge-${Date.now()}`,
       sourceId: sourceNodeId,
       targetId: targetNodeId,
+      sourceImageIndex,
     };
     setEdges(prev => [...prev, newEdge]);
     setEyedropperTargetNodeId(null);
     return true;
   }, []);
-
   // 默认节点尺寸映射（新建 / 重置窗口；文生图宽:高≈3:4；图生图 高:宽≈1.4；图片标注宽:高≈4:5；AI对话更高且内部分区 2:1；全景图生成等仍偏横向）
   const DEFAULT_NODE_SIZES: Record<string, { width: number, height: number }> = {
     /** 文生图：竖向窗，宽:高 = 3:4（与常见文生图界面比例接近） */
@@ -1066,7 +1123,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
       const k = edgeDupKey(newS, newT);
       if (seenEdge.has(k)) continue;
       seenEdge.add(k);
-      newEdges.push({ id: genId('edge'), sourceId: newS, targetId: newT });
+      newEdges.push({ id: genId('edge'), sourceId: newS, targetId: newT, sourceImageIndex: e.sourceImageIndex });
     }
     const newSel = ids.map((oid) => idMap.get(oid)!).filter(Boolean);
     const primaryNew = idMap.get(primaryId);
@@ -1508,11 +1565,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
         if (node.type === 'panorama' || node.type === 'annotation' || node.type === 'panoramaT2i' || node.type === 'director3d') {
           const incomingEdges = edges.filter((e) => e.targetId === node.id || e.sourceId === node.id);
           if (incomingEdges.length > 0) {
-            const sourceNodes = resolveImageProviderNodes(node.id, nodes, edges);
-
-            const primaryRef = sourceNodes
-              .map((n) => getNodePrimaryImageRef(n))
-              .find((ref) => ref !== null);
+            const primaryRef = resolveImageProviderRefs(node.id, nodes, edges)[0]?.ref ?? null;
 
             if (primaryRef) {
               const { base64, assetId } = imageRefToSingleImageFields(primaryRef);

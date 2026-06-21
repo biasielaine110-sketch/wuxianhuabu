@@ -147,7 +147,7 @@ export const CanvasProjectModal = memo(function CanvasProjectModal({
               <option value={30}>每 30 分钟</option>
             </select>
             <span className="text-[10px] text-gray-600 leading-snug max-w-[260px]">
-              已绑定本地草稿 JSON 的项目打开时默认每 5 分钟；会写入 IndexedDB 并覆盖绑定 JSON。
+              已绑定本地草稿的项目打开时默认每 5 分钟；会写入 IndexedDB 并覆盖绑定 ZIP / JSON。
             </span>
           </div>
         </div>

@@ -52,7 +52,7 @@ export type UseCanvasInteractionHandlersOptions = {
   setResizePreview: Dispatch<SetStateAction<ResizePreview | null>>;
   applyLiveCanvasTransform: (tf: Transform) => void;
   commitTransformFromRef: () => void;
-  handleCanvasEyedropper: (sourceNodeId: string, targetNodeId: string) => boolean;
+  handleCanvasEyedropper: (sourceNodeId: string, targetNodeId: string, opts?: { sourceImageIndex?: number }) => boolean;
   appendNodesWithUndo: (
     newNodes: CanvasNode[],
     opts?: { edges?: Edge[]; selectIds?: string[] }
@@ -425,7 +425,12 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
     const eyeT = eyedropperTargetNodeIdRef.current;
     const isEyedropperPickable = eyeT && eyeT !== id && (pickedNode?.type === 'text' ? true : !isInteractiveSurface);
     if (isEyedropperPickable && !isScrollbarThumb) {
-      if (handleCanvasEyedropper(id, eyeT)) {
+      const imageLen = Math.max(pickedNode?.images?.length ?? 0, pickedNode?.imageAssetIds?.length ?? 0);
+      const sourceImageIndex =
+        imageLen > 0
+          ? Math.min(Math.max(0, pickedNode?.currentImageIndex ?? 0), imageLen - 1)
+          : undefined;
+      if (handleCanvasEyedropper(id, eyeT, { sourceImageIndex })) {
         e.preventDefault();
         e.stopPropagation();
         return;
@@ -772,6 +777,27 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
     setSelectedIds((prev) => prev.filter((sid) => sid !== id));
   }, [revokeNodeBlobUrls, setNodes, setEdges, setSelectedIds]);
 
+  const handleDeleteNodes = useCallback((ids: string[]) => {
+    const idSet = new Set(ids);
+    if (idSet.size === 0) return;
+    const nodes = nodesRef.current.filter((n) => idSet.has(n.id));
+    if (nodes.length === 0) return;
+    const connectedEdges = edgesRef.current.filter(
+      (e) => idSet.has(e.sourceId) || idSet.has(e.targetId)
+    );
+    const remaining = nodesRef.current.filter((n) => !idSet.has(n.id));
+    nodes.forEach((node) => {
+      revokeNodeBlobUrls(node.id);
+      revokeNodeCanvasAssets(node, remaining);
+    });
+    queueMicrotask(() =>
+      pushCanvasCommandRef.current({ type: 'deleteNodes', nodes, edges: connectedEdges })
+    );
+    setNodes((prev) => prev.filter((n) => !idSet.has(n.id)));
+    setEdges((prev) => prev.filter((e) => !idSet.has(e.sourceId) && !idSet.has(e.targetId)));
+    setSelectedIds((prev) => prev.filter((sid) => !idSet.has(sid)));
+  }, [revokeNodeBlobUrls, setNodes, setEdges, setSelectedIds]);
+
   const handleDeleteEdge = useCallback((id: string) => {
     setEdges((prev) => {
       const edge = prev.find((e) => e.id === id);
@@ -798,6 +824,7 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
     handleImportImageClick,
     handleFileChange,
     handleDeleteNode,
+    handleDeleteNodes,
     handleDeleteEdge,
   };
 }

@@ -18,9 +18,11 @@ export type CanvasProjectSnapshot = {
   draftTitle?: string;
   /** 是否已为本项目完成过本地备份（另存为 JSON / 导出 ZIP 等）；仅存在草稿库，不写入导出的 project.json */
   diskSaveEstablished?: boolean;
+  /** 最近一次绑定的本地备份格式；仅存在草稿库，不写入导出的 project.json */
+  draftDiskWriteFormat?: 'json' | 'zip';
   /** 用户自填的本机草稿/备份参考路径（仅展示与「打开位置」校验；应用无法写入该路径） */
   draftStoragePathNote?: string;
-  /** 已绑定本地草稿 JSON 后的定时保存间隔（分钟）；未写入时打开该项目默认按 5 分钟 */
+  /** 已绑定本地草稿备份后的定时保存间隔（分钟）；未写入时打开该项目默认按 5 分钟 */
   draftAutosaveIntervalMin?: 0 | 5 | 10 | 20 | 30;
   /** 审核模式数据 */
   auditModeData?: AuditModeData;
@@ -191,7 +193,7 @@ export async function buildProjectZipBlob(project: CanvasProjectSnapshot): Promi
     app: '无限AI画布',
   };
   zip.file(ZIP_MANIFEST, JSON.stringify(manifest, null, 2));
-  const { diskSaveEstablished: _disk, ...projectForZip } = project;
+  const { diskSaveEstablished: _disk, draftDiskWriteFormat: _format, ...projectForZip } = project;
   zip.file(ZIP_PROJECT, JSON.stringify(projectForZip, null, 2));
   await embedProjectAssetsInZip(zip, project.nodes);
   return zip.generateAsync({
@@ -221,13 +223,17 @@ export type ExportZipDiskResult =
   | { kind: 'download' }
   | { kind: 'aborted' };
 
+export function projectZipFilename(project: CanvasProjectSnapshot): string {
+  const base = sanitizeFilename((project.draftTitle || project.name || 'project').trim() || 'project');
+  return `${base}${WXCANVAS_ZIP_EXTENSION}`;
+}
+
 /**
  * 导出 ZIP：优先用系统「另存为」拿到可反复覆盖写入的文件句柄；不支持或失败时回退为浏览器下载。
  */
 export async function exportProjectZipToDisk(project: CanvasProjectSnapshot): Promise<ExportZipDiskResult> {
   const blob = await buildProjectZipBlob(project);
-  const base = sanitizeFilename((project.draftTitle || project.name || 'project').trim() || 'project');
-  const filename = `${base}${WXCANVAS_ZIP_EXTENSION}`;
+  const filename = projectZipFilename(project);
   const w = window as unknown as {
     showSaveFilePicker?: (opts: {
       suggestedName?: string;
@@ -298,4 +304,14 @@ export async function parseProjectFromZipFile(file: File): Promise<CanvasProject
     draftStoragePathNote:
       typeof imported.draftStoragePathNote === 'string' ? imported.draftStoragePathNote : undefined,
   };
+}
+
+export async function restoreProjectAssetsFromZipFileHandle(
+  fileHandle: FileSystemFileHandle
+): Promise<number> {
+  const JSZip = await loadJSZip();
+  const file = await fileHandle.getFile();
+  const buf = await file.arrayBuffer();
+  const zip = await JSZip.loadAsync(buf);
+  return hydrateProjectAssetsFromZip(zip);
 }

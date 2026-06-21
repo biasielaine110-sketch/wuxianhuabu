@@ -31,7 +31,7 @@ export type BuildCanvasNodeRenderOverlayInput = {
   handleCopyToImage: (nodeId: string, layoutOrOptions?: CopyToImageLayout | CopyToImageOptions) => void;
   handleResetNodeSize: (nodeId: string) => void;
   handleDeleteNode: (id: string) => void;
-  handleCanvasEyedropper: (sourceId: string, targetId: string) => boolean;
+  handleCanvasEyedropper: (sourceId: string, targetId: string, opts?: { sourceImageIndex?: number }) => boolean;
   openBigEditor: (current: string, onSave: (v: string) => void) => void;
   openFullscreenImage: (nodeId: string, img: string, idx: number) => void;
   openFullscreenFromBase64: (base64: string) => void;

@@ -235,6 +235,8 @@ export interface Edge {
   id: string;
   sourceId: string;
   targetId: string;
+  /** X 吸管从多图节点取图时锁定的源图片序号；旧连线为空时仍使用源节点当前显示图。 */
+  sourceImageIndex?: number;
 }
 
 export interface Transform {

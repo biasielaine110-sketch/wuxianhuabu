@@ -13,8 +13,12 @@ export const IMAGE_OFFLOAD_MIN_CHARS = 48_000;
 /** 宫格拆分/合并等多图数组：单格体积较小也 offload */
 const GRID_ARRAY_OFFLOAD_MIN_CHARS = 1;
 
+function isRemoteImageUrl(value: string | undefined): boolean {
+  return /^https?:\/\//i.test((value || '').trim());
+}
+
 function shouldOffload(value: string | undefined, existingAssetId?: string): boolean {
-  return !!value && value.length >= IMAGE_OFFLOAD_MIN_CHARS && !existingAssetId;
+  return !!value && (isRemoteImageUrl(value) || value.length >= IMAGE_OFFLOAD_MIN_CHARS) && !existingAssetId;
 }
 
 function shouldOffloadGridSlot(value: string | undefined, existingAssetId?: string): boolean {
@@ -45,7 +49,7 @@ async function offloadStringArray(
   let changed = false;
   for (let i = 0; i < newValues.length; i++) {
     const im = newValues[i];
-    if (!im || im.length < minChars || newIds[i]) continue;
+    if (!im || (!isRemoteImageUrl(im) && im.length < minChars) || newIds[i]) continue;
     try {
       const newId = await putCanvasAssetFromBase64(im);
       const verified = await getCanvasAssetRecord(newId);
@@ -278,6 +282,132 @@ export function nodeMediaOffloadSignature(node: CanvasNode): string {
 
 export function buildMediaOffloadScanKey(nodes: CanvasNode[]): string {
   return nodes.map(nodeMediaOffloadSignature).join('\x1e');
+}
+
+function collectNodeMediaAssetIds(node: CanvasNode): string[] {
+  const pn = node as PanoramaNode;
+  const ptn = node as PanoramaT2iNode;
+  const an = node as AnnotationNode;
+  const dn = node as Director3DNode;
+  const gsn = node as GridSplitNode;
+  const gmn = node as GridMergeNode;
+  const ids = new Set<string>();
+  const add = (id?: string) => {
+    if (id) ids.add(id);
+  };
+  node.imageAssetIds?.forEach(add);
+  add(pn.panoramaImageAssetId);
+  add(ptn.panoramaImageAssetId);
+  add(an.sourceImageAssetId);
+  add(dn.backgroundImageAssetId);
+  add(gsn.inputImageAssetId);
+  gsn.outputImageAssetIds?.forEach(add);
+  gmn.inputImageAssetIds?.forEach(add);
+  add(gmn.outputImageAssetId);
+  return [...ids];
+}
+
+export async function findMissingNodeMediaAssetIds(nodes: CanvasNode[]): Promise<string[]> {
+  const ids = new Set<string>();
+  for (const node of nodes) {
+    collectNodeMediaAssetIds(node).forEach((id) => ids.add(id));
+  }
+  const missing: string[] = [];
+  for (const id of ids) {
+    const rec = await getCanvasAssetRecord(id);
+    if (!rec?.blob?.size) missing.push(id);
+  }
+  return missing;
+}
+
+export type MissingNodeMediaReport = {
+  nodeIds: string[];
+  slotCount: number;
+  assetIds: string[];
+};
+
+function hasInlineMediaValue(value: string | undefined, minLen = 80): boolean {
+  const s = (value || '').trim();
+  return /^https?:\/\//i.test(s) || s.length > minLen;
+}
+
+async function assetExists(id: string | undefined): Promise<boolean> {
+  if (!id) return false;
+  const rec = await getCanvasAssetRecord(id);
+  return !!rec?.blob?.size;
+}
+
+async function countMissingArraySlots(
+  values: string[] | undefined,
+  assetIds: string[] | undefined,
+  minLen = 80
+): Promise<{ count: number; assetIds: string[] }> {
+  const len = Math.max(values?.length ?? 0, assetIds?.length ?? 0);
+  let count = 0;
+  const missingAssetIds: string[] = [];
+  for (let i = 0; i < len; i++) {
+    if (hasInlineMediaValue(values?.[i], minLen)) continue;
+    const assetId = assetIds?.[i];
+    if (assetId) {
+      if (await assetExists(assetId)) continue;
+      missingAssetIds.push(assetId);
+      count++;
+    }
+  }
+  return { count, assetIds: missingAssetIds };
+}
+
+async function countMissingSingleSlot(
+  value: string | undefined,
+  assetId: string | undefined,
+  minLen = 80
+): Promise<{ count: number; assetIds: string[] }> {
+  if (hasInlineMediaValue(value, minLen)) return { count: 0, assetIds: [] };
+  if (!assetId) return { count: 0, assetIds: [] };
+  if (await assetExists(assetId)) return { count: 0, assetIds: [] };
+  return { count: 1, assetIds: [assetId] };
+}
+
+export async function findMissingNodeWindowMedia(
+  nodes: CanvasNode[]
+): Promise<MissingNodeMediaReport> {
+  const nodeIds = new Set<string>();
+  const assetIds = new Set<string>();
+  let slotCount = 0;
+
+  const add = (nodeId: string, result: { count: number; assetIds: string[] }) => {
+    if (result.count <= 0) return;
+    nodeIds.add(nodeId);
+    slotCount += result.count;
+    result.assetIds.forEach((id) => assetIds.add(id));
+  };
+
+  for (const node of nodes) {
+    if (node.isGenerating) continue;
+    add(node.id, await countMissingArraySlots(node.images, node.imageAssetIds));
+
+    const pn = node as PanoramaNode;
+    add(node.id, await countMissingSingleSlot(pn.panoramaImage, pn.panoramaImageAssetId));
+
+    const ptn = node as PanoramaT2iNode;
+    add(node.id, await countMissingSingleSlot(ptn.panoramaImage, ptn.panoramaImageAssetId));
+
+    const an = node as AnnotationNode;
+    add(node.id, await countMissingSingleSlot(an.sourceImage, an.sourceImageAssetId));
+
+    const dn = node as Director3DNode;
+    add(node.id, await countMissingSingleSlot(dn.backgroundImage, dn.backgroundImageAssetId));
+
+    const gsn = node as GridSplitNode;
+    add(node.id, await countMissingSingleSlot(gsn.inputImage, gsn.inputImageAssetId));
+    add(node.id, await countMissingArraySlots(gsn.outputImages, gsn.outputImageAssetIds, 1));
+
+    const gmn = node as GridMergeNode;
+    add(node.id, await countMissingArraySlots(gmn.inputImages, gmn.inputImageAssetIds, 1));
+    add(node.id, await countMissingSingleSlot(gmn.outputImage, gmn.outputImageAssetId, 1));
+  }
+
+  return { nodeIds: [...nodeIds], slotCount, assetIds: [...assetIds] };
 }
 
 /**

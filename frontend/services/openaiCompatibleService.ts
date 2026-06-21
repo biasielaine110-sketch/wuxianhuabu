@@ -227,6 +227,7 @@ const TOAPIS_VIDEO_TASK_MAX_WAIT_MS = 1_800_000;
 
 /** 满 eAPI（manxueapi.com）任务轮询最长等待 */
 const MANXUE_TASK_MAX_WAIT_MS = 1_800_000;
+const IMAGE_FETCH_TIMEOUT_MS = 45_000;
 
 /**
  * 满 eAPI 上游瞬时错误（Google 408 timeout / 500 "system under load" / submit failed 包装）：
@@ -3191,8 +3192,88 @@ function otuapiFetchBase(): string {
  * 文档（apifox 447634846e0 + 455245131e0 统一）：completed 状态时，
  * 结果 URL 位于响应顶层 `url` 字段。这里只取顶层 `url`。
  */
+function extractFirstStringUrl(value: unknown): string {
+  if (typeof value === 'string') {
+    const s = value.trim();
+    return /^https?:\/\//i.test(s) ? s : '';
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = extractFirstStringUrl(item);
+      if (found) return found;
+    }
+    return '';
+  }
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    for (const key of ['url', 'image_url', 'imageUrl', 'output_url', 'outputUrl', 'download_url', 'downloadUrl']) {
+      const found = extractFirstStringUrl(obj[key]);
+      if (found) return found;
+    }
+    for (const key of ['urls', 'images', 'image_urls', 'imageUrls', 'results', 'data', 'output', 'outputs']) {
+      const found = extractFirstStringUrl(obj[key]);
+      if (found) return found;
+    }
+    for (const item of Object.values(obj)) {
+      const found = extractFirstStringUrl(item);
+      if (found) return found;
+    }
+  }
+  return '';
+}
+
+async function fetchUrlAsBase64WithTimeout(
+  imageUrl: string,
+  signal?: AbortSignal,
+  bearerToken?: string,
+  timeoutMs = IMAGE_FETCH_TIMEOUT_MS
+): Promise<string> {
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  const ac = new AbortController();
+  let abortListener: (() => void) | undefined;
+  const timer = window.setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    if (signal) {
+      abortListener = () => ac.abort();
+      signal.addEventListener('abort', abortListener, { once: true });
+    }
+    return await fetchUrlAsBase64(imageUrl, ac.signal, bearerToken);
+  } catch (err) {
+    if (ac.signal.aborted && !signal?.aborted) {
+      throw new Error(`下载生成图超时（${Math.round(timeoutMs / 1000)} 秒）：${imageUrl.slice(0, 200)}`);
+    }
+    throw err;
+  } finally {
+    window.clearTimeout(timer);
+    if (signal && abortListener) signal.removeEventListener('abort', abortListener);
+  }
+}
+
 function extractOtuapiResultUrl(data: Record<string, unknown>): string {
-  return typeof data.url === 'string' ? data.url.trim() : '';
+  return extractFirstStringUrl(data);
+}
+
+function extractOtuapiStatus(data: Record<string, unknown>): string {
+  const direct =
+    (typeof data.status === 'string' && data.status.trim()) ||
+    (typeof data.gen_status === 'string' && data.gen_status.trim()) ||
+    (typeof data.state === 'string' && data.state.trim()) ||
+    '';
+  if (direct) return direct.toLowerCase();
+
+  for (const key of ['data', 'result', 'task']) {
+    const nested = data[key];
+    if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+      const status = extractOtuapiStatus(nested as Record<string, unknown>);
+      if (status) return status;
+    }
+  }
+
+  return '';
+}
+
+function isOtuapiDoneStatus(status: string): boolean {
+  return ['completed', 'succeeded', 'success', 'done', 'generated', 'finished'].includes(status);
 }
 
 /** otuapi 提交生图任务（图生图也用 POST /v1/videos），返回 task_id */
@@ -3277,7 +3358,7 @@ async function otuapiPollImageTaskToBase64(
         throw new Error(`查询 otuapi 任务失败 (${res.status}): ${text.slice(0, 500)}`);
       }
       const data = (await res.json()) as Record<string, unknown>;
-      const status = (typeof data.status === 'string' ? data.status : '').toLowerCase();
+      const status = extractOtuapiStatus(data);
       // 旧文档：progress 字段 0-100，completed 时为 100
       const progress =
         typeof (data as { progress?: number }).progress === 'number'
@@ -3294,20 +3375,24 @@ async function otuapiPollImageTaskToBase64(
           status === 'generating'
         ) {
           onStatus(`otuapi 正在生成图片${progressText}…`);
-        } else if (status === 'completed' || status === 'succeeded' || status === 'success') {
+        } else if (isOtuapiDoneStatus(status)) {
           onStatus('otuapi 生成完成，正在拉取图片…');
         } else {
           onStatus(`正在查询 otuapi 生图任务状态${progressText}…`);
         }
       }
-      if (status === 'completed' || status === 'succeeded' || status === 'success') {
+      const resultUrl = extractOtuapiResultUrl(data);
+      console.log('[otuapi] poll', { taskId, status, hasUrl: !!resultUrl });
+      if (isOtuapiDoneStatus(status) || resultUrl) {
         // otuapi 文档差异：旧文档顶层 url，新文档 results[0].url
-        const url = extractOtuapiResultUrl(data);
+        const url = resultUrl;
         if (!url) {
           throw new Error('otuapi 任务已完成但未返回图片链接，请稍后重试。');
         }
-        // 注意：otuapi 图片 URL 5 小时后失效；但我们下载后立即转 base64 写入项目，无需担心时效
-        return await fetchUrlAsBase64(url, signal, apiKey);
+        // otuapi 的成图 URL 有时下载很慢或 CDN 不稳定；先把 URL 返回给画布结束生成态，
+        // 显示层会走同源代理加载，避免后台已成功但前端卡在“生成中”。
+        void apiKey;
+        return url;
       }
       if (status === 'failed' || status === 'error') {
         // 兼容多种错误结构：
@@ -4037,6 +4122,14 @@ export async function normalizeCanvasGenerationImage(
     return i >= 0 ? s.slice(i + 1).trim() : s;
   }
   if (s.startsWith('http://') || s.startsWith('https://')) {
+    try {
+      const host = new URL(s).hostname.toLowerCase();
+      if (host === 'oss-us.file-download.life' || host.endsWith('.oss-us.file-download.life')) {
+        return s;
+      }
+    } catch {
+      /* fall through */
+    }
     return fetchUrlAsBase64(s, opts?.signal, opts?.bearerToken);
   }
   return s;

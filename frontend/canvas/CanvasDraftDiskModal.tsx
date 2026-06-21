@@ -25,15 +25,17 @@ export const CanvasDraftDiskModal = memo(function CanvasDraftDiskModal({
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-sm font-semibold text-gray-100 mb-1">
-          {modal.mode === 'firstSave' ? '首次保存草稿 JSON' : '另存 JSON'}
+          {modal.mode === 'firstSave' ? '首次保存草稿 ZIP' : '另存 JSON'}
         </h3>
         <p className="text-[11px] text-gray-500 mb-3 leading-relaxed">
           {modal.mode === 'firstSave'
-            ? '设置文件名（不含扩展名）；留空则使用当前项目名。确认后将弹出系统文件夹选择器，请选择草稿保存位置。'
+            ? '设置文件名（不含扩展名）；留空则使用当前项目名。确认后将保存为可自动覆盖的 .wxcanvas.zip 草稿备份。'
             : '设置另存文件名；留空则使用与导出一致的默认名。确认后将弹出文件夹选择器（不改变当前 Ctrl+S 绑定的主草稿）。'}
         </p>
         <label className="block mb-4">
-          <span className="text-[10px] text-gray-500 mb-1 block">JSON 文件名（不含 .json）</span>
+          <span className="text-[10px] text-gray-500 mb-1 block">
+            {modal.mode === 'firstSave' ? 'ZIP 文件名（不含 .wxcanvas.zip）' : 'JSON 文件名（不含 .json）'}
+          </span>
           <input
             type="text"
             value={modal.basenameDraft}
@@ -61,7 +63,7 @@ export const CanvasDraftDiskModal = memo(function CanvasDraftDiskModal({
             className="rounded-md bg-cyan-700 hover:bg-cyan-600 px-3 py-1.5 text-xs text-white"
             onClick={() => void onConfirm()}
           >
-            {modal.mode === 'firstSave' ? '选择文件夹并保存' : '选择文件夹并另存'}
+            {modal.mode === 'firstSave' ? '选择文件夹并保存 ZIP' : '选择文件夹并另存'}
           </button>
         </div>
       </div>

@@ -72,6 +72,19 @@ export function collectImageRefsFromNode(src: CanvasNode): ImageRefPayload[] {
   return refs;
 }
 
+export function getNodeImageRefAtIndex(src: CanvasNode, imageIndex: number): ImageRefPayload | null {
+  const len = Math.max(src.images?.length ?? 0, src.imageAssetIds?.length ?? 0);
+  if (len <= 0) return null;
+  const idx = Math.min(Math.max(0, imageIndex), len - 1);
+  const base64 = src.images?.[idx];
+  const assetId = src.imageAssetIds?.[idx];
+  if (!hasCanvasImagePayload(base64, assetId)) return null;
+  return {
+    base64: base64 && base64.length > 80 ? base64 : undefined,
+    assetId: assetId?.trim() || undefined,
+  };
+}
+
 function pushImageSlotRefs(
   refs: ImageRefPayload[],
   images: string[] | undefined,
@@ -122,19 +135,18 @@ export function getNodePrimaryCopyRef(src: CanvasNode): ImageRefPayload | null {
 export function getNodePrimaryImageRef(src: CanvasNode): ImageRefPayload | null {
   const len = Math.max(src.images?.length ?? 0, src.imageAssetIds?.length ?? 0);
   if (len > 0) {
-    const idx = Math.min(Math.max(0, src.currentImageIndex ?? 0), len - 1);
-    const base64 = src.images?.[idx];
-    const assetId = src.imageAssetIds?.[idx];
-    if (hasCanvasImagePayload(base64, assetId)) {
-      return {
-        base64: base64 && base64.length > 80 ? base64 : undefined,
-        assetId: assetId?.trim() || undefined,
-      };
-    }
-    return null;
+    return getNodeImageRefAtIndex(src, src.currentImageIndex ?? 0);
   }
   const refs = collectImageRefsFromNode(src);
   return refs[0] ?? null;
+}
+
+export function getNodeImageRefForEdge(src: CanvasNode, edge?: Edge): ImageRefPayload | null {
+  if (edge?.sourceId === src.id && Number.isFinite(edge.sourceImageIndex)) {
+    const edgeRef = getNodeImageRefAtIndex(src, edge.sourceImageIndex ?? 0);
+    if (edgeRef) return edgeRef;
+  }
+  return getNodePrimaryImageRef(src);
 }
 
 export type SingleImageFieldPayload = { base64: string; assetId?: string };
@@ -173,10 +185,37 @@ export function resolveImageProviderNodes(
     if (candidateId === consumerId || seen.has(candidateId)) continue;
 
     const candidate = nodes.find((n) => n.id === candidateId);
-    if (!candidate || !getNodePrimaryImageRef(candidate)) continue;
+    if (!candidate || !getNodeImageRefForEdge(candidate, edge)) continue;
 
     seen.add(candidateId);
     providers.push(candidate);
+  }
+
+  return providers;
+}
+
+export function resolveImageProviderRefs(
+  consumerId: string,
+  nodes: CanvasNode[],
+  edges: Edge[]
+): { node: CanvasNode; ref: ImageRefPayload; edge: Edge }[] {
+  const providers: { node: CanvasNode; ref: ImageRefPayload; edge: Edge }[] = [];
+  const seen = new Set<string>();
+
+  for (const edge of edges) {
+    if (edge.targetId !== consumerId && edge.sourceId !== consumerId) continue;
+
+    const candidateId = edge.targetId === consumerId ? edge.sourceId : edge.targetId;
+    if (candidateId === consumerId || seen.has(candidateId)) continue;
+
+    const candidate = nodes.find((n) => n.id === candidateId);
+    if (!candidate) continue;
+
+    const ref = getNodeImageRefForEdge(candidate, edge);
+    if (!ref) continue;
+
+    seen.add(candidateId);
+    providers.push({ node: candidate, ref, edge });
   }
 
   return providers;
@@ -293,7 +332,11 @@ export function buildIncomingRefSlots(
     const src = nodes.find((x) => x.id === edge.sourceId);
     if (!src) continue;
     const prefix = shortSourceLabel(src);
-    const imageRefs = collectImageRefsFromNode(src);
+    const hasLockedImageSlot = edge.sourceId === src.id && Number.isFinite(edge.sourceImageIndex);
+    const pickedRef = getNodeImageRefForEdge(src, edge);
+    const imageRefs = hasLockedImageSlot
+      ? (pickedRef ? [pickedRef] : [])
+      : collectImageRefsFromNode(src);
     if (imageRefs.length > 0) {
       const inlineB64s = imageRefs
         .map((r) => r.base64)

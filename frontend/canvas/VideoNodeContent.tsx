@@ -20,7 +20,7 @@ export interface VideoNodeContentProps {
   eyedropperTargetNodeIdRef: React.MutableRefObject<string | null>;
   nodesRef: React.MutableRefObject<CanvasNode[]>;
   onUpdateNode: (nodeId: string, updates: Partial<CanvasNode>) => void;
-  onCanvasEyedropper: (sourceId: string, targetId: string) => boolean;
+  onCanvasEyedropper: (sourceId: string, targetId: string, opts?: { sourceImageIndex?: number }) => boolean;
   onDownloadVideo: (url: string) => void;
 }
 

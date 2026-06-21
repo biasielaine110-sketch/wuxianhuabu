@@ -23,6 +23,9 @@ const MAX_UPSCALE_CANVAS_EDGE = 8192;
 
 /** 客户端放大生成图（2k/4k 档位） */
 export function upscaleImage(base64Str: string, targetRes: string): Promise<string> {
+  if (base64Str.startsWith('http://') || base64Str.startsWith('https://')) {
+    return Promise.resolve(base64Str);
+  }
   if (targetRes === '1k' || !targetRes) return Promise.resolve(base64Str);
   return new Promise((resolve) => {
     const img = new Image();

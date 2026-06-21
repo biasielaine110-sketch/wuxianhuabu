@@ -30,6 +30,10 @@ export function rewriteImageUrlForBrowserDisplay(imageUrl: string): string {
     if (host === 'manxueapi.com' || host.endsWith('.manxueapi.com')) {
       return `${origin}/manxue-api${u.pathname}${u.search}`;
     }
+    if (host === 'oss-us.file-download.life' || host.endsWith('.oss-us.file-download.life')) {
+      const prefix = import.meta.env.DEV ? '/otuapi-image-api' : '/api/otuapi-image-proxy';
+      return `${origin}${prefix}${u.pathname}${u.search}`;
+    }
   } catch {
     /* ignore */
   }
@@ -140,14 +144,49 @@ export async function probeImageDisplayMetadata(
     return meta;
   };
 
+  const loadImageDimensions = (src: string): Promise<{ width: number; height: number } | null> =>
+    new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve({ width: img.naturalWidth || img.width, height: img.naturalHeight || img.height });
+      img.onerror = () => resolve(null);
+      img.src = src;
+    });
+
   try {
     if (displaySrc.startsWith('blob:') || displaySrc.startsWith('http')) {
       const fetchUrl = displaySrc.startsWith('http')
         ? rewriteImageUrlForBrowserDisplay(displaySrc)
         : displaySrc;
-      const resp = await fetch(fetchUrl);
-      if (!resp.ok) throw new Error(`fetch ${resp.status}`);
-      return fromBlob(await resp.blob());
+      const [dims, resp] = await Promise.all([
+        loadImageDimensions(fetchUrl),
+        fetch(fetchUrl).catch(() => null),
+      ]);
+      if (resp?.ok) {
+        const blob = await resp.blob();
+        try {
+          const meta = await fromBlob(blob);
+          if (meta.width > 0 && meta.height > 0) return meta;
+        } catch {
+          /* use img dimensions below */
+        }
+        if (dims?.width && dims?.height) {
+          return {
+            width: dims.width,
+            height: dims.height,
+            fileSize: blob.size,
+            formatLabel: mimeToProbeFormatLabel(blob.type || 'image/jpeg'),
+          };
+        }
+      }
+      if (dims?.width && dims?.height) {
+        return {
+          width: dims.width,
+          height: dims.height,
+          fileSize: 0,
+          formatLabel: 'UNKNOWN',
+        };
+      }
+      throw new Error('remote image metadata unavailable');
     }
     if (displaySrc.startsWith('data:')) {
       const match = /^data:([^;]+);base64,(.+)$/.exec(displaySrc);
@@ -179,7 +218,8 @@ export async function probeImageDisplayMetadata(
 
 /** 节点 images[i] 是否有可显示内容（含 offload 后仅 assetId 的情况） */
 export function hasCanvasImagePayload(base64?: string, assetId?: string): boolean {
-  return (!!base64 && base64.length > 80) || !!(assetId && assetId.length > 0);
+  const s = (base64 || '').trim();
+  return /^https?:\/\//i.test(s) || (!!s && s.length > 80) || !!(assetId && assetId.length > 0);
 }
 
 export function countNodeImageSlots(images?: string[], assetIds?: string[]): number {

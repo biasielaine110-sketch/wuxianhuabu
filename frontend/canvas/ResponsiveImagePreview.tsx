@@ -46,7 +46,7 @@ export function ResponsiveImagePreview({
   }, []);
 
   const maxSide = Math.max(dimensions.width, dimensions.height, 100);
-  const hasSource = (!!base64 && base64.length > 80) || !!assetId;
+  const hasSource = (!!base64 && (/^https?:\/\//i.test(base64.trim()) || base64.length > 80)) || !!assetId;
 
   if (!isInViewport || !hasSource) {
     return (

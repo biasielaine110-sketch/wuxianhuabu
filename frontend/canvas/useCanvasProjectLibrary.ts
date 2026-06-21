@@ -1,19 +1,25 @@
 import { useState, useRef, useCallback, useEffect, type RefObject } from 'react';
 import type { AuditImage, CanvasNode, Edge, Transform } from '../types';
 import { hydrateNodesMediaFromAssets } from './jsonExportMediaHydrate';
-import { flushAllNodeMediaOffload } from '../services/canvasAssetSync';
+import { findMissingNodeMediaAssetIds, findMissingNodeWindowMedia, flushAllNodeMediaOffload } from '../services/canvasAssetSync';
 import {
   loadProjectLibrary,
   saveProjectLibrary,
   exportProjectZipToDisk,
+  overwriteProjectZipFileHandle,
+  buildProjectZipBlob,
+  projectZipFilename,
+  restoreProjectAssetsFromZipFileHandle,
   parseProjectFromZipFile,
   sanitizeFilename,
   CANVAS_LIBRARY_IDB_LABELS,
 } from '../services/projectPersistence';
 import {
   getProjectBackupFileHandle,
+  getProjectZipBackupFileHandle,
   getProjectDraftDirectoryHandle,
   persistProjectBackupFileHandle,
+  persistProjectZipBackupFileHandle,
   persistProjectDraftDirectoryHandle,
   removeProjectBackupFileHandle,
 } from '../services/projectBackupHandleStore';
@@ -32,6 +38,7 @@ import {
   type CanvasProject,
 } from './projectDraftUtils';
 import type { DraftDiskModalState } from './draftDiskModalTypes';
+import { requestPersistentCanvasStorage } from '../services/storagePersistence';
 
 export type UseCanvasProjectLibraryOptions = {
   setNodes: (updater: CanvasNode[] | ((prev: CanvasNode[]) => CanvasNode[])) => void;
@@ -106,6 +113,160 @@ export function useCanvasProjectLibrary({
     if (list.length === 0) return;
     await Promise.allSettled(list);
   }, []);
+  const restoreBoundBackupHandle = useCallback(async (project: CanvasProject | undefined | null): Promise<void> => {
+    lastJsonFileHandleRef.current = null;
+    lastZipFileHandleRef.current = null;
+    lastDiskWriteFormatRef.current = null;
+    setLastJsonFilename('');
+    if (!project?.id || !project.diskSaveEstablished) return;
+    if (project.draftDiskWriteFormat === 'zip') {
+      const h = await getProjectZipBackupFileHandle(project.id);
+      lastZipFileHandleRef.current = h ?? null;
+      lastDiskWriteFormatRef.current = h ? 'zip' : null;
+      return;
+    }
+    const h = await getProjectBackupFileHandle(project.id);
+    lastJsonFileHandleRef.current = h ?? null;
+    lastDiskWriteFormatRef.current = h ? 'json' : null;
+    setLastJsonFilename(h?.name ?? '');
+  }, []);
+  const restoreProjectAssetsFromBoundZip = useCallback(async (project: CanvasProject | undefined | null): Promise<void> => {
+    if (!project?.id || project.draftDiskWriteFormat !== 'zip') return;
+    try {
+      let h = lastZipFileHandleRef.current;
+      if (!h) h = (await getProjectZipBackupFileHandle(project.id)) ?? null;
+      if (!h) return;
+      const restored = await restoreProjectAssetsFromZipFileHandle(h);
+      if (restored > 0) {
+        lastZipFileHandleRef.current = h;
+        lastDiskWriteFormatRef.current = 'zip';
+        console.info(`[canvas] 已从绑定 ZIP 恢复 ${restored} 个图片资产`);
+      }
+    } catch (e) {
+      console.warn('[canvas] 从绑定 ZIP 恢复图片资产失败', e);
+    }
+  }, []);
+  const restoreMissingMediaSlotsFromSavedProject = useCallback(
+    async (currentNodes: CanvasNode[], savedProject: CanvasProject | undefined | null): Promise<CanvasNode[]> => {
+      if (!savedProject?.nodes?.length) return currentNodes;
+      const savedNodes = await hydrateNodesMediaFromAssets(savedProject.nodes || []);
+      const savedById = new Map(savedNodes.map((node) => [node.id, node]));
+      let changed = false;
+
+      const fillArray = (
+        curValues: string[] | undefined,
+        curIds: string[] | undefined,
+        savedValues: string[] | undefined,
+        savedIds: string[] | undefined,
+      ): { values?: string[]; ids?: string[] } => {
+        if (!curIds?.some(Boolean)) return { values: curValues, ids: curIds };
+        const values = [...(curValues ?? [])];
+        const ids = [...curIds];
+        let localChanged = false;
+        for (let i = 0; i < ids.length; i++) {
+          if (!ids[i]) continue;
+          if ((values[i] || '').trim().length > 80 || /^https?:\/\//i.test((values[i] || '').trim())) continue;
+          const savedValue = savedValues?.[i];
+          const savedId = savedIds?.[i];
+          if (savedValue && savedValue.trim().length > 80) {
+            values[i] = savedValue;
+            if (savedId) ids[i] = savedId;
+            localChanged = true;
+          }
+        }
+        if (localChanged) changed = true;
+        return { values, ids };
+      };
+
+      const fillSingle = (
+        curValue: string | undefined,
+        curId: string | undefined,
+        savedValue: string | undefined,
+        savedId: string | undefined,
+      ): { value?: string; id?: string } => {
+        if (!curId) return { value: curValue, id: curId };
+        const s = (curValue || '').trim();
+        if (s.length > 80 || /^https?:\/\//i.test(s)) return { value: curValue, id: curId };
+        if (savedValue && savedValue.trim().length > 80) {
+          changed = true;
+          return { value: savedValue, id: savedId || curId };
+        }
+        return { value: curValue, id: curId };
+      };
+
+      const restored = currentNodes.map((node) => {
+        const saved = savedById.get(node.id);
+        if (!saved) return node;
+        let next: CanvasNode = { ...node };
+
+        const images = fillArray(node.images, node.imageAssetIds, saved.images, saved.imageAssetIds);
+        next.images = images.values;
+        next.imageAssetIds = images.ids;
+
+        const curPanorama = node as CanvasNode & { panoramaImage?: string; panoramaImageAssetId?: string };
+        const savedPanorama = saved as CanvasNode & { panoramaImage?: string; panoramaImageAssetId?: string };
+        const panorama = fillSingle(
+          curPanorama.panoramaImage,
+          curPanorama.panoramaImageAssetId,
+          savedPanorama.panoramaImage,
+          savedPanorama.panoramaImageAssetId,
+        );
+        (next as typeof curPanorama).panoramaImage = panorama.value;
+        (next as typeof curPanorama).panoramaImageAssetId = panorama.id;
+
+        const curSource = node as CanvasNode & { sourceImage?: string; sourceImageAssetId?: string };
+        const savedSource = saved as CanvasNode & { sourceImage?: string; sourceImageAssetId?: string };
+        const source = fillSingle(
+          curSource.sourceImage,
+          curSource.sourceImageAssetId,
+          savedSource.sourceImage,
+          savedSource.sourceImageAssetId,
+        );
+        (next as typeof curSource).sourceImage = source.value;
+        (next as typeof curSource).sourceImageAssetId = source.id;
+
+        const curBg = node as CanvasNode & { backgroundImage?: string; backgroundImageAssetId?: string };
+        const savedBg = saved as CanvasNode & { backgroundImage?: string; backgroundImageAssetId?: string };
+        const bg = fillSingle(
+          curBg.backgroundImage,
+          curBg.backgroundImageAssetId,
+          savedBg.backgroundImage,
+          savedBg.backgroundImageAssetId,
+        );
+        (next as typeof curBg).backgroundImage = bg.value;
+        (next as typeof curBg).backgroundImageAssetId = bg.id;
+
+        const curGrid = node as CanvasNode & {
+          inputImage?: string;
+          inputImageAssetId?: string;
+          outputImages?: string[];
+          outputImageAssetIds?: string[];
+          inputImages?: string[];
+          inputImageAssetIds?: string[];
+          outputImage?: string;
+          outputImageAssetId?: string;
+        };
+        const savedGrid = saved as typeof curGrid;
+        const input = fillSingle(curGrid.inputImage, curGrid.inputImageAssetId, savedGrid.inputImage, savedGrid.inputImageAssetId);
+        (next as typeof curGrid).inputImage = input.value;
+        (next as typeof curGrid).inputImageAssetId = input.id;
+        const outputImages = fillArray(curGrid.outputImages, curGrid.outputImageAssetIds, savedGrid.outputImages, savedGrid.outputImageAssetIds);
+        (next as typeof curGrid).outputImages = outputImages.values;
+        (next as typeof curGrid).outputImageAssetIds = outputImages.ids;
+        const inputImages = fillArray(curGrid.inputImages, curGrid.inputImageAssetIds, savedGrid.inputImages, savedGrid.inputImageAssetIds);
+        (next as typeof curGrid).inputImages = inputImages.values;
+        (next as typeof curGrid).inputImageAssetIds = inputImages.ids;
+        const output = fillSingle(curGrid.outputImage, curGrid.outputImageAssetId, savedGrid.outputImage, savedGrid.outputImageAssetId);
+        (next as typeof curGrid).outputImage = output.value;
+        (next as typeof curGrid).outputImageAssetId = output.id;
+
+        return next;
+      });
+
+      return changed ? restored : currentNodes;
+    },
+    []
+  );
   useEffect(() => { draftDiskModalRef.current = draftDiskModal; }, [draftDiskModal]);
   useEffect(() => { setCenterTitleEditValue(null); }, [activeProjectId]);
 
@@ -197,9 +358,9 @@ export function useCanvasProjectLibrary({
   /**
    * 本地存档策略（简要）：
    * - 画布上的 nodes / edges / transform 只在内存中实时变化；
-   * - 「保存当前画布 / Ctrl+S」：写入 IndexedDB；若该项目尚未绑定本地草稿 JSON，会先弹出对话框填写文件名并选择保存文件夹（Chrome / Edge）；确认后绑定句柄，项目名下展示草稿位置；取消则仍只写草稿库；
-   * - 已绑定草稿后：**Ctrl+S** 会同步覆盖绑定的 JSON；**Ctrl+Alt+S（⌘+⌥+S）** 为「另存 JSON」（选文件夹 + 文件名），不改变当前绑定的主草稿；
-   * - 「定时自动保存」：已绑定草稿的项目打开时默认每 **5** 分钟静默保存（IndexedDB + 覆盖绑定 JSON）；可在项目管理里改为关闭或其它间隔；
+   * - 「保存当前画布 / Ctrl+S」：写入 IndexedDB；若该项目尚未绑定本地草稿，会先弹出对话框填写文件名并选择保存文件夹（Chrome / Edge）；确认后默认绑定 ZIP，项目名下展示草稿位置；取消则仍只写草稿库；
+   * - 已绑定草稿后：**Ctrl+S** 会同步覆盖绑定的 ZIP / JSON；**Ctrl+Alt+S（⌘+⌥+S）** 为「另存 JSON」（选文件夹 + 文件名），不改变当前绑定的主草稿；
+   * - 「定时自动保存」：已绑定草稿的项目打开时默认每 **5** 分钟静默保存（IndexedDB + 覆盖绑定 ZIP / JSON）；可在项目管理里改为关闭或其它间隔；
    * - 图片 / 视频下载在已选择草稿文件夹时，默认写入该文件夹（无需在设置里启用固定目录）；
    * - 「导出 JSON / ZIP」仍可通过菜单另存；导出 JSON 也会标记已做过磁盘备份；
    * - 首次打开会从旧版 localStorage 迁移到 IndexedDB；
@@ -240,14 +401,37 @@ export function useCanvasProjectLibrary({
     });
   }, []);
 
-  const flushBoundDraftJsonToDisk = useCallback(
+  const flushBoundDraftBackupToDisk = useCallback(
     async (
       pid: string,
       list: CanvasProject[],
       opts?: { alertOnFailure?: boolean; onSaved?: (filename: string) => void }
     ): Promise<string | null> => {
       const p = list.find((x) => x.id === pid);
-      if (!p?.diskSaveEstablished || lastDiskWriteFormatRef.current !== 'json') return null;
+      const format = p?.draftDiskWriteFormat || lastDiskWriteFormatRef.current;
+      if (!p?.diskSaveEstablished || (format !== 'json' && format !== 'zip')) return null;
+      if (format === 'zip') {
+        let h = lastZipFileHandleRef.current as FileSystemFileHandle | null;
+        if (!h) {
+          const fetched = await getProjectZipBackupFileHandle(pid);
+          h = fetched ?? null;
+          lastZipFileHandleRef.current = h;
+        }
+        if (!h) return null;
+        const savedFilename = h.name || '';
+        try {
+          await overwriteProjectZipFileHandle(h, p);
+          lastDiskWriteFormatRef.current = 'zip';
+          opts?.onSaved?.(savedFilename);
+          return savedFilename;
+        } catch (e) {
+          console.warn('[canvas] 覆盖本地草稿 ZIP 失败', e);
+          if (opts?.alertOnFailure) {
+            alert('草稿库已更新，但覆盖本地 ZIP 备份失败（文件可能被移动或无写入权限）。');
+          }
+          return null;
+        }
+      }
       let h = lastJsonFileHandleRef.current as FileSystemFileHandle | null;
       if (!h) {
         const fetched = await getProjectBackupFileHandle(pid);
@@ -259,6 +443,7 @@ export function useCanvasProjectLibrary({
       try {
         const forWrite = { ...p };
         delete (forWrite as { diskSaveEstablished?: boolean }).diskSaveEstablished;
+        delete (forWrite as { draftDiskWriteFormat?: 'json' | 'zip' }).draftDiskWriteFormat;
         // 把被 offload 到 IDB 资产库的大图反向读回 base64 写进文件，否则换电脑打开 JSON 全是空图。
         const hydratedNodes = await hydrateNodesMediaFromAssets(forWrite.nodes || []);
         const payload = { ...forWrite, nodes: hydratedNodes };
@@ -266,6 +451,7 @@ export function useCanvasProjectLibrary({
         const writable = await h.createWritable();
         await writable.write(json);
         await writable.close();
+        lastDiskWriteFormatRef.current = 'json';
         setLastJsonFilename(savedFilename);
         opts?.onSaved?.(savedFilename);
         return savedFilename;
@@ -316,6 +502,39 @@ export function useCanvasProjectLibrary({
           );
         }
       }
+      if (options?.skipDiskPrompt) {
+        const savedProject = projectsRef.current.find((p) => p.id === pid);
+        let missingWindowMedia = await findMissingNodeWindowMedia(currentNodes);
+        if (missingWindowMedia.slotCount > 0) {
+          await restoreProjectAssetsFromBoundZip(savedProject);
+          missingWindowMedia = await findMissingNodeWindowMedia(currentNodes);
+        }
+        if (missingWindowMedia.slotCount > 0) {
+          const restoredNodes = await restoreMissingMediaSlotsFromSavedProject(currentNodes, savedProject);
+          if (restoredNodes !== currentNodes) {
+            currentNodes = restoredNodes;
+            setNodes(currentNodes);
+            missingWindowMedia = await findMissingNodeWindowMedia(currentNodes);
+          }
+        }
+        if (missingWindowMedia.slotCount > 0) {
+          console.warn(
+            `[saveCurrentProject] 自动保存已暂停：检测到 ${missingWindowMedia.nodeIds.length} 个仍存在的节点窗口内有 ${missingWindowMedia.slotCount} 个图片内容缺失，避免覆盖上一次正常草稿。节点=${missingWindowMedia.nodeIds.join(',')}`
+          );
+          return false;
+        }
+      }
+      let missingAssets = await findMissingNodeMediaAssetIds(currentNodes);
+      if (missingAssets.length > 0) {
+        const projectForRestore = projectsRef.current.find((p) => p.id === pid);
+        await restoreProjectAssetsFromBoundZip(projectForRestore);
+        missingAssets = await findMissingNodeMediaAssetIds(currentNodes);
+        if (missingAssets.length > 0) {
+          console.warn(
+            `[saveCurrentProject] 仍有 ${missingAssets.length} 个图片资产缺失，保存会保留占位引用：${missingAssets.join(',')}`
+          );
+        }
+      }
       const nextProjects = mergeCurrentCanvasIntoProjectList(
         projectsRef.current,
         pid,
@@ -338,7 +557,8 @@ export function useCanvasProjectLibrary({
         }))
       );
       const cur = hydratedNextProjects.find((p) => p.id === pid);
-      const needsDiskPrompt = !options?.skipDiskPrompt && cur != null && !cur.diskSaveEstablished;
+      const hasBoundZip = cur?.diskSaveEstablished && cur.draftDiskWriteFormat === 'zip';
+      const needsDiskPrompt = !options?.skipDiskPrompt && cur != null && !hasBoundZip;
 
       const commitToIdb = (list: CanvasProject[]): Promise<boolean> => {
         setProjects(list);
@@ -357,7 +577,7 @@ export function useCanvasProjectLibrary({
         return (async () => {
           const ok = await commitToIdb(hydratedNextProjects);
           if (!ok) return false;
-          await flushBoundDraftJsonToDisk(pid, hydratedNextProjects, {
+          await flushBoundDraftBackupToDisk(pid, hydratedNextProjects, {
             alertOnFailure: !options?.skipDiskPrompt,
             onSaved: (filename) => {
               setSaveSuccessMsg(`已保存至: ${filename}`);
@@ -379,7 +599,7 @@ export function useCanvasProjectLibrary({
         });
       });
     },
-    [flushBoundDraftJsonToDisk]
+    [flushBoundDraftBackupToDisk, restoreMissingMediaSlotsFromSavedProject, restoreProjectAssetsFromBoundZip]
   );
 
   const saveCurrentProjectRef = useRef(saveCurrentProject);
@@ -394,7 +614,7 @@ export function useCanvasProjectLibrary({
       const pid = activeProjectIdRef.current;
       if (!pid) return;
       const p = projectsRef.current.find((x) => x.id === pid);
-      if (!p?.diskSaveEstablished) return;
+      if (!p?.diskSaveEstablished || p.draftDiskWriteFormat !== 'zip') return;
       void saveCurrentProjectRef.current({ skipDiskPrompt: true });
     }, ms);
     return () => clearInterval(timer);
@@ -449,7 +669,7 @@ export function useCanvasProjectLibrary({
       }
     })();
     const p = projectsRef.current.find((x) => x.id === pid);
-    if (p?.diskSaveEstablished) {
+    if (p?.diskSaveEstablished && p.draftDiskWriteFormat === 'zip') {
       setAutosaveIntervalMin((p.draftAutosaveIntervalMin ?? 5) as 0 | 5 | 10 | 20 | 30);
     } else {
       try {
@@ -474,7 +694,7 @@ export function useCanvasProjectLibrary({
     }
     const pid = activeProjectIdRef.current;
     const cur = projectsRef.current.find((x) => x.id === pid);
-    if (cur?.diskSaveEstablished) {
+    if (cur?.diskSaveEstablished && cur.draftDiskWriteFormat === 'zip') {
       setProjects((prev) => {
         const next = prev.map((p) =>
           p.id === pid ? { ...p, draftAutosaveIntervalMin: v, updatedAt: Date.now() } : p
@@ -523,16 +743,21 @@ export function useCanvasProjectLibrary({
     const defaultStem = projectExportBasename(snap);
     const raw = modal.basenameDraft.trim();
     const stem = sanitizeFilename((raw || defaultStem).replace(/\.json$/i, ''));
-    const filename = `${stem}.json`;
+    const isFirstSave = modal.mode === 'firstSave';
+    const draftTitleForDisk = stem !== (snap.name || '').trim() ? stem : undefined;
 
     const payload = { ...snap };
     delete (payload as { diskSaveEstablished?: boolean }).diskSaveEstablished;
+    delete (payload as { draftDiskWriteFormat?: 'json' | 'zip' }).draftDiskWriteFormat;
     // 把被 offload 到 IDB 资产库的大图反向读回 base64，否则 JSON 文件里 images 数组全是空字符串。
     // 覆盖：首次保存弹窗 / Ctrl+Alt+S 另存为 这两条路径之前只接了 projectSnapshotForJsonExport
     // 不够，因为大图 offload 后内存 nodes[i].images[j] 也是空。
     const hydratedNodes = await hydrateNodesMediaFromAssets(payload.nodes || []);
-    const payloadForDisk = { ...payload, nodes: hydratedNodes };
-    const json = JSON.stringify(payloadForDisk, null, 2);
+    const payloadForDisk = { ...payload, draftTitle: draftTitleForDisk, nodes: hydratedNodes };
+    const filename = isFirstSave ? projectZipFilename(payloadForDisk) : `${stem}.json`;
+    const diskBlob = isFirstSave
+      ? await buildProjectZipBlob(payloadForDisk)
+      : new Blob([JSON.stringify(payloadForDisk, null, 2)], { type: 'application/json' });
 
     const w = window as unknown as {
       showDirectoryPicker?: (opts?: { mode?: 'readwrite' }) => Promise<FileSystemDirectoryHandle>;
@@ -552,7 +777,9 @@ export function useCanvasProjectLibrary({
       } else if (typeof w.showSaveFilePicker === 'function') {
         fileHandle = await w.showSaveFilePicker({
           suggestedName: filename,
-          types: [{ description: 'JSON 文件', accept: { 'application/json': ['.json'] } }],
+          types: isFirstSave
+            ? [{ description: '画布备份 ZIP', accept: { 'application/zip': ['.wxcanvas.zip', '.zip'] } }]
+            : [{ description: 'JSON 文件', accept: { 'application/json': ['.json'] } }],
         });
       } else {
         alert('当前浏览器不支持选择保存文件夹，请使用 Chrome / Edge（HTTPS 或 localhost）。');
@@ -560,7 +787,7 @@ export function useCanvasProjectLibrary({
       }
 
       const writable = await fileHandle.createWritable();
-      await writable.write(json);
+      await writable.write(diskBlob);
       await writable.close();
     } catch (e: unknown) {
       if ((e as { name?: string })?.name === 'AbortError') return;
@@ -579,20 +806,26 @@ export function useCanvasProjectLibrary({
 
     const pid = modal.pid;
     try {
-      await persistProjectBackupFileHandle(pid, fileHandle);
+      if (isFirstSave) await persistProjectZipBackupFileHandle(pid, fileHandle);
+      else await persistProjectBackupFileHandle(pid, fileHandle);
       if (dirHandle) await persistProjectDraftDirectoryHandle(pid, dirHandle);
     } catch (e) {
       console.warn(e);
     }
 
-    lastJsonFileHandleRef.current = fileHandle;
-    lastDiskWriteFormatRef.current = 'json';
-    setLastJsonFilename(fileHandle.name);
+    if (isFirstSave) {
+      lastZipFileHandleRef.current = fileHandle;
+      lastJsonFileHandleRef.current = null;
+      lastDiskWriteFormatRef.current = 'zip';
+      setLastJsonFilename('');
+    } else {
+      lastJsonFileHandleRef.current = fileHandle;
+      lastDiskWriteFormatRef.current = 'json';
+      setLastJsonFilename(fileHandle.name);
+    }
 
     const folderLabel = dirHandle?.name?.trim() || '';
     const pathNote = folderLabel ? `${folderLabel} · ${fileHandle.name}` : fileHandle.name;
-    const projectName = (snap.name || '').trim();
-    const draftTitle = stem !== projectName ? stem : undefined;
 
     const resolve = draftDiskFlowResolveRef.current;
     draftDiskFlowResolveRef.current = null;
@@ -603,8 +836,9 @@ export function useCanvasProjectLibrary({
         ? {
             ...p,
             diskSaveEstablished: true as const,
+            draftDiskWriteFormat: 'zip' as const,
             draftStoragePathNote: pathNote,
-            draftTitle,
+            draftTitle: draftTitleForDisk,
             draftAutosaveIntervalMin: 5 as const,
             updatedAt: Date.now(),
           }
@@ -614,7 +848,7 @@ export function useCanvasProjectLibrary({
     setProjects(updatedList);
     projectsRef.current = updatedList;
     const ok = await trackProjectSave(saveProjectLibrary(updatedList, pid));
-    if (!ok) alert('本地 JSON 已写入，但同步 IndexedDB 草稿库失败，请重试。');
+    if (!ok) alert('本地 ZIP 已写入，但同步 IndexedDB 草稿库失败，请重试。');
     else persistWarningShownRef.current = false;
 
     setAutosaveIntervalMin(5);
@@ -737,33 +971,33 @@ export function useCanvasProjectLibrary({
     const target = projectsRef.current.find((p) => p.id === projectId);
     if (!target) return;
     saveCurrentProject();
-    const { project: normalizedTarget, stripped } = normalizeProjectStripLegacyAutoT2i(target);
-    if (stripped) {
-      const next = projectsRef.current.map((p) => (p.id === projectId ? normalizedTarget : p));
-      setProjects(next);
-      projectsRef.current = next;
-      void trackProjectSave(saveProjectLibrary(next, projectId)).then((ok) => {
-        if (!ok) console.warn('[canvas] 切换项目时已剥离旧版默认文生图占位，但写回草稿库失败');
-      });
-    }
-    setActiveProjectId(projectId);
-    setNodes(normalizedTarget.nodes || []);
-    setEdges(normalizedTarget.edges || []);
-    pendingDefaultViewportRef.current = true;
-    if (normalizedTarget.auditModeData?.images) {
-      setAuditImages(normalizedTarget.auditModeData.images);
-      auditImagesRef.current = normalizedTarget.auditModeData.images;
-    } else {
-      setAuditImages([]);
-      auditImagesRef.current = [];
-    }
-    void getProjectBackupFileHandle(projectId).then((h) => {
-      lastJsonFileHandleRef.current = h ?? null;
-      lastZipFileHandleRef.current = null;
-      lastDiskWriteFormatRef.current = h ? 'json' : null;
-      setLastJsonFilename(h?.name ?? '');
-    });
-  }, [saveCurrentProject]);
+    void (async () => {
+      await restoreProjectAssetsFromBoundZip(target);
+      const { project: normalizedTarget, stripped } = normalizeProjectStripLegacyAutoT2i(target);
+      const hydratedNodes = await hydrateNodesMediaFromAssets(normalizedTarget.nodes || []);
+      const readyTarget = { ...normalizedTarget, nodes: hydratedNodes };
+      if (stripped) {
+        const next = projectsRef.current.map((p) => (p.id === projectId ? readyTarget : p));
+        setProjects(next);
+        projectsRef.current = next;
+        void trackProjectSave(saveProjectLibrary(next, projectId)).then((ok) => {
+          if (!ok) console.warn('[canvas] 切换项目时已剥离旧版默认文生图占位，但写回草稿库失败');
+        });
+      }
+      setActiveProjectId(projectId);
+      setNodes(readyTarget.nodes || []);
+      setEdges(readyTarget.edges || []);
+      pendingDefaultViewportRef.current = true;
+      if (readyTarget.auditModeData?.images) {
+        setAuditImages(readyTarget.auditModeData.images);
+        auditImagesRef.current = readyTarget.auditModeData.images;
+      } else {
+        setAuditImages([]);
+        auditImagesRef.current = [];
+      }
+      void restoreBoundBackupHandle(readyTarget);
+    })();
+  }, [saveCurrentProject, restoreBoundBackupHandle, restoreProjectAssetsFromBoundZip]);
 
   const deleteProject = useCallback((projectId: string) => {
     void removeProjectBackupFileHandle(projectId);
@@ -785,12 +1019,7 @@ export function useCanvasProjectLibrary({
       setNodes(fbNorm.nodes || []);
       setEdges(fbNorm.edges || []);
       pendingDefaultViewportRef.current = true;
-      void getProjectBackupFileHandle(fbNorm.id).then((h) => {
-        lastJsonFileHandleRef.current = h ?? null;
-        lastZipFileHandleRef.current = null;
-        lastDiskWriteFormatRef.current = h ? 'json' : null;
-        setLastJsonFilename(h?.name ?? '');
-      });
+      void restoreBoundBackupHandle(fbNorm);
       void trackProjectSave(saveProjectLibrary(nextRemained, fbNorm.id)).then((ok) => {
         if (!ok) alert('项目已删除，但更新草稿库失败，请尝试导出 ZIP/JSON 备份。');
       });
@@ -802,7 +1031,7 @@ export function useCanvasProjectLibrary({
     void trackProjectSave(saveProjectLibrary(remained, curActive)).then((ok) => {
       if (!ok) alert('项目已删除，但更新草稿库失败，请尝试导出 ZIP/JSON 备份。');
     });
-  }, []);
+  }, [restoreBoundBackupHandle]);
 
   /** 导出 JSON 时：若目标即当前打开的项目，附带内存中最新的画布（无需先点保存） */
   const projectSnapshotForJsonExport = useCallback((project: CanvasProject): CanvasProject => {
@@ -830,11 +1059,16 @@ export function useCanvasProjectLibrary({
       const hydratedNodes = await hydrateNodesMediaFromAssets(snapshot.nodes || []);
       const payload = { ...snapshot, nodes: hydratedNodes };
       delete (payload as { diskSaveEstablished?: boolean }).diskSaveEstablished;
+      delete (payload as { draftDiskWriteFormat?: 'json' | 'zip' }).draftDiskWriteFormat;
       const r = await saveJsonToDisk(filename, payload, { backupProjectId: project.id });
       if (r !== 'saved') return;
       const pid = project.id;
       setProjects((prev) => {
-        const next = prev.map((p) => (p.id === pid ? { ...p, diskSaveEstablished: true as const } : p));
+        const next = prev.map((p) =>
+          p.id === pid
+            ? { ...p, diskSaveEstablished: true as const, draftDiskWriteFormat: 'json' as const }
+            : p
+        );
         projectsRef.current = next;
         void trackProjectSave(saveProjectLibrary(next, activeProjectIdRef.current));
         return next;
@@ -915,10 +1149,21 @@ export function useCanvasProjectLibrary({
         if (r.kind === 'handle') {
           lastZipFileHandleRef.current = r.handle;
           lastDiskWriteFormatRef.current = 'zip';
+          void persistProjectZipBackupFileHandle(project.id, r.handle).catch((e) =>
+            console.warn('持久化项目 ZIP 句柄失败', e)
+          );
+        } else {
+          lastZipFileHandleRef.current = null;
         }
         const pid = project.id;
         setProjects((prev) => {
-          const next = prev.map((p) => (p.id === pid ? { ...p, diskSaveEstablished: true as const } : p));
+          const next = prev.map((p) =>
+            p.id === pid && r.kind === 'handle'
+              ? { ...p, diskSaveEstablished: true as const, draftDiskWriteFormat: 'zip' as const }
+              : p.id === pid
+              ? { ...p, diskSaveEstablished: true as const }
+              : p
+          );
           projectsRef.current = next;
           void trackProjectSave(saveProjectLibrary(next, activeProjectIdRef.current));
           return next;
@@ -1039,12 +1284,17 @@ export function useCanvasProjectLibrary({
     let cancelled = false;
     (async () => {
       try {
+        void requestPersistentCanvasStorage();
         const lib = await loadProjectLibrary();
         if (cancelled) return;
         if (lib && lib.projects.length > 0) {
           const { next: patchedProjects, changed: libStrippedLegacy } =
             normalizeLibraryProjectsStripLegacyAutoT2i(lib.projects);
           const activeId = lib.activeProjectId || patchedProjects[0].id;
+          const activeForAssetRestore =
+            patchedProjects.find((p) => p.id === activeId) || patchedProjects[0];
+          await restoreProjectAssetsFromBoundZip(activeForAssetRestore);
+          if (cancelled) return;
           // 草稿库恢复：把被 offload 到 IDB 资产库的图反向读回 base64 写进内存 nodes
           // 解决「8d82dad 之前保存的旧草稿 / 早期 JSON 在 IDB 资产被回收后刷新丢图」的问题
           // （对称于导出路径的 hydrate；hydrate 失败/IDB 找不到的项静默保留空串）
@@ -1077,13 +1327,7 @@ export function useCanvasProjectLibrary({
             });
           }
           setProjectStoreReady(true);
-          void getProjectBackupFileHandle(initial.id).then((h) => {
-            if (cancelled) return;
-            lastJsonFileHandleRef.current = h ?? null;
-            lastZipFileHandleRef.current = null;
-            lastDiskWriteFormatRef.current = h ? 'json' : null;
-            setLastJsonFilename(h?.name ?? '');
-          });
+          void restoreBoundBackupHandle(initial);
           return;
       }
     } catch (err) {
@@ -1103,13 +1347,7 @@ export function useCanvasProjectLibrary({
     setActiveProjectId(defaultProject.id);
       await trackProjectSave(saveProjectLibrary([defaultProject], defaultProject.id));
     setProjectStoreReady(true);
-      void getProjectBackupFileHandle(defaultProject.id).then((h) => {
-        if (cancelled) return;
-        lastJsonFileHandleRef.current = h ?? null;
-        lastZipFileHandleRef.current = null;
-        lastDiskWriteFormatRef.current = h ? 'json' : null;
-        setLastJsonFilename(h?.name ?? '');
-      });
+      void restoreBoundBackupHandle(defaultProject);
     })();
     return () => {
       cancelled = true;

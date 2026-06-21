@@ -4,9 +4,10 @@
  */
 
 const DB_NAME = 'wxcanvas-project-backup-handles-v1';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE = 'jsonFile';
 const DRAFT_DIR_STORE = 'draftDir';
+const ZIP_STORE = 'zipFile';
 
 /** 供「存储位置」说明：记录各项目 JSON 文件句柄的 IndexedDB 库名 */
 export const PROJECT_JSON_HANDLE_IDB_NAME = DB_NAME;
@@ -33,6 +34,9 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(DRAFT_DIR_STORE)) {
         db.createObjectStore(DRAFT_DIR_STORE, { keyPath: 'projectId' });
       }
+      if (!db.objectStoreNames.contains(ZIP_STORE)) {
+        db.createObjectStore(ZIP_STORE, { keyPath: 'projectId' });
+      }
     };
     req.onsuccess = () => resolve(req.result);
   });
@@ -49,6 +53,20 @@ export async function persistProjectBackupFileHandle(
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
     tx.objectStore(STORE).put({ projectId, fileHandle } as Row);
+  });
+}
+
+export async function persistProjectZipBackupFileHandle(
+  projectId: string,
+  fileHandle: FileSystemFileHandle
+): Promise<void> {
+  if (!projectId) return;
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(ZIP_STORE, 'readwrite');
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.objectStore(ZIP_STORE).put({ projectId, fileHandle } as Row);
   });
 }
 
@@ -72,16 +90,37 @@ export async function getProjectBackupFileHandle(
   }
 }
 
+export async function getProjectZipBackupFileHandle(
+  projectId: string
+): Promise<FileSystemFileHandle | undefined> {
+  if (!projectId) return undefined;
+  try {
+    const db = await openDb();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(ZIP_STORE, 'readonly');
+      const r = tx.objectStore(ZIP_STORE).get(projectId);
+      r.onerror = () => reject(r.error);
+      r.onsuccess = () => {
+        const row = r.result as Row | undefined;
+        resolve(row?.fileHandle);
+      };
+    });
+  } catch {
+    return undefined;
+  }
+}
+
 export async function removeProjectBackupFileHandle(projectId: string): Promise<void> {
   if (!projectId) return;
   try {
     const db = await openDb();
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction([STORE, DRAFT_DIR_STORE], 'readwrite');
+      const tx = db.transaction([STORE, DRAFT_DIR_STORE, ZIP_STORE], 'readwrite');
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
       tx.objectStore(STORE).delete(projectId);
       tx.objectStore(DRAFT_DIR_STORE).delete(projectId);
+      tx.objectStore(ZIP_STORE).delete(projectId);
     });
   } catch {
     /* ignore */

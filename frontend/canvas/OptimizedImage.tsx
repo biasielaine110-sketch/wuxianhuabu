@@ -18,6 +18,46 @@ function sniffMimeFromBase64(raw: string): string {
   return 'image/jpeg';
 }
 
+function resizeImageElementToThumb(img: HTMLImageElement, maxSide: number, quality: number): string | null {
+  const maxEdge = Math.max(img.width, img.height);
+  if (maxEdge <= maxSide) return img.src;
+  const scale = maxSide / maxEdge;
+  const targetW = Math.max(1, Math.round(img.width * scale));
+  const targetH = Math.max(1, Math.round(img.height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = targetW;
+  canvas.height = targetH;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, targetW, targetH);
+  return canvas.toDataURL('image/jpeg', quality);
+}
+
+async function fetchRemoteImageAsThumb(
+  src: string,
+  maxSide: number,
+  quality: number,
+  signal: AbortSignal
+): Promise<string> {
+  const res = await fetch(src, { mode: 'cors', credentials: 'omit', signal });
+  if (!res.ok) throw new Error(`thumbnail fetch ${res.status}`);
+  const blob = await res.blob();
+  const blobUrl = URL.createObjectURL(blob);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('thumbnail decode failed'));
+      el.src = blobUrl;
+    });
+    return resizeImageElementToThumb(img, maxSide, quality) || src;
+  } finally {
+    URL.revokeObjectURL(blobUrl);
+  }
+}
+
 export function OptimizedImage({
   base64,
   assetId,
@@ -48,7 +88,8 @@ export function OptimizedImage({
 
   useEffect(() => {
     let cancelled = false;
-    const hasInline = !!base64 && base64.length > 80;
+    const cleanupFns: Array<() => void> = [];
+    const hasInline = !!base64 && (/^https?:\/\//i.test(base64.trim()) || base64.length > 80);
     if (!hasInline && !assetId) {
       setSrc('');
       return;
@@ -62,6 +103,7 @@ export function OptimizedImage({
         }
 
         const currentMaxSide = effectiveMaxSide;
+        const isRemoteUrl = resolved.startsWith('http://') || resolved.startsWith('https://');
         const cachedKey = `${resolved.slice(0, 48)}|${resolved.slice(-48)}|${resolved.length}|${currentMaxSide}|${quality}|${assetId ?? ''}|${thumbPct}`;        const cached = thumbnailCache.get(cachedKey);
         if (cached) {
           setSrc(cached);
@@ -71,6 +113,28 @@ export function OptimizedImage({
         const finish = (displaySrc: string) => {
           if (!cancelled && displaySrc) setSrc(displaySrc);
         };
+
+        if (isRemoteUrl) {
+          finish(resolved);
+          const ac = new AbortController();
+          const timer = window.setTimeout(() => ac.abort(), 15_000);
+          cleanupFns.push(() => {
+            window.clearTimeout(timer);
+            ac.abort();
+          });
+          void fetchRemoteImageAsThumb(resolved, currentMaxSide, quality, ac.signal)
+            .then((thumbSrc) => {
+              thumbnailCache.set(cachedKey, thumbSrc);
+              if (thumbnailCache.size > THUMB_MAX_CACHE) {
+                const firstKey = thumbnailCache.keys().next().value;
+                if (firstKey) thumbnailCache.delete(firstKey);
+              }
+              finish(thumbSrc);
+            })
+            .catch(() => finish(resolved))
+            .finally(() => window.clearTimeout(timer));
+          return;
+        }
 
         const img = new Image();
         const needsCrossOrigin =
@@ -146,6 +210,7 @@ export function OptimizedImage({
 
     return () => {
       cancelled = true;
+      cleanupFns.forEach((fn) => fn());
     };
   }, [base64, assetId, effectiveMaxSide, quality, thumbPct]);
   if (!src) {

@@ -35,7 +35,7 @@ export interface CanvasImageGenAreaProps {
   eyedropperTargetNodeIdRef: React.MutableRefObject<string | null>;
   onUpdateNode: (nodeId: string, updates: Partial<CanvasNode>) => void;
   onCopyToImage: (nodeId: string, options?: CopyToImageOptions) => void;
-  onCanvasEyedropper: (sourceId: string, targetId: string) => boolean;
+  onCanvasEyedropper: (sourceId: string, targetId: string, opts?: { sourceImageIndex?: number }) => boolean;
   openFullscreenImage: (nodeId: string, img: string, idx: number) => void;
   setEyedropperTargetNodeId: React.Dispatch<React.SetStateAction<string | null>>;
   onImportImage: (nodeId: string) => void;
@@ -243,7 +243,7 @@ export function CanvasImageGenArea({
                       onClick={(e) => {
                         e.stopPropagation();
                         if (eyedropperTargetNodeId) {
-                          onCanvasEyedropper(node.id, eyedropperTargetNodeIdRef.current!);
+                          onCanvasEyedropper(node.id, eyedropperTargetNodeIdRef.current!, { sourceImageIndex: idx });
                         } else {
                           onUpdateNode(node.id, { viewMode: 'single', currentImageIndex: idx });
                         }
@@ -278,7 +278,7 @@ export function CanvasImageGenArea({
                 onClick={(e) => {
                   e.stopPropagation();
                   if (eyedropperTargetNodeId) {
-                    onCanvasEyedropper(node.id, eyedropperTargetNodeIdRef.current!);
+                    onCanvasEyedropper(node.id, eyedropperTargetNodeIdRef.current!, { sourceImageIndex: currentIndex });
                   }
                 }}
                 onDoubleClick={(e) => {

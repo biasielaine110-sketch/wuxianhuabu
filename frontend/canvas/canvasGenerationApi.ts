@@ -112,7 +112,7 @@ export function createCanvasGenerationApi(
         // 构建 prompt（即梦分支独立构建）
         const incomingEdges = edgesRef.current.filter(e => e.targetId === nodeId);
         const inputNodes = incomingEdges.map(e => nodesRef.current.find(n => n.id === e.sourceId)).filter(Boolean) as CanvasNode[];
-        const textInputs = inputNodes.map(n => n.prompt).filter(Boolean);
+        const textInputs = inputNodes.filter(n => n.type === 'text').map(n => n.prompt).filter(Boolean);
         const presetPrompts = (node.activePresets ?? []).map(key => promptPresets[key] || '').filter(Boolean);
         const combined = [...presetPrompts, node.prompt, ...textInputs].filter(Boolean).join('\n');
         const prompt = stripRefMarkers(combined) || combined;
@@ -187,7 +187,7 @@ export function createCanvasGenerationApi(
       const incomingEdges = edgesRef.current.filter(e => e.targetId === nodeId);
       const inputNodes = incomingEdges.map(e => nodesRef.current.find(n => n.id === e.sourceId)).filter(Boolean) as CanvasNode[];
 
-      const textInputs = inputNodes.map(n => n.prompt).filter(Boolean);
+      const textInputs = inputNodes.filter(n => n.type === 'text').map(n => n.prompt).filter(Boolean);
 
       // 获取预设提示词（如果有激活的预设）
       const presetPrompts = (node.activePresets ?? []).map(key => promptPresets[key] || '').filter(Boolean);
@@ -262,10 +262,10 @@ export function createCanvasGenerationApi(
 
         // Append new images to existing ones
         const newImages = [...(node.images || []), ...validImages];
-        
-        setNodes(prev => prev.map(n => n.id === nodeId ? { 
-          ...n, 
-          isGenerating: false, 
+
+        setNodes(prev => prev.map(n => n.id === nodeId ? {
+          ...n,
+          isGenerating: false,
           images: newImages,
           currentImageIndex: (node.images || []).length,
           _thumbTick: ((node as CanvasNode & { _thumbTick?: number })._thumbTick ?? 0) + 1,
@@ -322,7 +322,7 @@ export function createCanvasGenerationApi(
 
     const incomingEdges = edgesRef.current.filter(e => e.targetId === nodeId);
     const inputNodes = incomingEdges.map(e => nodesRef.current.find(n => n.id === e.sourceId)).filter(Boolean) as CanvasNode[];
-    const textInputs = inputNodes.map(n => n.prompt).filter(Boolean);
+    const textInputs = inputNodes.filter(n => n.type === 'text').map(n => n.prompt).filter(Boolean);
 
     const slots = buildIncomingRefSlots(nodeId, edgesRef.current, nodesRef.current);
     const pickIndices = parseRefPickIndices(inputText);
@@ -736,7 +736,7 @@ ${text}`,
         // 检查 prompt（即梦也需 prompt）
         const incomingEdges = edgesRef.current.filter(e => e.targetId === nodeId);
         const inputNodes = incomingEdges.map(e => nodesRef.current.find(n => n.id === e.sourceId)).filter(Boolean) as CanvasNode[];
-        const textInputs = inputNodes.map(n => n.prompt).filter(Boolean);
+        const textInputs = inputNodes.filter(n => n.type === 'text').map(n => n.prompt).filter(Boolean);
 
         const combinedRaw = [node.prompt, ...textInputs].filter(Boolean).join('\n').trim();
         if (!combinedRaw) throw new Error('请输入提示词');
@@ -821,7 +821,7 @@ ${text}`,
     try {
       const incomingEdges = edgesRef.current.filter(e => e.targetId === nodeId);
       const inputNodes = incomingEdges.map(e => nodesRef.current.find(n => n.id === e.sourceId)).filter(Boolean) as CanvasNode[];
-      const textInputs = inputNodes.map(n => n.prompt).filter(Boolean);
+      const textInputs = inputNodes.filter(n => n.type === 'text').map(n => n.prompt).filter(Boolean);
 
       const combinedRaw = [node.prompt, ...textInputs].filter(Boolean).join('\n').trim();
       if (!combinedRaw) throw new Error('请输入提示词或连接文本节点');
