@@ -1,5 +1,5 @@
 import type { CanvasNode, Edge, GridSplitNode } from './types';
-import { hasCanvasImagePayload } from './services/canvasAssetResolver';
+import { hasCanvasImagePayload, imageSrcToRawBase64, resolveCanvasImageSource } from './services/canvasAssetResolver';
 
 export type ImageRefPayload = { base64?: string; assetId?: string };
 
@@ -226,9 +226,6 @@ async function resolveImageRefToBase64(ref: ImageRefPayload): Promise<string | n
     return ref.base64.includes(',') ? ref.base64.split(',')[1] : ref.base64;
   }
   if (ref.assetId) {
-    const { resolveCanvasImageSource, imageSrcToRawBase64 } = await import(
-      './services/canvasAssetResolver'
-    );
     const src = await resolveCanvasImageSource(undefined, ref.assetId);
     if (!src) return null;
     const raw = await imageSrcToRawBase64(src);

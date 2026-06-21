@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { THUMB_MAX_CACHE, thumbnailCache } from './thumbnailCache';
 import { getThumbResolutionPercent, scaleThumbMaxSide } from './thumbResolution';
+import { resolveCanvasImageSource } from '../services/canvasAssetResolver';
 function sniffMimeFromBase64(raw: string): string {
   const cleaned = raw.replace(/^data:[^;]+;base64,/, '').replace(/\s/g, '');
   if (!cleaned || cleaned.length < 8) return 'image/jpeg';
@@ -95,8 +96,7 @@ export function OptimizedImage({
       return;
     }
 
-    void import('../services/canvasAssetResolver').then(({ resolveCanvasImageSource }) =>
-      resolveCanvasImageSource(base64, assetId).then((resolved) => {
+    void resolveCanvasImageSource(base64, assetId).then((resolved) => {
         if (cancelled || !resolved) {
           if (!cancelled) setSrc('');
           return;
@@ -205,8 +205,7 @@ export function OptimizedImage({
           : resolved.startsWith('data:') || resolved.startsWith('blob:')
             ? resolved
             : `data:${sniffMimeFromBase64(resolved)};base64,${resolved.replace(/\s/g, '')}`;
-      })
-    );
+      });
 
     return () => {
       cancelled = true;

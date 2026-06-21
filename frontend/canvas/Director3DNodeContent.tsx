@@ -26,6 +26,7 @@ import {
   ViewIcon,
 } from './canvasIcons';
 import { flipAndStoreAsset } from './imageFlipUtils';
+import { resolveCanvasImageSource } from '../services/canvasAssetResolver';
 
 export interface Director3DNodeContentProps {
   node: Director3DNode;
@@ -1574,7 +1575,6 @@ export function Director3DNodeContent({ node, nodes, eyedropperTargetNodeId, onE
     };
 
     void (async () => {
-      const { resolveCanvasImageSource } = await import('../services/canvasAssetResolver');
       const src = await resolveCanvasImageSource(backgroundImage, backgroundImageAssetId);
       if (cancelled || !src) {
         clearBackground();

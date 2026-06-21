@@ -6,6 +6,7 @@ import { flipAndStoreAsset } from './imageFlipUtils';
 import { OptimizedImage } from './OptimizedImage';
 import { getNodePrimaryImageRef } from '../referenceSlots';
 import { findAnnotationAtPoint, translateAnnotation } from './annotationTransform';
+import { resolveCanvasImageSource } from '../services/canvasAssetResolver';
 
 export interface AnnotationNodeContentProps {
   node: AnnotationNode;
@@ -989,14 +990,12 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       renderCanvas();
       return;
     }
-    void import('../services/canvasAssetResolver').then(({ resolveCanvasImageSource }) =>
-      resolveCanvasImageSource(sourceImage, sourceImageAssetId).then((url) => {
+    void resolveCanvasImageSource(sourceImage, sourceImageAssetId).then((url) => {
         if (cancelled) return;
         resolvedSourceUrlRef.current = url;
         console.log('[annotation canvas] useEffect 重跑: sourceImage.length=', sourceImage?.length, 'resolved url.length=', url.length);
         renderCanvas();
       })
-    );
     return () => {
       cancelled = true;
     };
@@ -1735,7 +1734,6 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
         canvas.width = rw;
         canvas.height = rh;
 
-        const { resolveCanvasImageSource } = await import('../services/canvasAssetResolver');
         const url = await resolveCanvasImageSource(sourceImage, sourceImageAssetId);
         if (cancelled || !url) return;
 
@@ -1852,7 +1850,6 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
     // 有标注时，从全屏坐标直接渲染到原始图片并创建图片节点
     if (currentFsAnnots.length > 0 && hasSourceImage && fs) {
       void (async () => {
-        const { resolveCanvasImageSource } = await import('../services/canvasAssetResolver');
         const url = await resolveCanvasImageSource(sourceImage, sourceImageAssetId);
         if (!url) return;
         const img = new Image();
@@ -2973,7 +2970,6 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
               // === 紧急修复：直接更新本地 ref + 重画，绕开 React 渲染链路 ===
               // 翻转后，先同步把缓存清掉 + 解析新 url + 重画（不依赖 store 回流）
               imageCacheRef.current = null;
-              const { resolveCanvasImageSource } = await import('../services/canvasAssetResolver');
               const newUrl = await resolveCanvasImageSource(flipped.base64, flipped.assetId);
               resolvedSourceUrlRef.current = newUrl;
               renderCanvas();

@@ -1,4 +1,5 @@
 import type { CanvasNode, Edge } from '../types';
+import { resolveCanvasImageSource } from '../services/canvasAssetResolver';
 
 export type ResolvedGridImage = { base64?: string; assetId?: string };
 
@@ -52,6 +53,5 @@ export async function loadImageElement(src: string): Promise<HTMLImageElement> {
 }
 
 export async function resolveImageSrc(base64?: string, assetId?: string): Promise<string> {
-  const { resolveCanvasImageSource } = await import('../services/canvasAssetResolver');
   return resolveCanvasImageSource(base64, assetId);
 }

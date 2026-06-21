@@ -2,6 +2,7 @@
  * 画布媒体资产 IndexedDB 存储（与 projectPersistence 分离）。
  * 节点可逐步改为存 assetId 而非内嵌 base64，降低内存与撤销栈压力。
  */
+import { imageSrcToRawBase64 } from './canvasAssetResolver';
 
 const DB_NAME = 'infinite-ai-canvas-assets';
 const DB_VERSION = 1;
@@ -70,7 +71,6 @@ export async function putCanvasAssetRecord(
 export async function putCanvasAssetFromBase64(base64: string): Promise<string> {
   const trimmed = base64.trim();
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-    const { imageSrcToRawBase64 } = await import('./canvasAssetResolver');
     const raw = await imageSrcToRawBase64(trimmed);
     if (!raw?.base64) throw new Error('无法下载远程图片用于本地存储');
     return putCanvasAssetFromBase64(raw.base64);

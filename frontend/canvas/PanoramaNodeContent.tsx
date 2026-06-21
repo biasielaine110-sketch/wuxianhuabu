@@ -11,6 +11,7 @@ import {
   PanoramaIcon,
 } from './canvasIcons';
 import { flipAndStoreAsset } from './imageFlipUtils';
+import { resolveCanvasImageSource } from '../services/canvasAssetResolver';
 
 export interface PanoramaNodeContentProps {
   node: PanoramaNode;
@@ -396,7 +397,6 @@ export function PanoramaNodeContent({
       const cacheKey = panoramaImage || panoramaImageAssetId || '';
       if (currentImageRef.current === cacheKey) return;
 
-      const { resolveCanvasImageSource } = await import('../services/canvasAssetResolver');
       const src = await resolveCanvasImageSource(panoramaImage, panoramaImageAssetId);
       if (cancelled || !src) return;
       applyTextureFromSrc(src, cacheKey, isFlipped);
@@ -694,7 +694,6 @@ export function PanoramaNodeContent({
     // 加载纹理并等待完成后开始渲染（支持 assetId）
     let cancelled = false;
     void (async () => {
-      const { resolveCanvasImageSource } = await import('../services/canvasAssetResolver');
       const src = await resolveCanvasImageSource(panoramaImage, panoramaImageAssetId);
       if (cancelled || !src) {
         if (!textureLoaded) animate();
