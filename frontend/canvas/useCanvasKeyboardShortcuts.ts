@@ -69,7 +69,7 @@ export type CanvasKeyboardShortcutDeps = {
   DEFAULT_NODE_SIZES: Record<string, { width: number; height: number }>;
   handleResetNodeSize: (nodeId: string) => void;
   handleDeleteNode: (id: string) => void;
-  handleDeleteNodes: (ids: string[]) => void;
+  handleDeleteNodes?: (ids: string[]) => void;
   appendNodesWithUndo: (nodes: CanvasNode[], opts?: { selectIds?: string[] }) => void;
   createImageNodesFromBase64List: (base64List: string[]) => void;
   undoCanvasState: () => void;
@@ -262,7 +262,14 @@ export function attachCanvasKeyboardShortcuts(
         d.setFullscreenImage(null);
         d.setEyedropperTargetNodeId(null);
       } else if ((e.code === 'Backspace' || e.code === 'Delete') && !isInput && !d.fullscreenImage) {
-        d.handleDeleteNodes(d.selectedIdsRef.current);
+        const selectedIds = d.selectedIdsRef.current;
+        if (selectedIds.length === 0) return;
+        e.preventDefault();
+        if (typeof d.handleDeleteNodes === 'function') {
+          d.handleDeleteNodes(selectedIds);
+        } else {
+          selectedIds.forEach((id) => d.handleDeleteNode(id));
+        }
       } else if (
         e.altKey &&
         !e.ctrlKey &&
@@ -275,7 +282,11 @@ export function attachCanvasKeyboardShortcuts(
         e.preventDefault();
         const sel = d.selectedIdsRef.current;
         if (sel.length === 0) return;
-        d.handleDeleteNodes(sel);
+        if (typeof d.handleDeleteNodes === 'function') {
+          d.handleDeleteNodes(sel);
+        } else {
+          sel.forEach((id) => d.handleDeleteNode(id));
+        }
       } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC' && !isInput) {
         // 节点内 textarea 或消息气泡内选中文本时，交给浏览器默认复制
         const sel = window.getSelection();

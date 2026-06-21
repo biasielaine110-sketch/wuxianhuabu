@@ -1427,6 +1427,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     handleImportImageClick,
     handleFileChange,
     handleDeleteNode,
+    handleDeleteNodes,
     handleDeleteEdge,
   } = interaction;
 
@@ -1722,6 +1723,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     DEFAULT_NODE_SIZES,
     handleResetNodeSize,
     handleDeleteNode,
+    handleDeleteNodes,
     appendNodesWithUndo,
     createImageNodesFromBase64List,
     undoCanvasState,
