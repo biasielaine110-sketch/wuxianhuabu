@@ -1678,10 +1678,11 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
       const r = await saveImageDownload(raw.base64, raw.mime);
       if (!r.ok && r.message) window.alert(r.message);
       if (r.ok) {
-        setCanvasNoticeTone('success');
-        setCanvasHistoryNotice('图片已保存完成');
-        if (canvasNoticeTimerRef.current) window.clearTimeout(canvasNoticeTimerRef.current);
-        canvasNoticeTimerRef.current = window.setTimeout(() => setCanvasHistoryNotice(null), 2600);
+        // 用顶层 z-[9999] 的绿色 toast（与 Ctrl+S 保存成功一致），
+        // 之前用的 canvasHistoryNotice 会被节点自身遮挡，用户看不到。
+        setSaveSuccessMsg('下载图片成功');
+        if (saveSuccessTimerRef.current) clearTimeout(saveSuccessTimerRef.current);
+        saveSuccessTimerRef.current = window.setTimeout(() => setSaveSuccessMsg(null), 2600);
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '下载失败';

@@ -144,6 +144,15 @@ export default function AuditModeCanvas({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; canvasX: number; canvasY: number } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
 
+  // 下载成功提示（看图模式独立维护，不走画布 setSaveSuccessMsg）
+  const [downloadNotice, setDownloadNotice] = useState<string | null>(null);
+  const downloadNoticeTimerRef = useRef<number | null>(null);
+  const showDownloadNotice = useCallback((text: string) => {
+    setDownloadNotice(text);
+    if (downloadNoticeTimerRef.current) window.clearTimeout(downloadNoticeTimerRef.current);
+    downloadNoticeTimerRef.current = window.setTimeout(() => setDownloadNotice(null), 2600);
+  }, []);
+
   // 历史记录（最多保留1步撤销）
   const [annotationHistory, setAnnotationHistory] = useState<AuditAnnotation[][]>([[]]);
   const [historyIndex, setHistoryIndex] = useState(0);
@@ -1699,6 +1708,7 @@ export default function AuditModeCanvas({
         const mime = sniffImageMimeFromBase64(raw);
         const r = await saveImageDownload(raw, mime);
         if (!r.ok && r.message) window.alert(r.message);
+        if (r.ok) showDownloadNotice('下载图片成功');
         return;
       }
       const anns = getAnnotationsForImages(selected);
@@ -1709,6 +1719,7 @@ export default function AuditModeCanvas({
       }
       const r = await saveImageDownload(result.base64, 'image/png');
       if (!r.ok && r.message) window.alert(r.message);
+      if (r.ok) showDownloadNotice('下载图片成功');
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '下载失败';
       window.alert(`${msg}。可尝试右键图片另存为。`);
@@ -1868,6 +1879,15 @@ export default function AuditModeCanvas({
             : undefined,
       }}
     >
+      {/* 下载成功提示（看图模式独立维护） */}
+      {downloadNotice && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] px-5 py-3 bg-green-600 text-white text-sm font-medium rounded-lg shadow-xl flex items-center gap-2 animate-pulse">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20,6 9,17 4,12"/>
+          </svg>
+          {downloadNotice}
+        </div>
+      )}
       <AuditAnnotationToolbar
         currentTool={currentTool}
         currentColor={currentColor}
