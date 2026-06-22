@@ -18,6 +18,7 @@ import {
   PlusIcon,
   SingleIcon,
   TextIcon,
+  TrashIcon,
 } from './canvasIcons';
 import { flipAndStoreAsset } from './imageFlipUtils';
 
@@ -117,6 +118,36 @@ export function CanvasImageGenArea({
             >
               <CopyIcon size={25} />
             </button>
+            {/* 删除当前图片：保留节点的 prompt / 文本输入 / aspect / size，只移除当前显示的那张图。
+                场景：节点已生成多张图，但用户只想保留一张或几张，删掉其它的不影响节点其它字段。
+                - single 视图：删 currentIndex 这张
+                - grid 视图：单图按钮删当前主图（currentIndex），但更细粒度的删除走 grid 内每张图的 × 按钮 */}
+            {viewMode === 'single' && hasDisplayableImages && (
+              <button
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (images.length === 0) return;
+                  const nextImgs = images.filter((_, i) => i !== currentIndex);
+                  const nextIds = (imageAssetIds ?? []).filter((_, i) => i !== currentIndex);
+                  // 删完后 currentImageIndex 收尾：保持在原位（已经是下一张），
+                  // 边界：删到 0 时置 0。
+                  const nextIndex = Math.min(currentIndex, Math.max(0, nextImgs.length - 1));
+                  onUpdateNode(node.id, {
+                    images: nextImgs,
+                    imageAssetIds: nextIds,
+                    currentImageIndex: nextIndex,
+                    _thumbTick: ((node as CanvasNode & { _thumbTick?: number })._thumbTick ?? 0) + 1,
+                  });
+                }}
+                className="p-1.5 bg-black/60 hover:bg-red-600/80 rounded text-white backdrop-blur-sm"
+                title={`删除当前图片（保留节点其它内容，共 ${images.length} 张，删后剩 ${Math.max(0, images.length - 1)} 张）`}
+              >
+                <TrashIcon size={25} />
+              </button>
+            )}
             {(node.type === 't2i' || node.type === 'i2i' || node.type === 'image' || node.type === 'panoramaT2i') && (
               <button
                 onPointerDown={(e) => {
@@ -260,6 +291,34 @@ export function CanvasImageGenArea({
                       title="放大查看"
                     >
                       <MaximizeIcon size={50} />
+                    </button>
+                    {/* grid 视图下每张图的删除按钮：保留节点其它内容（prompt / 文本 / size 等），
+                        只删这一张。注意：onPointerDown stopPropagation 防止触发图片点击进入 single 视图。
+                        删除后 currentImageIndex 保持在原位或夹到 [0, length-1] */}
+                    <button
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const nextImgs = images.filter((_, i) => i !== idx);
+                        const nextIds = (imageAssetIds ?? []).filter((_, i) => i !== idx);
+                        // 删完后若 currentImageIndex 指向被删之后的位置，往前移 1
+                        const cur = node.currentImageIndex ?? 0;
+                        let nextIndex = cur;
+                        if (cur > idx) nextIndex = cur - 1;
+                        if (nextIndex >= nextImgs.length) nextIndex = Math.max(0, nextImgs.length - 1);
+                        onUpdateNode(node.id, {
+                          images: nextImgs,
+                          imageAssetIds: nextIds,
+                          currentImageIndex: nextIndex,
+                          _thumbTick: ((node as CanvasNode & { _thumbTick?: number })._thumbTick ?? 0) + 1,
+                        });
+                      }}
+                      className="absolute top-1 right-1 w-6 h-6 flex items-center justify-center bg-black/60 hover:bg-red-600/80 rounded-full text-white backdrop-blur-sm opacity-0 group-hover/item:opacity-100 transition-opacity"
+                      title="删除这张图片（保留节点其它内容）"
+                    >
+                      <TrashIcon size={12} />
                     </button>
                   </div>
                 );
