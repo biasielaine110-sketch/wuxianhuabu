@@ -5,6 +5,7 @@ import { OptimizedImage } from './OptimizedImage';
 import { EyedropperIcon } from './canvasIcons';
 import {
   getVideoModelSwitchUpdates,
+  isHfsyVideoModel,
   isJimengVideoModel,
   isManxueGrokImagineVideoModel,
   isVideoDoubaoFamilyModel,
@@ -43,6 +44,7 @@ export function VideoNodeSettingsPanel({
   const isDoubao = isVideoDoubaoFamilyModel(vm);
   const isSeedance2 = vm === 'seedance-2';
   const isSeedance2Fast = vm === 'seedance-2-fast';
+  const isHfsyVideo = isHfsyVideoModel(vm);
   const isGemini = vm === 'gemini-omni-flash';
   const isDoubaoSeedance2 = isVideoDoubaoSeedance2Model(vm);
   const isManxueGrokImagine = isManxueGrokImagineVideoModel(vm);
@@ -224,6 +226,10 @@ export function VideoNodeSettingsPanel({
             <option value="seedance-2-fast">Seedance 2 Fast</option>
             <option value="gemini-omni-flash">Gemini Omni Flash</option>
           </optgroup>
+          <optgroup label="hfsyapi.cn">
+            <option value="hfsy-sd-2-fast">SD-2 Fast（hfsyapi.cn）</option>
+            <option value="hfsy-sd-2">SD-2（hfsyapi.cn）</option>
+          </optgroup>
           <optgroup label="满 e (manxueapi.com)">
             <option value={MANXUE_GROK_IMAGINE_VIDEO_MODEL}>Grok Imagine Video 1.5 Preview（满 e）</option>
           </optgroup>
@@ -322,6 +328,19 @@ export function VideoNodeSettingsPanel({
               <option value={8}>8 秒</option>
               <option value={10}>10 秒</option>
               <option value={12}>12 秒</option>
+            </select>
+          ) : isHfsyVideo ? (
+            <select
+              className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+              value={[5, 8, 10, 12, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 8}
+              onChange={(e) => onUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <option value={5}>5 秒</option>
+              <option value={8}>8 秒</option>
+              <option value={10}>10 秒</option>
+              <option value={12}>12 秒</option>
+              <option value={15}>15 秒</option>
             </select>
           ) : isGemini ? (
             <select
@@ -429,6 +448,20 @@ export function VideoNodeSettingsPanel({
               <option value="3:4">3:4</option>
               <option value="21:9">21:9</option>
             </select>
+          ) : isHfsyVideo ? (
+            <select
+              className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+              value={['9:16', '3:4', '1:1', '4:3', '16:9', '21:9'].includes(node.aspectRatio || '') ? node.aspectRatio : '16:9'}
+              onChange={(e) => onUpdateNode(node.id, { aspectRatio: e.target.value })}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <option value="9:16">9:16</option>
+              <option value="3:4">3:4</option>
+              <option value="1:1">1:1</option>
+              <option value="4:3">4:3</option>
+              <option value="16:9">16:9</option>
+              <option value="21:9">21:9</option>
+            </select>
           ) : (
             <select
               className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
@@ -492,6 +525,8 @@ export function VideoNodeSettingsPanel({
             </select>
           ) : isSeedance2Fast ? (
             <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p (8毛/秒)</span>
+          ) : isHfsyVideo ? (
+            <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">size: large</span>
           ) : isGemini ? (
             <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p</span>
           ) : isManxueGrokImagine ? (

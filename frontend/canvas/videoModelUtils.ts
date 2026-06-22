@@ -67,6 +67,10 @@ export function isVideoDoubaoSeedance2Model(vm: string): boolean {
   return vm === 'doubao-seedance-2-0-260128' || vm === 'doubao-seedance-2-0-fast-260128';
 }
 
+export function isHfsyVideoModel(vm?: string): boolean {
+  return vm === 'hfsy-sd-2' || vm === 'hfsy-sd-2-fast';
+}
+
 /** 切换视频模型时同步时长、分辨率、画幅等默认值 */
 export function getVideoModelSwitchUpdates(m: string, node: CanvasNode): Partial<CanvasNode> {
   const updates: Partial<CanvasNode> = { model: m };
@@ -103,6 +107,12 @@ export function getVideoModelSwitchUpdates(m: string, node: CanvasNode): Partial
     updates.videoResolution = '720p';
     const ar = node.aspectRatio || '16:9';
     if (!['16:9', '9:16', '1:1'].includes(ar)) updates.aspectRatio = '16:9';
+  } else if (isHfsyVideoModel(m)) {
+    const d = node.videoDuration ?? 8;
+    updates.videoDuration = [5, 8, 10, 12, 15].includes(d) ? d : 8;
+    updates.videoResolution = node.videoResolution === '480p' || node.videoResolution === '1080p' ? node.videoResolution : '720p';
+    const ar = node.aspectRatio || '16:9';
+    if (!['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'].includes(ar)) updates.aspectRatio = '16:9';
   } else if (m === 'gemini-omni-flash') {
     const d = node.videoDuration ?? 6;
     updates.videoDuration = [6, 10].includes(d) ? d : 6;
@@ -158,6 +168,7 @@ export function videoNodeModelToToApis(m?: string): ToApisVideoModelId {
   if (vm === 'doubao-seedance-1-5-pro') return 'doubao-seedance-1-5-pro';
   if (vm === 'doubao-seedance-2-0-260128' || vm === 'doubao-seedance-2-0-fast-260128') return vm as ToApisVideoModelId;
   if (vm === 'seedance-2' || vm === 'seedance-2-fast') return vm as ToApisVideoModelId;
+  if (isHfsyVideoModel(vm)) return vm as ToApisVideoModelId;
   if (vm === 'gemini-omni-flash') return 'gemini-omni-flash';
   if (vm === 'grok-video-1.5-preview') return 'grok-video-1.5-preview';
   if (vm === 'grok-imagine-video-1.5-preview-aiid') return 'grok-imagine-video-1.5-preview-aiid';

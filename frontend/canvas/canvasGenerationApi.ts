@@ -834,6 +834,11 @@ ${text}`,
       // 解析语音参考
       const audioRefs = resolveSlotAudios(slots);
       const audioBase64 = audioRefs.length > 0 ? audioRefs[0].base64 : undefined;
+      const referenceVideoUrls = slots
+        .filter((slot) => slot.kind === 'video' && typeof slot.videoUrl === 'string')
+        .map((slot) => slot.videoUrl as string)
+        .filter((url) => /^https?:\/\//i.test(url.trim()))
+        .slice(0, 3);
 
       const videoModel = videoNodeModelToToApis(node.model);
 
@@ -865,6 +870,7 @@ ${text}`,
           aspectRatio: node.aspectRatio || '16:9',
           resolution,
           referenceImagesBase64: (videoModel === 'doubao-seedance-1-5-pro' || videoModel === 'gemini-omni-flash' || videoModel === 'seedance-2' || videoModel === 'seedance-2-fast' || videoModel === 'doubao-seedance-2-0-260128' || videoModel === 'doubao-seedance-2-0-fast-260128') ? imageInputs.slice(0, 2) : imageInputs.slice(0, 3),
+          referenceVideoUrls,
           referenceAudioBase64: audioBase64,
           signal: ac.signal,
         });
@@ -911,4 +917,3 @@ ${text}`,
     handleCancelGeneration,
   };
 }
-

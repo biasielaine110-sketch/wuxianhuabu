@@ -1600,7 +1600,15 @@ async function toApisUploadVideoReferenceImageUrls(
   return imageUrls;
 }
 
-export type ToApisVideoModelId = 'grok-video-3' | 'grok-video-1.5-preview' | 'sora-2-vvip' | 'veo3.1-fast' | 'doubao-seedance-1-5-pro' | 'jimeng-video-v3' | 'jimeng-image-to-video' | 'gemini-omni-flash' | 'seedance-2' | 'seedance-2-fast' | 'doubao-seedance-2-0-260128' | 'doubao-seedance-2-0-fast-260128' | 'grok-imagine-video-1.5-preview' | 'grok-imagine-video-1.5-preview-aiid';
+export type ToApisVideoModelId = 'grok-video-3' | 'grok-video-1.5-preview' | 'sora-2-vvip' | 'veo3.1-fast' | 'doubao-seedance-1-5-pro' | 'jimeng-video-v3' | 'jimeng-image-to-video' | 'gemini-omni-flash' | 'seedance-2' | 'seedance-2-fast' | 'hfsy-sd-2' | 'hfsy-sd-2-fast' | 'doubao-seedance-2-0-260128' | 'doubao-seedance-2-0-fast-260128' | 'grok-imagine-video-1.5-preview' | 'grok-imagine-video-1.5-preview-aiid';
+
+function isHfsyVideoModel(model?: string): model is 'hfsy-sd-2' | 'hfsy-sd-2-fast' {
+  return model === 'hfsy-sd-2' || model === 'hfsy-sd-2-fast';
+}
+
+function toHfsyVideoModel(model: 'hfsy-sd-2' | 'hfsy-sd-2-fast'): 'sd-2' | 'sd-2-fast' {
+  return model === 'hfsy-sd-2-fast' ? 'sd-2-fast' : 'sd-2';
+}
 
 function isHttpUrlString(v: unknown): v is string {
   if (typeof v !== 'string') return false;
@@ -1618,7 +1626,7 @@ function extractVideoUrlFromPollPayload(data: unknown): string | null {
   const o = data as Record<string, unknown>;
 
   if (isHttpUrlString(o.url)) return o.url.trim();
-  for (const k of ['video_url', 'download_url', 'file_url'] as const) {
+  for (const k of ['video_url', 'result_url', 'download_url', 'file_url'] as const) {
     const v = o[k];
     if (isHttpUrlString(v)) return v.trim();
   }
@@ -1635,7 +1643,7 @@ function extractVideoUrlFromPollPayload(data: unknown): string | null {
   } else if (topData && typeof topData === 'object') {
     const td = topData as Record<string, unknown>;
     if (isHttpUrlString(td.url)) return td.url.trim();
-    for (const k of ['video_url', 'download_url', 'file_url'] as const) {
+    for (const k of ['video_url', 'result_url', 'download_url', 'file_url'] as const) {
       if (isHttpUrlString(td[k])) return String(td[k]).trim();
     }
     const vid = td.video;
@@ -1655,7 +1663,7 @@ function extractVideoUrlFromPollPayload(data: unknown): string | null {
   if (result && typeof result === 'object') {
     const r = result as Record<string, unknown>;
     if (isHttpUrlString(r.url)) return r.url.trim();
-    for (const k of ['video_url', 'download_url', 'file_url'] as const) {
+    for (const k of ['video_url', 'result_url', 'download_url', 'file_url'] as const) {
       const v = r[k];
       if (isHttpUrlString(v)) return v.trim();
     }
@@ -1671,7 +1679,7 @@ function extractVideoUrlFromPollPayload(data: unknown): string | null {
     } else if (d && typeof d === 'object') {
       const rd = d as Record<string, unknown>;
       if (isHttpUrlString(rd.url)) return rd.url.trim();
-      for (const k of ['video_url', 'download_url', 'file_url'] as const) {
+      for (const k of ['video_url', 'result_url', 'download_url', 'file_url'] as const) {
         if (isHttpUrlString(rd[k])) return String(rd[k]).trim();
       }
       const vid = rd.video;
@@ -1713,6 +1721,21 @@ function extractVideoUrlFromPollPayload(data: unknown): string | null {
 function isVideoTaskCompletedStatus(status: unknown): boolean {
   const s = String(status || '').toLowerCase();
   return s === 'completed' || s === 'succeeded' || s === 'success' || s === 'done';
+}
+
+function normalizeHfsyVideoDuration(uiSeconds: number): number {
+  const n = Math.round(Number(uiSeconds) || 8);
+  return Math.min(15, Math.max(5, n));
+}
+
+function normalizeHfsyVideoRatio(aspectRatio: string): string {
+  const r = (aspectRatio || '').trim();
+  return ['auto', '9:16', '3:4', '1:1', '4:3', '16:9', '21:9'].includes(r) ? r : '16:9';
+}
+
+function hfsyVideoOrientation(aspectRatio: string): 'landscape' | 'portrait' {
+  const r = normalizeHfsyVideoRatio(aspectRatio);
+  return r === '9:16' || r === '3:4' ? 'portrait' : 'landscape';
 }
 
 async function toApisSubmitVideoGeneration(body: Record<string, unknown>, signal?: AbortSignal): Promise<{ id: string }> {
@@ -1784,6 +1807,176 @@ async function toApisPollVideoTaskToPlayableUrl(taskId: string, signal?: AbortSi
 }
 
 /** 满 eAPI 视频任务超时：30 分钟 */
+function extractVideoTaskIdFromPayload(data: unknown): string | null {
+  if (!data || typeof data !== 'object') return null;
+  const o = data as Record<string, unknown>;
+  for (const k of ['id', 'task_id', 'taskId', 'request_id'] as const) {
+    const v = o[k];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+    if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+  }
+  const d = o.data;
+  if (d && typeof d === 'object' && !Array.isArray(d)) return extractVideoTaskIdFromPayload(d);
+  const result = o.result;
+  if (result && typeof result === 'object') return extractVideoTaskIdFromPayload(result);
+  return null;
+}
+
+function extractTaskStatusFromPayload(data: unknown): string {
+  if (!data || typeof data !== 'object') return '';
+  const o = data as Record<string, unknown>;
+  const direct = o.status || o.state || o.task_status;
+  if (direct !== undefined && direct !== null) return String(direct).toLowerCase();
+  const d = o.data;
+  if (d && typeof d === 'object' && !Array.isArray(d)) {
+    const nested = extractTaskStatusFromPayload(d);
+    if (nested) return nested;
+  }
+  const result = o.result;
+  if (result && typeof result === 'object') {
+    const nested = extractTaskStatusFromPayload(result);
+    if (nested) return nested;
+  }
+  return '';
+}
+
+function isVideoTaskPendingStatus(status: string): boolean {
+  const s = status.toLowerCase();
+  return (
+    !s ||
+    s === 'pending' ||
+    s === 'queued' ||
+    s === 'queueing' ||
+    s === 'created' ||
+    s === 'submitted' ||
+    s === 'processing' ||
+    s === 'running' ||
+    s === 'in_progress' ||
+    s === 'generating'
+  );
+}
+
+async function hfsySubmitVideoGeneration(body: Record<string, unknown>, signal?: AbortSignal): Promise<{ id: string }> {
+  const apiKey = getHfsySavedKey().trim();
+  if (!apiKey) {
+    throw new Error('未配置 hfsyapi.cn API Key。请在「设置 → API」填写「hfsyapi.cn（GPT Image 2）」API Key。');
+  }
+  const base = hfsyFetchBase();
+  const res = await fetch(`${base}/video/create`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`hfsyapi.cn 视频任务提交失败 (${res.status}): ${text.slice(0, 800)}`);
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error(`hfsyapi.cn 提交响应不是 JSON: ${text.slice(0, 400)}`);
+  }
+  const err = json && typeof json === 'object' ? (json as Record<string, unknown>).error : undefined;
+  if (err) {
+    const message = typeof err === 'object' && err ? (err as Record<string, unknown>).message : err;
+    throw new Error(`hfsyapi.cn: ${String(message || '视频任务提交失败')}`);
+  }
+  const id = extractVideoTaskIdFromPayload(json);
+  if (!id) throw new Error(`hfsyapi.cn 未返回视频任务 ID: ${text.slice(0, 600)}`);
+  return { id };
+}
+
+async function hfsyPollVideoTaskToPlayableUrl(taskId: string, signal?: AbortSignal): Promise<string> {
+  const apiKey = getHfsySavedKey().trim();
+  const base = hfsyFetchBase();
+  const deadline = Date.now() + TOAPIS_VIDEO_TASK_MAX_WAIT_MS;
+  await sleepInterruptible(5_000, signal);
+
+  while (Date.now() < deadline) {
+    assertNotAborted(signal);
+    const res = await fetch(`${base}/video/query?id=${encodeURIComponent(taskId)}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal,
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`hfsyapi.cn 查询视频任务失败 (${res.status}): ${text.slice(0, 500)}`);
+    let data: unknown;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(`hfsyapi.cn 查询响应不是 JSON: ${text.slice(0, 300)}`);
+    }
+
+    const status = extractTaskStatusFromPayload(data);
+    if (isVideoTaskCompletedStatus(status)) {
+      const rawUrl = extractVideoUrlFromPollPayload(data);
+      if (!rawUrl) throw new Error(`hfsyapi.cn 视频任务完成但未返回可播放 URL。完整响应：${text.slice(0, 2000)}`);
+      const normalizedUrl = rawUrl.replace(/^(https?:\/)([^/])/i, '$1/$2');
+      return rewriteKnownImageCdnToSameOrigin(normalizedUrl);
+    }
+    if (status === 'failed' || status === 'error' || status === 'cancelled' || status === 'canceled') {
+      const o = data && typeof data === 'object' ? (data as Record<string, unknown>) : {};
+      const message =
+        (o.error && typeof o.error === 'object' ? (o.error as Record<string, unknown>).message : o.error) ||
+        o.message ||
+        text.slice(0, 400);
+      throw new Error(`hfsyapi.cn 视频生成失败: ${String(message)}`);
+    }
+    if (!isVideoTaskPendingStatus(status)) {
+      const rawUrl = extractVideoUrlFromPollPayload(data);
+      if (rawUrl) return rewriteKnownImageCdnToSameOrigin(rawUrl.replace(/^(https?:\/)([^/])/i, '$1/$2'));
+    }
+    await sleepInterruptible(10_000, signal);
+  }
+  throw new Error(`hfsyapi.cn 视频任务超时（已等待超过 ${TOAPIS_VIDEO_TASK_MAX_WAIT_MS / 60_000} 分钟），请稍后重试。`);
+}
+
+async function hfsyVideoGenerate(params: {
+  prompt: string;
+  videoModel: 'hfsy-sd-2' | 'hfsy-sd-2-fast';
+  durationSeconds: number;
+  aspectRatio: string;
+  referenceImagesBase64?: string[];
+  referenceVideoUrls?: string[];
+  signal?: AbortSignal;
+}): Promise<string> {
+  const imageUrls: string[] = [];
+  const refs = (params.referenceImagesBase64 || []).filter(Boolean).slice(0, 4);
+  const apiKey = getHfsySavedKey().trim();
+  for (let i = 0; i < refs.length; i++) {
+    assertNotAborted(params.signal);
+    const img = refs[i];
+    const { raw, mime } = parseBase64ImageInput(img);
+    const blob = base64ToBlob(raw, mime || 'image/jpeg');
+    const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : mime.includes('gif') ? 'gif' : 'jpg';
+    imageUrls.push(await openAiCompatUploadImageBlob(hfsyFetchBase(), apiKey, blob, `hfsy-video-ref-${i}.${ext}`, params.signal));
+  }
+
+  const videoUrls = (params.referenceVideoUrls || []).filter((u) => /^https?:\/\//i.test(u.trim())).slice(0, 3);
+  if (imageUrls.length + videoUrls.length > 4) {
+    throw new Error('hfsyapi.cn sd-2/sd-2-fast 参考素材总数不能超过 4 个。');
+  }
+
+  const ratio = normalizeHfsyVideoRatio(params.aspectRatio);
+  const body: Record<string, unknown> = {
+    model: toHfsyVideoModel(params.videoModel),
+    orientation: hfsyVideoOrientation(ratio),
+    ratio,
+    prompt: params.prompt,
+    duration: normalizeHfsyVideoDuration(params.durationSeconds),
+    size: 'large',
+    watermark: false,
+  };
+  if (imageUrls.length > 0) body.images = imageUrls;
+  if (videoUrls.length > 0) body.videos = videoUrls;
+
+  const { id } = await hfsySubmitVideoGeneration(body, params.signal);
+  return hfsyPollVideoTaskToPlayableUrl(id, params.signal);
+}
+
 const MANXUE_VIDEO_TASK_MAX_WAIT_MS = 1_800_000;
 
 /** 满 eAPI 参考图最大张数（首帧） */
@@ -2660,6 +2853,7 @@ export async function toApisCanvasVideoGenerate(params: {
   aspectRatio: string;
   resolution: '480p' | '720p' | '1080p' | '4k';
   referenceImagesBase64?: string[];
+  referenceVideoUrls?: string[];
   /** 语音参考：音频 base64 */
   referenceAudioBase64?: string;
   signal?: AbortSignal;
@@ -2737,6 +2931,17 @@ export async function toApisCanvasVideoGenerate(params: {
       resolution: res,
       referenceImagesBase64: params.referenceImagesBase64,
       videoModel: params.videoModel as 'seedance-2' | 'seedance-2-fast',
+      signal: params.signal,
+    });
+  }
+  if (isHfsyVideoModel(params.videoModel)) {
+    return hfsyVideoGenerate({
+      prompt: params.prompt,
+      durationSeconds: params.durationSeconds,
+      aspectRatio: params.aspectRatio,
+      referenceImagesBase64: params.referenceImagesBase64,
+      referenceVideoUrls: params.referenceVideoUrls,
+      videoModel: params.videoModel,
       signal: params.signal,
     });
   }

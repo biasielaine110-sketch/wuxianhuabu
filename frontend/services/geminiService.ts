@@ -525,6 +525,8 @@ export async function generateCanvasVideoViaToApis(
     aspectRatio: string;
     resolution: '480p' | '720p' | '1080p' | '4k';
     referenceImagesBase64?: string[];
+    referenceVideoUrls?: string[];
+    referenceAudioBase64?: string;
     signal?: AbortSignal;
   }
 ): Promise<string> {
