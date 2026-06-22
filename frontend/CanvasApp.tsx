@@ -1661,6 +1661,9 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     return useCanvasStore.subscribe(syncConnectedMedia);
   }, [handleUpdateNode]);
 
+  // 下载图片成功 toast 专用定时器（与项目保存共用 saveSuccessMsg，但不复用 hook 内部的 ref，
+  // 避免其作用域错误导致定时器失效、toast 永不消失）。
+  const downloadNoticeTimerRef = useRef<number | null>(null);
   const downloadImage = useCallback(async (imageSrc: string) => {
     try {
       const raw = await imageSrcToRawBase64(
@@ -1681,8 +1684,11 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
         // 用顶层 z-[9999] 的绿色 toast（与 Ctrl+S 保存成功一致），
         // 之前用的 canvasHistoryNotice 会被节点自身遮挡，用户看不到。
         setSaveSuccessMsg('下载图片成功');
-        if (saveSuccessTimerRef.current) clearTimeout(saveSuccessTimerRef.current);
-        saveSuccessTimerRef.current = window.setTimeout(() => setSaveSuccessMsg(null), 2600);
+        if (downloadNoticeTimerRef.current) window.clearTimeout(downloadNoticeTimerRef.current);
+        downloadNoticeTimerRef.current = window.setTimeout(() => {
+          setSaveSuccessMsg(null);
+          downloadNoticeTimerRef.current = null;
+        }, 3000);
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '下载失败';
