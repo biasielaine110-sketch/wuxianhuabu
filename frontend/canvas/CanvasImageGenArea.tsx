@@ -142,10 +142,10 @@ export function CanvasImageGenArea({
                     _thumbTick: ((node as CanvasNode & { _thumbTick?: number })._thumbTick ?? 0) + 1,
                   });
                 }}
-                className="p-1.5 bg-black/60 hover:bg-red-600/80 rounded text-white backdrop-blur-sm"
+                className="p-2 bg-black/60 hover:bg-red-600/80 rounded text-white backdrop-blur-sm"
                 title={`删除当前图片（保留节点其它内容，共 ${images.length} 张，删后剩 ${Math.max(0, images.length - 1)} 张）`}
               >
-                <TrashIcon size={25} />
+                <TrashIcon size={36} />
               </button>
             )}
             {(node.type === 't2i' || node.type === 'i2i' || node.type === 'image' || node.type === 'panoramaT2i') && (
@@ -315,10 +315,10 @@ export function CanvasImageGenArea({
                           _thumbTick: ((node as CanvasNode & { _thumbTick?: number })._thumbTick ?? 0) + 1,
                         });
                       }}
-                      className="absolute top-1 right-1 w-6 h-6 flex items-center justify-center bg-black/60 hover:bg-red-600/80 rounded-full text-white backdrop-blur-sm opacity-0 group-hover/item:opacity-100 transition-opacity"
+                      className="absolute top-1 right-1 w-[18px] h-[18px] flex items-center justify-center bg-black/60 hover:bg-red-600/80 rounded-full text-white backdrop-blur-sm opacity-0 group-hover/item:opacity-100 transition-opacity"
                       title="删除这张图片（保留节点其它内容）"
                     >
-                      <TrashIcon size={12} />
+                      <TrashIcon size={36} />
                     </button>
                   </div>
                 );
