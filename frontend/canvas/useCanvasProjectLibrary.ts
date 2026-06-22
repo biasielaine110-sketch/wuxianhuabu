@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect, type RefObject } from 'react';
 import type { AuditImage, CanvasNode, Edge, Transform } from '../types';
-import { hydrateNodesMediaFromAssets } from './jsonExportMediaHydrate';
+import { hydrateNodesMediaFromAssets, hydrateNodesMediaFromAssetsCached, countHydratedMediaValues } from './jsonExportMediaHydrate';
 import { findMissingNodeMediaAssetIds, findMissingNodeWindowMedia, flushAllNodeMediaOffload } from '../services/canvasAssetSync';
 import { repairMissingNodeMediaAssetsFromNodeSources } from '../services/canvasAssetRepair';
 import {
@@ -102,6 +102,11 @@ export function useCanvasProjectLibrary({
 
   useEffect(() => { activeProjectIdRef.current = activeProjectId; }, [activeProjectId]);
   useEffect(() => { projectsRef.current = projects; }, [projects]);
+
+  // 防止用户连点 / 长按 Ctrl+S 触发多次 saveCurrentProject。
+  // 每次保存都要 hydrate + clone + IDB put，几百 MB 节点会卡数秒；
+  // 不加锁就会出现「保存中又点保存 → 后一次把前一次的 state 推后，重复 IO」造成看似「保存失败」的现象。
+  const isSavingRef = useRef(false);
 
   // 追踪所有进行中的 saveProjectLibrary Promise：返回首页前必须先 await 全部完成，
   // 否则 HomeScreen mount 后立即 loadProjectLibrary 可能读到 IDB 旧值（race condition）。
@@ -459,8 +464,21 @@ export function useCanvasProjectLibrary({
         delete (forWrite as { diskSaveEstablished?: boolean }).diskSaveEstablished;
         delete (forWrite as { draftDiskWriteFormat?: 'json' | 'zip' }).draftDiskWriteFormat;
         // 把被 offload 到 IDB 资产库的大图反向读回 base64 写进文件，否则换电脑打开 JSON 全是空图。
-        const hydratedNodes = await hydrateNodesMediaFromAssets(forWrite.nodes || []);
+        // 这条路径同时被「自动保存」「Ctrl+S 覆盖绑定的 JSON」共用，hydrate 是必须的：
+        // 用户换电脑 / 跨设备打开这个 JSON 时不会带 IDB，必须依赖 JSON 自身包含 base64。
+        const hydratedNodes = await hydrateNodesMediaFromAssetsCached(forWrite.nodes || [], null);
         const payload = { ...forWrite, nodes: hydratedNodes };
+        const stats = countHydratedMediaValues(hydratedNodes);
+        console.log(
+          `[writeJSON] ${savedFilename}: 共 ${stats.total} 张图, hydrate 后 ${stats.filled} 张有内容。` +
+          `（IDB 草稿库只存元数据 + assetId；本 JSON 草稿已自包含 base64，可换电脑导入。）`
+        );
+        if (stats.total > 0 && stats.filled === 0) {
+          console.warn(
+            `[writeJSON] ${savedFilename}: hydrate 后 0 张有内容，IDB 资产库可能已被清空；` +
+            `该 JSON 换电脑打开将丢图，建议改用「导出 ZIP」。`
+          );
+        }
         const json = JSON.stringify(payload, null, 2);
         const writable = await h.createWritable();
         await writable.write(json);
@@ -482,10 +500,25 @@ export function useCanvasProjectLibrary({
 
   const saveCurrentProject = useCallback(
     async (options?: { skipDiskPrompt?: boolean }): Promise<boolean> => {
+      if (isSavingRef.current) {
+        return false;
+      }
+      isSavingRef.current = true;
+      try {
+        return await saveCurrentProjectInner(options);
+      } finally {
+        isSavingRef.current = false;
+      }
+    },
+    []
+  );
+
+  const saveCurrentProjectInner = useCallback(
+    async (options?: { skipDiskPrompt?: boolean }): Promise<boolean> => {
       const pid = activeProjectIdRef.current;
       if (!pid) {
         alert('项目数据仍在加载，请稍后再试保存。');
-        return Promise.resolve(false);
+        return false;
       }
       /**
        * 关键第一步：autosave 前强制 flush 媒体 offload 队列。
@@ -558,18 +591,15 @@ export function useCanvasProjectLibrary({
         auditImagesRef.current.length > 0 ? { images: auditImagesRef.current } : undefined
       );
       /**
-       * 关键：autosave / 任何保存路径写入 IDB 前，强制把每个项目的 nodes 用 hydrateNodesMediaFromAssets
-       * 反向从 IDB 资产库补回 base64。即使内存中 nodes 已被 canvasAssetSync offload 清成空串 + assetId，
-       * 只要 IDB 资产还在，写入 IDB 的 projects 仍然是「完整 base64 版本」，刷新后 hydrate 必然能救回。
-       * 解决「半小时后图裂开/丢图」的根因——之前 autosave 直接写入了带空 base64 + assetId 的版本，
-       * 一旦 IDB 资产库被浏览器回收（夸克浏览器的 IDB 清理策略），刷新就彻底没图了。
+       * 关键修复：autosave / 任何保存路径写入 IDB 草稿库时不再 hydrate base64。
+       * 草稿库只保存「项目元数据 + 节点结构（含 imageAssetIds）」，
+       * 图片本体已经在 infinite-ai-canvas-assets 库里持久化（offload 由 canvasAssetSync 负责）。
+       * hydrate 只在真正需要自包含数据的导出（JSON / ZIP）路径上做，那条路径对实时性不敏感。
+       * 之前这里每次都 hydrate 写 IDB，导致「半小时后图裂开/丢图」之后又出现
+       * 「保存非常卡 + 大对象被浏览器 IDB 配额截断而保存失败」的新根因。
+       * 加载路径（loadProjectLibrary / 打开项目时）仍会 hydrate 一次以兼容旧草稿。
        */
-      const hydratedNextProjects = await Promise.all(
-        nextProjects.map(async (p) => ({
-          ...p,
-          nodes: await hydrateNodesMediaFromAssets(p.nodes || []),
-        }))
-      );
+      const hydratedNextProjects = nextProjects;
       const cur = hydratedNextProjects.find((p) => p.id === pid);
       const hasBoundZip = cur?.diskSaveEstablished && cur.draftDiskWriteFormat === 'zip';
       const needsDiskPrompt = !options?.skipDiskPrompt && cur != null && !hasBoundZip;
@@ -823,70 +853,39 @@ export function useCanvasProjectLibrary({
     // 把被 offload 到 IDB 资产库的大图反向读回 base64，否则 JSON 文件里 images 数组全是空字符串。
     // 覆盖：首次保存弹窗 / Ctrl+Alt+S 另存为 这两条路径之前只接了 projectSnapshotForJsonExport
     // 不够，因为大图 offload 后内存 nodes[i].images[j] 也是空。
-    const hydratedNodes = await hydrateNodesMediaFromAssets(payload.nodes || []);
+    // 合并 stash：使用 hydrateNodesMediaFromAssetsCached（异步 FileReader）避免主线程卡。
+    const hydratedNodes = await hydrateNodesMediaFromAssetsCached(payload.nodes || [], null);
     const payloadForDisk = { ...payload, draftTitle: draftTitleForDisk, nodes: hydratedNodes };
     const filename = isFirstSave ? projectZipFilename(payloadForDisk) : `${stem}.json`;
-    const diskBlob = isFirstSave
-      ? await buildProjectZipBlob(payloadForDisk)
-      : new Blob([JSON.stringify(payloadForDisk, null, 2)], { type: 'application/json' });
-
-    // 首次保存：直接走浏览器默认下载，不弹系统「另存为」/文件夹选择器。
-    // 设计取舍：跨 await 后调用 showSaveFilePicker 容易在 Vercel/iframe 沙箱中报
-    // "Failed to execute 'showSaveFilePicker' on 'Window': Must be handling a user gesture"
-    // 以及 "Write failed. The folder may be read-only" 等错误；同时与用户「首次保存不弹窗」的诉求一致。
-    // 草稿主存仍在 IndexedDB（saveProjectLibrary），下载到的 ZIP 视为一份外部快照；
-    // 后续如需「自动覆盖」磁盘备份，可再走 Ctrl+Alt+S 另存为绑定句柄。
+    let diskBlob: Blob;
     if (isFirstSave) {
-      const resolveEarly = draftDiskFlowResolveRef.current;
-      draftDiskFlowResolveRef.current = null;
-      setDraftDiskModal(null);
-      try {
-        downloadBlob(diskBlob, filename);
-      } catch (e) {
-        console.error('[canvas] 首次保存触发浏览器下载失败:', e);
-        alert('首次保存失败：浏览器阻止了文件下载，请检查下载权限后重试。');
-        resolveEarly?.(false);
-        return;
-      }
-      const pathNote = `下载文件夹 · ${filename}`;
-      const pid = modal.pid;
-      const updatedList = modal.mergedProjects.map((p) =>
-        p.id === pid
-          ? {
-              ...p,
-              diskSaveEstablished: true as const,
-              draftDiskWriteFormat: 'zip' as const,
-              draftStoragePathNote: pathNote,
-              draftTitle: draftTitleForDisk,
-              draftAutosaveIntervalMin: 5 as const,
-              updatedAt: Date.now(),
-            }
-          : p
+      // 合并 stash：首次保存走 ZIP，hydrate 后立即统计图数，方便跨设备前自检
+      const stats = countHydratedMediaValues(hydratedNodes);
+      console.log(
+        `[firstSaveZip] ${filename}: 共 ${stats.total} 张图, hydrate 后 ${stats.filled} 张有内容。` +
+        `（首次保存走 ZIP 下载到默认下载文件夹；assets/ 目录已内嵌，换电脑导入 ZIP 即可恢复所有图。）`
       );
-      setProjects(updatedList);
-      projectsRef.current = updatedList;
-      const ok = await trackProjectSave(saveProjectLibrary(updatedList, pid));
-      if (!ok) alert('草稿库写入失败：无法写入 IndexedDB。请检查存储权限后重试。');
-      else persistWarningShownRef.current = false;
-      setAutosaveIntervalMin(5);
-      try {
-        localStorage.setItem('wxcanvas-autosave-interval-min', '5');
-      } catch {
-        /* ignore */
+      if (stats.total > 0 && stats.filled === 0) {
+        alert(
+          `首次保存的 ZIP 中没有任何图片内容（IDB 资产库可能已被浏览器清理）。\n` +
+          `该 ZIP 换电脑导入也会丢图，建议先到 DevTools → Application → IndexedDB 检查 infinite-ai-canvas-assets 库。`
+        );
       }
-      // 不再持有本地文件句柄，避免自动保存尝试覆盖一个用户已下载走的文件
-      lastZipFileHandleRef.current = null;
-      lastJsonFileHandleRef.current = null;
-      lastDiskWriteFormatRef.current = null;
-      setLastJsonFilename('');
-      if (ok) {
-        setSaveSuccessMsg(`已保存至下载文件夹: ${filename}`);
-        if (saveSuccessTimerRef.current) clearTimeout(saveSuccessTimerRef.current);
-        saveSuccessTimerRef.current = window.setTimeout(() => setSaveSuccessMsg(null), 4000);
-      }
-      resolveEarly?.(ok);
-      return;
+      const { blob } = await buildProjectZipBlob(payloadForDisk);
+      diskBlob = blob;
+    } else {
+      diskBlob = new Blob([JSON.stringify(payloadForDisk, null, 2)], { type: 'application/json' });
     }
+
+    // 首次保存走和 saveAs 一样的 picker 流程：弹 showDirectoryPicker / showSaveFilePicker
+    // 让用户**选文件夹**保存（默认项目文件 = ZIP，跨电脑场景自包含 base64 + assets/）。
+    // 取消选择（AbortError）静默返回，保留 modal 状态让用户重选。
+    // 写失败时把真实原因 alert，不再尝试回退到无效 picker。
+    // 关键：confirmDraftDiskModal 是用户在 modal 上点击「确认」后同步触发的，
+    // 这里的 showDirectoryPicker / showSaveFilePicker 都在 user gesture 链内，
+    // 不会触发 GitHub 提到的 "Must be handling a user gesture" 报错。
+    // （GitHub 上游原本在这里把首次保存改成"直接下载到默认文件夹"，本仓库改回"弹文件夹选择"
+    // 以满足「首次保存需要选择保存的文件夹路径」需求。）
 
     const w = window as unknown as {
       showDirectoryPicker?: (opts?: { mode?: 'readwrite' }) => Promise<FileSystemDirectoryHandle>;
@@ -1210,10 +1209,22 @@ export function useCanvasProjectLibrary({
       // 反向从 IDB 读回 base64 填到对应字段。这是确保 JSON 文件**真的**包含图片的关键。
       // 之前 fa85a22 / 29d673d 不够，因为大图被自动 offload 后 images 数组里就是空字符串。
       const snapshot = projectSnapshotForJsonExport(project);
-      const hydratedNodes = await hydrateNodesMediaFromAssets(snapshot.nodes || []);
+      const hydratedNodes = await hydrateNodesMediaFromAssetsCached(snapshot.nodes || [], null);
       const payload = { ...snapshot, nodes: hydratedNodes };
       delete (payload as { diskSaveEstablished?: boolean }).diskSaveEstablished;
       delete (payload as { draftDiskWriteFormat?: 'json' | 'zip' }).draftDiskWriteFormat;
+      // 调试 / 防丢图：统计 hydrate 后「有图」的格数。
+      // 跨电脑操作必须确认这里 filled > 0，否则换电脑后 JSON 全是空图。
+      const stats = countHydratedMediaValues(hydratedNodes);
+      console.log(
+        `[exportJSON] ${filename}: 共 ${stats.total} 张图, hydrate 后 ${stats.filled} 张有内容, ${stats.empty} 张为空。`
+      );
+      if (stats.total > 0 && stats.filled === 0) {
+        alert(
+          `导出 JSON 时无法找到任何图片内容（IDB 资产库可能已被浏览器清理）。\n` +
+          `为避免换电脑打开时丢图，请改用「导出 ZIP」格式，ZIP 内会同时打包 assets/ 文件夹。`
+        );
+      }
       const r = await saveJsonToDisk(filename, payload, { backupProjectId: project.id });
       if (r !== 'saved') return;
       const pid = project.id;
@@ -1310,8 +1321,20 @@ export function useCanvasProjectLibrary({
         // ZIP 内 assets/ 也会再存一份作为冗余，这里 hydrate 是为了 project.json 自包含
         // （用户偶尔只拷贝 project.json 出来时也能恢复）。
         const snapshot = projectSnapshotForJsonExport(project);
-        const hydratedNodes = await hydrateNodesMediaFromAssets(snapshot.nodes || []);
+        const hydratedNodes = await hydrateNodesMediaFromAssetsCached(snapshot.nodes || [], null);
         const payload = { ...snapshot, nodes: hydratedNodes };
+        const stats = countHydratedMediaValues(hydratedNodes);
+        console.log(
+          `[exportZIP] project=${project.id}: 共 ${stats.total} 张图, hydrate 后 ${stats.filled} 张有内容。` +
+          `（ZIP 内 assets/ 还会再保存一份作为冗余，换电脑导入时通过 hydrateProjectAssetsFromZip 自动恢复。）`
+        );
+        if (stats.total > 0 && stats.filled === 0) {
+          alert(
+            `警告：hydrate 后没有任何图片内容。\n` +
+            `ZIP 内 assets/ 仍会按 IDB 当前可读到的资产打包，但 IDB 已被清空时 ZIP 也会丢图。\n` +
+            `请先在浏览器 DevTools → Application → IndexedDB 确认 infinite-ai-canvas-assets 库内资产是否还在。`
+          );
+        }
         const r = await exportProjectZipToDisk(payload);
         if (r.kind === 'aborted') return;
         if (r.kind === 'handle') {
@@ -1390,7 +1413,7 @@ export function useCanvasProjectLibrary({
             // ZIP 路径：hydrateProjectAssetsFromZip 已把 ZIP 内的资产写回 IDB，
             // 这里再 hydrate 一次把 nodes 里被 offload 的图反向读回 base64，
             // 解决「旧 ZIP 导入后画布图丢」的问题（与 8d82dad 导出 hydrate 对称）。
-            const hydratedNodes = await hydrateNodesMediaFromAssets(parsed.nodes || []);
+            const hydratedNodes = await hydrateNodesMediaFromAssetsCached(parsed.nodes || [], null);
             const newProject: CanvasProject = {
               ...parsed,
               nodes: hydratedNodes,
@@ -1422,7 +1445,7 @@ export function useCanvasProjectLibrary({
           // JSON 路径：hydrate 尝试从 IDB 反向回填；
           // 8d82dad 之后导出的 JSON 自身已含 base64，hydrate 是 no-op；
           // 8d82dad 之前的旧 JSON（含 imageAssetIds 但 images 为空）+ 本机 IDB 资产仍在 → 救回来
-          const hydratedNodes = await hydrateNodesMediaFromAssets(impNodes);
+          const hydratedNodes = await hydrateNodesMediaFromAssetsCached(impNodes, null);
         const newProject: CanvasProject = {
           id: `project-${Date.now()}`,
           name: (imported.name || file.name.replace(/\.json$/i, '') || '导入项目').toString(),
@@ -1464,10 +1487,12 @@ export function useCanvasProjectLibrary({
           // 草稿库恢复：把被 offload 到 IDB 资产库的图反向读回 base64 写进内存 nodes
           // 解决「8d82dad 之前保存的旧草稿 / 早期 JSON 在 IDB 资产被回收后刷新丢图」的问题
           // （对称于导出路径的 hydrate；hydrate 失败/IDB 找不到的项静默保留空串）
+          // 跨项目共享一次 cache：避免 N 个项目里同一张图被读 N 次。
+          const loadHydrateCache = new Map<string, string | null>();
           const hydratedProjects = await Promise.all(
             patchedProjects.map(async (p) => ({
               ...p,
-              nodes: await hydrateNodesMediaFromAssets(p.nodes || []),
+              nodes: await hydrateNodesMediaFromAssetsCached(p.nodes || [], loadHydrateCache),
             }))
           );
           if (cancelled) return;

@@ -25,7 +25,19 @@ import { getCanvasAssetRecord } from '../services/canvasAssetStore';
  *   - outputImage / outputImageAssetId（GridMergeNode）
  */
 export async function hydrateNodesMediaFromAssets(nodes: CanvasNode[]): Promise<CanvasNode[]> {
-  const cache = new Map<string, string | null>();
+  return hydrateNodesMediaFromAssetsCached(nodes, null);
+}
+
+/**
+ * 带显式缓存的版本：调用方可传入一个跨调用复用的 cache Map，
+ * 避免每次导出/加载都重新从 IDB 读 Blob。
+ * 不传则退化为「单次调用内局部缓存」原行为。
+ */
+export async function hydrateNodesMediaFromAssetsCached(
+  nodes: CanvasNode[],
+  sharedCache: Map<string, string | null> | null
+): Promise<CanvasNode[]> {
+  const cache = sharedCache ?? new Map<string, string | null>();
 
   const assetIdToBase64 = async (id: string): Promise<string | null> => {
     if (cache.has(id)) return cache.get(id) ?? null;
@@ -39,11 +51,17 @@ export async function hydrateNodesMediaFromAssets(nodes: CanvasNode[]): Promise<
       return null;
     }
     try {
-      const buffer = await rec.blob.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let binary = '';
-      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-      const base64 = btoa(binary);
+      // 用 FileReader 异步把 Blob 转 data URL：浏览器内部是异步分块处理，
+      // 不会在主线程上做 N MB 的 String.fromCharCode + btoa 同步循环。
+      // 之前实现每次保存都让主线程卡几百毫秒～数秒，是「保存非常卡」的核心原因之一。
+      const dataUrl: string = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(rec.blob);
+      });
+      const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl);
+      const base64 = m ? m[2] : dataUrl;
       cache.set(id, base64);
       return base64;
     } catch {
@@ -165,4 +183,69 @@ export async function hydrateNodesMediaFromAssets(nodes: CanvasNode[]): Promise<
     out.push(next);
   }
   return out;
+}
+
+/**
+ * 统计 hydrate 后真正"有 base64 内容"的图片数（>= 80 字符视为有图）。
+ * 用于导出/保存路径的调试与告警：换电脑 / 跨设备时如果这里=0，
+ * 说明 IDB 资产库已被清空，导出的 JSON/ZIP 一定丢图。
+ */
+export function countHydratedMediaValues(nodes: CanvasNode[]): {
+  total: number;
+  filled: number;
+  empty: number;
+} {
+  let total = 0;
+  let filled = 0;
+  for (const n of nodes) {
+    const pn = n as PanoramaNode;
+    const ptn = n as PanoramaT2iNode;
+    const an = n as AnnotationNode;
+    const dn = n as Director3DNode;
+    const gsn = n as GridSplitNode;
+    const gmn = n as GridMergeNode;
+    if (Array.isArray(n.images)) {
+      for (const im of n.images) {
+        total++;
+        if (im && im.length >= 80) filled++;
+      }
+    }
+    if ('panoramaImage' in pn || pn.panoramaImageAssetId) {
+      total++;
+      if (pn.panoramaImage && pn.panoramaImage.length >= 80) filled++;
+    }
+    if ('panoramaImage' in ptn || ptn.panoramaImageAssetId) {
+      total++;
+      if (ptn.panoramaImage && ptn.panoramaImage.length >= 80) filled++;
+    }
+    if (an.sourceImageAssetId) {
+      total++;
+      if (an.sourceImage && an.sourceImage.length >= 80) filled++;
+    }
+    if (dn.backgroundImageAssetId) {
+      total++;
+      if (dn.backgroundImage && dn.backgroundImage.length >= 80) filled++;
+    }
+    if (gsn.inputImageAssetId) {
+      total++;
+      if (gsn.inputImage && gsn.inputImage.length >= 80) filled++;
+    }
+    if (Array.isArray(gsn.outputImages)) {
+      for (const im of gsn.outputImages) {
+        total++;
+        if (im && im.length >= 80) filled++;
+      }
+    }
+    if (Array.isArray(gmn.inputImages)) {
+      for (const im of gmn.inputImages) {
+        total++;
+        if (im && im.length >= 80) filled++;
+      }
+    }
+    if (gmn.outputImageAssetId) {
+      total++;
+      if (gmn.outputImage && gmn.outputImage.length >= 80) filled++;
+    }
+  }
+  return { total, filled, empty: total - filled };
 }

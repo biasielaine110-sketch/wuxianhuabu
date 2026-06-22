@@ -184,7 +184,7 @@ export function sanitizeFilename(name: string): string {
   return name.replace(/[/\\?%*:|"<>]/g, '_').slice(0, 80) || 'project';
 }
 
-export async function buildProjectZipBlob(project: CanvasProjectSnapshot): Promise<Blob> {
+export async function buildProjectZipBlob(project: CanvasProjectSnapshot): Promise<{ blob: Blob; assetCount: number }> {
   const JSZip = await loadJSZip();
   const zip = new JSZip();
   const manifest: ZipManifest = {
@@ -195,12 +195,13 @@ export async function buildProjectZipBlob(project: CanvasProjectSnapshot): Promi
   zip.file(ZIP_MANIFEST, JSON.stringify(manifest, null, 2));
   const { diskSaveEstablished: _disk, draftDiskWriteFormat: _format, ...projectForZip } = project;
   zip.file(ZIP_PROJECT, JSON.stringify(projectForZip, null, 2));
-  await embedProjectAssetsInZip(zip, project.nodes);
-  return zip.generateAsync({
+  const assetCount = await embedProjectAssetsInZip(zip, project.nodes);
+  const blob = await zip.generateAsync({
     type: 'blob',
     compression: 'DEFLATE',
     compressionOptions: { level: 6 },
   });
+  return { blob, assetCount };
 }
 
 export function downloadBlob(blob: Blob, filename: string): void {
@@ -213,9 +214,8 @@ export function downloadBlob(blob: Blob, filename: string): void {
 }
 
 export async function exportProjectToZipDownload(project: CanvasProjectSnapshot): Promise<void> {
-  const blob = await buildProjectZipBlob(project);
-  const base = sanitizeFilename((project.draftTitle || project.name || 'project').trim() || 'project');
-  downloadBlob(blob, `${base}${WXCANVAS_ZIP_EXTENSION}`);
+  const { blob } = await buildProjectZipBlob(project);
+  downloadBlob(blob, projectZipFilename(project));
 }
 
 export type ExportZipDiskResult =
@@ -232,7 +232,9 @@ export function projectZipFilename(project: CanvasProjectSnapshot): string {
  * 导出 ZIP：优先用系统「另存为」拿到可反复覆盖写入的文件句柄；不支持或失败时回退为浏览器下载。
  */
 export async function exportProjectZipToDisk(project: CanvasProjectSnapshot): Promise<ExportZipDiskResult> {
-  const blob = await buildProjectZipBlob(project);
+  // 合并 stash 里的修复：buildProjectZipBlob 现在返回 { blob, assetCount }，需要解构
+  // 同时沿用 GitHub 上新抽出的 projectZipFilename 工具函数
+  const { blob } = await buildProjectZipBlob(project);
   const filename = projectZipFilename(project);
   const w = window as unknown as {
     showSaveFilePicker?: (opts: {
@@ -269,7 +271,7 @@ export async function overwriteProjectZipFileHandle(
   fileHandle: FileSystemFileHandle,
   project: CanvasProjectSnapshot
 ): Promise<void> {
-  const blob = await buildProjectZipBlob(project);
+  const { blob } = await buildProjectZipBlob(project);
   const writable = await fileHandle.createWritable();
   await writable.write(blob);
   await writable.close();
@@ -293,7 +295,7 @@ export async function parseProjectFromZipFile(file: File): Promise<CanvasProject
   if (!imported || !Array.isArray(imported.nodes) || !Array.isArray(imported.edges)) {
     throw new Error('project.json 格式不正确');
   }
-  await hydrateProjectAssetsFromZip(zip);
+  await hydrateProjectAssetsFromZip(zip as unknown as { file: (path: string) => { async: (type: string) => Promise<unknown> } | null });
   return {
     id: (imported.id as string) || `project-${Date.now()}`,
     name: (imported.name as string) || file.name.replace(/\.(wxcanvas\.)?zip$/i, '') || '导入项目',
@@ -313,5 +315,5 @@ export async function restoreProjectAssetsFromZipFileHandle(
   const file = await fileHandle.getFile();
   const buf = await file.arrayBuffer();
   const zip = await JSZip.loadAsync(buf);
-  return hydrateProjectAssetsFromZip(zip);
+  return hydrateProjectAssetsFromZip(zip as unknown as { file: (path: string) => { async: (type: string) => Promise<unknown> } | null });
 }
