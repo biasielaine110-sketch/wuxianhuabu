@@ -163,6 +163,33 @@ export function useCanvasProjectLibrary({
         return { status: 'no-handle', restored: 0 };
       }
       const fileName = (h as { name?: string }).name || '未命名.wxcanvas.zip';
+      // FileSystemFileHandle 在新会话/跨会话/某些浏览器策略下需要重新请求权限，
+      // 否则 getFile() 会抛 NotAllowedError。这里先 queryPermission → 不 granted 再 requestPermission。
+      // 注意：requestPermission 必须在 user gesture 内调用，但「页面加载时静默恢复」是 fire-and-forget 的，
+      // 此时 user gesture 不可用，requestPermission 会直接抛 / 静默失败。
+      // 处理策略：
+      //   1) 已有权限（queryPermission === 'granted'）→ 正常读
+      //   2) 无权限但不在 user gesture → 静默返回 permission-lost，UI 弹「重新选择 ZIP」
+      //   3) 无权限但在 user gesture（用户主动点了按钮）→ 弹浏览器原生授权对话框
+      try {
+        const w = h as unknown as {
+          queryPermission?: (opts: { mode: 'read' | 'readwrite' }) => Promise<PermissionState>;
+          requestPermission?: (opts: { mode: 'read' | 'readwrite' }) => Promise<PermissionState>;
+        };
+        if (typeof w.queryPermission === 'function') {
+          let st: PermissionState = await w.queryPermission({ mode: 'read' });
+          if (st !== 'granted' && typeof w.requestPermission === 'function') {
+            st = await w.requestPermission({ mode: 'read' });
+          }
+          if (st !== 'granted') {
+            console.warn(`[canvas] 绑定 ZIP 权限未授予: ${fileName} (state=${st})`);
+            return { status: 'permission', restored: 0, fileName };
+          }
+        }
+      } catch (permErr) {
+        console.warn(`[canvas] requestPermission 异常: ${fileName}`, permErr);
+        // 继续往下走，交给 restoreProjectAssetsFromZipFileHandle 看会不会真正抛 NotAllowedError
+      }
       try {
         const restored = await restoreProjectAssetsFromZipFileHandle(h);
         if (restored > 0) {
@@ -245,10 +272,21 @@ export function useCanvasProjectLibrary({
   );
 
   const restoreProjectsAssetsFromBoundZips = useCallback(async (projectList: CanvasProject[]): Promise<void> => {
+    const permLostProjects: string[] = [];
     for (const project of projectList) {
-      if (project?.diskSaveEstablished && project.draftDiskWriteFormat === 'zip') {
-        await restoreProjectAssetsFromBoundZip(project);
+      if (!project?.diskSaveEstablished || project.draftDiskWriteFormat !== 'zip') continue;
+      const r = await restoreProjectAssetsFromBoundZip(project);
+      // 启动时批量加载：permission-lost 错误太常见（FileSystemFileHandle 跨会话失效），
+      // 不为每个项目都打 warn 噪音；统一收集到 permLostProjects，最后合并成一条 info 日志。
+      if (r.status === 'permission') {
+        permLostProjects.push(project.name || project.id);
       }
+    }
+    if (permLostProjects.length > 0) {
+      console.info(
+        `[canvas] 启动时以下 ${permLostProjects.length} 个项目的 ZIP 权限已失效：${permLostProjects.join(', ')}。` +
+        `用户可在项目管理中点「修复图片资产」按钮触发重新授权（user gesture 内会弹原生对话框）。`
+      );
     }
   }, [restoreProjectAssetsFromBoundZip]);
   const restoreMissingMediaSlotsFromSavedProject = useCallback(
