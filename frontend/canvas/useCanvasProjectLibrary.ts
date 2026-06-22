@@ -661,8 +661,10 @@ export function useCanvasProjectLibrary({
   }, [saveCurrentProject]);
 
   const repairCurrentProjectImageAssets = useCallback(async (): Promise<void> => {
+    console.log('[repairAssets] 函数被调入, isRepairingImageAssets=', isRepairingImageAssets);
     if (isRepairingImageAssets) return;
     const pid = activeProjectIdRef.current;
+    console.log('[repairAssets] pid=', pid);
     if (!pid) {
       alert('项目还在加载，请稍后再修复图片资产。');
       return;

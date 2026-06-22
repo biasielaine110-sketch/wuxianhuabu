@@ -2259,11 +2259,18 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
       {/* 修复图片资产按钮 - 画布右上角（看图模式下隐藏）。
           之前这个功能只在项目弹窗底部有入口，但用户经常在画布上看到「图片资产缺失」的占位
           想直接重 hydrate，所以放到画布右上角常驻。点击后从绑定 ZIP / 节点残留 base64 找回
-          被 IDB offload 的图片。修复期间禁用按钮并显示「修复中...」。 */}
+          被 IDB offload 的图片。修复期间禁用按钮并显示「修复中...」。
+          onPointerDown / onMouseDown / onClick 全部 stopPropagation 防止
+          canvas-container 的 onPointerDown 长按计时 / 框选状态机把 click 吞掉。 */}
       <button
         type="button"
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={(e) => { e.stopPropagation(); void repairCurrentProjectImageAssets(); }}
+        onPointerDown={(e) => { e.stopPropagation(); console.log('[repairBtn] pointerdown'); }}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          console.log('[repairBtn] click → repairCurrentProjectImageAssets');
+          void repairCurrentProjectImageAssets();
+        }}
         disabled={isRepairingImageAssets}
         title="从绑定 ZIP / 节点残留的 base64 恢复 IDB 缺失的图片资产（看到「图片资产缺失」占位时用）"
         className={`fixed top-[25px] right-[460px] z-[60] px-3 py-2 rounded-lg text-sm font-medium border border-teal-500/40 text-teal-300 bg-[#1a1a2e]/80 hover:bg-teal-500/20 disabled:opacity-50 disabled:cursor-wait ${canvasMode === 'audit' ? 'hidden' : ''}`}
