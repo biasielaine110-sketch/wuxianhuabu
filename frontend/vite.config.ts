@@ -231,8 +231,15 @@ const toapisFileCdnProxy = {
     changeOrigin: true,
     secure: false,
     configure(proxy) {
+      let jimengWarned = false;
       proxy.on('error', (err, _req, res) => {
-        console.warn('[vite proxy /api/jimeng] 即梦后端未启动 (npm start --prefix server):', err instanceof Error ? err.message : err);
+        // 同一次 dev server 启动内只提示一次，避免 ECONNREFUSED 反复触发把日志刷屏
+        // 让人误以为前端崩了。前端 JimengAuthProvider 已有 try/catch 兜底，不影响页面功能。
+        if (!jimengWarned) {
+          jimengWarned = true;
+          console.warn('[vite proxy /api/jimeng] 即梦后端未启动 (npm start --prefix server)，本次 dev 会话内不再重复提示。');
+          console.warn('原始错误：', err instanceof Error ? err.message : err);
+        }
         const r = res as { headersSent?: boolean; writeHead?: (c: number, h?: unknown) => void; end?: (s?: string) => void };
         if (r && !r.headersSent && typeof r.writeHead === 'function') {
           r.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });

@@ -10,6 +10,7 @@ import {
   overwriteProjectZipFileHandle,
   buildProjectZipBlob,
   projectZipFilename,
+  downloadBlob,
   restoreProjectAssetsFromZipFileHandle,
   parseProjectFromZipFile,
   sanitizeFilename,
@@ -829,6 +830,64 @@ export function useCanvasProjectLibrary({
       ? await buildProjectZipBlob(payloadForDisk)
       : new Blob([JSON.stringify(payloadForDisk, null, 2)], { type: 'application/json' });
 
+    // 首次保存：直接走浏览器默认下载，不弹系统「另存为」/文件夹选择器。
+    // 设计取舍：跨 await 后调用 showSaveFilePicker 容易在 Vercel/iframe 沙箱中报
+    // "Failed to execute 'showSaveFilePicker' on 'Window': Must be handling a user gesture"
+    // 以及 "Write failed. The folder may be read-only" 等错误；同时与用户「首次保存不弹窗」的诉求一致。
+    // 草稿主存仍在 IndexedDB（saveProjectLibrary），下载到的 ZIP 视为一份外部快照；
+    // 后续如需「自动覆盖」磁盘备份，可再走 Ctrl+Alt+S 另存为绑定句柄。
+    if (isFirstSave) {
+      const resolveEarly = draftDiskFlowResolveRef.current;
+      draftDiskFlowResolveRef.current = null;
+      setDraftDiskModal(null);
+      try {
+        downloadBlob(diskBlob, filename);
+      } catch (e) {
+        console.error('[canvas] 首次保存触发浏览器下载失败:', e);
+        alert('首次保存失败：浏览器阻止了文件下载，请检查下载权限后重试。');
+        resolveEarly?.(false);
+        return;
+      }
+      const pathNote = `下载文件夹 · ${filename}`;
+      const pid = modal.pid;
+      const updatedList = modal.mergedProjects.map((p) =>
+        p.id === pid
+          ? {
+              ...p,
+              diskSaveEstablished: true as const,
+              draftDiskWriteFormat: 'zip' as const,
+              draftStoragePathNote: pathNote,
+              draftTitle: draftTitleForDisk,
+              draftAutosaveIntervalMin: 5 as const,
+              updatedAt: Date.now(),
+            }
+          : p
+      );
+      setProjects(updatedList);
+      projectsRef.current = updatedList;
+      const ok = await trackProjectSave(saveProjectLibrary(updatedList, pid));
+      if (!ok) alert('草稿库写入失败：无法写入 IndexedDB。请检查存储权限后重试。');
+      else persistWarningShownRef.current = false;
+      setAutosaveIntervalMin(5);
+      try {
+        localStorage.setItem('wxcanvas-autosave-interval-min', '5');
+      } catch {
+        /* ignore */
+      }
+      // 不再持有本地文件句柄，避免自动保存尝试覆盖一个用户已下载走的文件
+      lastZipFileHandleRef.current = null;
+      lastJsonFileHandleRef.current = null;
+      lastDiskWriteFormatRef.current = null;
+      setLastJsonFilename('');
+      if (ok) {
+        setSaveSuccessMsg(`已保存至下载文件夹: ${filename}`);
+        if (saveSuccessTimerRef.current) clearTimeout(saveSuccessTimerRef.current);
+        saveSuccessTimerRef.current = window.setTimeout(() => setSaveSuccessMsg(null), 4000);
+      }
+      resolveEarly?.(ok);
+      return;
+    }
+
     const w = window as unknown as {
       showDirectoryPicker?: (opts?: { mode?: 'readwrite' }) => Promise<FileSystemDirectoryHandle>;
       showSaveFilePicker?: (opts: {
@@ -840,6 +899,12 @@ export function useCanvasProjectLibrary({
     let fileHandle: FileSystemFileHandle | null = null;
     let dirHandle: FileSystemDirectoryHandle | null = null;
 
+    // saveAs 路径必须在 user gesture 之内一次性拿到 file handle。
+    // 旧实现：先 showDirectoryPicker → 写文件失败 → fallback showSaveFilePicker，
+    // 会跨多个 await 把 gesture 消耗掉，触发
+    // "Failed to execute 'showSaveFilePicker' on 'Window': Must be handling a user gesture"。
+    // 新实现：showDirectoryPicker / showSaveFilePicker 二选一（按浏览器能力优先目录），
+    // 拿不到就回退浏览器默认下载；写失败时把真实原因 alert 给用户，而不是再弹一个无效的 picker。
     try {
       if (typeof w.showDirectoryPicker === 'function') {
         try {
@@ -848,36 +913,39 @@ export function useCanvasProjectLibrary({
           const writable = await fileHandle.createWritable();
           await writable.write(diskBlob);
           await writable.close();
-        } catch (dirWriteError: unknown) {
-          if ((dirWriteError as { name?: string })?.name === 'AbortError') return;
-          console.warn('[canvas] write to selected directory failed, falling back to save picker', dirWriteError);
-          dirHandle = null;
-          fileHandle = null;
-          if (typeof w.showSaveFilePicker !== 'function') throw dirWriteError;
+        } catch (dirPickError: unknown) {
+          // 用户取消选目录：不弹任何错误，静默返回
+          if ((dirPickError as { name?: string })?.name === 'AbortError') return;
+          // 目录拿到了但写失败（只读 / 配额 / 文件被占用等）：不再尝试 showSaveFilePicker
+          // —— 已经在 user gesture 外，再调 picker 必然报 user gesture 错，徒增困惑。
+          // 真实原因直接 alert 给用户，让其换目录或下载到默认下载文件夹。
+          throw dirPickError;
         }
-      }
-
-      if (!fileHandle && typeof w.showSaveFilePicker === 'function') {
+      } else if (typeof w.showSaveFilePicker === 'function') {
         fileHandle = await w.showSaveFilePicker({
           suggestedName: filename,
-          types: isFirstSave
-            ? [{ description: 'Canvas backup ZIP', accept: { 'application/zip': ['.wxcanvas.zip', '.zip'] } }]
-            : [{ description: 'JSON file', accept: { 'application/json': ['.json'] } }],
+          types: [{ description: 'JSON file', accept: { 'application/json': ['.json'] } }],
         });
         const writable = await fileHandle.createWritable();
         await writable.write(diskBlob);
         await writable.close();
-      }
-
-      if (!fileHandle) {
-        alert('Current browser cannot choose a save folder. Please use Chrome or Edge on HTTPS/localhost.');
+      } else {
+        // 既没有 showDirectoryPicker 也没有 showSaveFilePicker：降级到浏览器默认下载。
+        downloadBlob(diskBlob, filename);
+        setDraftDiskModal(null);
+        const resolve = draftDiskFlowResolveRef.current;
+        draftDiskFlowResolveRef.current = null;
+        resolve?.(true);
         return;
       }
     } catch (e: unknown) {
       if ((e as { name?: string })?.name === 'AbortError') return;
-      console.error(e);
+      console.error('[canvas] 另存 JSON 写入失败:', e);
       const detail = e instanceof Error && e.message ? `\n\nError: ${e.message}` : '';
-      alert(`Write failed. The folder may be read-only, the file may be in use, or the disk may be full. Please choose another folder or free disk space and try again.${detail}`);
+      alert(
+        `写入失败：所选文件夹可能为只读、文件正在被其他程序占用，或磁盘已满。\n` +
+          `请换一个可写目录后重试，或直接走浏览器默认下载路径。${detail}`
+      );
       return;
     }
 
@@ -889,7 +957,8 @@ export function useCanvasProjectLibrary({
       return;
     }
 
-    const pid = modal.pid;
+    // modal 此时只可能是 firstSave（saveAs 已在上面 return）
+    const pid = (modal as { pid: string }).pid;
     try {
       if (isFirstSave) await persistProjectZipBackupFileHandle(pid, fileHandle);
       else await persistProjectBackupFileHandle(pid, fileHandle);
@@ -916,7 +985,7 @@ export function useCanvasProjectLibrary({
     draftDiskFlowResolveRef.current = null;
     setDraftDiskModal(null);
 
-    const updatedList = modal.mergedProjects.map((p) =>
+    const updatedList = (modal as { mergedProjects: CanvasProject[] }).mergedProjects.map((p) =>
       p.id === pid
         ? {
             ...p,
