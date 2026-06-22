@@ -16,6 +16,11 @@ export type CanvasAssetRepairReport = {
   failedCount: number;
   recoveredAssetIds: string[];
   failedAssetIds: string[];
+  /** 来自远程 URL (http/https) 拉取后写入 IDB 的数量 */
+  remoteFetchedCount: number;
+  /** 远程 URL 拉取失败的数量（CORS、网络错误、404 等） */
+  remoteFailedCount: number;
+  remoteFailedAssetIds: string[];
 };
 
 type RepairSource = {
@@ -26,11 +31,15 @@ type RepairSource = {
 
 function hasRecoverableImageValue(value: string | undefined): value is string {
   const s = (value || '').trim();
+  if (!s) return false;
   return (
-    s.length > 80 ||
+    // 远程 URL（http/https）也算可恢复源
+    /^https?:\/\//i.test(s) ||
     s.startsWith('data:') ||
     s.startsWith('blob:') ||
-    /^https?:\/\//i.test(s)
+    // 任意非空 base64 字符串都尝试写回 IDB（即使很短），
+    // 之前 length > 80 把短 base64 / 占位串过滤掉了，导致这部分图永久丢。
+    s.length > 16
   );
 }
 
@@ -105,6 +114,9 @@ export async function repairMissingNodeMediaAssetsFromNodeSources(
   const scannedMissingAssetIds: string[] = [];
   const recoveredAssetIds: string[] = [];
   const failedAssetIds: string[] = [];
+  const remoteFailedAssetIds: string[] = [];
+  let remoteFetchedCount = 0;
+  let remoteFailedCount = 0;
 
   for (const source of sources) {
     if (usedAssetIds.has(source.assetId)) continue;
@@ -113,6 +125,8 @@ export async function repairMissingNodeMediaAssetsFromNodeSources(
     const existing = await getCanvasAssetRecord(source.assetId);
     if (existing?.blob?.size) continue;
     scannedMissingAssetIds.push(source.assetId);
+
+    const isRemoteUrl = /^https?:\/\//i.test((source.value || '').trim());
 
     try {
       const raw = await imageSrcToRawBase64(source.value);
@@ -123,13 +137,19 @@ export async function repairMissingNodeMediaAssetsFromNodeSources(
       const verified = await getCanvasAssetRecord(source.assetId);
       if (!verified?.blob?.size) throw new Error('asset write verification failed');
       recoveredAssetIds.push(source.assetId);
+      if (isRemoteUrl) remoteFetchedCount++;
     } catch (e) {
       console.warn('[canvasAssetRepair] failed to repair asset from node source', {
         nodeId: source.nodeId,
         assetId: source.assetId,
+        sourceKind: isRemoteUrl ? 'remote-url' : 'inline-base64',
         error: e,
       });
       failedAssetIds.push(source.assetId);
+      if (isRemoteUrl) {
+        remoteFailedCount++;
+        remoteFailedAssetIds.push(source.assetId);
+      }
     }
   }
 
@@ -139,5 +159,8 @@ export async function repairMissingNodeMediaAssetsFromNodeSources(
     failedCount: failedAssetIds.length,
     recoveredAssetIds,
     failedAssetIds,
+    remoteFetchedCount,
+    remoteFailedCount,
+    remoteFailedAssetIds,
   };
 }

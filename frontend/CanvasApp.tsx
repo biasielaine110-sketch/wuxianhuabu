@@ -350,6 +350,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     projectSnapshotForJsonExport,
     handleSaveDraftJsonSaveAs,
     repairCurrentProjectImageAssets,
+    rebindProjectZipHandle,
     commitCenterProjectRename,
     flushPendingProjectWrites,
   } = projectLibrary;
@@ -2266,10 +2267,28 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
         type="button"
         onPointerDown={(e) => { e.stopPropagation(); console.log('[repairBtn] pointerdown'); }}
         onMouseDown={(e) => e.stopPropagation()}
-        onClick={(e) => {
+        onClick={async (e) => {
           e.stopPropagation();
           console.log('[repairBtn] click → repairCurrentProjectImageAssets');
-          void repairCurrentProjectImageAssets();
+          const result = await repairCurrentProjectImageAssets();
+          // 修复跑完，如果 ZIP 状态是 file-missing / permission / error，弹「重新选择 ZIP」确认
+          if (result && (result.zipStatus === 'file-missing' || result.zipStatus === 'permission' || result.zipStatus === 'error')) {
+            const reasonText =
+              result.zipStatus === 'file-missing'
+                ? `原文件可能已被移动或删除：${result.fileName || ''}`
+                : result.zipStatus === 'permission'
+                  ? `浏览器对原文件的读取权限已失效：${result.fileName || ''}`
+                  : `读取绑定 ZIP 出错：${result.fileName || ''}`;
+            if (window.confirm(`绑定 ZIP 无法读取。\n${reasonText}\n\n是否重新选择 ZIP 文件？`)) {
+              const pid = activeProjectId;
+              if (pid) {
+                const r = await rebindProjectZipHandle(pid);
+                if (r) {
+                  alert(`已重新指定 ZIP：${r.fileName}\n恢复 ${r.restored} 个图片资产。`);
+                }
+              }
+            }
+          }
         }}
         disabled={isRepairingImageAssets}
         title="从绑定 ZIP / 节点残留的 base64 恢复 IDB 缺失的图片资产（看到「图片资产缺失」占位时用）"

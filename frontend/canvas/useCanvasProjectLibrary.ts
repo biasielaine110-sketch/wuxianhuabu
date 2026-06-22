@@ -140,24 +140,110 @@ export function useCanvasProjectLibrary({
     lastDiskWriteFormatRef.current = h ? 'json' : null;
     setLastJsonFilename(h?.name ?? '');
   }, []);
-  const restoreProjectAssetsFromBoundZip = useCallback(async (project: CanvasProject | undefined | null): Promise<number> => {
-    if (!project?.id || project.draftDiskWriteFormat !== 'zip') return 0;
-    try {
+  /** 从绑定 ZIP 恢复资产到 IDB。
+   *  返回详细结果，区分以下几种情况：
+   *  - { status: 'no-zip-bound',   restored: 0 }  // 项目根本没绑定过 ZIP
+   *  - { status: 'no-handle',      restored: 0 }  // IDB 句柄丢失
+   *  - { status: 'file-missing',   restored: 0, fileName }  // 句柄在但文件被删/移/重命名（NotFoundError）
+   *  - { status: 'permission',     restored: 0, fileName }  // 浏览器权限丢失（NotAllowedError）
+   *  - { status: 'error',          restored: 0, error }     // 其他异常（ZIP 损坏等）
+   *  - { status: 'ok',             restored: N }            // 成功
+   *  UI 拿到 file-missing / permission 可以弹「重新选择 ZIP」按钮让用户指回原文件。 */
+  const restoreProjectAssetsFromBoundZip = useCallback(
+    async (project: CanvasProject | undefined | null): Promise<
+      | { status: 'no-zip-bound' | 'no-handle' | 'file-missing' | 'permission' | 'error'; restored: 0; fileName?: string; error?: unknown }
+      | { status: 'ok'; restored: number }
+    > => {
+      if (!project?.id || project.draftDiskWriteFormat !== 'zip') {
+        return { status: 'no-zip-bound', restored: 0 };
+      }
       let h = lastZipFileHandleRef.current;
       if (!h) h = (await getProjectZipBackupFileHandle(project.id)) ?? null;
-      if (!h) return 0;
-      const restored = await restoreProjectAssetsFromZipFileHandle(h);
-      if (restored > 0) {
-        lastZipFileHandleRef.current = h;
-        lastDiskWriteFormatRef.current = 'zip';
-        console.info(`[canvas] 已从绑定 ZIP 恢复 ${restored} 个图片资产`);
+      if (!h) {
+        return { status: 'no-handle', restored: 0 };
       }
-      return restored;
-    } catch (e) {
-      console.warn('[canvas] 从绑定 ZIP 恢复图片资产失败', e);
-      return 0;
-    }
-  }, []);
+      const fileName = (h as { name?: string }).name || '未命名.wxcanvas.zip';
+      try {
+        const restored = await restoreProjectAssetsFromZipFileHandle(h);
+        if (restored > 0) {
+          lastZipFileHandleRef.current = h;
+          lastDiskWriteFormatRef.current = 'zip';
+          console.info(`[canvas] 已从绑定 ZIP 恢复 ${restored} 个图片资产`);
+        }
+        return { status: 'ok', restored };
+      } catch (e) {
+        const errName = (e as { name?: string })?.name;
+        // 区分「文件被删/移/重命名」 vs 「权限丢失」 vs 「ZIP 损坏」
+        if (errName === 'NotFoundError') {
+          console.warn(`[canvas] 绑定 ZIP 文件丢失: ${fileName}`, e);
+          return { status: 'file-missing', restored: 0, fileName };
+        }
+        if (errName === 'NotAllowedError' || errName === 'SecurityError') {
+          console.warn(`[canvas] 绑定 ZIP 权限丢失: ${fileName}`, e);
+          return { status: 'permission', restored: 0, fileName };
+        }
+        console.warn(`[canvas] 从绑定 ZIP 恢复图片资产失败: ${fileName}`, e);
+        return { status: 'error', restored: 0, fileName, error: e };
+      }
+    },
+    []
+  );
+
+  /**
+   * 让用户重新指定绑定 ZIP 文件（之前「file-missing」/「permission」状态时调用）。
+   * 用 showOpenFilePicker（兼容性比 showSaveFilePicker 略差，但夸克 / Edge / Chrome 86+ 都支持）
+   * 让用户选回原文件；选成功后：
+   *   1) 把句柄写进 lastZipFileHandleRef + IDB 持久化
+   *   2) 立即触发一次恢复（用同一个 restoreProjectAssetsFromBoundZip 走 file-missing 修复路径）
+   * 用户取消（AbortError）静默返回 null。
+   */
+  const rebindProjectZipHandle = useCallback(
+    async (projectId: string): Promise<{ restored: number; fileName: string } | null> => {
+      const w = window as unknown as {
+        showOpenFilePicker?: (opts: {
+          multiple?: boolean;
+          types?: { description: string; accept: Record<string, string[]> }[];
+        }) => Promise<FileSystemFileHandle[]>;
+      };
+      if (typeof w.showOpenFilePicker !== 'function') {
+        alert('当前浏览器不支持 showOpenFilePicker，请用 Chrome / Edge 桌面版打开。');
+        return null;
+      }
+      let h: FileSystemFileHandle;
+      try {
+        const handles = await w.showOpenFilePicker({
+          multiple: false,
+          types: [
+            {
+              description: '画布备份 ZIP',
+              accept: { 'application/zip': ['.zip', '.wxcanvas.zip'] },
+            },
+          ],
+        });
+        h = handles[0];
+      } catch (e) {
+        if ((e as { name?: string })?.name === 'AbortError') return null;
+        console.warn('[canvas] 重新选择 ZIP 失败', e);
+        alert('重新选择 ZIP 失败，请重试。');
+        return null;
+      }
+      // 1) 写回内存 + IDB
+      lastZipFileHandleRef.current = h;
+      lastDiskWriteFormatRef.current = 'zip';
+      try {
+        await persistProjectZipBackupFileHandle(projectId, h);
+      } catch (e) {
+        console.warn('[canvas] 持久化新 ZIP 句柄失败', e);
+      }
+      // 2) 立即触发一次恢复
+      const project = projectsRef.current.find((p) => p.id === projectId) ?? null;
+      const result = await restoreProjectAssetsFromBoundZip(project);
+      const restored = result.status === 'ok' ? result.restored : 0;
+      return { restored, fileName: (h as { name?: string }).name || '' };
+    },
+    [restoreProjectAssetsFromBoundZip]
+  );
+
   const restoreProjectsAssetsFromBoundZips = useCallback(async (projectList: CanvasProject[]): Promise<void> => {
     for (const project of projectList) {
       if (project?.diskSaveEstablished && project.draftDiskWriteFormat === 'zip') {
@@ -660,22 +746,26 @@ export function useCanvasProjectLibrary({
     saveCurrentProjectRef.current = saveCurrentProject;
   }, [saveCurrentProject]);
 
-  const repairCurrentProjectImageAssets = useCallback(async (): Promise<void> => {
+  const repairCurrentProjectImageAssets = useCallback(async (): Promise<
+    | { zipStatus: 'no-zip-bound' | 'no-handle' | 'ok' | 'file-missing' | 'permission' | 'error'; zipRestored: number; fileName?: string }
+  > => {
     console.log('[repairAssets] 函数被调入, isRepairingImageAssets=', isRepairingImageAssets);
-    if (isRepairingImageAssets) return;
+    if (isRepairingImageAssets) return { zipStatus: 'no-zip-bound', zipRestored: 0 };
     const pid = activeProjectIdRef.current;
     console.log('[repairAssets] pid=', pid);
     if (!pid) {
       alert('项目还在加载，请稍后再修复图片资产。');
-      return;
+      return { zipStatus: 'no-zip-bound', zipRestored: 0 };
     }
     setIsRepairingImageAssets(true);
     try {
       const project = projectsRef.current.find((p) => p.id === pid);
       let currentNodes = nodesRef.current;
       const before = await findMissingNodeWindowMedia(currentNodes);
-      const zipRestored = await restoreProjectAssetsFromBoundZip(project);
+      const zipResult = await restoreProjectAssetsFromBoundZip(project);
       const nodeRepair = await repairMissingNodeMediaAssetsFromNodeSources(currentNodes);
+
+      const zipRestored = zipResult.status === 'ok' ? zipResult.restored : 0;
 
       if (zipRestored > 0 || nodeRepair.recoveredCount > 0) {
         currentNodes = await hydrateNodesMediaFromAssets(currentNodes);
@@ -698,17 +788,44 @@ export function useCanvasProjectLibrary({
         `修复前缺失窗口图片：${before.slotCount}`,
         `从绑定 ZIP 恢复资产：${zipRestored}`,
         `从节点残留图片/链接恢复：${nodeRepair.recoveredCount}`,
+        `从远程 URL 拉取：${nodeRepair.remoteFetchedCount ?? 0}`,
         `仍未恢复的窗口图片：${after.slotCount}`,
       ];
+      // 区分 ZIP 失败原因，提示用户
+      if (zipResult.status === 'file-missing') {
+        lines.push('');
+        lines.push(`⚠ 绑定 ZIP 文件丢失：${zipResult.fileName}`);
+        lines.push('  请把 ZIP 移回原位置后重试，或点击「重新选择 ZIP」按钮重新指定文件。');
+      } else if (zipResult.status === 'permission') {
+        lines.push('');
+        lines.push(`⚠ 绑定 ZIP 权限丢失：${zipResult.fileName}`);
+        lines.push('  请在浏览器地址栏左侧重新授予文件访问权限，或点击「重新选择 ZIP」重新指定。');
+      } else if (zipResult.status === 'no-handle') {
+        lines.push('');
+        lines.push('⚠ 当前项目未绑定 ZIP 句柄（之前可能没首次保存，或句柄被清理）。');
+        lines.push('  如需启用 ZIP 备份，请用 Ctrl+S 触发一次首次保存绑定。');
+      } else if (zipResult.status === 'no-zip-bound') {
+        // 项目根本没绑过 ZIP，不算异常
+      } else if (zipResult.status === 'error') {
+        lines.push('');
+        lines.push(`⚠ 绑定 ZIP 读取失败：${zipResult.fileName}`);
+        lines.push('  ZIP 文件可能已损坏，可点击「重新选择 ZIP」指定其他备份。');
+      }
       if (after.slotCount > 0) {
         lines.push('');
         lines.push(`涉及节点：${after.nodeIds.slice(0, 12).join(', ')}${after.nodeIds.length > 12 ? '...' : ''}`);
         lines.push('如果仍未恢复，说明当前节点和绑定 ZIP 里都没有图片本体，只能重新生成这些图片。');
       }
       alert(lines.join('\n'));
+      return {
+        zipStatus: zipResult.status,
+        zipRestored,
+        fileName: zipResult.status !== 'ok' ? zipResult.fileName : undefined,
+      };
     } catch (e) {
       console.error(e);
       alert('修复图片资产失败，请先确认本地 ZIP 仍然存在且浏览器有读取权限。');
+      return { zipStatus: 'error', zipRestored: 0 };
     } finally {
       setIsRepairingImageAssets(false);
     }
@@ -1630,6 +1747,7 @@ export function useCanvasProjectLibrary({
     projectSnapshotForJsonExport,
     handleSaveDraftJsonSaveAs,
     repairCurrentProjectImageAssets,
+    rebindProjectZipHandle,
     commitCenterProjectRename,
     flushPendingProjectWrites,
   };
