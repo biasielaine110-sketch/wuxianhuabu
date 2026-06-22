@@ -319,6 +319,9 @@ export function useCanvasProjectLibrary({
     ): Promise<'saved' | 'aborted'> => {
     const json = JSON.stringify(data, null, 2);
     const hasPicker = typeof (window as any).showSaveFilePicker === 'function';
+    console.log(
+      `[saveJsonToDisk] 文件名=${filename}, hasPicker=${hasPicker}, isSecureContext=${window.isSecureContext}`
+    );
     if (hasPicker) {
       try {
         const handle = await (window as any).showSaveFilePicker({
@@ -428,6 +431,12 @@ export function useCanvasProjectLibrary({
     ): Promise<string | null> => {
       const p = list.find((x) => x.id === pid);
       const format = p?.draftDiskWriteFormat || lastDiskWriteFormatRef.current;
+      const hasZipHandle = !!lastZipFileHandleRef.current || !!(await getProjectZipBackupFileHandle(pid).catch(() => null));
+      const hasJsonHandle = !!lastJsonFileHandleRef.current || !!(await getProjectBackupFileHandle(pid).catch(() => null));
+      console.log(
+        `[flushBoundDraftBackupToDisk] pid=${pid}, format=${format}, diskSaveEstablished=${p?.diskSaveEstablished}, ` +
+        `hasZipHandle=${hasZipHandle}, hasJsonHandle=${hasJsonHandle}, filenameHint=${p?.draftStoragePathNote || '(none)'}`
+      );
       if (!p?.diskSaveEstablished || (format !== 'json' && format !== 'zip')) return null;
       if (format === 'zip') {
         let h = lastZipFileHandleRef.current as FileSystemFileHandle | null;
@@ -905,7 +914,34 @@ export function useCanvasProjectLibrary({
     // 新实现：showDirectoryPicker / showSaveFilePicker 二选一（按浏览器能力优先目录），
     // 拿不到就回退浏览器默认下载；写失败时把真实原因 alert 给用户，而不是再弹一个无效的 picker。
     try {
-      if (typeof w.showDirectoryPicker === 'function') {
+      // 跨浏览器兼容策略：
+      // 1) 优先用 showSaveFilePicker（兼容性最广，夸克 / Edge / Chrome 86+ 都支持，
+      //    secure context 下 localhost 也算 secure）。
+      // 2) 不支持再回退到 showDirectoryPicker（仅 Chrome / Edge 桌面版支持）。
+      // 3) 都不支持才降级到浏览器默认下载（link.click()）。
+      // 这样即使夸克不支持 showDirectoryPicker，也能用 showSaveFilePicker 弹出「另存为」选位置。
+      const isZip = filename.toLowerCase().endsWith('.zip');
+      const typesForSave = isZip
+        ? [
+            {
+              description: '画布备份 ZIP',
+              accept: { 'application/zip': ['.zip', '.wxcanvas.zip'] },
+            },
+          ]
+        : [{ description: 'JSON file', accept: { 'application/json': ['.json'] } }];
+      if (typeof w.showSaveFilePicker === 'function') {
+        console.log('[firstSave] 使用 showSaveFilePicker 弹另存为对话框');
+        try {
+          fileHandle = await w.showSaveFilePicker({ suggestedName: filename, types: typesForSave });
+          const writable = await fileHandle.createWritable();
+          await writable.write(diskBlob);
+          await writable.close();
+        } catch (savePickError: unknown) {
+          if ((savePickError as { name?: string })?.name === 'AbortError') return;
+          throw savePickError;
+        }
+      } else if (typeof w.showDirectoryPicker === 'function') {
+        console.log('[firstSave] 使用 showDirectoryPicker 弹文件夹选择对话框');
         try {
           dirHandle = await w.showDirectoryPicker({ mode: 'readwrite' });
           fileHandle = await dirHandle.getFileHandle(filename, { create: true });
@@ -913,23 +949,15 @@ export function useCanvasProjectLibrary({
           await writable.write(diskBlob);
           await writable.close();
         } catch (dirPickError: unknown) {
-          // 用户取消选目录：不弹任何错误，静默返回
           if ((dirPickError as { name?: string })?.name === 'AbortError') return;
-          // 目录拿到了但写失败（只读 / 配额 / 文件被占用等）：不再尝试 showSaveFilePicker
-          // —— 已经在 user gesture 外，再调 picker 必然报 user gesture 错，徒增困惑。
-          // 真实原因直接 alert 给用户，让其换目录或下载到默认下载文件夹。
           throw dirPickError;
         }
-      } else if (typeof w.showSaveFilePicker === 'function') {
-        fileHandle = await w.showSaveFilePicker({
-          suggestedName: filename,
-          types: [{ description: 'JSON file', accept: { 'application/json': ['.json'] } }],
-        });
-        const writable = await fileHandle.createWritable();
-        await writable.write(diskBlob);
-        await writable.close();
       } else {
         // 既没有 showDirectoryPicker 也没有 showSaveFilePicker：降级到浏览器默认下载。
+        console.warn(
+          '[firstSave] 当前浏览器不支持 showDirectoryPicker / showSaveFilePicker，降级为默认下载。' +
+          '请使用 Chrome / Edge 桌面版以获得文件夹选择体验。'
+        );
         downloadBlob(diskBlob, filename);
         setDraftDiskModal(null);
         const resolve = draftDiskFlowResolveRef.current;

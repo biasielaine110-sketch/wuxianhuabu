@@ -29,7 +29,11 @@ export const CanvasDraftDiskModal = memo(function CanvasDraftDiskModal({
         </h3>
         <p className="text-[11px] text-gray-500 mb-3 leading-relaxed">
           {modal.mode === 'firstSave'
-            ? '设置文件名（不含扩展名）；留空则使用当前项目名。确认后将直接下载到浏览器下载目录，保存为 .wxcanvas.zip 草稿备份，不会弹出文件夹选择窗口。如需后续定时自动覆盖，请改用 Ctrl+Alt+S 另存为绑定文件句柄。'
+            ? '设置文件名（不含扩展名）；留空则使用当前项目名。' +
+              '点击「保存到文件夹」后会弹出文件夹选择器，选中的目录里会写入 .wxcanvas.zip 草稿备份。' +
+              '若浏览器不支持文件夹选择器（夸克/部分 Chromium 派生版），则降级为弹出「另存为」对话框；' +
+              '若都不支持，则下载到默认下载目录。' +
+              '如果你只想下载而不绑定文件夹，可以点取消后用 Ctrl+Alt+S 另存为。'
             : '设置另存文件名；留空则使用与导出一致的默认名。确认后将弹出文件夹选择器（不改变当前 Ctrl+S 绑定的主草稿）。'}
         </p>
         <label className="block mb-4">
@@ -63,7 +67,7 @@ export const CanvasDraftDiskModal = memo(function CanvasDraftDiskModal({
             className="rounded-md bg-cyan-700 hover:bg-cyan-600 px-3 py-1.5 text-xs text-white"
             onClick={() => void onConfirm()}
           >
-            {modal.mode === 'firstSave' ? '保存到下载文件夹' : '选择文件夹并另存'}
+            {modal.mode === 'firstSave' ? '保存到文件夹…' : '选择文件夹并另存'}
           </button>
         </div>
       </div>
