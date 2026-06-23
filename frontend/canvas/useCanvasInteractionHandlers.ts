@@ -24,6 +24,18 @@ export type CanvasContextMenu = {
   canvasY: number;
 } | null;
 
+/**
+ * 节点级右键菜单：出现在某个节点内右键时。
+ * - nodeId: 右键所在的节点 id（一定是 selectedIds 的子集——多选时取一次）
+ * - selectedIds 快照：菜单渲染时一次性读取，避免渲染时 selectedIds 变化导致误删
+ */
+export type CanvasNodeContextMenu = {
+  x: number;
+  y: number;
+  nodeId: string;
+  selectedIds: string[];
+} | null;
+
 export type UseCanvasInteractionHandlersOptions = {
   containerRef: RefObject<HTMLDivElement>;
   fileInputRef: RefObject<HTMLInputElement>;
@@ -35,8 +47,10 @@ export type UseCanvasInteractionHandlersOptions = {
   canvasMode: string;
   activeTool: string;
   contextMenu: CanvasContextMenu;
+  nodeContextMenu: CanvasNodeContextMenu;
   pendingEdgeSourceId: string | null;
   setContextMenu: Dispatch<SetStateAction<CanvasContextMenu>>;
+  setNodeContextMenu: Dispatch<SetStateAction<CanvasNodeContextMenu>>;
   setSelectedIds: Dispatch<SetStateAction<string[]>>;
   setIsSelecting: Dispatch<SetStateAction<boolean>>;
   setSelectionBox: Dispatch<SetStateAction<{ x: number; y: number; width: number; height: number } | null>>;
@@ -106,8 +120,10 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
     canvasMode,
     activeTool,
     contextMenu,
+    nodeContextMenu,
     pendingEdgeSourceId,
     setContextMenu,
+    setNodeContextMenu,
     setSelectedIds,
     setIsSelecting,
     setSelectionBox,
@@ -171,6 +187,7 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
     }
     if (e.cancelable) e.preventDefault();
     setContextMenu(null);
+    setNodeContextMenu(null);
 
     const zoomSensitivity = 0.001;
     const delta = -e.deltaY * zoomSensitivity;
@@ -204,6 +221,7 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
     const target = e.target as HTMLElement;
     if (target.closest('[data-node-root]')) return;
     setContextMenu(null);
+    setNodeContextMenu(null);
 
     if (activeTool === 'pan' || e.button === 1) {
       activePointerTypeRef.current = 'canvas';
@@ -368,15 +386,29 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     if (fullscreenImage || canvasMode === 'audit') return;
-    // 节点内右键不弹出创建面板
     const target = e.target as HTMLElement;
-    if (target.closest('[data-node-root]')) return;
+    // 节点内右键 → 弹出节点级菜单（删除/复制等）
+    const nodeRoot = target.closest('[data-node-root="true"]') as HTMLElement | null;
+    if (nodeRoot) {
+      const nodeId = nodeRoot.getAttribute('data-node-id');
+      if (!nodeId) return;
+      // 关闭画布空白菜单
+      setContextMenu(null);
+      // 选中该节点（如果未选中），多选时尊重用户已有的 selectedIds
+      const currentSelected = selectedIdsRef.current;
+      const ids = currentSelected.includes(nodeId) ? currentSelected : [nodeId];
+      setSelectedIds(ids);
+      setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeId, selectedIds: ids });
+      return;
+    }
+    // 画布空白右键 → 关闭节点菜单，弹出创建面板
+    setNodeContextMenu(null);
     const rect = containerRef.current!.getBoundingClientRect();
     const tf = transformRef.current;
     const canvasX = (e.clientX - rect.left - tf.x) / tf.scale;
     const canvasY = (e.clientY - rect.top - tf.y) / tf.scale;
     setContextMenu({ x: e.clientX, y: e.clientY, canvasX, canvasY });
-  }, [fullscreenImage, canvasMode]);
+  }, [fullscreenImage, canvasMode, setContextMenu, setNodeContextMenu, setSelectedIds]);
 
   const handleCanvasDoubleClick = useCallback((e: React.MouseEvent) => {
     if (fullscreenImage || canvasMode === 'audit') return;
@@ -494,6 +526,7 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
       }
 
       setContextMenu(null);
+      setNodeContextMenu(null);
 
       if (isInteractiveSurface) {
         return;
@@ -705,7 +738,8 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
     if (!contextMenu) return;
     addNodeAtCanvasPosition(type, contextMenu.canvasX, contextMenu.canvasY);
     setContextMenu(null);
-  }, [contextMenu, addNodeAtCanvasPosition, setContextMenu]);
+    setNodeContextMenu(null);
+  }, [contextMenu, addNodeAtCanvasPosition, setContextMenu, setNodeContextMenu]);
 
   const handleImportImageClick = useCallback(() => {
     if (!contextMenu) return;
@@ -715,7 +749,8 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
     }
     fileInputRef.current?.click();
     setContextMenu(null);
-  }, [contextMenu, pendingEdgeSourceId, fileInputRef, setContextMenu]);
+    setNodeContextMenu(null);
+  }, [contextMenu, pendingEdgeSourceId, fileInputRef, setContextMenu, setNodeContextMenu]);
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

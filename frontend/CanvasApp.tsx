@@ -33,6 +33,7 @@ import {
   PanoramaIcon,
   SettingsIcon,
   TextIcon,
+  TrashIcon,
   VideoIcon,
   WandIcon,
   WidePanoramaIcon,
@@ -255,7 +256,33 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
 
   // Context Menu & Clipboard
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, canvasX: number, canvasY: number } | null>(null);
+  /**
+   * 节点内右键弹出的菜单：仅出现在某个节点上，包含「删除节点 / 复制 / 删除选中 (N)」等。
+   * 选区快照 selectedIds 在弹出时一次性确定，避免菜单期间外部修改 selectedIds 导致误删。
+   */
+  const [nodeContextMenu, setNodeContextMenu] = useState<
+    { x: number; y: number; nodeId: string; selectedIds: string[] } | null
+  >(null);
   const [clipboard, setClipboard] = useState<CanvasNode | null>(null);
+  const nodeContextMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // 节点右键菜单：点击菜单外任意位置（含右键到菜单外）时关闭。
+  // 在 capture 阶段监听，避免被画布 onPointerDown / stopPropagation 拦截。
+  useEffect(() => {
+    if (!nodeContextMenu) return;
+    const close = (e: PointerEvent | MouseEvent) => {
+      if ((e as MouseEvent).button === 2) return;
+      const el = nodeContextMenuRef.current;
+      if (el && el.contains(e.target as Node)) return;
+      setNodeContextMenu(null);
+    };
+    window.addEventListener('pointerdown', close, true);
+    window.addEventListener('mousedown', close, true);
+    return () => {
+      window.removeEventListener('pointerdown', close, true);
+      window.removeEventListener('mousedown', close, true);
+    };
+  }, [nodeContextMenu]);
 
   // 全局大编辑框（所有节点的 textarea 双击弹出）
   const [bigEditorOpen, setBigEditorOpen] = useState(false);
@@ -1372,8 +1399,10 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     canvasMode,
     activeTool,
     contextMenu,
+    nodeContextMenu,
     pendingEdgeSourceId,
     setContextMenu,
+    setNodeContextMenu,
     setSelectedIds,
     setIsSelecting,
     setSelectionBox,
@@ -2149,6 +2178,39 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
           </button>
         </div>
       )}
+
+    {/* 节点右键菜单（在节点上右键出现） */}
+    {nodeContextMenu && canvasMode !== 'audit' && (
+      <div
+        ref={nodeContextMenuRef}
+        className="absolute z-50 bg-[#252525] border border-[#444] rounded-lg shadow-2xl py-1 min-w-[180px] overflow-hidden canvas-chrome-150"
+        style={{ left: nodeContextMenu.x, top: nodeContextMenu.y, transform: 'scale(0.73)', transformOrigin: 'top left' }}
+        onPointerDown={e => e.stopPropagation()}
+        onContextMenu={e => e.preventDefault()}
+      >
+        {nodeContextMenu.selectedIds.length > 1 ? (
+          <button
+            className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-rose-600 hover:text-white flex items-center gap-2"
+            onPointerDown={() => {
+              handleDeleteNodes(nodeContextMenu.selectedIds);
+              setNodeContextMenu(null);
+            }}
+          >
+            <TrashIcon size={14} /> 删除选中节点（{nodeContextMenu.selectedIds.length}）
+          </button>
+        ) : (
+          <button
+            className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-rose-600 hover:text-white flex items-center gap-2"
+            onPointerDown={() => {
+              handleDeleteNode(nodeContextMenu.nodeId);
+              setNodeContextMenu(null);
+            }}
+          >
+            <TrashIcon size={14} /> 删除节点
+          </button>
+        )}
+      </div>
+    )}
 
       {/* UI Overlay: 快捷键 + 工具栏（左上） */}
       <div className={`absolute top-6 left-6 z-40 flex flex-col gap-1.5 ${canvasMode === 'audit' ? 'hidden' : ''}`}>

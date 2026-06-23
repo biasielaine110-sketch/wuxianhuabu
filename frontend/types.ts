@@ -158,6 +158,12 @@ export interface AnnotationNode extends CanvasNode {
   selectedAnnotationId?: string;
   /** 导出缩放比例（100/70/50），脱离视野/失焦后保留 */
   exportScale?: number;
+  /**
+   * 源图片在画布上的显示透明度（0–1），只影响当前节点的显示与最终导出。
+   * 工具栏提供 20/30/50/70/80% 5 个快捷档位，未设置时视为 1.0（不透明）。
+   * 持久化到节点上，离开视口再次挂载可恢复。
+   */
+  sourceOpacity?: number;
 }
 
 export interface Annotation {

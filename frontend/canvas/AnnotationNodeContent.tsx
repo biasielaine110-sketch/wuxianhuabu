@@ -36,6 +36,20 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
   const [isFlipping, setIsFlipping] = useState(false);
   const [currentTool, setCurrentTool] = useState<'rect' | 'circle' | 'arrow' | 'pen' | 'text' | 'fillRect' | 'fillCircle' | 'crop' | 'move'>('rect');
   const [exportScale, setExportScale] = useState<number>(node.exportScale ?? 100);
+  /**
+   * 源图片在节点画布上的透明度（0–1）。
+   * - 与 node.sourceOpacity 双向同步：toolbar 点击后写回 node 让视口外/重新挂载后保留。
+   * - 之所以同时维护 useState：频繁重渲（用户连续点 5 个按钮）时不必每次都触发 onUpdate，
+   *   只在最终值稳定后写回 node。
+   * - 默认 1.0 = 完全不透明，与原行为一致。
+   */
+  const [sourceOpacity, setSourceOpacityState] = useState<number>(node.sourceOpacity ?? 1);
+  const sourceOpacityRef = useRef<number>(node.sourceOpacity ?? 1);
+  useEffect(() => { sourceOpacityRef.current = sourceOpacity; }, [sourceOpacity]);
+  const setSourceOpacity = useCallback((v: number) => {
+    setSourceOpacityState(v);
+    onUpdate({ sourceOpacity: v });
+  }, [onUpdate]);
   const [currentColor, setCurrentColor] = useState('#ff6b6b');
   const [fillOpacity, setFillOpacity] = useState(0.45);
   const fillOpacityRef = useRef(0.45);
@@ -47,6 +61,25 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
   useEffect(() => {
     cropPendingRef.current = cropPending;
   }, [cropPending]);
+
+  /**
+   * 用保存/恢复的方式，把当前 ctx 的 globalAlpha 临时改为 sourceOpacityRef。
+   * 仅影响紧随其后的 drawImage；调用方在 drawImage 之后负责恢复。
+   * 这样能保证画布上后续的标注 / 裁切遮罩仍以默认 alpha=1 绘制。
+   */
+  const drawSourceImageWithOpacity = useCallback(
+    (ctx: CanvasRenderingContext2D, fn: () => void) => {
+      const prev = ctx.globalAlpha;
+      const op = sourceOpacityRef.current;
+      ctx.globalAlpha = op;
+      try {
+        fn();
+      } finally {
+        ctx.globalAlpha = prev;
+      }
+    },
+    []
+  );
   const cropDragRef = useRef<{ x: number; y: number; endX: number; endY: number } | null>(null);
   type CropAdjustMode = 'move' | 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w';
   const cropAdjustRef = useRef<{ mode: CropAdjustMode; startX: number; startY: number; orig: { x: number; y: number; w: number; h: number } } | null>(null);
@@ -755,7 +788,9 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       // 使用缓存或加载图片
       if (imageCacheRef.current && imageCacheRef.current.src === imgSrc) {
         const cached = imageCacheRef.current;
-        ctx.drawImage(cached.img, cached.x, cached.y, cached.w, cached.h);
+        drawSourceImageWithOpacity(ctx, () => {
+          ctx.drawImage(cached.img, cached.x, cached.y, cached.w, cached.h);
+        });
         renderAnnotations(ctx);
         drawCropOverlay(ctx, canvas.width, canvas.height);
       } else {
@@ -772,7 +807,9 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
           const x = (canvas.width - w) / 2;
           const y = (canvas.height - h) / 2;
           imageCacheRef.current = { src: imgSrc, img, x, y, w, h };
-          ctx.drawImage(img, x, y, w, h);
+          drawSourceImageWithOpacity(ctx, () => {
+            ctx.drawImage(img, x, y, w, h);
+          });
           renderAnnotations(ctx);
           drawCropOverlay(ctx, canvas.width, canvas.height);
           console.log('[annotation canvas] 新图绘制完成, src 前 40 字=', imgSrc.slice(0, 40));
@@ -823,7 +860,9 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       ctx.beginPath();
       ctx.rect(cx, cy, cwid, chgt);
       ctx.clip();
-      ctx.drawImage(cached.img, cached.x, cached.y, cached.w, cached.h);
+      drawSourceImageWithOpacity(ctx, () => {
+        ctx.drawImage(cached.img, cached.x, cached.y, cached.w, cached.h);
+      });
       ctx.restore();
     }
     // 选区淡蓝高亮
@@ -1009,6 +1048,15 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
     renderCanvas();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thumbTick]);
+
+  // 源图片透明度变化时同步重渲内嵌/全屏画布。
+  // - renderCanvas: 内嵌预览重新绘制带透明度的图
+  // - renderFsCanvas: 全屏模式若已打开也需跟随
+  useEffect(() => {
+    renderCanvas();
+    if (isFullscreenAnnotation) renderFsCanvas();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceOpacity]);
 
   // 当标注变化时重新渲染
   useEffect(() => {
@@ -1489,7 +1537,9 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
 
     if (fsImageRef.current) {
       const cached = fsImageRef.current;
-      ctx.drawImage(cached.img, cached.x, cached.y, cached.w, cached.h);
+      drawSourceImageWithOpacity(ctx, () => {
+        ctx.drawImage(cached.img, cached.x, cached.y, cached.w, cached.h);
+      });
     }
 
     // 绘制已保存的标注
@@ -1536,7 +1586,9 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       ctx.beginPath();
       ctx.rect(cx, cy, cwid, chgt);
       ctx.clip();
-      ctx.drawImage(cached.img, cached.x, cached.y, cached.w, cached.h);
+      drawSourceImageWithOpacity(ctx, () => {
+        ctx.drawImage(cached.img, cached.x, cached.y, cached.w, cached.h);
+      });
       ctx.restore();
     }
     ctx.fillStyle = 'rgba(100, 180, 255, 0.35)';
@@ -2291,7 +2343,9 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
     out.height = Math.max(1, Math.round(sh));
     const octx = out.getContext('2d');
     if (!octx) return;
-    octx.drawImage(img, sx, sy, sw, sh, 0, 0, out.width, out.height);
+    drawSourceImageWithOpacity(octx, () => {
+      octx.drawImage(img, sx, sy, sw, sh, 0, 0, out.width, out.height);
+    });
     const base64 = out.toDataURL('image/jpeg', 0.95).split(',')[1];
     onCreateImageNode([base64], node.x + node.width + 50, node.y);
     setFsCropPending(null);
@@ -2338,7 +2392,9 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       out.height = Math.max(1, Math.round(sh));
       const octx = out.getContext('2d');
       if (!octx) return;
-      octx.drawImage(img, sx, sy, sw, sh, 0, 0, out.width, out.height);
+      drawSourceImageWithOpacity(octx, () => {
+        octx.drawImage(img, sx, sy, sw, sh, 0, 0, out.width, out.height);
+      });
       const base64 = out.toDataURL('image/jpeg', 0.95).split(',')[1];
       onCreateImageNode([base64], node.x + node.width + 50, node.y);
       setCropPending(null);
@@ -2381,8 +2437,10 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       const outCtx = tempCanvas.getContext('2d');
       if (!outCtx) return;
 
-      // 先绘制原图（缩放后）
-      outCtx.drawImage(img, 0, 0, img.width, img.height, 0, 0, outW, outH);
+      // 先绘制原图（缩放后），带透明度
+      drawSourceImageWithOpacity(outCtx, () => {
+        outCtx.drawImage(img, 0, 0, img.width, img.height, 0, 0, outW, outH);
+      });
 
       // 如果有标注，才转换并绘制标注
       const cssWidth = canvas.width;
@@ -2879,6 +2937,30 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
             </select>
           </div>
         )}
+
+        {/* 源图片透明度（5 档快捷 + 100% 恢复）：作用于当前画布与最终导出图。 */}
+        <div className="flex items-center gap-1">
+          <span className="text-[10px] text-gray-400">图透明度:</span>
+          {[20, 30, 50, 70, 80, 100].map((p) => {
+            const v = p / 100;
+            const active = Math.abs(sourceOpacity - v) < 1e-3;
+            return (
+              <button
+                key={p}
+                type="button"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => setSourceOpacity(v)}
+                title={`源图片透明度 ${p}%`}
+                className={`px-1.5 py-0.5 rounded text-[10px] border ${active
+                  ? 'bg-blue-600 border-blue-500 text-white'
+                  : 'bg-[#333] border-[#444] text-gray-300 hover:bg-[#444]'
+                }`}
+              >
+                {p}%
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* 操作按钮 */}
