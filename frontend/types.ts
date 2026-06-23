@@ -164,6 +164,12 @@ export interface AnnotationNode extends CanvasNode {
    * 持久化到节点上，离开视口再次挂载可恢复。
    */
   sourceOpacity?: number;
+  /**
+   * 源图片的高斯模糊程度（像素值，对应 CSS `ctx.filter = blur(Npx)`）。
+   * 工具栏提供 20/30/50/70/80 5 档（数值代表模糊半径，0 = 不模糊）。
+   * 同 sourceOpacity 一样作用于预览与最终导出图，持久化到节点。
+   */
+  sourceBlur?: number;
 }
 
 export interface Annotation {

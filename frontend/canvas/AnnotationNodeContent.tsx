@@ -38,8 +38,8 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
   const [exportScale, setExportScale] = useState<number>(node.exportScale ?? 100);
   /**
    * 源图片在节点画布上的透明度（0–1）。
-   * - 与 node.sourceOpacity 双向同步：toolbar 点击后写回 node 让视口外/重新挂载后保留。
-   * - 之所以同时维护 useState：频繁重渲（用户连续点 5 个按钮）时不必每次都触发 onUpdate，
+   * - 与 node.sourceOpacity 双向同步：toolbar 下拉切换后写回 node 让视口外/重新挂载后保留。
+   * - 之所以同时维护 useState：频繁重渲（用户连续切换下拉）时不必每次都触发 onUpdate，
    *   只在最终值稳定后写回 node。
    * - 默认 1.0 = 完全不透明，与原行为一致。
    */
@@ -49,6 +49,20 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
   const setSourceOpacity = useCallback((v: number) => {
     setSourceOpacityState(v);
     onUpdate({ sourceOpacity: v });
+  }, [onUpdate]);
+
+  /**
+   * 源图片的高斯模糊半径（像素）。
+   * - 0 = 不模糊（默认），与原行为一致。
+   * - 工具栏提供 0/20/30/50/70/80 像素 6 档。
+   * - 同步到 node.sourceBlur，节点失焦/重新挂载可恢复。
+   */
+  const [sourceBlur, setSourceBlurState] = useState<number>(node.sourceBlur ?? 0);
+  const sourceBlurRef = useRef<number>(node.sourceBlur ?? 0);
+  useEffect(() => { sourceBlurRef.current = sourceBlur; }, [sourceBlur]);
+  const setSourceBlur = useCallback((v: number) => {
+    setSourceBlurState(v);
+    onUpdate({ sourceBlur: v });
   }, [onUpdate]);
   const [currentColor, setCurrentColor] = useState('#ff6b6b');
   const [fillOpacity, setFillOpacity] = useState(0.45);
@@ -63,19 +77,26 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
   }, [cropPending]);
 
   /**
-   * 用保存/恢复的方式，把当前 ctx 的 globalAlpha 临时改为 sourceOpacityRef。
+   * 用保存/恢复的方式，把 ctx 临时改成「源图专用」效果（globalAlpha + filter），
    * 仅影响紧随其后的 drawImage；调用方在 drawImage 之后负责恢复。
-   * 这样能保证画布上后续的标注 / 裁切遮罩仍以默认 alpha=1 绘制。
+   * 这样能保证画布上后续的标注 / 裁切遮罩仍以默认 alpha=1、filter=none 绘制。
+   *
+   * - sourceOpacity: 0–1，1 = 不透明（默认）
+   * - sourceBlur: 像素值，0 = 不模糊（默认）
+   *   ctx.filter='blur(Npx)' 在 Chrome/Edge/Firefox/Safari 均原生支持。
    */
-  const drawSourceImageWithOpacity = useCallback(
+  const drawSourceImageWithEffects = useCallback(
     (ctx: CanvasRenderingContext2D, fn: () => void) => {
-      const prev = ctx.globalAlpha;
-      const op = sourceOpacityRef.current;
-      ctx.globalAlpha = op;
+      const prevAlpha = ctx.globalAlpha;
+      const prevFilter = ctx.filter;
+      ctx.globalAlpha = sourceOpacityRef.current;
+      const blur = sourceBlurRef.current;
+      ctx.filter = blur > 0 ? `blur(${blur}px)` : 'none';
       try {
         fn();
       } finally {
-        ctx.globalAlpha = prev;
+        ctx.globalAlpha = prevAlpha;
+        ctx.filter = prevFilter;
       }
     },
     []
@@ -788,7 +809,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       // 使用缓存或加载图片
       if (imageCacheRef.current && imageCacheRef.current.src === imgSrc) {
         const cached = imageCacheRef.current;
-        drawSourceImageWithOpacity(ctx, () => {
+        drawSourceImageWithEffects(ctx, () => {
           ctx.drawImage(cached.img, cached.x, cached.y, cached.w, cached.h);
         });
         renderAnnotations(ctx);
@@ -807,7 +828,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
           const x = (canvas.width - w) / 2;
           const y = (canvas.height - h) / 2;
           imageCacheRef.current = { src: imgSrc, img, x, y, w, h };
-          drawSourceImageWithOpacity(ctx, () => {
+          drawSourceImageWithEffects(ctx, () => {
             ctx.drawImage(img, x, y, w, h);
           });
           renderAnnotations(ctx);
@@ -860,7 +881,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       ctx.beginPath();
       ctx.rect(cx, cy, cwid, chgt);
       ctx.clip();
-      drawSourceImageWithOpacity(ctx, () => {
+      drawSourceImageWithEffects(ctx, () => {
         ctx.drawImage(cached.img, cached.x, cached.y, cached.w, cached.h);
       });
       ctx.restore();
@@ -1057,6 +1078,13 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
     if (isFullscreenAnnotation) renderFsCanvas();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceOpacity]);
+
+  // 源图片高斯模糊变化时同步重渲内嵌/全屏画布。
+  useEffect(() => {
+    renderCanvas();
+    if (isFullscreenAnnotation) renderFsCanvas();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceBlur]);
 
   // 当标注变化时重新渲染
   useEffect(() => {
@@ -1537,7 +1565,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
 
     if (fsImageRef.current) {
       const cached = fsImageRef.current;
-      drawSourceImageWithOpacity(ctx, () => {
+      drawSourceImageWithEffects(ctx, () => {
         ctx.drawImage(cached.img, cached.x, cached.y, cached.w, cached.h);
       });
     }
@@ -1586,7 +1614,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       ctx.beginPath();
       ctx.rect(cx, cy, cwid, chgt);
       ctx.clip();
-      drawSourceImageWithOpacity(ctx, () => {
+      drawSourceImageWithEffects(ctx, () => {
         ctx.drawImage(cached.img, cached.x, cached.y, cached.w, cached.h);
       });
       ctx.restore();
@@ -2343,7 +2371,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
     out.height = Math.max(1, Math.round(sh));
     const octx = out.getContext('2d');
     if (!octx) return;
-    drawSourceImageWithOpacity(octx, () => {
+    drawSourceImageWithEffects(octx, () => {
       octx.drawImage(img, sx, sy, sw, sh, 0, 0, out.width, out.height);
     });
     const base64 = out.toDataURL('image/jpeg', 0.95).split(',')[1];
@@ -2392,7 +2420,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       out.height = Math.max(1, Math.round(sh));
       const octx = out.getContext('2d');
       if (!octx) return;
-      drawSourceImageWithOpacity(octx, () => {
+      drawSourceImageWithEffects(octx, () => {
         octx.drawImage(img, sx, sy, sw, sh, 0, 0, out.width, out.height);
       });
       const base64 = out.toDataURL('image/jpeg', 0.95).split(',')[1];
@@ -2438,7 +2466,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       if (!outCtx) return;
 
       // 先绘制原图（缩放后），带透明度
-      drawSourceImageWithOpacity(outCtx, () => {
+      drawSourceImageWithEffects(outCtx, () => {
         outCtx.drawImage(img, 0, 0, img.width, img.height, 0, 0, outW, outH);
       });
 
@@ -2821,31 +2849,72 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
         ))}
       </div>
 
-      {/* 缩放按钮 */}
-      <div className="flex items-center gap-1 shrink-0">
-        <span className="text-[10px] text-gray-400">缩放:</span>
-        <select
-          value={exportScale}
-          onPointerDown={(e) => e.stopPropagation()}
-          onChange={(e) => {
-            const v = Number(e.target.value);
-            setExportScale(v);
-            onUpdate({ exportScale: v });
-          }}
-          className="rounded border border-[#444] bg-[#333] px-1 py-0.5 text-[10px] text-gray-200 outline-none cursor-pointer"
-        >
-          <option value="100">100%</option>
-          <option value="85">85%</option>
-          <option value="70">70%</option>
-          <option value="60">60%</option>
-          <option value="50">50%</option>
-          <option value="40">40%</option>
-          <option value="35">35%</option>
-          <option value="25">25%</option>
-          <option value="10">10%</option>
-          <option value="5">5%</option>
-          <option value="2">2%</option>
-        </select>
+      {/* 缩放 / 图透明度 / 高斯模糊 三个 select 同行（与 order: 2 的颜色/字号工具栏并列） */}
+      <div className="flex items-center gap-2 shrink-0 flex-wrap" style={{ order: 2 }}>
+        {/* 缩放比例 */}
+        <div className="flex items-center gap-1">
+          <span className="text-[10px] text-gray-400">缩放:</span>
+          <select
+            value={exportScale}
+            onPointerDown={(e) => e.stopPropagation()}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              setExportScale(v);
+              onUpdate({ exportScale: v });
+            }}
+            className="rounded border border-[#444] bg-[#333] px-1 py-0.5 text-[10px] text-gray-200 outline-none cursor-pointer"
+          >
+            <option value="100">100%</option>
+            <option value="85">85%</option>
+            <option value="70">70%</option>
+            <option value="60">60%</option>
+            <option value="50">50%</option>
+            <option value="40">40%</option>
+            <option value="35">35%</option>
+            <option value="25">25%</option>
+            <option value="10">10%</option>
+            <option value="5">5%</option>
+            <option value="2">2%</option>
+          </select>
+        </div>
+
+        {/* 源图片透明度（5 档快捷 + 100% 恢复）：作用于当前画布与最终导出图。 */}
+        <div className="flex items-center gap-1">
+          <span className="text-[10px] text-gray-400">图透明度:</span>
+          <select
+            value={Math.round(sourceOpacity * 100)}
+            onPointerDown={(e) => e.stopPropagation()}
+            onChange={(e) => setSourceOpacity(Number(e.target.value) / 100)}
+            title="源图片透明度（影响预览与最终导出图）"
+            className="rounded border border-[#444] bg-[#333] px-1 py-0.5 text-[10px] text-gray-200 outline-none cursor-pointer"
+          >
+            <option value="100">100%</option>
+            <option value="80">80%</option>
+            <option value="70">70%</option>
+            <option value="50">50%</option>
+            <option value="30">30%</option>
+            <option value="20">20%</option>
+          </select>
+        </div>
+
+        {/* 源图片高斯模糊（5 档快捷 + 0 关闭）：作用于当前画布与最终导出图。 */}
+        <div className="flex items-center gap-1">
+          <span className="text-[10px] text-gray-400">高斯模糊:</span>
+          <select
+            value={sourceBlur}
+            onPointerDown={(e) => e.stopPropagation()}
+            onChange={(e) => setSourceBlur(Number(e.target.value))}
+            title="源图片高斯模糊半径（px，影响预览与最终导出图）"
+            className="rounded border border-[#444] bg-[#333] px-1 py-0.5 text-[10px] text-gray-200 outline-none cursor-pointer"
+          >
+            <option value="0">0（无）</option>
+            <option value="20">20</option>
+            <option value="30">30</option>
+            <option value="50">50</option>
+            <option value="70">70</option>
+            <option value="80">80</option>
+          </select>
+        </div>
       </div>
 
       {/* 颜色和字体大小 */}
@@ -2937,30 +3006,6 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
             </select>
           </div>
         )}
-
-        {/* 源图片透明度（5 档快捷 + 100% 恢复）：作用于当前画布与最终导出图。 */}
-        <div className="flex items-center gap-1">
-          <span className="text-[10px] text-gray-400">图透明度:</span>
-          {[20, 30, 50, 70, 80, 100].map((p) => {
-            const v = p / 100;
-            const active = Math.abs(sourceOpacity - v) < 1e-3;
-            return (
-              <button
-                key={p}
-                type="button"
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={() => setSourceOpacity(v)}
-                title={`源图片透明度 ${p}%`}
-                className={`px-1.5 py-0.5 rounded text-[10px] border ${active
-                  ? 'bg-blue-600 border-blue-500 text-white'
-                  : 'bg-[#333] border-[#444] text-gray-300 hover:bg-[#444]'
-                }`}
-              >
-                {p}%
-              </button>
-            );
-          })}
-        </div>
       </div>
 
       {/* 操作按钮 */}
