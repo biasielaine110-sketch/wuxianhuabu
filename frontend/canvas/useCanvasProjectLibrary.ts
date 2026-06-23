@@ -1122,6 +1122,10 @@ export function useCanvasProjectLibrary({
       } else {
         downloadBlob(new Blob([JSON.stringify(payloadFallback, null, 2)], { type: 'application/json' }), filename);
       }
+      setDraftDiskModal(null);
+      const resolve = draftDiskFlowResolveRef.current;
+      draftDiskFlowResolveRef.current = null;
+      resolve?.(true);
       return;
     }
 
@@ -1159,6 +1163,10 @@ export function useCanvasProjectLibrary({
             `已自动改为浏览器默认下载路径，请到默认下载目录查找。${detail}`
         );
         downloadBlob(blob, filename);
+        setDraftDiskModal(null);
+        const resolve = draftDiskFlowResolveRef.current;
+        draftDiskFlowResolveRef.current = null;
+        resolve?.(true);
         return;
       }
     } else {
@@ -1177,6 +1185,10 @@ export function useCanvasProjectLibrary({
             `已自动改为浏览器默认下载路径。${detail}`
         );
         downloadBlob(new Blob([json], { type: 'application/json' }), filename);
+        setDraftDiskModal(null);
+        const resolve = draftDiskFlowResolveRef.current;
+        draftDiskFlowResolveRef.current = null;
+        resolve?.(true);
         return;
       }
     }
