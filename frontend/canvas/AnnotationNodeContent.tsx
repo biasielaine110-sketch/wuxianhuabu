@@ -80,30 +80,68 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
   }, [cropPending]);
 
   /**
-   * 用保存/恢复的方式，把 ctx 临时改成「源图专用」效果（globalAlpha + filter），
-   * 仅影响紧随其后的 drawImage；调用方在 drawImage 之后负责恢复。
-   * 这样能保证画布上后续的标注 / 裁切遮罩仍以默认 alpha=1、filter=none 绘制。
+   * 在主画布上绘制「带源图效果」的图像。
    *
-   * - sourceOpacity: 0–1，1 = 不透明（默认）
-   * - sourceBlurPercent: 0–100，0 = 不模糊（默认）；实际像素 = ctx.canvas.width * percent / 100，
-   *   因此视觉模糊量随画布尺寸等比缩放，内嵌/全屏/导出都按各自画布宽度计算。
-   *   ctx.filter='blur(Npx)' 在 Chrome/Edge/Firefox/Safari 均原生支持。
+   * - sourceBlurPercent：高斯模糊百分比（0–100），以 `ctx.canvas.width * percent / 100`
+   *   为像素半径，通过 `ctx.filter='blur(Npx)'` 走原生实现，行为与画布尺寸等比缩放。
+   * - sourceOpacity：源图整体透明度档位（0–1）。
+   *   关键点：**不要直接把源图以半透形式画到主画布上**，否则源图的"白"会变得透到画布
+   *   自身的深色底（#1a1a1a）上去，导致视觉上"透出黑底"。
+   *   正确做法是先在 off-screen 上以白底为底、以 `globalAlpha = sourceOpacity` 把
+   *   源图合成上去，得到一张已经"和白色滤色"过的位图（白色部分接近白，原色被白光
+   *   提亮后变浅，即"白色滤色"效果），再以 alpha=1 / filter=none 一次性画回主画布。
+   *   模糊也在 off-screen 上做，避免对主画布后续的标注 / 裁切遮罩产生副作用。
+   *
+   * 实现策略：调用方传入 `fn: (target: CanvasRenderingContext2D) => void`，
+   * 内部把 `target` 临时指向 off-screen ctx（与主画布同尺寸 / 同坐标系），
+   * 让 fn 在其上以 `target.drawImage(...)` 形式绘制源图；绘制完成后本函数负责
+   * 恢复 off-screen 状态，并把最终位图以 alpha=1 画回主 ctx。
    */
   const drawSourceImageWithEffects = useCallback(
-    (ctx: CanvasRenderingContext2D, fn: () => void) => {
-      const prevAlpha = ctx.globalAlpha;
-      const prevFilter = ctx.filter;
-      ctx.globalAlpha = sourceOpacityRef.current;
+    (ctx: CanvasRenderingContext2D, fn: (target: CanvasRenderingContext2D) => void) => {
+      const opacity = sourceOpacityRef.current;
       const percent = sourceBlurRef.current;
+      const target = ctx.canvas;
+      if (!target) {
+        fn(ctx);
+        return;
+      }
+
+      const off = document.createElement('canvas');
+      off.width = target.width;
+      off.height = target.height;
+      const octx = off.getContext('2d');
+      if (!octx) {
+        fn(ctx);
+        return;
+      }
+
+      octx.save();
+      // 1) 铺白底
+      octx.fillStyle = '#ffffff';
+      octx.fillRect(0, 0, off.width, off.height);
+      // 2) 设置透明 + 模糊
+      octx.globalAlpha = opacity;
       if (percent > 0) {
-        const width = ctx.canvas?.width ?? 0;
-        const blurPx = (width * percent) / 100;
-        ctx.filter = blurPx > 0 ? `blur(${blurPx}px)` : 'none';
+        const blurPx = (off.width * percent) / 100;
+        octx.filter = blurPx > 0 ? `blur(${blurPx}px)` : 'none';
       } else {
-        ctx.filter = 'none';
+        octx.filter = 'none';
       }
       try {
-        fn();
+        // 3) 调用方在 off-screen 上画源图（坐标系同主画布，因为尺寸一致）
+        fn(octx);
+      } finally {
+        octx.restore();
+      }
+
+      // 4) 把合成好的位图写回主画布（alpha=1、filter=none）
+      const prevAlpha = ctx.globalAlpha;
+      const prevFilter = ctx.filter;
+      ctx.globalAlpha = 1;
+      ctx.filter = 'none';
+      try {
+        ctx.drawImage(off, 0, 0);
       } finally {
         ctx.globalAlpha = prevAlpha;
         ctx.filter = prevFilter;
@@ -819,8 +857,8 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       // 使用缓存或加载图片
       if (imageCacheRef.current && imageCacheRef.current.src === imgSrc) {
         const cached = imageCacheRef.current;
-        drawSourceImageWithEffects(ctx, () => {
-          ctx.drawImage(cached.img, cached.x, cached.y, cached.w, cached.h);
+        drawSourceImageWithEffects(ctx, (target) => {
+          target.drawImage(cached.img, cached.x, cached.y, cached.w, cached.h);
         });
         renderAnnotations(ctx);
         drawCropOverlay(ctx, canvas.width, canvas.height);
@@ -838,8 +876,8 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
           const x = (canvas.width - w) / 2;
           const y = (canvas.height - h) / 2;
           imageCacheRef.current = { src: imgSrc, img, x, y, w, h };
-          drawSourceImageWithEffects(ctx, () => {
-            ctx.drawImage(img, x, y, w, h);
+          drawSourceImageWithEffects(ctx, (target) => {
+            target.drawImage(img, x, y, w, h);
           });
           renderAnnotations(ctx);
           drawCropOverlay(ctx, canvas.width, canvas.height);
@@ -858,7 +896,10 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
     }
   };
 
-  /** 裁切蒙层：拖拽中与待确认选区（保留原图可见） */
+  /** 裁切蒙层：拖拽中与待确认选区（保留原图可见）
+   *  顺序：源图（含白底滤色）已由 renderCanvas 主体画到 ctx 上，此处只画"选区外的暗色蒙版"，
+   *  再叠选区淡蓝高亮与边框把手。
+   */
   const drawCropOverlay = (ctx: CanvasRenderingContext2D, cw: number, ch: number) => {
     let cx: number;
     let cy: number;
@@ -879,23 +920,13 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       return;
     }
     if (cwid < 2 || chgt < 2) return;
-    const cached = imageCacheRef.current;
     ctx.save();
-    // 暗色遮罩盖住整张画布
+    // 选区外的暗色蒙版：先盖整张，再用 evenodd 反向挖掉选区
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
-    ctx.fillRect(0, 0, cw, ch);
-    // 裁切选区内先清再重绘原图部分，避免 clearRect 把底图擦掉
-    ctx.clearRect(cx, cy, cwid, chgt);
-    if (cached) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(cx, cy, cwid, chgt);
-      ctx.clip();
-      drawSourceImageWithEffects(ctx, () => {
-        ctx.drawImage(cached.img, cached.x, cached.y, cached.w, cached.h);
-      });
-      ctx.restore();
-    }
+    ctx.beginPath();
+    ctx.rect(0, 0, cw, ch);
+    ctx.rect(cx, cy, cwid, chgt);
+    ctx.fill('evenodd');
     // 选区淡蓝高亮
     ctx.fillStyle = 'rgba(100, 180, 255, 0.35)';
     ctx.fillRect(cx, cy, cwid, chgt);
@@ -1575,8 +1606,8 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
 
     if (fsImageRef.current) {
       const cached = fsImageRef.current;
-      drawSourceImageWithEffects(ctx, () => {
-        ctx.drawImage(cached.img, cached.x, cached.y, cached.w, cached.h);
+      drawSourceImageWithEffects(ctx, (target) => {
+        target.drawImage(cached.img, cached.x, cached.y, cached.w, cached.h);
       });
     }
 
@@ -1593,7 +1624,10 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
     drawFsCropOverlay(ctx, canvas.width, canvas.height);
   };
 
-  /** 全屏裁切蒙层 */
+  /** 全屏裁切蒙层
+   *  顺序：源图（含白底滤色）已由 renderFsCanvas 主体画到 ctx 上，此处只画"选区外的暗色蒙版"，
+   *  再叠选区淡蓝高亮与边框把手。
+   */
   const drawFsCropOverlay = (ctx: CanvasRenderingContext2D, cw: number, ch: number) => {
     let cx: number;
     let cy: number;
@@ -1614,21 +1648,13 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       return;
     }
     if (cwid < 2 || chgt < 2) return;
-    const cached = fsImageRef.current;
     ctx.save();
+    // 选区外的暗色蒙版（evenodd 挖空选区）
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
-    ctx.fillRect(0, 0, cw, ch);
-    ctx.clearRect(cx, cy, cwid, chgt);
-    if (cached) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(cx, cy, cwid, chgt);
-      ctx.clip();
-      drawSourceImageWithEffects(ctx, () => {
-        ctx.drawImage(cached.img, cached.x, cached.y, cached.w, cached.h);
-      });
-      ctx.restore();
-    }
+    ctx.beginPath();
+    ctx.rect(0, 0, cw, ch);
+    ctx.rect(cx, cy, cwid, chgt);
+    ctx.fill('evenodd');
     ctx.fillStyle = 'rgba(100, 180, 255, 0.35)';
     ctx.fillRect(cx, cy, cwid, chgt);
     ctx.strokeStyle = '#ffffff';
@@ -2381,8 +2407,8 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
     out.height = Math.max(1, Math.round(sh));
     const octx = out.getContext('2d');
     if (!octx) return;
-    drawSourceImageWithEffects(octx, () => {
-      octx.drawImage(img, sx, sy, sw, sh, 0, 0, out.width, out.height);
+    drawSourceImageWithEffects(octx, (target) => {
+      target.drawImage(img, sx, sy, sw, sh, 0, 0, out.width, out.height);
     });
     const base64 = out.toDataURL('image/jpeg', 0.95).split(',')[1];
     onCreateImageNode([base64], node.x + node.width + 50, node.y);
@@ -2430,8 +2456,8 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       out.height = Math.max(1, Math.round(sh));
       const octx = out.getContext('2d');
       if (!octx) return;
-      drawSourceImageWithEffects(octx, () => {
-        octx.drawImage(img, sx, sy, sw, sh, 0, 0, out.width, out.height);
+      drawSourceImageWithEffects(octx, (target) => {
+        target.drawImage(img, sx, sy, sw, sh, 0, 0, out.width, out.height);
       });
       const base64 = out.toDataURL('image/jpeg', 0.95).split(',')[1];
       onCreateImageNode([base64], node.x + node.width + 50, node.y);
@@ -2476,8 +2502,8 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       if (!outCtx) return;
 
       // 先绘制原图（缩放后），带透明度
-      drawSourceImageWithEffects(outCtx, () => {
-        outCtx.drawImage(img, 0, 0, img.width, img.height, 0, 0, outW, outH);
+      drawSourceImageWithEffects(outCtx, (target) => {
+        target.drawImage(img, 0, 0, img.width, img.height, 0, 0, outW, outH);
       });
 
       // 如果有标注，才转换并绘制标注
