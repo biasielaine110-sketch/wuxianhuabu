@@ -1020,38 +1020,27 @@ export function useCanvasProjectLibrary({
     // 覆盖：首次保存弹窗 / Ctrl+Alt+S 另存为 这两条路径之前只接了 projectSnapshotForJsonExport
     // 不够，因为大图 offload 后内存 nodes[i].images[j] 也是空。
     // 合并 stash：使用 hydrateNodesMediaFromAssetsCached（异步 FileReader）避免主线程卡。
-    const hydratedNodes = await hydrateNodesMediaFromAssetsCached(payload.nodes || [], null);
-    const payloadForDisk = { ...payload, draftTitle: draftTitleForDisk, nodes: hydratedNodes };
-    const filename = isFirstSave ? projectZipFilename(payloadForDisk) : `${stem}.json`;
-    let diskBlob: Blob;
-    if (isFirstSave) {
-      // 合并 stash：首次保存走 ZIP，hydrate 后立即统计图数，方便跨设备前自检
-      const stats = countHydratedMediaValues(hydratedNodes);
-      console.log(
-        `[firstSaveZip] ${filename}: 共 ${stats.total} 张图, hydrate 后 ${stats.filled} 张有内容。` +
-        `（首次保存走 ZIP 下载到默认下载文件夹；assets/ 目录已内嵌，换电脑导入 ZIP 即可恢复所有图。）`
-      );
-      if (stats.total > 0 && stats.filled === 0) {
-        alert(
-          `首次保存的 ZIP 中没有任何图片内容（IDB 资产库可能已被浏览器清理）。\n` +
-          `该 ZIP 换电脑导入也会丢图，建议先到 DevTools → Application → IndexedDB 检查 infinite-ai-canvas-assets 库。`
-        );
-      }
-      const { blob } = await buildProjectZipBlob(payloadForDisk);
-      diskBlob = blob;
-    } else {
-      diskBlob = new Blob([JSON.stringify(payloadForDisk, null, 2)], { type: 'application/json' });
-    }
+    // —— 关键修复：picker 必须在 user gesture 链中第一个 await 出现；
+    // 这里把 hydrate + buildProjectZipBlob 全部下移到 picker 拿到 handle 之后，
+    // 避免 showSaveFilePicker 报 "Must be handling a user gesture"。
+    const filename = isFirstSave ? `${stem}.wxcanvas.zip` : `${stem}.json`;
+    const isZip = filename.toLowerCase().endsWith('.zip');
+    const typesForSave = isZip
+      ? [
+          {
+            description: '画布备份 ZIP',
+            accept: { 'application/zip': ['.zip', '.wxcanvas.zip'] },
+          },
+        ]
+      : [{ description: 'JSON file', accept: { 'application/json': ['.json'] } }];
 
     // 首次保存走和 saveAs 一样的 picker 流程：弹 showDirectoryPicker / showSaveFilePicker
     // 让用户**选文件夹**保存（默认项目文件 = ZIP，跨电脑场景自包含 base64 + assets/）。
     // 取消选择（AbortError）静默返回，保留 modal 状态让用户重选。
-    // 写失败时把真实原因 alert，不再尝试回退到无效 picker。
     // 关键：confirmDraftDiskModal 是用户在 modal 上点击「确认」后同步触发的，
-    // 这里的 showDirectoryPicker / showSaveFilePicker 都在 user gesture 链内，
-    // 不会触发 GitHub 提到的 "Must be handling a user gesture" 报错。
-    // （GitHub 上游原本在这里把首次保存改成"直接下载到默认文件夹"，本仓库改回"弹文件夹选择"
-    // 以满足「首次保存需要选择保存的文件夹路径」需求。）
+    // picker 必须是本函数中第一个 await —— 不能在前面 await hydrate / buildBlob，
+    // 否则会跨多个 await 把 user gesture 消耗掉，触发
+    // "Failed to execute 'showSaveFilePicker' on 'Window': Must be handling a user gesture"。
 
     const w = window as unknown as {
       showDirectoryPicker?: (opts?: { mode?: 'readwrite' }) => Promise<FileSystemDirectoryHandle>;
@@ -1064,35 +1053,17 @@ export function useCanvasProjectLibrary({
     let fileHandle: FileSystemFileHandle | null = null;
     let dirHandle: FileSystemDirectoryHandle | null = null;
 
-    // saveAs 路径必须在 user gesture 之内一次性拿到 file handle。
-    // 旧实现：先 showDirectoryPicker → 写文件失败 → fallback showSaveFilePicker，
-    // 会跨多个 await 把 gesture 消耗掉，触发
-    // "Failed to execute 'showSaveFilePicker' on 'Window': Must be handling a user gesture"。
-    // 新实现：showDirectoryPicker / showSaveFilePicker 二选一（按浏览器能力优先目录），
-    // 拿不到就回退浏览器默认下载；写失败时把真实原因 alert 给用户，而不是再弹一个无效的 picker。
+    // 第一行 await 必须是 picker（user gesture 链内）。
+    // 跨浏览器兼容策略：
+    // 1) 优先用 showSaveFilePicker（兼容性最广，夸克 / Edge / Chrome 86+ 都支持，
+    //    secure context 下 localhost 也算 secure）。
+    // 2) 不支持再回退到 showDirectoryPicker（仅 Chrome / Edge 桌面版支持）。
+    // 3) 都不支持才降级到浏览器默认下载（link.click()）。
     try {
-      // 跨浏览器兼容策略：
-      // 1) 优先用 showSaveFilePicker（兼容性最广，夸克 / Edge / Chrome 86+ 都支持，
-      //    secure context 下 localhost 也算 secure）。
-      // 2) 不支持再回退到 showDirectoryPicker（仅 Chrome / Edge 桌面版支持）。
-      // 3) 都不支持才降级到浏览器默认下载（link.click()）。
-      // 这样即使夸克不支持 showDirectoryPicker，也能用 showSaveFilePicker 弹出「另存为」选位置。
-      const isZip = filename.toLowerCase().endsWith('.zip');
-      const typesForSave = isZip
-        ? [
-            {
-              description: '画布备份 ZIP',
-              accept: { 'application/zip': ['.zip', '.wxcanvas.zip'] },
-            },
-          ]
-        : [{ description: 'JSON file', accept: { 'application/json': ['.json'] } }];
       if (typeof w.showSaveFilePicker === 'function') {
         console.log('[firstSave] 使用 showSaveFilePicker 弹另存为对话框');
         try {
           fileHandle = await w.showSaveFilePicker({ suggestedName: filename, types: typesForSave });
-          const writable = await fileHandle.createWritable();
-          await writable.write(diskBlob);
-          await writable.close();
         } catch (savePickError: unknown) {
           if ((savePickError as { name?: string })?.name === 'AbortError') return;
           throw savePickError;
@@ -1101,21 +1072,32 @@ export function useCanvasProjectLibrary({
         console.log('[firstSave] 使用 showDirectoryPicker 弹文件夹选择对话框');
         try {
           dirHandle = await w.showDirectoryPicker({ mode: 'readwrite' });
-          fileHandle = await dirHandle.getFileHandle(filename, { create: true });
-          const writable = await fileHandle.createWritable();
-          await writable.write(diskBlob);
-          await writable.close();
         } catch (dirPickError: unknown) {
           if ((dirPickError as { name?: string })?.name === 'AbortError') return;
           throw dirPickError;
         }
       } else {
         // 既没有 showDirectoryPicker 也没有 showSaveFilePicker：降级到浏览器默认下载。
+        // 这条路径不需要 handle，直接把 blob 写好再 link.click()。
         console.warn(
           '[firstSave] 当前浏览器不支持 showDirectoryPicker / showSaveFilePicker，降级为默认下载。' +
-          '请使用 Chrome / Edge 桌面版以获得文件夹选择体验。'
+            '请使用 Chrome / Edge 桌面版以获得文件夹选择体验。'
         );
-        downloadBlob(diskBlob, filename);
+        const hydratedNodesFallback = await hydrateNodesMediaFromAssetsCached(payload.nodes || [], null);
+        const payloadFallback = { ...payload, draftTitle: draftTitleForDisk, nodes: hydratedNodesFallback };
+        if (isFirstSave) {
+          const stats = countHydratedMediaValues(hydratedNodesFallback);
+          if (stats.total > 0 && stats.filled === 0) {
+            alert(
+              `首次保存的 ZIP 中没有任何图片内容（IDB 资产库可能已被浏览器清理）。\n` +
+                `该 ZIP 换电脑导入也会丢图，建议先到 DevTools → Application → IndexedDB 检查 infinite-ai-canvas-assets 库。`
+            );
+          }
+          const { blob } = await buildProjectZipBlob(payloadFallback);
+          downloadBlob(blob, filename);
+        } else {
+          downloadBlob(new Blob([JSON.stringify(payloadFallback, null, 2)], { type: 'application/json' }), filename);
+        }
         setDraftDiskModal(null);
         const resolve = draftDiskFlowResolveRef.current;
         draftDiskFlowResolveRef.current = null;
@@ -1124,13 +1106,79 @@ export function useCanvasProjectLibrary({
       }
     } catch (e: unknown) {
       if ((e as { name?: string })?.name === 'AbortError') return;
-      console.error('[canvas] 另存 JSON 写入失败:', e);
+      console.error('[canvas] 另存 picker 失败:', e);
       const detail = e instanceof Error && e.message ? `\n\nError: ${e.message}` : '';
       alert(
-        `写入失败：所选文件夹可能为只读、文件正在被其他程序占用，或磁盘已满。\n` +
-          `请换一个可写目录后重试，或直接走浏览器默认下载路径。${detail}`
+        `无法弹出文件选择对话框：${e instanceof Error ? e.message : String(e)}\n` +
+          `将降级为浏览器默认下载路径。${detail}`
       );
+      // picker 抛非 AbortError 时（例如 Must be handling a user gesture），
+      // 降级为浏览器默认下载，不再让用户卡死。
+      const hydratedNodesFallback = await hydrateNodesMediaFromAssetsCached(payload.nodes || [], null);
+      const payloadFallback = { ...payload, draftTitle: draftTitleForDisk, nodes: hydratedNodesFallback };
+      if (isFirstSave) {
+        const { blob } = await buildProjectZipBlob(payloadFallback);
+        downloadBlob(blob, filename);
+      } else {
+        downloadBlob(new Blob([JSON.stringify(payloadFallback, null, 2)], { type: 'application/json' }), filename);
+      }
       return;
+    }
+
+    // —— picker 已拿到 handle / dirHandle，现在再做 hydrate / buildBlob / write ——
+    // 这一段已经不在 user gesture 链内，所以可以放心 await hydrate / buildProjectZipBlob。
+    const hydratedNodes = await hydrateNodesMediaFromAssetsCached(payload.nodes || [], null);
+    const payloadForDisk = { ...payload, draftTitle: draftTitleForDisk, nodes: hydratedNodes };
+    if (isFirstSave) {
+      const stats = countHydratedMediaValues(hydratedNodes);
+      console.log(
+        `[firstSaveZip] ${filename}: 共 ${stats.total} 张图, hydrate 后 ${stats.filled} 张有内容。` +
+          `（首次保存走 ZIP 下载到默认下载文件夹；assets/ 目录已内嵌，换电脑导入 ZIP 即可恢复所有图。）`
+      );
+      if (stats.total > 0 && stats.filled === 0) {
+        alert(
+          `首次保存的 ZIP 中没有任何图片内容（IDB 资产库可能已被浏览器清理）。\n` +
+            `该 ZIP 换电脑导入也会丢图，建议先到 DevTools → Application → IndexedDB 检查 infinite-ai-canvas-assets 库。`
+        );
+      }
+      const { blob } = await buildProjectZipBlob(payloadForDisk);
+      try {
+        if (dirHandle && !fileHandle) {
+          fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+        }
+        if (!fileHandle) throw new Error('fileHandle 缺失，无法写入 ZIP');
+        const writable = await fileHandle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+      } catch (e: unknown) {
+        if ((e as { name?: string })?.name === 'AbortError') return;
+        console.error('[canvas] ZIP 写入失败，回退为浏览器下载：', e);
+        const detail = e instanceof Error && e.message ? `\n\nError: ${e.message}` : '';
+        alert(
+          `写入失败：所选文件夹可能为只读、文件正在被其他程序占用，或磁盘已满。\n` +
+            `已自动改为浏览器默认下载路径，请到默认下载目录查找。${detail}`
+        );
+        downloadBlob(blob, filename);
+        return;
+      }
+    } else {
+      const json = JSON.stringify(payloadForDisk, null, 2);
+      try {
+        if (!fileHandle) throw new Error('fileHandle 缺失，无法写入 JSON');
+        const writable = await fileHandle.createWritable();
+        await writable.write(json);
+        await writable.close();
+      } catch (e: unknown) {
+        if ((e as { name?: string })?.name === 'AbortError') return;
+        console.error('[canvas] JSON 写入失败，回退为浏览器下载：', e);
+        const detail = e instanceof Error && e.message ? `\n\nError: ${e.message}` : '';
+        alert(
+          `写入失败：所选文件可能为只读、正在被其他程序占用，或磁盘已满。\n` +
+            `已自动改为浏览器默认下载路径。${detail}`
+        );
+        downloadBlob(new Blob([json], { type: 'application/json' }), filename);
+        return;
+      }
     }
 
     if (modal.mode === 'saveAs') {
