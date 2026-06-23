@@ -52,17 +52,20 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
   }, [onUpdate]);
 
   /**
-   * 源图片的高斯模糊半径（像素）。
+   * 源图片的高斯模糊程度（百分比，0–100）。
+   * - 渲染时换算为 `ctx.filter = blur(canvas.width * percent / 100 + 'px')`。
+   *   因此视觉模糊量与画布尺寸成正比——内嵌画布较小、导出图较大时，相同
+   *   百分比呈现的视觉强度一致。
    * - 0 = 不模糊（默认），与原行为一致。
-   * - 工具栏提供 0/20/30/50/70/80 像素 6 档。
-   * - 同步到 node.sourceBlur，节点失焦/重新挂载可恢复。
+   * - 工具栏提供 0/2/5/7/8/10 共 6 档。
+   * - 同步到 node.sourceBlurPercent，节点失焦/重新挂载可恢复。
    */
-  const [sourceBlur, setSourceBlurState] = useState<number>(node.sourceBlur ?? 0);
-  const sourceBlurRef = useRef<number>(node.sourceBlur ?? 0);
-  useEffect(() => { sourceBlurRef.current = sourceBlur; }, [sourceBlur]);
-  const setSourceBlur = useCallback((v: number) => {
-    setSourceBlurState(v);
-    onUpdate({ sourceBlur: v });
+  const [sourceBlurPercent, setSourceBlurPercentState] = useState<number>(node.sourceBlurPercent ?? 0);
+  const sourceBlurRef = useRef<number>(node.sourceBlurPercent ?? 0);
+  useEffect(() => { sourceBlurRef.current = sourceBlurPercent; }, [sourceBlurPercent]);
+  const setSourceBlurPercent = useCallback((v: number) => {
+    setSourceBlurPercentState(v);
+    onUpdate({ sourceBlurPercent: v });
   }, [onUpdate]);
   const [currentColor, setCurrentColor] = useState('#ff6b6b');
   const [fillOpacity, setFillOpacity] = useState(0.45);
@@ -82,7 +85,8 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
    * 这样能保证画布上后续的标注 / 裁切遮罩仍以默认 alpha=1、filter=none 绘制。
    *
    * - sourceOpacity: 0–1，1 = 不透明（默认）
-   * - sourceBlur: 像素值，0 = 不模糊（默认）
+   * - sourceBlurPercent: 0–100，0 = 不模糊（默认）；实际像素 = ctx.canvas.width * percent / 100，
+   *   因此视觉模糊量随画布尺寸等比缩放，内嵌/全屏/导出都按各自画布宽度计算。
    *   ctx.filter='blur(Npx)' 在 Chrome/Edge/Firefox/Safari 均原生支持。
    */
   const drawSourceImageWithEffects = useCallback(
@@ -90,8 +94,14 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
       const prevAlpha = ctx.globalAlpha;
       const prevFilter = ctx.filter;
       ctx.globalAlpha = sourceOpacityRef.current;
-      const blur = sourceBlurRef.current;
-      ctx.filter = blur > 0 ? `blur(${blur}px)` : 'none';
+      const percent = sourceBlurRef.current;
+      if (percent > 0) {
+        const width = ctx.canvas?.width ?? 0;
+        const blurPx = (width * percent) / 100;
+        ctx.filter = blurPx > 0 ? `blur(${blurPx}px)` : 'none';
+      } else {
+        ctx.filter = 'none';
+      }
       try {
         fn();
       } finally {
@@ -1084,7 +1094,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
     renderCanvas();
     if (isFullscreenAnnotation) renderFsCanvas();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourceBlur]);
+  }, [sourceBlurPercent]);
 
   // 当标注变化时重新渲染
   useEffect(() => {
@@ -2897,22 +2907,22 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
           </select>
         </div>
 
-        {/* 源图片高斯模糊（5 档快捷 + 0 关闭）：作用于当前画布与最终导出图。 */}
+        {/* 源图片高斯模糊（5 档快捷 + 0 关闭）：以画布宽度为基准的百分比，作用于当前画布与最终导出图。 */}
         <div className="flex items-center gap-1">
           <span className="text-[10px] text-gray-400">高斯模糊:</span>
           <select
-            value={sourceBlur}
+            value={sourceBlurPercent}
             onPointerDown={(e) => e.stopPropagation()}
-            onChange={(e) => setSourceBlur(Number(e.target.value))}
-            title="源图片高斯模糊半径（px，影响预览与最终导出图）"
+            onChange={(e) => setSourceBlurPercent(Number(e.target.value))}
+            title="源图片高斯模糊程度（% 画布宽度，影响预览与最终导出图）"
             className="rounded border border-[#444] bg-[#333] px-1 py-0.5 text-[10px] text-gray-200 outline-none cursor-pointer"
           >
-            <option value="0">0（无）</option>
-            <option value="20">20</option>
-            <option value="30">30</option>
-            <option value="50">50</option>
-            <option value="70">70</option>
-            <option value="80">80</option>
+            <option value="0">0%（无）</option>
+            <option value="2">2%</option>
+            <option value="5">5%</option>
+            <option value="7">7%</option>
+            <option value="8">8%</option>
+            <option value="10">10%</option>
           </select>
         </div>
       </div>

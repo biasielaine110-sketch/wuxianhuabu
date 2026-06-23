@@ -165,11 +165,14 @@ export interface AnnotationNode extends CanvasNode {
    */
   sourceOpacity?: number;
   /**
-   * 源图片的高斯模糊程度（像素值，对应 CSS `ctx.filter = blur(Npx)`）。
-   * 工具栏提供 20/30/50/70/80 5 档（数值代表模糊半径，0 = 不模糊）。
-   * 同 sourceOpacity 一样作用于预览与最终导出图，持久化到节点。
+   * 源图片的高斯模糊程度（百分比，0–100）。
+   * - 渲染时换算为 `ctx.filter = blur(Npx)`，N = `画布宽度 * percent / 100`。
+   *   画布宽度指各渲染目标（内嵌/全屏/导出）自身 canvas 的 width，因此视觉
+   *   强度与画布尺寸成正比，行为与「透明度」按比例调整类似。
+   * - 工具栏提供 0/2/5/7/8/10 共 6 档（数值代表百分比，0 = 不模糊）。
+   * - 同 sourceOpacity 一样作用于预览与最终导出图，持久化到节点。
    */
-  sourceBlur?: number;
+  sourceBlurPercent?: number;
 }
 
 export interface Annotation {
