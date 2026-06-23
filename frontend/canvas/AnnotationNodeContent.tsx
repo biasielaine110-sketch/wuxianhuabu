@@ -57,7 +57,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
    *   因此视觉模糊量与画布尺寸成正比——内嵌画布较小、导出图较大时，相同
    *   百分比呈现的视觉强度一致。
    * - 0 = 不模糊（默认），与原行为一致。
-   * - 工具栏提供 0/0.5/1/2/5 共 5 档。
+   * - 工具栏提供 0/0.1/0.3/0.5/1/2/5 共 7 档。
    * - 同步到 node.sourceBlurPercent，节点失焦/重新挂载可恢复。
    */
   const [sourceBlurPercent, setSourceBlurPercentState] = useState<number>(node.sourceBlurPercent ?? 0);
@@ -2933,7 +2933,7 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
           </select>
         </div>
 
-        {/* 源图片高斯模糊（4 档快捷 + 0 关闭）：以画布宽度为基准的百分比，作用于当前画布与最终导出图。 */}
+        {/* 源图片高斯模糊（6 档快捷 + 0 关闭）：以画布宽度为基准的百分比，作用于当前画布与最终导出图。 */}
         <div className="flex items-center gap-1">
           <span className="text-[10px] text-gray-400">高斯模糊:</span>
           <select
@@ -2944,6 +2944,8 @@ export function AnnotationNodeContent({ node, nodes, edges, eyedropperTargetNode
             className="rounded border border-[#444] bg-[#333] px-1 py-0.5 text-[10px] text-gray-200 outline-none cursor-pointer"
           >
             <option value="0">0%（无）</option>
+            <option value="0.1">0.1%</option>
+            <option value="0.3">0.3%</option>
             <option value="0.5">0.5%</option>
             <option value="1">1%</option>
             <option value="2">2%</option>
