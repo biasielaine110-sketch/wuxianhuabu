@@ -2057,12 +2057,17 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
       )}
 
       {/* Canvas Area */}
-      <div 
+      <div
         id="canvas-container"
         ref={containerRef}
         className={`absolute inset-0 w-full h-full ${canvasMode === 'audit' ? 'hidden' : ''} ${activeTool === 'pan' ? 'cursor-grab active:cursor-grabbing' : activeTool === 'boxSelect' ? 'cursor-crosshair' : 'cursor-default'}`}
         onWheel={handleWheel}
         onPointerDown={handleCanvasPointerDown}
+        // 阻止鼠标中键 native drag / autoscroll：
+        // 浏览器默认行为是切换为"四方向箭头" cursor 并向画布派发 wheel，
+        // 引发 handleWheel zoom 流程反向改 transform，造成"大幅弹回"。
+        onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
+        onAuxClick={(e) => { e.preventDefault(); }}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
         style={{ touchAction: 'none' }}

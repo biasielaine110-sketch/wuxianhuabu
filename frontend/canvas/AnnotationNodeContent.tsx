@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Annotation, AnnotationNode, CanvasNode, Edge } from '../types';
 import { CopyIcon, EyedropperIcon, FullscreenIcon, ImageIcon, FlipHorizontalIcon, LoaderIcon } from './canvasIcons';

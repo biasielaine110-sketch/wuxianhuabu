@@ -176,11 +176,13 @@ export function useCanvasGlobalPointerEvents(opts: UseCanvasGlobalPointerEventsO
 
     const handleGlobalPointerMove = (e: PointerEvent) => {
     // 安全兜底：鼠标按键已释放但未收到 pointerup 时，强制清理拖拽/框选状态（缩放仅 pointerup 结束，避免误触）
-    if (e.buttons === 0 && activePointerTypeRef.current && activePointerTypeRef.current !== 'resize') {
-      const pt = activePointerTypeRef.current;
-      if (pt === 'canvas') {
-        commitTransformFromRef();
-      }
+    // 注意：'canvas'（pan 工具 / 中键平移）不在此处清——
+    // 中键 pan 时浏览器 autoscroll 偶尔会派发 buttons===0 的 pointermove，
+    // 这里清掉 activePointerTypeRef.current=null 会让后续 pan 事件被忽略，
+    // 造成"卡住/弹回"。pan 由 pointerup / pointercancel 自然结束。
+    if (e.buttons === 0 && activePointerTypeRef.current
+        && activePointerTypeRef.current !== 'resize'
+        && activePointerTypeRef.current !== 'canvas') {
       if (draggingNodeIdRef.current) {
         draggingNodeIdRef.current = null;
         setDraggingNodeId(null);

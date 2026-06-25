@@ -180,6 +180,10 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     if (!containerRef.current || fullscreenImage) return;
+    // 中键（bit 1 = 0b10）按下时浏览器可能派发 wheel（autoscroll），
+    // 这种情况我们正在用 pointermove 做 pan，wheel zoom 会反向改 transform
+    // 导致"大幅弹回"，直接忽略。
+    if (e.buttons & 0b10) return;
     const target = e.target as HTMLElement;
     // 节点内部滚轮仅作用于节点自身，不触发画布缩放
     if (target.closest('[data-node-root="true"]')) {
@@ -224,6 +228,10 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
     setNodeContextMenu(null);
 
     if (activeTool === 'pan' || e.button === 1) {
+      // 鼠标中键 pan 时必须 preventDefault 阻止浏览器 native autoscroll；
+      // 否则浏览器会启动四方向箭头 autoscroll 并向画布派发 wheel 事件，
+      // 引发 handleWheel zoom 流程反向改写 transform，造成"大幅弹回"。
+      if (e.button === 1 && e.cancelable) e.preventDefault();
       activePointerTypeRef.current = 'canvas';
       lastMousePosRef.current = { x: e.clientX, y: e.clientY };
     } else if (activeTool === 'boxSelect') {
