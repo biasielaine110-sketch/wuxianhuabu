@@ -31,6 +31,16 @@ export function setActiveProjectDraftDownloadDirectory(dir: FileSystemDirectoryH
   activeProjectDraftDownloadDir = dir;
 }
 
+/** 从目录句柄或已保存的文件句柄解析图片/视频下载目标目录 */
+export async function resolveDraftDownloadDirectory(
+  dirHandle: FileSystemDirectoryHandle | null | undefined,
+  fileHandle?: FileSystemFileHandle | null
+): Promise<FileSystemDirectoryHandle | null> {
+  if (dirHandle) return dirHandle;
+  if (fileHandle) return await resolveDirectoryHandleFromFileHandle(fileHandle);
+  return null;
+}
+
 export function supportsFileSystemAccess(): boolean {
   return typeof (window as unknown as { showDirectoryPicker?: unknown }).showDirectoryPicker === 'function';
 }
@@ -282,13 +292,22 @@ async function saveBlobWithPicker(blob: Blob, suggestedName: string): Promise<bo
   }
 }
 
-function fallbackAnchorDownload(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+function fallbackAnchorDownload(blob: Blob, filename: string): boolean {
+  try {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    // 立即 revoke 会导致部分浏览器下载尚未开始就失效
+    window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -340,8 +359,17 @@ export async function saveImageDownload(
   if (await saveBlobWithPicker(blob, filename)) {
     return { ok: true };
   }
-  fallbackAnchorDownload(blob, filename);
-  return { ok: true };
+  if (fallbackAnchorDownload(blob, filename)) {
+    return {
+      ok: true,
+      message: '已触发浏览器下载，如未看到文件请检查浏览器默认下载目录',
+    };
+  }
+  return {
+    ok: false,
+    message:
+      '保存失败：无法写入项目文件夹。请重新保存项目（Ctrl+S）以授权文件夹，或在设置中配置下载路径。',
+  };
 }
 
 /** 从 URL 拉取视频 Blob 并保存 */
@@ -376,6 +404,15 @@ export async function saveVideoDownloadFromUrl(url: string): Promise<{ ok: boole
   if (await saveBlobWithPicker(blob, filename)) {
     return { ok: true };
   }
-  fallbackAnchorDownload(blob, filename);
-  return { ok: true };
+  if (fallbackAnchorDownload(blob, filename)) {
+    return {
+      ok: true,
+      message: '已触发浏览器下载，如未看到文件请检查浏览器默认下载目录',
+    };
+  }
+  return {
+    ok: false,
+    message:
+      '保存失败：无法写入项目文件夹。请重新保存项目（Ctrl+S）以授权文件夹，或在设置中配置下载路径。',
+  };
 }

@@ -27,7 +27,7 @@ import {
   persistProjectDraftDirectoryHandle,
   removeProjectBackupFileHandle,
 } from '../services/projectBackupHandleStore';
-import { setActiveProjectDraftDownloadDirectory, resolveDirectoryHandleFromFileHandle, supportsFileSystemAccess } from '../services/downloadPathSettings';
+import { setActiveProjectDraftDownloadDirectory, resolveDirectoryHandleFromFileHandle, resolveDraftDownloadDirectory, supportsFileSystemAccess } from '../services/downloadPathSettings';
 import { DEFAULT_CANVAS_VIEW_SCALE, useCanvasStore } from '../stores/canvasStore';
 import {
   mergeCurrentCanvasIntoProjectList,
@@ -562,6 +562,24 @@ export function useCanvasProjectLibrary({
         `hasZipHandle=${hasZipHandle}, hasJsonHandle=${hasJsonHandle}, filenameHint=${p?.draftStoragePathNote || '(none)'}`
       );
       if (!p?.diskSaveEstablished || (format !== 'json' && format !== 'zip')) return null;
+
+      const ensureDownloadDirForFileHandle = async (fileHandle: FileSystemFileHandle) => {
+        try {
+          const existing = await getProjectDraftDirectoryHandle(pid);
+          if (existing) {
+            setActiveProjectDraftDownloadDirectory(existing);
+            return;
+          }
+          const dir = await resolveDraftDownloadDirectory(null, fileHandle);
+          if (dir) {
+            await persistProjectDraftDirectoryHandle(pid, dir);
+            setActiveProjectDraftDownloadDirectory(dir);
+          }
+        } catch (e) {
+          console.warn('刷新图片下载目录失败', e);
+        }
+      };
+
       if (format === 'zip') {
         let h = lastZipFileHandleRef.current as FileSystemFileHandle | null;
         if (!h) {
@@ -574,6 +592,7 @@ export function useCanvasProjectLibrary({
         try {
           await overwriteProjectZipFileHandle(h, p);
           lastDiskWriteFormatRef.current = 'zip';
+          void ensureDownloadDirForFileHandle(h);
           opts?.onSaved?.(savedFilename);
           return savedFilename;
         } catch (e) {
@@ -618,6 +637,7 @@ export function useCanvasProjectLibrary({
         await writable.close();
         lastDiskWriteFormatRef.current = 'json';
         setLastJsonFilename(savedFilename);
+        void ensureDownloadDirForFileHandle(h);
         opts?.onSaved?.(savedFilename);
         return savedFilename;
       } catch (e) {
@@ -1194,6 +1214,10 @@ export function useCanvasProjectLibrary({
     }
 
     if (modal.mode === 'saveAs') {
+      void (async () => {
+        const downloadDir = await resolveDraftDownloadDirectory(dirHandle, fileHandle);
+        if (downloadDir) setActiveProjectDraftDownloadDirectory(downloadDir);
+      })();
       setDraftDiskModal(null);
       setSaveSuccessMsg(`已另存为: ${fileHandle.name}`);
       if (saveSuccessTimerRef.current) clearTimeout(saveSuccessTimerRef.current);
@@ -1203,10 +1227,12 @@ export function useCanvasProjectLibrary({
 
     // modal 此时只可能是 firstSave（saveAs 已在上面 return）
     const pid = (modal as { pid: string }).pid;
+    let downloadDir: FileSystemDirectoryHandle | null = null;
     try {
       if (isFirstSave) await persistProjectZipBackupFileHandle(pid, fileHandle);
       else await persistProjectBackupFileHandle(pid, fileHandle);
-      if (dirHandle) await persistProjectDraftDirectoryHandle(pid, dirHandle);
+      downloadDir = await resolveDraftDownloadDirectory(dirHandle, fileHandle);
+      if (downloadDir) await persistProjectDraftDirectoryHandle(pid, downloadDir);
     } catch (e) {
       console.warn(e);
     }
@@ -1256,8 +1282,7 @@ export function useCanvasProjectLibrary({
       /* ignore */
     }
 
-    if (dirHandle) setActiveProjectDraftDownloadDirectory(dirHandle);
-    else setActiveProjectDraftDownloadDirectory(null);
+    setActiveProjectDraftDownloadDirectory(downloadDir);
 
     resolve?.(ok);
     if (ok) {
