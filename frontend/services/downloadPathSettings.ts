@@ -27,6 +27,19 @@ let cachedVideo: FileSystemDirectoryHandle | null = null;
 /** 当前打开项目通过 Ctrl+S 绑定的草稿文件夹（图片/视频下载优先写入此处） */
 let activeProjectDraftDownloadDir: FileSystemDirectoryHandle | null = null;
 
+type DraftDownloadDirectoryResolver = () => Promise<FileSystemDirectoryHandle | null>;
+let draftDownloadDirectoryResolver: DraftDownloadDirectoryResolver | null = null;
+
+export function setDraftDownloadDirectoryResolver(
+  resolver: DraftDownloadDirectoryResolver | null
+): void {
+  draftDownloadDirectoryResolver = resolver;
+}
+
+export function getActiveProjectDraftDownloadDirectory(): FileSystemDirectoryHandle | null {
+  return activeProjectDraftDownloadDir;
+}
+
 export function setActiveProjectDraftDownloadDirectory(dir: FileSystemDirectoryHandle | null): void {
   activeProjectDraftDownloadDir = dir;
 }
@@ -219,9 +232,7 @@ export async function resolveDirectoryHandleFromFileHandle(
     return null;
   }
   if (!dir) return null;
-  // 3) 主动给目录句柄请求 readwrite 权限（getParent 只保证 inherited read，
-  //    不一定有 readwrite；显式触发一次授权弹窗，让用户一次性确认，
-  //    后续图片/视频下载才能直接写入而不再静默回退到另存为）
+  // 尽力请求目录 write 权限；未 granted 也返回 dir，下载点击时再 request（user gesture）
   try {
     const dw = dir as unknown as {
       queryPermission?: (opts: FileSystemHandlePermissionDescriptor) => Promise<PermissionState>;
@@ -230,15 +241,11 @@ export async function resolveDirectoryHandleFromFileHandle(
     if (typeof dw.queryPermission === 'function') {
       let stDir = await dw.queryPermission({ mode: 'readwrite' });
       if (stDir !== 'granted' && typeof dw.requestPermission === 'function') {
-        stDir = await dw.requestPermission({ mode: 'readwrite' });
-      }
-      if (stDir !== 'granted') {
-        // 用户拒绝授权，目录写入不可用
-        return null;
+        await dw.requestPermission({ mode: 'readwrite' });
       }
     }
   } catch {
-    return null;
+    /* ignore */
   }
   return dir;
 }
@@ -253,6 +260,24 @@ async function verifyDirWritable(dir: FileSystemDirectoryHandle): Promise<boolea
   } catch {
     return false;
   }
+}
+
+/** 下载前确保草稿目录可用（内存缓存 → 项目 resolver → 失败返回 null） */
+async function ensureDraftDownloadDirectoryWritable(): Promise<FileSystemDirectoryHandle | null> {
+  if (activeProjectDraftDownloadDir && (await verifyDirWritable(activeProjectDraftDownloadDir))) {
+    return activeProjectDraftDownloadDir;
+  }
+  if (!draftDownloadDirectoryResolver) return null;
+  try {
+    const dir = await draftDownloadDirectoryResolver();
+    if (dir && (await verifyDirWritable(dir))) {
+      activeProjectDraftDownloadDir = dir;
+      return dir;
+    }
+  } catch (e) {
+    console.warn('解析草稿下载目录失败', e);
+  }
+  return null;
 }
 
 async function writeBlobToDirectory(
@@ -334,10 +359,12 @@ export async function saveImageDownload(
   const blob = new Blob([binary], { type: mime });
   const filename = pickFilename('image', ext);
 
-  if (activeProjectDraftDownloadDir && (await verifyDirWritable(activeProjectDraftDownloadDir))) {
+  const draftDir = await ensureDraftDownloadDirectoryWritable();
+  if (draftDir) {
     try {
-      await writeBlobToDirectory(activeProjectDraftDownloadDir, filename, blob);
-      return { ok: true };
+      await writeBlobToDirectory(draftDir, filename, blob);
+      const label = draftDir.name?.trim() || '草稿文件夹';
+      return { ok: true, message: `已保存至草稿目录：${label}` };
     } catch (e) {
       console.warn('写入草稿文件夹失败，尝试其它路径', e);
     }
@@ -379,10 +406,12 @@ export async function saveVideoDownloadFromUrl(url: string): Promise<{ ok: boole
   const blob = await res.blob();
   const filename = pickFilename('video', 'mp4');
 
-  if (activeProjectDraftDownloadDir && (await verifyDirWritable(activeProjectDraftDownloadDir))) {
+  const draftDir = await ensureDraftDownloadDirectoryWritable();
+  if (draftDir) {
     try {
-      await writeBlobToDirectory(activeProjectDraftDownloadDir, filename, blob);
-      return { ok: true };
+      await writeBlobToDirectory(draftDir, filename, blob);
+      const label = draftDir.name?.trim() || '草稿文件夹';
+      return { ok: true, message: `已保存至草稿目录：${label}` };
     } catch (e) {
       console.warn('写入草稿文件夹失败，尝试其它路径', e);
     }

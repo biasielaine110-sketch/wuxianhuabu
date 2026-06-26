@@ -1708,7 +1708,7 @@ export default function AuditModeCanvas({
         const mime = sniffImageMimeFromBase64(raw);
         const r = await saveImageDownload(raw, mime);
         if (!r.ok && r.message) window.alert(r.message);
-        if (r.ok) showDownloadNotice('下载图片成功');
+        if (r.ok) showDownloadNotice(r.message || '下载图片成功');
         return;
       }
       const anns = getAnnotationsForImages(selected);
@@ -1719,7 +1719,7 @@ export default function AuditModeCanvas({
       }
       const r = await saveImageDownload(result.base64, 'image/png');
       if (!r.ok && r.message) window.alert(r.message);
-      if (r.ok) showDownloadNotice('下载图片成功');
+      if (r.ok) showDownloadNotice(r.message || '下载图片成功');
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '下载失败';
       window.alert(`${msg}。可尝试右键图片另存为。`);

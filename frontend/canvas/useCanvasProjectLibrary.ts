@@ -27,7 +27,7 @@ import {
   persistProjectDraftDirectoryHandle,
   removeProjectBackupFileHandle,
 } from '../services/projectBackupHandleStore';
-import { setActiveProjectDraftDownloadDirectory, resolveDirectoryHandleFromFileHandle, resolveDraftDownloadDirectory, supportsFileSystemAccess } from '../services/downloadPathSettings';
+import { setActiveProjectDraftDownloadDirectory, setDraftDownloadDirectoryResolver, resolveDirectoryHandleFromFileHandle, resolveDraftDownloadDirectory, supportsFileSystemAccess } from '../services/downloadPathSettings';
 import { DEFAULT_CANVAS_VIEW_SCALE, useCanvasStore } from '../stores/canvasStore';
 import {
   mergeCurrentCanvasIntoProjectList,
@@ -937,9 +937,10 @@ export function useCanvasProjectLibrary({
         setActiveProjectDraftDownloadDirectory(existing);
         return;
       }
-      // 老项目: 只存了 fileHandle 没存 dirHandle, 从 fileHandle 推导
+      // 老项目: 只存了 fileHandle 没存 dirHandle, 从 fileHandle 推导（ZIP 优先）
       try {
-        const fh = await getProjectBackupFileHandle(pid);
+        let fh = await getProjectZipBackupFileHandle(pid);
+        if (!fh) fh = await getProjectBackupFileHandle(pid);
         if (!fh) {
           setActiveProjectDraftDownloadDirectory(null);
           return;
@@ -970,6 +971,55 @@ export function useCanvasProjectLibrary({
       }
     }
   }, [projectStoreReady, activeProjectId]);
+
+  /** 图片/视频下载时懒解析草稿目录（含 ZIP 句柄 getParent、必要时弹目录选择器） */
+  useEffect(() => {
+    setDraftDownloadDirectoryResolver(async () => {
+      const pid = activeProjectIdRef.current;
+      if (!pid) return null;
+
+      const existing = await getProjectDraftDirectoryHandle(pid);
+      if (existing) return existing;
+
+      let fh = lastZipFileHandleRef.current as FileSystemFileHandle | null;
+      if (!fh) {
+        fh = (await getProjectZipBackupFileHandle(pid)) ?? null;
+        if (fh) lastZipFileHandleRef.current = fh;
+      }
+      if (!fh) {
+        fh = (await getProjectBackupFileHandle(pid)) ?? null;
+        if (fh) lastJsonFileHandleRef.current = fh;
+      }
+      if (!fh) return null;
+
+      const fromParent = await resolveDirectoryHandleFromFileHandle(fh);
+      if (fromParent) {
+        try {
+          await persistProjectDraftDirectoryHandle(pid, fromParent);
+        } catch (e) {
+          console.warn('持久化草稿下载目录失败', e);
+        }
+        return fromParent;
+      }
+
+      if (!supportsFileSystemAccess()) return null;
+      try {
+        const w = window as unknown as {
+          showDirectoryPicker?: (opts: {
+            startIn?: FileSystemHandle;
+            mode?: 'read' | 'readwrite';
+          }) => Promise<FileSystemDirectoryHandle>;
+        };
+        if (typeof w.showDirectoryPicker !== 'function') return null;
+        const picked = await w.showDirectoryPicker({ startIn: fh, mode: 'readwrite' });
+        await persistProjectDraftDirectoryHandle(pid, picked);
+        return picked;
+      } catch {
+        return null;
+      }
+    });
+    return () => setDraftDownloadDirectoryResolver(null);
+  }, [projectStoreReady]);
 
   const handleAutosaveIntervalChange = useCallback((v: 0 | 5 | 10 | 20 | 30) => {
     setAutosaveIntervalMin(v);
@@ -1063,7 +1113,10 @@ export function useCanvasProjectLibrary({
     // "Failed to execute 'showSaveFilePicker' on 'Window': Must be handling a user gesture"。
 
     const w = window as unknown as {
-      showDirectoryPicker?: (opts?: { mode?: 'readwrite' }) => Promise<FileSystemDirectoryHandle>;
+      showDirectoryPicker?: (opts?: {
+        mode?: 'read' | 'readwrite';
+        startIn?: FileSystemHandle;
+      }) => Promise<FileSystemDirectoryHandle>;
       showSaveFilePicker?: (opts: {
         suggestedName?: string;
         types?: { description: string; accept: Record<string, string[]> }[];
@@ -1084,6 +1137,19 @@ export function useCanvasProjectLibrary({
         console.log('[firstSave] 使用 showSaveFilePicker 弹另存为对话框');
         try {
           fileHandle = await w.showSaveFilePicker({ suggestedName: filename, types: typesForSave });
+          // 仍在 user gesture 内：另存为只授权单个文件，需绑定所在文件夹供图片下载写入
+          if (fileHandle && !dirHandle) {
+            dirHandle = await resolveDraftDownloadDirectory(null, fileHandle);
+            if (!dirHandle && typeof w.showDirectoryPicker === 'function') {
+              try {
+                dirHandle = await w.showDirectoryPicker({ startIn: fileHandle, mode: 'readwrite' });
+              } catch (dirErr: unknown) {
+                if ((dirErr as { name?: string })?.name !== 'AbortError') {
+                  console.warn('[firstSave] 绑定图片下载目录失败', dirErr);
+                }
+              }
+            }
+          }
         } catch (savePickError: unknown) {
           if ((savePickError as { name?: string })?.name === 'AbortError') return;
           throw savePickError;
