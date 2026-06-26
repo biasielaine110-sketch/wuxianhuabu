@@ -139,7 +139,7 @@ function rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNormalized: string): st
   } catch {
     /* keep next */
   }
-  return rewriteCodesonlineImageBaseForBrowserCors(next);
+  return rewriteHfsyImageBaseForBrowserCors(rewriteCodesonlineImageBaseForBrowserCors(next));
 }
 
 /** 502/504 等为网关层错误，多为上游或反向代理；与 Chrome 扩展报的 runtime.lastError 无关 */
@@ -3276,13 +3276,72 @@ async function codesonlineEditImage(
   );
 }
 
-/** hfsyapi.cn GPT Image 2 文生图：OpenAI 兼容 /v1/images/generations（同步或异步依官方） */
+/**
+ * hfsyapi.cn gpt-image-2 画幅 → size（1K，与 https://www.hfsyapi.cn 创作中心 XA 表一致）。
+ * gpt-image-2 仅支持 1K 档位；勿使用 DALL·E 的 1792x1024 等尺寸。
+ */
+const HFSY_GPT_IMAGE_2_ASPECT_SIZES: Record<string, string> = {
+  '1:1': '1024x1024',
+  '5:4': '1040x832',
+  '9:16': '720x1280',
+  '16:9': '1280x720',
+  '4:3': '1024x768',
+  '3:2': '1008x672',
+  '4:5': '832x1040',
+  '3:4': '768x1024',
+  '2:3': '672x1008',
+  '21:9': '1344x576',
+};
+
+function hfsyGptImage2Size(aspectRatio: string, pixelSize?: string): string {
+  if (pixelSize?.trim()) return pixelSize.trim();
+  const key = (aspectRatio || '1:1').trim();
+  return HFSY_GPT_IMAGE_2_ASPECT_SIZES[key] || HFSY_GPT_IMAGE_2_ASPECT_SIZES['1:1'];
+}
+
+/** hfsyapi 图生图 reference_images：URL 原样；base64 去掉 data: 前缀 */
+function hfsyNormalizeReferenceImage(input: string): string {
+  const trimmed = (input || '').trim();
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+  return parseBase64ImageInput(trimmed).raw;
+}
+
+/** hfsyapi.cn GPT Image 2 单次生图（文生图 / 图生图共用）；文档 https://www.hfsyapi.cn/docs */
+async function hfsyRequestOneImage(
+  prompt: string,
+  aspectRatio: string,
+  apiKey: string,
+  signal?: AbortSignal,
+  referenceImages?: string[],
+  pixelSize?: string
+): Promise<string> {
+  const base = hfsyFetchBase();
+  const body: Record<string, unknown> = {
+    model: 'gpt-image-2',
+    prompt,
+    n: 1,
+    size: hfsyGptImage2Size(aspectRatio, pixelSize),
+    response_format: 'b64_json',
+  };
+  if (referenceImages?.length) {
+    body.reference_images = referenceImages.slice(0, 6);
+  }
+  const json = await postJsonAtBase<Record<string, unknown>>(
+    base,
+    '/images/generations',
+    body,
+    apiKey
+  );
+  return openAiStyleGenerationJsonToBase64(json, signal, apiKey, base);
+}
+
+/** hfsyapi.cn GPT Image 2 文生图：POST /v1/images/generations（同步或 task_id 异步轮询） */
 async function hfsyGenerateNewImage(
   prompt: string,
   aspectRatio: string,
   numberOfImages: number,
-  nodeResolution?: string,
-  quality?: string,
+  _nodeResolution?: string,
+  _quality?: string,
   signal?: AbortSignal
 ): Promise<string[]> {
   const apiKey = getHfsySavedKey().trim();
@@ -3291,31 +3350,25 @@ async function hfsyGenerateNewImage(
       '未配置 hfsyapi.cn 图像通道。请在「设置 → API」填写「hfsyapi.cn（GPT Image 2）」API Key；文档：https://www.hfsyapi.cn/docs'
     );
   }
-  return generateImagesAtOpenAiCompatibleBase(
-    hfsyFetchBase(),
-    apiKey,
-    prompt,
-    aspectRatio,
-    numberOfImages,
-    'gpt-image-2',
-    nodeResolution,
-    quality,
-    signal
-  );
+  const count = Math.min(Math.max(numberOfImages, 1), 4);
+  const out: string[] = [];
+  for (let i = 0; i < count; i++) {
+    assertNotAborted(signal);
+    out.push(await hfsyRequestOneImage(prompt, aspectRatio, apiKey, signal));
+  }
+  return out;
 }
 
 /** hfsyapi.cn GPT Image 2 图生图：
- * hfsyapi.cn 不支持 OpenAI 标准的 `/v1/images/edits`（multipart 端点）。
- * 它家图生图是 POST /v1/images/generations，参考图用 `reference_images: [base64, ...]` 字段一并传过去。
- * 与文生图共用 OpenAI 兼容响应（`{ data: [{ b64_json / url }] }`）。参考影刀社区示例。
+ * 不支持 `/v1/images/edits`；走 POST /v1/images/generations + `reference_images`（URL 或裸 base64）。
  */
 async function hfsyEditImage(
   base64Images: string[],
   prompt: string,
   numberOfImages: number,
   aspectRatio: string,
-  nodeResolution?: string,
-  quality?: string,
+  _nodeResolution?: string,
+  _quality?: string,
   pixelSize?: string,
   signal?: AbortSignal
 ): Promise<string[]> {
@@ -3326,38 +3379,14 @@ async function hfsyEditImage(
       '未配置 hfsyapi.cn 图像通道。请在「设置 → API」填写「hfsyapi.cn（GPT Image 2）」API Key；文档：https://www.hfsyapi.cn/docs'
     );
   }
-  const base = hfsyFetchBase();
-  const size = pixelSize || aspectRatioToOpenAiSize(aspectRatio, 'gpt-image-2');
-  const enhancedPrompt = pixelSize ? prompt : buildPromptWithDimensions(prompt, aspectRatio);
-
-  // 提取裸 base64（去掉 data:image/...;base64, 前缀），与服务端 reference_images 字段约定一致
-  const referenceImages: string[] = base64Images.map((img) => {
-    const trimmed = (img || '').trim();
-    const parsed = parseBase64ImageInput(trimmed);
-    return parsed.raw;
-  });
-
+  const referenceImages = base64Images.map(hfsyNormalizeReferenceImage).filter(Boolean);
   const count = Math.min(Math.max(numberOfImages, 1), 4);
   const out: string[] = [];
-
   for (let i = 0; i < count; i++) {
     assertNotAborted(signal);
-    const body: Record<string, unknown> = {
-      model: 'gpt-image-2',
-      prompt: enhancedPrompt,
-      n: 1,
-      size,
-      response_format: 'b64_json',
-      reference_images: referenceImages,
-    };
-    if (quality) body.quality = quality;
-    const json = await postJsonAtBase<Record<string, unknown>>(
-      base,
-      '/images/generations',
-      body,
-      apiKey
+    out.push(
+      await hfsyRequestOneImage(prompt, aspectRatio, apiKey, signal, referenceImages, pixelSize)
     );
-    out.push(await openAiStyleGenerationJsonToBase64(json, signal, apiKey, base));
   }
   return out;
 }
