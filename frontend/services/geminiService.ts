@@ -178,9 +178,6 @@ export const generateNewImage = async (
     if (model === 'gpt-image-2-hfsy') {
       return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
     }
-    if (model === 'gpt-image-2-otuapi') {
-      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
-    }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {
       throw new Error(
         'GPT Image 2（ToAPIs）等需在「设置 → API」中使用 OpenAI 兼容主通道，Base URL 指向 ToAPIs（https://toapis.com/v1）。君澜 / codesonline 通路请分别选择「GPT Image 2（君澜 AI）」「GPT Image 2（codesonline）」并填写对应密钥。'
@@ -276,9 +273,6 @@ export const editExistingImage = async (
       return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, pixelSize, signal);
     }
     if (model === 'gpt-image-2-hfsy') {
-      return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, pixelSize, signal);
-    }
-    if (model === 'gpt-image-2-otuapi') {
       return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, pixelSize, signal);
     }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {

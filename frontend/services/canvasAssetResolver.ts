@@ -30,10 +30,6 @@ export function rewriteImageUrlForBrowserDisplay(imageUrl: string): string {
     if (host === 'manxueapi.com' || host.endsWith('.manxueapi.com')) {
       return `${origin}/manxue-api${u.pathname}${u.search}`;
     }
-    if (host === 'oss-us.file-download.life' || host.endsWith('.oss-us.file-download.life')) {
-      const prefix = import.meta.env.DEV ? '/otuapi-image-api' : '/api/otuapi-image-proxy';
-      return `${origin}${prefix}${u.pathname}${u.search}`;
-    }
   } catch {
     /* ignore */
   }

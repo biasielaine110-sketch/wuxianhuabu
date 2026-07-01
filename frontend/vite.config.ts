@@ -171,38 +171,6 @@ const toapisFileCdnProxy = {
     },
     rewrite: (p: string) => p.replace(/^\/hfsy-image-api/, ''),
   },
-  /** otuapi.com 异步返回的图片 URL 托管在 oss-us.file-download.life，未开放 CORS；
-   * 经同源 /api/otuapi-image-proxy（生产 Vercel serverless）/ /otuapi-image-api（开发 Vite）转发 */
-  '/api/otuapi-image-proxy': {
-    target: 'https://oss-us.file-download.life',
-    changeOrigin: true,
-    secure: true,
-    timeout: 1_800_000,
-    proxyTimeout: 1_800_000,
-    rewrite: (p: string) => {
-      const path = p.startsWith('/') ? p : `/${p}`;
-      const stripped = path.replace(/^\/api\/otuapi-image-proxy(?=\/|$)/, '');
-      return stripped.length ? stripped : '/';
-    },
-  },
-  '/otuapi-image-api': {
-    target: 'https://oss-us.file-download.life',
-    changeOrigin: true,
-    secure: true,
-    timeout: 1_800_000,
-    proxyTimeout: 1_800_000,
-    configure(proxy) {
-      proxy.on('error', (err, _req, res) => {
-        console.error('[vite proxy /otuapi-image-api]', err);
-        const r = res as { headersSent?: boolean; writeHead?: (c: number, h?: unknown) => void; end?: (s?: string) => void };
-        if (r && !r.headersSent && typeof r.writeHead === 'function') {
-          r.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
-          r.end?.(`otuapi 图像代理错误: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      });
-    },
-    rewrite: (p: string) => p.replace(/^\/otuapi-image-api/, ''),
-  },
   /** 满 e（manxueapi.com）未开放 CORS；图生图 multipart 经同源转发 */
   '/manxue-api': {
     target: 'https://manxueapi.com',

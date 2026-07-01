@@ -3,15 +3,14 @@ export function defaultCanvasImageModel(): string {
   return 'gpt-image-2-codesonline';
 }
 
-/** GPT Image 2：君澜 / codesonline / hfsy / ToAPIs / 满 e / otuapi 节点选择时默认 2K */
+/** GPT Image 2：君澜 / codesonline / hfsy / ToAPIs / 满 e 节点选择时默认 2K */
 export function isGptImage2CanvasModelId(id: string): boolean {
   return (
     id === 'gpt-image-2-junlan' ||
     id === 'gpt-image-2-codesonline' ||
     id === 'gpt-image-2-hfsy' ||
     id === 'gpt-image-2' ||
-    id === 'gpt-image-2-manxue' ||
-    id === 'gpt-image-2-otuapi'
+    id === 'gpt-image-2-manxue'
   );
 }
 

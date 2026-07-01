@@ -9,7 +9,7 @@ import {
   isVeo31FastVideoModel,
   videoNodeModelToToApis,
 } from './videoModelUtils';
-import { DEFAULT_DEEPSEEK_CHAT_MODEL_ID, normalizeDeepSeekChatModelId, getCodesonlineSavedKey, getJunlanSavedKey, getOtuapiSavedKey, getOpenAiSavedKey } from '../services/aiSettings';
+import { DEFAULT_DEEPSEEK_CHAT_MODEL_ID, normalizeDeepSeekChatModelId, getCodesonlineSavedKey, getJunlanSavedKey, getOpenAiSavedKey } from '../services/aiSettings';
 import { normalizeCanvasGenerationImages } from '../services/openaiCompatibleService';
 import { hasCanvasImagePayload } from '../services/canvasAssetResolver';
 import {
@@ -66,7 +66,6 @@ export function createCanvasGenerationApi(
     const m = (model || '').trim();
     if (m === 'gpt-image-2-codesonline') return getCodesonlineSavedKey() || undefined;
     if (m === 'gpt-image-2-junlan') return getJunlanSavedKey() || undefined;
-    if (m === 'gpt-image-2-otuapi') return getOtuapiSavedKey() || undefined;
     if (m.startsWith('gpt-image-')) return getOpenAiSavedKey() || undefined;
     return undefined;
   };

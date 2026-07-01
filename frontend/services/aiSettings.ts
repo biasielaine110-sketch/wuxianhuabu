@@ -15,10 +15,6 @@ const CODESONLINE_IMAGE_BASE_URL_STORAGE_KEY = 'codesonline-image-openai-base-ur
 /** hfsyapi.cn OpenAI 兼容图像网关；画布模型 id 为 `gpt-image-2-hfsy`；文档 https://www.hfsyapi.cn/docs */
 const HFSY_IMAGE_API_KEY_STORAGE_KEY = 'hfsy-image-openai-api-key-v1';
 const HFSY_IMAGE_BASE_URL_STORAGE_KEY = 'hfsy-image-openai-base-url-v1';
-/** [otuapi.com](https://otuapi.com/) gpt-image-2 / gpt-image-2-2K / gpt-image-2-4K 异步图像网关；画布模型 id 为 `gpt-image-2-otuapi`；
- * 接口走 POST /v1/videos + GET /v1/videos/{task_id} 轮询，与 codesonline/hfsy 不同，需独立通道 */
-const OTUAPI_IMAGE_API_KEY_STORAGE_KEY = 'otuapi-image-openai-api-key-v1';
-const OTUAPI_IMAGE_BASE_URL_STORAGE_KEY = 'otuapi-image-openai-base-url-v1';
 /** codesonline GPT-5.5 对话专用 */
 const CODESONLINE_CHAT_API_KEY_STORAGE_KEY = 'codesonline-chat-openai-api-key-v1';
 const CODESONLINE_CHAT_BASE_URL_STORAGE_KEY = 'codesonline-chat-openai-base-url-v1';
@@ -62,9 +58,6 @@ export const DEFAULT_CODESONLINE_IMAGE_BASE_URL = 'https://image.codesonline.dev
 
 /** hfsyapi.cn 图像 API（OpenAI 兼容 /v1）；文档 https://www.hfsyapi.cn/docs */
 export const DEFAULT_HFSY_IMAGE_BASE_URL = 'https://www.hfsyapi.cn/v1';
-
-/** otuapi.com gpt-image-2 图像 API（OpenAI 兼容 /v1）；文档 https://otuapi.com/ */
-export const DEFAULT_OTUAPI_IMAGE_BASE_URL = 'https://otuapi.com/v1';
 
 let aiSettingsLegacyMigrated = false;
 
@@ -278,44 +271,6 @@ export function setHfsyBaseUrl(url: string): void {
   try {
     if (normalized) localStorage.setItem(HFSY_IMAGE_BASE_URL_STORAGE_KEY, normalized);
     else localStorage.removeItem(HFSY_IMAGE_BASE_URL_STORAGE_KEY);
-  } catch {
-    /* ignore */
-  }
-}
-
-/** otuapi.com（GPT Image 2 异步网关，画布 id：gpt-image-2-otuapi） */
-export function getOtuapiSavedKey(): string {
-  try {
-    return localStorage.getItem(OTUAPI_IMAGE_API_KEY_STORAGE_KEY)?.trim() || '';
-  } catch {
-    return '';
-  }
-}
-
-export function setOtuapiKey(apiKey: string): void {
-  const normalized = apiKey.trim();
-  try {
-    if (normalized) localStorage.setItem(OTUAPI_IMAGE_API_KEY_STORAGE_KEY, normalized);
-    else localStorage.removeItem(OTUAPI_IMAGE_API_KEY_STORAGE_KEY);
-  } catch {
-    /* ignore */
-  }
-}
-
-export function getOtuapiBaseUrl(): string {
-  try {
-    const raw = localStorage.getItem(OTUAPI_IMAGE_BASE_URL_STORAGE_KEY)?.trim();
-    return raw || DEFAULT_OTUAPI_IMAGE_BASE_URL;
-  } catch {
-    return DEFAULT_OTUAPI_IMAGE_BASE_URL;
-  }
-}
-
-export function setOtuapiBaseUrl(url: string): void {
-  const normalized = url.trim();
-  try {
-    if (normalized) localStorage.setItem(OTUAPI_IMAGE_BASE_URL_STORAGE_KEY, normalized);
-    else localStorage.removeItem(OTUAPI_IMAGE_BASE_URL_STORAGE_KEY);
   } catch {
     /* ignore */
   }
@@ -540,8 +495,6 @@ export type AiSettingsSnapshot = {
   codesonlineBaseUrl: string;
   hfsyKey: string;
   hfsyBaseUrl: string;
-  otuapiKey: string;
-  otuapiBaseUrl: string;
   deepSeekKey: string;
   deepSeekBaseUrl: string;
   manxueKey: string;
@@ -562,8 +515,6 @@ export function getAiSettingsSnapshot(): AiSettingsSnapshot {
     codesonlineBaseUrl: getCodesonlineBaseUrl(),
     hfsyKey: getHfsySavedKey(),
     hfsyBaseUrl: getHfsyBaseUrl(),
-    otuapiKey: getOtuapiSavedKey(),
-    otuapiBaseUrl: getOtuapiBaseUrl(),
     deepSeekKey: getDeepSeekSavedKey(),
     deepSeekBaseUrl: getDeepSeekBaseUrl(),
     manxueKey: getManxueSavedKey(),
@@ -591,9 +542,6 @@ export type PersistAiSettingsInput = {
   /** hfsyapi.cn GPT Image 2 专用（画布 id：gpt-image-2-hfsy）；不传则保留原值 */
   hfsyApiKey?: string;
   hfsyBaseUrl?: string;
-  /** otuapi.com gpt-image-2 专用（画布 id：gpt-image-2-otuapi）；不传则保留原值 */
-  otuapiApiKey?: string;
-  otuapiBaseUrl?: string;
   /** DeepSeek 对话专用；不传则保留原值 */
   deepSeekApiKey?: string;
   deepSeekBaseUrl?: string;
@@ -619,8 +567,6 @@ export function persistAiSettings(opts: PersistAiSettingsInput): void {
   if (opts.codesonlineBaseUrl !== undefined) setCodesonlineBaseUrl(opts.codesonlineBaseUrl);
   if (opts.hfsyApiKey !== undefined) setHfsyKey(opts.hfsyApiKey);
   if (opts.hfsyBaseUrl !== undefined) setHfsyBaseUrl(opts.hfsyBaseUrl);
-  if (opts.otuapiApiKey !== undefined) setOtuapiKey(opts.otuapiApiKey);
-  if (opts.otuapiBaseUrl !== undefined) setOtuapiBaseUrl(opts.otuapiBaseUrl);
   if (opts.deepSeekApiKey !== undefined) setDeepSeekKey(opts.deepSeekApiKey);
   if (opts.deepSeekBaseUrl !== undefined) setDeepSeekBaseUrl(opts.deepSeekBaseUrl);
   if (opts.manxueApiKey !== undefined) setManxueKey(opts.manxueApiKey);

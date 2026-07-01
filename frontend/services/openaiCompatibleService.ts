@@ -15,8 +15,6 @@ import {
   getManxueSavedKey,
   getMiniMaxBaseUrl,
   getMiniMaxSavedKey,
-  getOtuapiBaseUrl,
-  getOtuapiSavedKey,
   getOpenAiBaseUrl,
   getOpenAiSavedKey,
   getAiidBaseUrl,
@@ -55,14 +53,6 @@ function hfsyImageProxyPathPrefix(): '/api/hfsy-image-proxy' | '/hfsy-image-api'
     return '/api/hfsy-image-proxy';
   }
   return '/hfsy-image-api';
-}
-
-/** 生产构建直接请求 /api/otuapi-image-proxy；otuapi 生成图 CDN（oss-us.file-download.life）未开放 CORS */
-function otuapiImageProxyPathPrefix(): '/api/otuapi-image-proxy' | '/otuapi-image-api' {
-  if (typeof import.meta !== 'undefined' && import.meta.env?.PROD) {
-    return '/api/otuapi-image-proxy';
-  }
-  return '/otuapi-image-api';
 }
 
 /** manxueapi.com 未开放 CORS；生产走 Vercel rewrite、开发走 Vite 同源代理 /manxue-api */
@@ -632,10 +622,6 @@ function rewriteKnownImageCdnToSameOrigin(imageUrl: string): string {
     }
     if (host === 'www.hfsyapi.cn' || host === 'hfsyapi.cn') {
       return `${origin}${hfsyImageProxyPathPrefix()}${u.pathname}${u.search}`;
-    }
-    // otuapi 异步任务返回的图片 URL 托管在 oss-us.file-download.life，未开放 CORS
-    if (host === 'oss-us.file-download.life' || host.endsWith('.oss-us.file-download.life')) {
-      return `${origin}${otuapiImageProxyPathPrefix()}${u.pathname}${u.search}`;
     }
   } catch {
     /* ignore */
@@ -3051,7 +3037,6 @@ function resolveT2iModel(modelName: string): string {
   if (m === 'gpt-image-2-codesonline') return 'gpt-image-2';
   if (m === 'gpt-image-2-hfsy') return 'gpt-image-2';
   if (m === 'gpt-image-2-junlan') return 'gpt-image-2';
-  if (m === 'gpt-image-2-otuapi') return 'gpt-image-2';
   if (m === 'dall-e-2' || m === 'dall-e-3' || m === 'gpt-image-2' || m === 'gpt-image-1') return m;
   return 'dall-e-3';
 }
@@ -3061,7 +3046,6 @@ function resolveEditModel(modelName: string): string {
   if (m === 'gpt-image-2-codesonline') return 'gpt-image-2';
   if (m === 'gpt-image-2-hfsy') return 'gpt-image-2';
   if (m === 'gpt-image-2-junlan') return 'gpt-image-2';
-  if (m === 'gpt-image-2-otuapi') return 'gpt-image-2';
   if (m === 'gpt-image-2') return 'gpt-image-2';
   if (m === 'dall-e-2' || m === 'gpt-image-1') return m;
   if (m === 'dall-e-3') return 'gpt-image-1';
@@ -3391,41 +3375,7 @@ async function hfsyEditImage(
   return out;
 }
 
-/**
- * otuapi.com（画布 id：gpt-image-2-otuapi）gpt-image-2 文生图 / 图生图公共工具。
- * 接口与 codesonline / hfsy / 满 e 不同：
- *   - 提交走 POST /v1/videos（与视频生成共用端点，靠 model 字段分流）
- *   - 异步轮询走 GET /v1/videos/{task_id}
- *   - 不支持 n>1；一次提交只产 1 张图，多张需循环提交
- *   - 支持 aspect_ratio 字符串（10 种）；支持 images[]（Base64 / URL）
- *   - 文档：https://6l0ket291i.apifox.cn/447634846e0
- */
-
-const OTUAPI_SUPPORTED_ASPECT_RATIOS = new Set([
-  '1:1', '5:4', '9:16', '21:9', '16:9', '3:2', '4:3', '4:5', '3:4', '2:3',
-]);
-
-/** 把内部任意画幅表达映射到 otuapi 支持的 10 种之一；不支持时回退到 1:1 */
-function normalizeOtuapiAspectRatio(aspectRatio: string): string {
-  const ar = (aspectRatio || '').trim();
-  if (OTUAPI_SUPPORTED_ASPECT_RATIOS.has(ar)) return ar;
-  // 常见兼容映射
-  if (ar === '4:5' || ar === '5:4') return ar;
-  if (ar === '9:21' || ar === '21:9') return '21:9';
-  if (ar === '2:1' || ar === '1:2') return '1:1';
-  return '1:1';
-}
-
-function otuapiFetchBase(): string {
-  return normalizeBaseUrl(getOtuapiBaseUrl());
-}
-
-/**
- * 从 otuapi 任务查询响应中提取生成结果的 URL。
- *
- * 文档（apifox 447634846e0 + 455245131e0 统一）：completed 状态时，
- * 结果 URL 位于响应顶层 `url` 字段。这里只取顶层 `url`。
- */
+/** 从任意嵌套响应中提取第一个 http(s) URL。 */
 function extractFirstStringUrl(value: unknown): string {
   if (typeof value === 'string') {
     const s = value.trim();
@@ -3481,278 +3431,6 @@ async function fetchUrlAsBase64WithTimeout(
     window.clearTimeout(timer);
     if (signal && abortListener) signal.removeEventListener('abort', abortListener);
   }
-}
-
-function extractOtuapiResultUrl(data: Record<string, unknown>): string {
-  return extractFirstStringUrl(data);
-}
-
-function extractOtuapiStatus(data: Record<string, unknown>): string {
-  const direct =
-    (typeof data.status === 'string' && data.status.trim()) ||
-    (typeof data.gen_status === 'string' && data.gen_status.trim()) ||
-    (typeof data.state === 'string' && data.state.trim()) ||
-    '';
-  if (direct) return direct.toLowerCase();
-
-  for (const key of ['data', 'result', 'task']) {
-    const nested = data[key];
-    if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
-      const status = extractOtuapiStatus(nested as Record<string, unknown>);
-      if (status) return status;
-    }
-  }
-
-  return '';
-}
-
-function isOtuapiDoneStatus(status: string): boolean {
-  return ['completed', 'succeeded', 'success', 'done', 'generated', 'finished'].includes(status);
-}
-
-/** otuapi 提交生图任务（图生图也用 POST /v1/videos），返回 task_id */
-async function otuapiSubmitImageTask(
-  base: string,
-  apiKey: string,
-  model: string,
-  prompt: string,
-  aspectRatio: string,
-  images: string[] | undefined,
-  signal?: AbortSignal
-): Promise<string> {
-  const body: Record<string, unknown> = {
-    model,
-    prompt,
-    aspect_ratio: normalizeOtuapiAspectRatio(aspectRatio),
-    images: images && images.length > 0 ? images : [],
-  };
-  const json = await postJsonAtBase<Record<string, unknown>>(base, '/videos', body, apiKey);
-  assertNotAborted(signal);
-  const taskId =
-    (typeof json.id === 'string' && json.id.trim()) ||
-    (typeof json.task_id === 'string' && json.task_id.trim()) ||
-    (typeof (json as { data?: { id?: string } }).data?.id === 'string' &&
-      (json as { data?: { id?: string } }).data?.id?.trim()) ||
-    '';
-  if (!taskId) {
-    throw new Error(`otuapi 提交任务后未返回 id/task_id：${JSON.stringify(json).slice(0, 400)}`);
-  }
-  const status = (typeof json.status === 'string' ? json.status : '').toLowerCase();
-  if (status === 'failed' || status === 'error') {
-    // 兼容多种错误结构：
-    //   {error:{message}}
-    //   {message}
-    //   {error_code, message}
-    //   {error_code, error_message}
-    //   {error_message}
-    const errObj = json.error;
-    const errMsg =
-      (errObj && typeof errObj === 'object' && typeof (errObj as { message?: string }).message === 'string'
-        ? (errObj as { message?: string }).message
-        : typeof json.message === 'string'
-        ? json.message
-        : typeof (json as { error_message?: string }).error_message === 'string'
-        ? (json as { error_message?: string }).error_message
-        : typeof (json as { error_code?: string }).error_code === 'string'
-        ? `${(json as { error_code?: string }).error_code}: ${typeof (json as { error_message?: string }).error_message === 'string' ? (json as { error_message?: string }).error_message : typeof json.message === 'string' ? json.message : JSON.stringify(json)}`
-        : JSON.stringify(json).slice(0, 400));
-    throw new Error(`otuapi 任务直接失败: ${errMsg}`);
-  }
-  return taskId;
-}
-
-/** otuapi 轮询生图任务，拿到 URL 后拉取成 base64 返回 */
-async function otuapiPollImageTaskToBase64(
-  base: string,
-  apiKey: string,
-  taskId: string,
-  signal?: AbortSignal,
-  onStatus?: (message: string) => void
-): Promise<string> {
-  // 文档建议轮询间隔 2~5 秒；先等 2 秒避免提交与轮询抢资源
-  await sleepInterruptible(2000, signal);
-  const deadline = Date.now() + MANXUE_TASK_MAX_WAIT_MS;
-  const pollUrl = `${base}/videos/${encodeURIComponent(taskId)}`;
-  while (Date.now() < deadline) {
-    assertNotAborted(signal);
-    try {
-      const res = await fetch(
-        rewriteRemoteOpenAiCompatBaseForBrowserCors(pollUrl),
-        {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            Accept: 'application/json',
-          },
-          signal,
-        }
-      );
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new Error(`查询 otuapi 任务失败 (${res.status}): ${text.slice(0, 500)}`);
-      }
-      const data = (await res.json()) as Record<string, unknown>;
-      const status = extractOtuapiStatus(data);
-      // 旧文档：progress 字段 0-100，completed 时为 100
-      const progress =
-        typeof (data as { progress?: number }).progress === 'number'
-          ? Math.max(0, Math.min(100, Math.round((data as { progress?: number }).progress!)))
-          : null;
-      const progressText = progress != null ? `（${progress}%）` : '';
-      if (onStatus) {
-        if (status === 'queued' || status === 'dispatched' || status === 'pending') {
-          onStatus(`任务已提交，等待 otuapi 分配生图账号${progressText}…`);
-        } else if (
-          status === 'in_progress' ||
-          status === 'running' ||
-          status === 'processing' ||
-          status === 'generating'
-        ) {
-          onStatus(`otuapi 正在生成图片${progressText}…`);
-        } else if (isOtuapiDoneStatus(status)) {
-          onStatus('otuapi 生成完成，正在拉取图片…');
-        } else {
-          onStatus(`正在查询 otuapi 生图任务状态${progressText}…`);
-        }
-      }
-      const resultUrl = extractOtuapiResultUrl(data);
-      console.log('[otuapi] poll', { taskId, status, hasUrl: !!resultUrl });
-      if (isOtuapiDoneStatus(status) || resultUrl) {
-        // otuapi 文档差异：旧文档顶层 url，新文档 results[0].url
-        const url = resultUrl;
-        if (!url) {
-          throw new Error('otuapi 任务已完成但未返回图片链接，请稍后重试。');
-        }
-        // otuapi 的成图 URL 有时下载很慢或 CDN 不稳定；先把 URL 返回给画布结束生成态，
-        // 显示层会走同源代理加载，避免后台已成功但前端卡在“生成中”。
-        void apiKey;
-        return url;
-      }
-      if (status === 'failed' || status === 'error') {
-        // 兼容多种错误结构：
-        //   {error:{message}}
-        //   {message}
-        //   {error_code, message}
-        //   {error_message}
-        //   {error_code, error_message}
-        const errObj = data.error;
-        const errMessageField =
-          typeof (data as { error_message?: string }).error_message === 'string'
-            ? (data as { error_message?: string }).error_message
-            : '';
-        const errCodeField =
-          typeof (data as { error_code?: string }).error_code === 'string'
-            ? (data as { error_code?: string }).error_code
-            : '';
-        const msg =
-          (errObj &&
-            typeof errObj === 'object' &&
-            typeof (errObj as { message?: string }).message === 'string' &&
-            (errObj as { message?: string }).message) ||
-          (typeof data.message === 'string' && data.message) ||
-          errMessageField ||
-          (errCodeField
-            ? `${errCodeField}: ${
-                typeof data.message === 'string'
-                  ? data.message
-                  : errMessageField || JSON.stringify(data).slice(0, 200)
-              }`
-            : '') ||
-          JSON.stringify(data).slice(0, 400);
-        throw new Error(`otuapi 任务失败: ${msg}`);
-      }
-    } catch (err) {
-      if ((err as DOMException)?.name === 'AbortError') throw err;
-      throw new Error(
-        `查询 otuapi 生图任务失败：${err instanceof Error ? err.message : String(err)}（轮询 GET /v1/videos/{id}）`
-      );
-    }
-    await sleepInterruptible(3000, signal);
-  }
-  throw new Error(`otuapi 生图任务超时（已等待超过 ${MANXUE_TASK_MAX_WAIT_MS / 60_000} 分钟）`);
-}
-
-/** otuapi 一次性提交 + 轮询，返回单张 base64 */
-async function otuapiGenerateOneImage(
-  model: string,
-  prompt: string,
-  aspectRatio: string,
-  images: string[] | undefined,
-  signal?: AbortSignal,
-  onStatus?: (message: string) => void
-): Promise<string> {
-  const apiKey = getOtuapiSavedKey().trim();
-  if (!apiKey) {
-    throw new Error(
-      '未配置 otuapi.com 图像通道。请在「设置 → API」填写「otuapi.com（GPT Image 2）」API Key；文档：https://otuapi.com/'
-    );
-  }
-  const base = otuapiFetchBase();
-  const taskId = await otuapiSubmitImageTask(base, apiKey, model, prompt, aspectRatio, images, signal);
-  return otuapiPollImageTaskToBase64(base, apiKey, taskId, signal, onStatus);
-}
-
-/** otuapi gpt-image-2 文生图：单次产 1 张，循环 numberOfImages 次 */
-async function otuapiGenerateNewImage(
-  prompt: string,
-  aspectRatio: string,
-  numberOfImages: number,
-  nodeResolution?: string,
-  quality?: string,
-  signal?: AbortSignal,
-  onStatus?: (message: string) => void
-): Promise<string[]> {
-  const enhancedPrompt = buildPromptWithDimensions(prompt, aspectRatio);
-  const model = resolveOtuapiModelFromNodeResolution(nodeResolution);
-  const count = Math.min(Math.max(numberOfImages, 1), 4);
-  const out: string[] = [];
-  for (let i = 0; i < count; i++) {
-    assertNotAborted(signal);
-    if (onStatus) {
-      onStatus(`otuapi 提交第 ${i + 1}/${count} 张图…`);
-    }
-    out.push(await otuapiGenerateOneImage(model, enhancedPrompt, aspectRatio, undefined, signal, onStatus));
-  }
-  // 静默吞掉 quality：otuapi 当前不支持 quality 字段（按 aspect_ratio 控档），避免误导用户
-  void quality;
-  return out;
-}
-
-/** otuapi gpt-image-2 图生图：最多 5 张参考图（超出截断），单次产 1 张，循环 numberOfImages 次 */
-async function otuapiEditImage(
-  base64Images: string[],
-  prompt: string,
-  numberOfImages: number,
-  aspectRatio: string,
-  nodeResolution?: string,
-  _quality?: string,
-  _pixelSize?: string,
-  signal?: AbortSignal,
-  onStatus?: (message: string) => void
-): Promise<string[]> {
-  if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
-  // 文档：images[] 最多 5 张；保留完整 data URL（与 docs 示例一致），让 otuapi 网关自行解析
-  const images = base64Images.slice(0, 5).map((s) => (s || '').trim()).filter(Boolean);
-  const enhancedPrompt = buildPromptWithDimensions(prompt, aspectRatio);
-  const model = resolveOtuapiModelFromNodeResolution(nodeResolution);
-  const count = Math.min(Math.max(numberOfImages, 1), 4);
-  const out: string[] = [];
-  for (let i = 0; i < count; i++) {
-    assertNotAborted(signal);
-    if (onStatus) {
-      onStatus(`otuapi 提交第 ${i + 1}/${count} 张图…`);
-    }
-    out.push(await otuapiGenerateOneImage(model, enhancedPrompt, aspectRatio, images, signal, onStatus));
-  }
-  return out;
-}
-
-/** 节点 2K/4K 档位映射到 otuapi 模型变体；不识别时回落到 gpt-image-2 标准档 */
-function resolveOtuapiModelFromNodeResolution(nodeResolution?: string): string {
-  const r = (nodeResolution || '').trim().toLowerCase();
-  if (r === '4k') return 'gpt-image-2-4K';
-  if (r === '2k') return 'gpt-image-2-2K';
-  return 'gpt-image-2';
 }
 
 /** 满 eAPI Gemini 图生图：使用 Vertex AI 风格的 generateContent 接口 */
@@ -4670,18 +4348,6 @@ export async function openAiGenerateNewImage(
     );
   }
 
-  if (rawModel === 'gpt-image-2-otuapi') {
-    return otuapiGenerateNewImage(
-      prompt,
-      aspectRatio,
-      numberOfImages,
-      nodeResolution,
-      quality,
-      signal,
-      onStatus
-    );
-  }
-
   // 满 eAPI 图像模型
   if (isManxueImageModel(rawModel)) {
     const mxKey = getManxueSavedKey().trim();
@@ -4782,20 +4448,6 @@ export async function openAiEditImage(
       quality,
       pixelSize,
       signal
-    );
-  }
-
-  if (rawModel === 'gpt-image-2-otuapi') {
-    return otuapiEditImage(
-      base64Images,
-      prompt,
-      numberOfImages,
-      aspectRatio,
-      nodeResolution,
-      quality,
-      pixelSize,
-      signal,
-      onStatus
     );
   }
 
