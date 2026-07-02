@@ -422,6 +422,7 @@ export function createCanvasGenerationApi(
         const imageModel = (node as ChatNode).imageModel || 'gpt-image-2-codesonline';
         const aspectRatio = (node as ChatNode).imageAspectRatio || '16:9';
         const resolution = (node as ChatNode).imageResolution || '2k';
+        const imageQuality = (node as ChatNode).imageQuality || 'low';
         const imageCount = 1;
 
         // 构建带上下文的生图提示词（传递最近10轮对话摘要，最多2000字符）
@@ -456,7 +457,7 @@ export function createCanvasGenerationApi(
             imageModel,
             aspectRatio,
             resolution,
-            undefined, // quality
+            imageQuality,
           );
         } else {
           // 无参考图时，使用纯文生图
@@ -465,7 +466,8 @@ export function createCanvasGenerationApi(
             aspectRatio,
             imageCount,
             imageModel,
-            resolution
+            resolution,
+            imageQuality
           );
         }
 

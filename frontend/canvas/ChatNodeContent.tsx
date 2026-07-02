@@ -16,6 +16,7 @@ import {
 } from './chatNodeUtils';
 import { resolveCanvasImageSource } from '../services/canvasAssetResolver';
 import { loadChatPromptPresets, getLatestChatPromptPresets } from './loadChatPromptPresets';
+import { isToApisGptImage2QualityModel } from './canvasModelUtils';
 const LoaderIcon = ({ size = 16 }: { size?: number }) => (
   <svg className="animate-spin" xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
 );
@@ -1165,11 +1166,25 @@ export function ChatNodeContent({
             <option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option>
             <option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option>
             <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
+            <option value="gpt-image-2-vip">GPT Image 2 VIP（ToAPIs）</option>
+            <option value="gpt-image-2-official">GPT Image 2 Official（ToAPIs）</option>
             <option value="gpt-image-2-manxue">GPT Image 2（满 e）</option>
             <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option>
             <option value="gemini-3.1-flash-image-preview-2k-manxue">Gemini 3.1 Flash Image 2K（满 e）</option>
             <option value="gemini-3-pro-image-preview-2k-manxue">Gemini 3 Pro Image 2K（满 e）</option>
           </select>
+          {isToApisGptImage2QualityModel(node.imageModel || 'gpt-image-2-codesonline') && (
+            <select
+              className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-purple-500"
+              style={{ fontSize: fs(10) }}
+              value={node.imageQuality || 'low'}
+              onChange={(e) => onUpdate({ imageQuality: e.target.value })}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+            </select>
+          )}
           <button
             onPointerDown={(e) => {
               e.stopPropagation();

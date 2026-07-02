@@ -353,6 +353,8 @@ export interface ChatNode extends CanvasNode {
   imageResolution?: string;
   /** 对话内生图模式使用的图片模型 */
   imageModel?: string;
+  /** 对话内生图模式使用的图片质量 */
+  imageQuality?: string;
   /** 消息列表滚动位置（持久化，节点被视口卸载后再挂载可恢复） */
   chatScrollTop?: number;
 }

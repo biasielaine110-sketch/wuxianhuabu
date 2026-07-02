@@ -565,6 +565,11 @@ function isToApisGemini31FlashImageModel(modelId: string): boolean {
   return (modelId || '').trim() === 'gemini-3.1-flash-image-preview';
 }
 
+function isToApisGptImage2Model(modelId: string): boolean {
+  const m = (modelId || '').trim();
+  return m === 'gpt-image-2' || m === 'gpt-image-2-vip' || m === 'gpt-image-2-official';
+}
+
 function toApisGeminiFlashMetadataResolution(nodeRes?: string): '0.5K' | '1K' | '2K' | '4K' {
   const r = (nodeRes || '4k').toLowerCase().replace(/\s/g, '');
   if (r === '0.5k') return '0.5K';
@@ -579,9 +584,10 @@ function buildToApisImageGenerationBody(params: {
   promptLine: string;
   size: string;
   nodeResolution?: string;
+  quality?: string;
   image_urls?: string[];
 }): Record<string, unknown> {
-  const { model, promptLine, size, nodeResolution, image_urls } = params;
+  const { model, promptLine, size, nodeResolution, quality, image_urls } = params;
   const body: Record<string, unknown> = {
     model,
     prompt: promptLine,
@@ -589,7 +595,13 @@ function buildToApisImageGenerationBody(params: {
     size,
     response_format: 'url',
   };
-  if (image_urls?.length) body.image_urls = image_urls;
+  if (image_urls?.length) {
+    if (isToApisGptImage2Model(model)) body.reference_images = image_urls;
+    body.image_urls = image_urls;
+  }
+  if (isToApisGptImage2Model(model) && (quality === 'low' || quality === 'medium')) {
+    body.quality = quality;
+  }
 
   if (isToApisGemini31FlashImageModel(model)) {
     body.metadata = { resolution: toApisGeminiFlashMetadataResolution(nodeResolution) };
@@ -1014,6 +1026,7 @@ async function toApisEditImage(
   modelName: string,
   aspectRatio: string,
   nodeResolution?: string,
+  quality?: string,
   signal?: AbortSignal
 ): Promise<string[]> {
   const model = toApisT2iModel(modelName);
@@ -1044,6 +1057,7 @@ async function toApisEditImage(
       promptLine: `${prompt}\n\n（画幅比例 ${aspectRatio}）`,
       size,
       nodeResolution,
+      quality,
       image_urls: imageUrls,
     });
     const { id } = await toApisSubmitGeneration(body, signal);
@@ -2992,6 +3006,7 @@ async function toApisGenerateNewImage(
   numberOfImages: number,
   modelName: string,
   nodeResolution?: string,
+  quality?: string,
   signal?: AbortSignal
 ): Promise<string[]> {
   const model = toApisT2iModel(modelName);
@@ -3006,6 +3021,7 @@ async function toApisGenerateNewImage(
       promptLine: `${prompt}\n\n（画幅比例 ${aspectRatio}）`,
       size,
       nodeResolution,
+      quality,
     });
     const { id } = await toApisSubmitGeneration(body, signal);
     const b64 = await toApisPollTaskToBase64(id, signal);
@@ -3037,7 +3053,7 @@ function resolveT2iModel(modelName: string): string {
   if (m === 'gpt-image-2-codesonline') return 'gpt-image-2';
   if (m === 'gpt-image-2-hfsy') return 'gpt-image-2';
   if (m === 'gpt-image-2-junlan') return 'gpt-image-2';
-  if (m === 'dall-e-2' || m === 'dall-e-3' || m === 'gpt-image-2' || m === 'gpt-image-1') return m;
+  if (m === 'dall-e-2' || m === 'dall-e-3' || m === 'gpt-image-2' || m === 'gpt-image-2-vip' || m === 'gpt-image-2-official' || m === 'gpt-image-1') return m;
   return 'dall-e-3';
 }
 
@@ -3046,7 +3062,7 @@ function resolveEditModel(modelName: string): string {
   if (m === 'gpt-image-2-codesonline') return 'gpt-image-2';
   if (m === 'gpt-image-2-hfsy') return 'gpt-image-2';
   if (m === 'gpt-image-2-junlan') return 'gpt-image-2';
-  if (m === 'gpt-image-2') return 'gpt-image-2';
+  if (m === 'gpt-image-2' || m === 'gpt-image-2-vip' || m === 'gpt-image-2-official') return m;
   if (m === 'dall-e-2' || m === 'gpt-image-1') return m;
   if (m === 'dall-e-3') return 'gpt-image-1';
   return 'gpt-image-1';
@@ -4361,7 +4377,7 @@ export async function openAiGenerateNewImage(
 
   const base = normalizeBaseUrl(getOpenAiBaseUrl());
   if (isToApisHost(base)) {
-    return toApisGenerateNewImage(prompt, aspectRatio, numberOfImages, modelName, nodeResolution, signal);
+    return toApisGenerateNewImage(prompt, aspectRatio, numberOfImages, modelName, nodeResolution, quality, signal);
   }
 
   const apiKey = getOpenAiSavedKey();
@@ -4465,7 +4481,7 @@ export async function openAiEditImage(
   if (!base64Images.length) throw new Error('图生图需要至少一张参考图。');
   if (isToApisHost(normalizeBaseUrl(getOpenAiBaseUrl()))) {
     const toApisPrompt = pixelSize ? `${prompt}\n\n（输出约 ${pixelSize} 像素，保持参考图宽高比）` : prompt;
-    return toApisEditImage(base64Images, toApisPrompt, numberOfImages, modelName, aspectRatio, nodeResolution, signal);
+    return toApisEditImage(base64Images, toApisPrompt, numberOfImages, modelName, aspectRatio, nodeResolution, quality, signal);
   }
   const apiKey = getOpenAiSavedKey();
   if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key。');
