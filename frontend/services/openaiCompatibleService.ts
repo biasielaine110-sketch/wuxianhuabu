@@ -134,6 +134,9 @@ function rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNormalized: string): st
 
 /** 502/504 等为网关层错误，多为上游或反向代理；与 Chrome 扩展报的 runtime.lastError 无关 */
 function openAiCompatFailureHint(status: number, kind: 'generations-json' | 'image-edit'): string {
+  if (status === 401) {
+    return '（401：鉴权失败。若使用 hfsyapi.cn 模型，请在「设置 → API」填写并保存 hfsyapi.cn API Key；确认不要误填 ToAPIs、满 e 或 OpenAI 兼容通道的 Key。）';
+  }
   if (status === 404) {
     return kind === 'image-edit'
       ? '（404：请确认请求为 POST multipart；开发环境须在 frontend 目录启动 Vite；生产环境需已部署 /api/codesonline-image-proxy 单入口代理。若出现 NOT_FOUND，请重新部署并硬刷新。）'
@@ -3311,11 +3314,117 @@ function hfsyGptImage2Size(aspectRatio: string, pixelSize?: string): string {
   return HFSY_GPT_IMAGE_2_ASPECT_SIZES[key] || HFSY_GPT_IMAGE_2_ASPECT_SIZES['1:1'];
 }
 
+function isHfsyNanoBananaModel(modelName: string): boolean {
+  const m = (modelName || '').trim();
+  return m === 'nano-banana-2-hfsy' || m === 'nano-banana-pro-hfsy';
+}
+
+function hfsyGeminiFetchBase(): string {
+  return hfsyFetchBase().replace(/\/v1\/?$/, '/v1beta');
+}
+
+function hfsyGeminiImageSize(nodeResolution?: string): '1K' | '2K' | '4K' {
+  const r = (nodeResolution || '2K').trim().toUpperCase();
+  if (r === '1K' || r === '4K') return r;
+  return '2K';
+}
+
 /** hfsyapi 图生图 reference_images：URL 原样；base64 去掉 data: 前缀 */
 function hfsyNormalizeReferenceImage(input: string): string {
   const trimmed = (input || '').trim();
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
   return parseBase64ImageInput(trimmed).raw;
+}
+
+async function hfsyRequestOneNanoBananaImage(
+  modelName: string,
+  prompt: string,
+  aspectRatio: string,
+  apiKey: string,
+  signal?: AbortSignal,
+  referenceImages?: string[],
+  nodeResolution?: string
+): Promise<string> {
+  const model = toHfsyImageModel(modelName);
+  const parts: Array<
+    | { text: string }
+    | { fileData: { mimeType: string; fileUri: string } }
+    | { inlineData: { mimeType: string; data: string } }
+  > = [{ text: prompt }];
+
+  for (const ref of (referenceImages || []).slice(0, 6)) {
+    const trimmed = (ref || '').trim();
+    if (!trimmed) continue;
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      const lower = trimmed.toLowerCase();
+      const mime = lower.endsWith('.webp')
+        ? 'image/webp'
+        : lower.endsWith('.gif')
+          ? 'image/gif'
+          : lower.endsWith('.png')
+            ? 'image/png'
+            : 'image/jpeg';
+      parts.push({ fileData: { mimeType: mime, fileUri: trimmed } });
+    } else {
+      const { raw, mime } = parseBase64ImageInput(trimmed);
+      parts.push({ inlineData: { mimeType: mime || 'image/jpeg', data: raw } });
+    }
+  }
+
+  const body = {
+    contents: [{ parts }],
+    generationConfig: {
+      imageConfig: {
+        aspectRatio,
+        imageSize: hfsyGeminiImageSize(nodeResolution),
+      },
+    },
+  };
+
+  const base = hfsyGeminiFetchBase();
+  const res = await fetch(`${base}/models/${encodeURIComponent(model)}:generateContent`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`hfsyapi.cn Nano Banana generateContent failed (${res.status}): ${text.slice(0, 800)}`);
+  }
+
+  let json: {
+    candidates?: Array<{
+      content?: {
+        parts?: Array<{
+          fileData?: { fileUri?: string; mimeType?: string };
+          inlineData?: { data?: string; mimeType?: string };
+        }>;
+      };
+    }>;
+    error?: { message?: string };
+  };
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error(`hfsyapi.cn Nano Banana response is not JSON: ${text.slice(0, 500)}`);
+  }
+  if (json.error?.message) throw new Error(`hfsyapi.cn Nano Banana: ${json.error.message}`);
+
+  const responseParts = json.candidates?.[0]?.content?.parts || [];
+  for (const part of responseParts) {
+    const inline = part.inlineData?.data;
+    if (inline && isPlausibleImageBase64(inline)) return inline;
+    const uri = part.fileData?.fileUri;
+    if (uri) return fetchUrlAsBase64(uri, signal, apiKey);
+  }
+
+  const url = extractFirstStringUrl(json);
+  if (url) return fetchUrlAsBase64(url, signal, apiKey);
+  throw new Error(`hfsyapi.cn Nano Banana response did not include an image: ${text.slice(0, 800)}`);
 }
 
 /** hfsyapi.cn GPT Image 2 单次生图（文生图 / 图生图共用）；文档 https://www.hfsyapi.cn/docs */
@@ -3326,8 +3435,12 @@ async function hfsyRequestOneImage(
   apiKey: string,
   signal?: AbortSignal,
   referenceImages?: string[],
-  pixelSize?: string
+  pixelSize?: string,
+  nodeResolution?: string
 ): Promise<string> {
+  if (isHfsyNanoBananaModel(modelName)) {
+    return hfsyRequestOneNanoBananaImage(modelName, prompt, aspectRatio, apiKey, signal, referenceImages, nodeResolution);
+  }
   const base = hfsyFetchBase();
   const body: Record<string, unknown> = {
     model: toHfsyImageModel(modelName),
@@ -3354,7 +3467,7 @@ async function hfsyGenerateNewImage(
   aspectRatio: string,
   numberOfImages: number,
   modelName: string,
-  _nodeResolution?: string,
+  nodeResolution?: string,
   _quality?: string,
   signal?: AbortSignal
 ): Promise<string[]> {
@@ -3368,7 +3481,7 @@ async function hfsyGenerateNewImage(
   const out: string[] = [];
   for (let i = 0; i < count; i++) {
     assertNotAborted(signal);
-    out.push(await hfsyRequestOneImage(modelName, prompt, aspectRatio, apiKey, signal));
+    out.push(await hfsyRequestOneImage(modelName, prompt, aspectRatio, apiKey, signal, undefined, undefined, nodeResolution));
   }
   return out;
 }
@@ -3382,7 +3495,7 @@ async function hfsyEditImage(
   numberOfImages: number,
   modelName: string,
   aspectRatio: string,
-  _nodeResolution?: string,
+  nodeResolution?: string,
   _quality?: string,
   pixelSize?: string,
   signal?: AbortSignal
@@ -3400,7 +3513,7 @@ async function hfsyEditImage(
   for (let i = 0; i < count; i++) {
     assertNotAborted(signal);
     out.push(
-      await hfsyRequestOneImage(modelName, prompt, aspectRatio, apiKey, signal, referenceImages, pixelSize)
+      await hfsyRequestOneImage(modelName, prompt, aspectRatio, apiKey, signal, referenceImages, pixelSize, nodeResolution)
     );
   }
   return out;
