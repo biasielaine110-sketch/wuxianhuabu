@@ -3068,6 +3068,18 @@ function resolveEditModel(modelName: string): string {
   return 'gpt-image-1';
 }
 
+function isHfsyImageModel(modelName: string): boolean {
+  const m = (modelName || '').trim();
+  return m === 'gpt-image-2-hfsy' || m === 'nano-banana-2-hfsy' || m === 'nano-banana-pro-hfsy';
+}
+
+function toHfsyImageModel(modelName: string): string {
+  const m = (modelName || '').trim();
+  if (m === 'nano-banana-2-hfsy') return 'nano-banana-2';
+  if (m === 'nano-banana-pro-hfsy') return 'nano-banana-pro';
+  return 'gpt-image-2';
+}
+
 /** 满 eAPI 尺寸格式：WIDTHxHEIGHT（如 1824x1024），而非宽高比 */
 function manxueAspectSize(aspectRatio: string): string {
   const map: Record<string, string> = {
@@ -3308,6 +3320,7 @@ function hfsyNormalizeReferenceImage(input: string): string {
 
 /** hfsyapi.cn GPT Image 2 单次生图（文生图 / 图生图共用）；文档 https://www.hfsyapi.cn/docs */
 async function hfsyRequestOneImage(
+  modelName: string,
   prompt: string,
   aspectRatio: string,
   apiKey: string,
@@ -3317,7 +3330,7 @@ async function hfsyRequestOneImage(
 ): Promise<string> {
   const base = hfsyFetchBase();
   const body: Record<string, unknown> = {
-    model: 'gpt-image-2',
+    model: toHfsyImageModel(modelName),
     prompt,
     n: 1,
     size: hfsyGptImage2Size(aspectRatio, pixelSize),
@@ -3340,6 +3353,7 @@ async function hfsyGenerateNewImage(
   prompt: string,
   aspectRatio: string,
   numberOfImages: number,
+  modelName: string,
   _nodeResolution?: string,
   _quality?: string,
   signal?: AbortSignal
@@ -3354,7 +3368,7 @@ async function hfsyGenerateNewImage(
   const out: string[] = [];
   for (let i = 0; i < count; i++) {
     assertNotAborted(signal);
-    out.push(await hfsyRequestOneImage(prompt, aspectRatio, apiKey, signal));
+    out.push(await hfsyRequestOneImage(modelName, prompt, aspectRatio, apiKey, signal));
   }
   return out;
 }
@@ -3366,6 +3380,7 @@ async function hfsyEditImage(
   base64Images: string[],
   prompt: string,
   numberOfImages: number,
+  modelName: string,
   aspectRatio: string,
   _nodeResolution?: string,
   _quality?: string,
@@ -3385,7 +3400,7 @@ async function hfsyEditImage(
   for (let i = 0; i < count; i++) {
     assertNotAborted(signal);
     out.push(
-      await hfsyRequestOneImage(prompt, aspectRatio, apiKey, signal, referenceImages, pixelSize)
+      await hfsyRequestOneImage(modelName, prompt, aspectRatio, apiKey, signal, referenceImages, pixelSize)
     );
   }
   return out;
@@ -4353,11 +4368,12 @@ export async function openAiGenerateNewImage(
     );
   }
 
-  if (rawModel === 'gpt-image-2-hfsy') {
+  if (isHfsyImageModel(rawModel)) {
     return hfsyGenerateNewImage(
       prompt,
       aspectRatio,
       numberOfImages,
+      rawModel,
       nodeResolution,
       quality,
       signal
@@ -4454,11 +4470,12 @@ export async function openAiEditImage(
     );
   }
 
-  if (rawModel === 'gpt-image-2-hfsy') {
+  if (isHfsyImageModel(rawModel)) {
     return hfsyEditImage(
       base64Images,
       prompt,
       numberOfImages,
+      rawModel,
       aspectRatio,
       nodeResolution,
       quality,

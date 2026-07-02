@@ -175,7 +175,7 @@ export const generateNewImage = async (
     if (model === 'gpt-image-2-codesonline') {
       return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
     }
-    if (model === 'gpt-image-2-hfsy') {
+    if (model === 'gpt-image-2-hfsy' || model === 'nano-banana-2-hfsy' || model === 'nano-banana-pro-hfsy') {
       return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
     }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {
@@ -272,7 +272,7 @@ export const editExistingImage = async (
     if (model === 'gpt-image-2-codesonline') {
       return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, pixelSize, signal);
     }
-    if (model === 'gpt-image-2-hfsy') {
+    if (model === 'gpt-image-2-hfsy' || model === 'nano-banana-2-hfsy' || model === 'nano-banana-pro-hfsy') {
       return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, pixelSize, signal);
     }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {

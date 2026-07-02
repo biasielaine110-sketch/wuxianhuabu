@@ -58,6 +58,20 @@ export const DEFAULT_CREDIT_PRICING_ROWS: CreditPricingRow[] = [
     credits: 10,
   },
   {
+    id: 'default-row-nano-banana-pro-hfsy',
+    category: '图生图',
+    modelName: 'nano-banana-pro-hfsy',
+    specLabel: 'hfsyapi.cn',
+    credits: 10,
+  },
+  {
+    id: 'default-row-nano-banana-2-hfsy',
+    category: '图生图',
+    modelName: 'nano-banana-2-hfsy',
+    specLabel: 'hfsyapi.cn',
+    credits: 8,
+  },
+  {
     id: 'default-row-gemini-31-flash-2k',
     category: '图生图',
     modelName: 'gemini-3.1-flash-image-preview',
