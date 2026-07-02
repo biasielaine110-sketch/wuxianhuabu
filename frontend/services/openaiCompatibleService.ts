@@ -599,8 +599,8 @@ function buildToApisImageGenerationBody(params: {
     if (isToApisGptImage2Model(model)) body.reference_images = image_urls;
     body.image_urls = image_urls;
   }
-  if (isToApisGptImage2Model(model) && (quality === 'low' || quality === 'medium')) {
-    body.quality = quality;
+  if (isToApisGptImage2Model(model)) {
+    body.quality = model === 'gpt-image-2-vip' && quality === 'medium' ? 'medium' : 'low';
   }
 
   if (isToApisGemini31FlashImageModel(model)) {

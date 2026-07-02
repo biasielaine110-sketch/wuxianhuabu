@@ -21,6 +21,11 @@ export function isToApisGptImage2QualityModel(id: string): boolean {
   return id === 'gpt-image-2-vip' || id === 'gpt-image-2-official';
 }
 
+/** ToAPIs GPT Image 2 VIP 支持 medium；official 仅保留 low */
+export function isToApisGptImage2MediumQualityModel(id: string): boolean {
+  return id === 'gpt-image-2-vip';
+}
+
 /** 满 eAPI Gemini 图像模型 */
 export function isManxueGeminiImageModel(id: string): boolean {
   return (
