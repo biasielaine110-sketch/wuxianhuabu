@@ -42,6 +42,23 @@ function faviconFallbackPlugin(): Plugin {
   };
 }
 
+/** hfsy 图像代理：支持 ?path=v1beta/models/...:generateContent，避免路径冒号被错误解析 */
+function configureHfsyImageProxyPathQuery(proxy: { on: (event: string, handler: (...args: unknown[]) => void) => void }) {
+  proxy.on('proxyReq', (proxyReq, req) => {
+    try {
+      const raw = (req as { url?: string }).url || '/';
+      const url = new URL(raw, 'http://localhost');
+      const sub = url.searchParams.get('path')?.replace(/^\/+/, '');
+      if (!sub) return;
+      url.searchParams.delete('path');
+      const rest = url.searchParams.toString();
+      (proxyReq as { path?: string }).path = `/${sub}${rest ? `?${rest}` : ''}`;
+    } catch {
+      /* ignore */
+    }
+  });
+}
+
 /** ToAPIs 等返回的图片 CDN 常未对浏览器开放 CORS，经同源路径代理后可正常读图 */
 const toapisFileCdnProxy = {
   '/cdn-files-toapis': {
@@ -147,6 +164,17 @@ const toapisFileCdnProxy = {
     secure: true,
     timeout: 1_800_000,
     proxyTimeout: 1_800_000,
+    configure(proxy) {
+      configureHfsyImageProxyPathQuery(proxy);
+      proxy.on('error', (err, _req, res) => {
+        console.error('[vite proxy /api/hfsy-image-proxy]', err);
+        const r = res as { headersSent?: boolean; writeHead?: (c: number, h?: unknown) => void; end?: (s?: string) => void };
+        if (r && !r.headersSent && typeof r.writeHead === 'function') {
+          r.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
+          r.end?.(`hfsyapi.cn 图像代理错误: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      });
+    },
     rewrite: (p: string) => {
       const path = p.startsWith('/') ? p : `/${p}`;
       const stripped = path.replace(/^\/api\/hfsy-image-proxy(?=\/|$)/, '');
@@ -160,6 +188,7 @@ const toapisFileCdnProxy = {
     timeout: 1_800_000,
     proxyTimeout: 1_800_000,
     configure(proxy) {
+      configureHfsyImageProxyPathQuery(proxy);
       proxy.on('error', (err, _req, res) => {
         console.error('[vite proxy /hfsy-image-api]', err);
         const r = res as { headersSent?: boolean; writeHead?: (c: number, h?: unknown) => void; end?: (s?: string) => void };

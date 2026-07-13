@@ -3319,14 +3319,35 @@ function isHfsyNanoBananaModel(modelName: string): boolean {
   return m === 'nano-banana-2-hfsy' || m === 'nano-banana-pro-hfsy';
 }
 
-function hfsyGeminiFetchBase(): string {
-  return hfsyFetchBase().replace(/\/v1\/?$/, '/v1beta');
+/** hfsy Nano Banana 的 generateContent 路径含冒号；统一走 ?path=，避免路径冒号或重复拼接导致 502 */
+function hfsyGeminiGenerateContentUrl(model: string): string {
+  const actionPath = `v1beta/models/${model}:generateContent`;
+  if (typeof window === 'undefined') {
+    return `https://www.hfsyapi.cn/${actionPath}`;
+  }
+  const prefix = hfsyImageProxyPathPrefix();
+  const url = `${window.location.origin}${prefix}?path=${encodeURIComponent(actionPath)}`;
+  if ((url.match(/https?:\/\//gi) || []).length > 1) {
+    throw new Error('hfsyapi.cn Nano Banana 请求地址构造异常，请硬刷新页面后重试。');
+  }
+  return url;
 }
 
 function hfsyGeminiImageSize(nodeResolution?: string): '1K' | '2K' | '4K' {
   const r = (nodeResolution || '2K').trim().toUpperCase();
   if (r === '1K' || r === '4K') return r;
   return '2K';
+}
+
+function hfsyNanoBananaFailureHint(status: number, bodyText: string): string {
+  const lower = bodyText.toLowerCase();
+  if (lower.includes('account access is restricted') || lower.includes('access is restricted')) {
+    return '（账户权限受限：hfsyapi.cn 账号未开通 Nano Banana 生图，或账户欠费/被限制。请登录 https://www.hfsyapi.cn 检查余额、套餐与模型权限，或联系平台客服。若 GPT Image 2（hfsy）可用，说明 Key 有效，只是 Nano Banana 未授权。）';
+  }
+  if (status === 401 || lower.includes('invalid token')) {
+    return '（401：请在「设置 → API」填写并保存正确的 hfsyapi.cn API Key。）';
+  }
+  return '';
 }
 
 /** hfsyapi 图生图 reference_images：URL 原样；base64 去掉 data: 前缀 */
@@ -3381,8 +3402,7 @@ async function hfsyRequestOneNanoBananaImage(
     },
   };
 
-  const base = hfsyGeminiFetchBase();
-  const res = await fetch(`${base}/models/${encodeURIComponent(model)}:generateContent`, {
+  const res = await fetch(hfsyGeminiGenerateContentUrl(model), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -3393,7 +3413,8 @@ async function hfsyRequestOneNanoBananaImage(
   });
   const text = await res.text();
   if (!res.ok) {
-    throw new Error(`hfsyapi.cn Nano Banana generateContent failed (${res.status}): ${text.slice(0, 800)}`);
+    const hint = hfsyNanoBananaFailureHint(res.status, text);
+    throw new Error(`hfsyapi.cn Nano Banana generateContent failed (${res.status}): ${text.slice(0, 800)}${hint}`);
   }
 
   let json: {
