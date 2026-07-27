@@ -47,6 +47,26 @@ function isMiniMaxChatModelId(modelName: string): boolean {
   return m === 'minimax-m2.7' || m.startsWith('minimax-');
 }
 
+/** codesonline（ai.codesonline.dev）对话模型 id */
+function isCodesonlineChatModelId(modelName: string): boolean {
+  const m = (modelName || '').trim();
+  return (
+    m === 'gpt-5.5-codesonline' ||
+    m === 'gpt-5.6-sol-codesonline' ||
+    m === 'gpt-5.6-terra-codesonline' ||
+    m === 'claude-haiku-4-5-codesonline'
+  );
+}
+
+/** UI 模型 id → ai.codesonline.dev 上游 model 字段 */
+function resolveCodesonlineChatUpstreamModelId(modelName: string): string {
+  const m = (modelName || '').trim();
+  if (m === 'gpt-5.6-sol-codesonline') return 'gpt-5.6-sol';
+  if (m === 'gpt-5.6-terra-codesonline') return 'gpt-5.6-terra';
+  if (m === 'claude-haiku-4-5-codesonline') return 'claude-haiku-4-5';
+  return 'gpt-5.5';
+}
+
 /** 满 eAPI（manxueapi.com）对话模型 id；与 ToAPIs 的 gemini-3.1-flash-lite-preview-official 区分 */
 function isManxueChatModelId(modelName: string): boolean {
   const m = (modelName || '').trim();
@@ -422,22 +442,19 @@ export const callGeminiChatWithHistory = async (
       ) };
     }
 
-    // codesonline GPT-5.5 对话
-    if (modelName === 'gpt-5.5-codesonline') {
+    // codesonline（ai.codesonline.dev）对话：GPT-5.5 / GPT-5.6 Sol / GPT-5.6 Terra / Claude Haiku 4.5
+    if (isCodesonlineChatModelId(modelName)) {
       const coKey = getCodesonlineChatSavedKey().trim();
       if (!coKey) {
         throw new Error(
-          '使用 GPT-5.5（codesonline）：请在「设置 → API」中填写「codesonline API Key (GPT-5.5)」。'
+          '使用 codesonline 对话模型：请在「设置 → API」中填写「codesonline API Key（对话）」。'
         );
       }
-      // 开发环境用 Vite 代理，生产环境用 vercel.json rewrite 代理
-      const baseUrl = import.meta.env.DEV
-        ? '/codesonline-chat-api'
-        : '/codesonline-chat-api';
+      // 开发 / 生产均走同源代理 /codesonline-chat-api → ai.codesonline.dev
       return { text: await chatCompletionHistoryAtBase(
-        baseUrl,
+        '/codesonline-chat-api',
         coKey,
-        'gpt-5.5',
+        resolveCodesonlineChatUpstreamModelId(modelName),
         slice.map((t) => ({
           role: t.role,
           content: t.content,

@@ -363,9 +363,12 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                     >文档：https://www.hfsyapi.cn/docs</a>
                   </div>
 
-                  {/* codesonline GPT-5.5 对话 */}
+                  {/* codesonline 对话（ai.codesonline.dev：GPT-5.5 / GPT-5.6 / Claude Haiku） */}
                   <div className="mt-5 pt-4 border-t border-[#333]">
-                    <h3 className="text-sm font-semibold text-gray-200 mb-2">codesonline (GPT-5.5 对话)</h3>
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">codesonline（对话）</h3>
+                    <p className="text-xs text-gray-500 mb-2">
+                      用于 GPT-5.5 / GPT-5.6 Sol / GPT-5.6 Terra / Claude Haiku 4.5（ai.codesonline.dev）
+                    </p>
                     <label className="text-xs text-gray-500 block mb-1">Base URL</label>
                     <input
                       type="text"
@@ -374,7 +377,7 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                       placeholder={DEFAULT_CODESONLINE_CHAT_BASE_URL}
                       className="w-full mb-3 bg-[#252525] border border-[#333] rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
                     />
-                    <label className="text-xs text-gray-500 block mb-1">codesonline API Key (GPT-5.5)</label>
+                    <label className="text-xs text-gray-500 block mb-1">codesonline API Key（对话）</label>
                     <input
                       type="password"
                       value={codesonlineChatKeyInput}

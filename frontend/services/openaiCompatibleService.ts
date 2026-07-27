@@ -3738,7 +3738,11 @@ function resolveChatModelForBase(baseNormalized: string, modelName: string): str
   const m = (modelName || '').trim();
   /** 画布对话节点 id，上游 OpenAI 兼容 model 字段 */
   if (m === 'gpt-5.5-junlan') return 'gpt-5.5';
-  if (m === 'claude-sonnet-4-6') return 'claude-sonnet-4-6';
+  if (m === 'gpt-5.5-codesonline') return 'gpt-5.5';
+  if (m === 'gpt-5.6-sol-codesonline') return 'gpt-5.6-sol';
+  if (m === 'gpt-5.6-terra-codesonline') return 'gpt-5.6-terra';
+  if (m === 'claude-haiku-4-5-codesonline') return 'claude-haiku-4-5';
+  if (m === 'claude-sonnet-4-6' || m.startsWith('claude-')) return m;
   if (isToApisHost(baseNormalized)) {
     if (m) return m;
     return 'gemini-3-pro-preview';
