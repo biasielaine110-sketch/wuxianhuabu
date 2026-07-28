@@ -117,7 +117,7 @@ export const PRESET_DOMAIN_TAB_OPTIONS: { id: PresetDomainId; label: string }[] 
 /** 内置 AI 对话快捷预设键（与对话节点按钮一致，默认归入 AI对话 类） */
 export const DEFAULT_CHAT_PRESET_KEYS = new Set([
   'AAAA_全能资产',
-  '反推提示词',
+  'BBBB_全能提示词',
   'BBBB_全能资产',
   'EEEE_备选万能资产',
   'CCC即梦分镜',

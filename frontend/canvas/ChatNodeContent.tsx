@@ -57,12 +57,12 @@ const CHAT_FEATURE_BUTTON_TONE_CLASSES: Record<'green' | 'blue' | 'purple' | 'ro
 const CHAT_FEATURE_BUTTON_SPECS: ChatFeatureButtonSpec[] = [
   // —— 玫红组（默认色）——
   {
-    id: 'reverse-prompt',
-    presetKey: '反推提示词',
-    label: '反推提示词',
+    id: 'bbbb-universal-prompt',
+    presetKey: 'BBBB_全能提示词',
+    label: 'BBBB_全能提示词',
     icon: 'video',
     title:
-      '',
+      'BBBB_全能提示词：根据图片素材（人物/分镜）与剧情描述，编写精准对应画面的视频生成提示词。发送前请连接参考图并补充剧情描述。',
   },
   {
     id: 'eeee-alt-universal-asset',
