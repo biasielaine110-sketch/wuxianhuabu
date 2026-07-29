@@ -18,7 +18,6 @@ import {
   DEFAULT_CODESONLINE_CHAT_BASE_URL,
   DEFAULT_CODESONLINE_IMAGE_BASE_URL,
   DEFAULT_DEEPSEEK_BASE_URL,
-  DEFAULT_JUNLAN_BASE_URL,
   DEFAULT_MANXUE_BASE_URL,
   DEFAULT_MINIMAX_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
@@ -98,9 +97,6 @@ export type CanvasSettingsModalProps = {
   deepSeekKeyInput: string;
   setDeepSeekKeyInput: Dispatch<SetStateAction<string>>;
   deepSeekBaseInput: string;
-  junlanBaseInput: string;
-  junlanKeyInput: string;
-  setJunlanKeyInput: Dispatch<SetStateAction<string>>;
   codesonlineBaseInput: string;
   codesonlineKeyInput: string;
   setCodesonlineKeyInput: Dispatch<SetStateAction<string>>;
@@ -175,9 +171,6 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
     deepSeekKeyInput,
     setDeepSeekKeyInput,
     deepSeekBaseInput,
-    junlanBaseInput,
-    junlanKeyInput,
-    setJunlanKeyInput,
     codesonlineBaseInput,
     codesonlineKeyInput,
     setCodesonlineKeyInput,

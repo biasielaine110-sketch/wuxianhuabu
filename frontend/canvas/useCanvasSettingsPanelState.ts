@@ -97,8 +97,6 @@ export function useCanvasSettingsPanelState({
   });
   const [deepSeekKeyInput, setDeepSeekKeyInput] = useState(() => getAiSettingsSnapshot().deepSeekKey);
   const [deepSeekBaseInput, setDeepSeekBaseInput] = useState(() => getAiSettingsSnapshot().deepSeekBaseUrl);
-  const [junlanBaseInput, setJunlanBaseInput] = useState(() => getAiSettingsSnapshot().junlanBaseUrl);
-  const [junlanKeyInput, setJunlanKeyInput] = useState(() => getAiSettingsSnapshot().junlanKey);
   const [codesonlineBaseInput, setCodesonlineBaseInput] = useState(
     () => getAiSettingsSnapshot().codesonlineBaseUrl
   );
@@ -119,8 +117,6 @@ export function useCanvasSettingsPanelState({
     setApiKeyInput(s.provider === 'gemini' ? s.geminiKey : s.openAiKey);
     setDeepSeekKeyInput(s.deepSeekKey);
     setDeepSeekBaseInput(s.deepSeekBaseUrl);
-    setJunlanBaseInput(s.junlanBaseUrl);
-    setJunlanKeyInput(s.junlanKey);
     setCodesonlineBaseInput(s.codesonlineBaseUrl);
     setCodesonlineKeyInput(s.codesonlineKey);
     setCodesonlineChatKeyInput(getCodesonlineChatSavedKey());
@@ -153,8 +149,6 @@ export function useCanvasSettingsPanelState({
     setApiKeyInput(s.provider === 'gemini' ? s.geminiKey : s.openAiKey);
     setDeepSeekKeyInput(s.deepSeekKey);
     setDeepSeekBaseInput(s.deepSeekBaseUrl);
-    setJunlanBaseInput(s.junlanBaseUrl);
-    setJunlanKeyInput(s.junlanKey);
     setCodesonlineBaseInput(s.codesonlineBaseUrl);
     setCodesonlineKeyInput(s.codesonlineKey);
     setHfsyKeyInput(getHfsySavedKey());
@@ -371,10 +365,6 @@ export function useCanvasSettingsPanelState({
       setDeepSeekKeyInput,
       deepSeekBaseInput,
       setDeepSeekBaseInput,
-      junlanBaseInput,
-      setJunlanBaseInput,
-      junlanKeyInput,
-      setJunlanKeyInput,
       codesonlineBaseInput,
       setCodesonlineBaseInput,
       codesonlineKeyInput,

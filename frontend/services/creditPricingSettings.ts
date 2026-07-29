@@ -37,13 +37,6 @@ export const DEFAULT_CREDIT_PRICING_ROWS: CreditPricingRow[] = [
     credits: 4,
   },
   {
-    id: 'default-row-gpt-image-2-junlan',
-    category: '图生图',
-    modelName: 'gpt-image-2-junlan',
-    specLabel: '君澜',
-    credits: 4,
-  },
-  {
     id: 'default-row-gpt-image-2-codesonline',
     category: '图生图',
     modelName: 'gpt-image-2-codesonline',

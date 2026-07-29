@@ -429,9 +429,7 @@ export function ChatNodeContent({
       msg.includes('unauthorized') ||
       msg.includes('invalid api key') ||
       (msg.includes('deepseek') && msg.includes('密钥')) ||
-      (msg.includes('使用 deepseek') && msg.includes('填写')) ||
-      (msg.includes('君澜') && msg.includes('密钥')) ||
-      (msg.includes('gpt-5.5') && msg.includes('君澜'))
+      (msg.includes('使用 deepseek') && msg.includes('填写'))
     ) {
       return {
         title: '鉴权 / DeepSeek 配置',
@@ -439,7 +437,7 @@ export function ChatNodeContent({
         fixes: [
           { label: '打开 API 设置', action: () => onOpenApiSettings() },
           { label: '切换到 DeepSeek-V4-Flash', action: () => onUpdate({ model: DEFAULT_DEEPSEEK_CHAT_MODEL_ID, error: undefined }) },
-          { label: '切换到 GPT-5.5（君澜）', action: () => onUpdate({ model: 'gpt-5.5-junlan', error: undefined }) },
+          { label: '切换到 GPT-5.5（codesonline）', action: () => onUpdate({ model: 'gpt-5.5-codesonline', error: undefined }) },
           { label: '清除报错', action: () => onUpdate({ error: undefined }) },
         ],
       };
@@ -683,9 +681,6 @@ export function ChatNodeContent({
           <optgroup label="MiniMax">
             <option value="minimax-m2.7">MiniMax M2.7</option>
             <option value="minimax-m3">MiniMax M3</option>
-          </optgroup>
-          <optgroup label="君澜 AI">
-            <option value="gpt-5.5-junlan">GPT-5.5（君澜）</option>
           </optgroup>
           <optgroup label="Google Gemini / ToAPIs">
             <option value="gemini-2.0-flash-official">Gemini 2.0 Flash（ToAPIs）</option>
@@ -1167,7 +1162,7 @@ export function ChatNodeContent({
             onPointerDown={(e) => e.stopPropagation()}
           >
             <option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option>
-            <option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option>
+            
             <option value="gpt-image-2-vip">GPT Image 2 VIP（ToAPIs）</option>
             <option value="gpt-image-2-official">GPT Image 2 Official（ToAPIs）</option>
             <optgroup label="hfsyapi.cn">

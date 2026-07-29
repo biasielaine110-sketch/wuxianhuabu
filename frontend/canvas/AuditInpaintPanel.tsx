@@ -295,7 +295,6 @@ export function AuditInpaintPanel({
             }}
             disabled={isGenerating}
           >
-            <option value="gpt-image-2-junlan">GPT Image 2（君澜 AI）</option>
             <option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option>
             <optgroup label="满 e（manxueapi.com）">
               <option value="gemini-3.1-flash-image-preview-2k-manxue">Gemini 3.1 Flash 2K（满 e）</option>

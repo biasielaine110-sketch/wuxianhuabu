@@ -9,7 +9,7 @@ import {
   isVeo31FastVideoModel,
   videoNodeModelToToApis,
 } from './videoModelUtils';
-import { DEFAULT_DEEPSEEK_CHAT_MODEL_ID, normalizeDeepSeekChatModelId, getCodesonlineSavedKey, getHfsySavedKey, getJunlanSavedKey, getOpenAiSavedKey } from '../services/aiSettings';
+import { DEFAULT_DEEPSEEK_CHAT_MODEL_ID, normalizeDeepSeekChatModelId, getCodesonlineSavedKey, getHfsySavedKey, getOpenAiSavedKey } from '../services/aiSettings';
 import { normalizeCanvasGenerationImages } from '../services/openaiCompatibleService';
 import { hasCanvasImagePayload } from '../services/canvasAssetResolver';
 import {
@@ -65,7 +65,6 @@ export function createCanvasGenerationApi(
   const imageModelBearerToken = (model: string): string | undefined => {
     const m = (model || '').trim();
     if (m === 'gpt-image-2-codesonline') return getCodesonlineSavedKey() || undefined;
-    if (m === 'gpt-image-2-junlan') return getJunlanSavedKey() || undefined;
     if (m === 'gpt-image-2-hfsy' || m === 'nano-banana-2-hfsy' || m === 'nano-banana-pro-hfsy') return getHfsySavedKey() || undefined;
     if (m.startsWith('gpt-image-')) return getOpenAiSavedKey() || undefined;
     return undefined;
@@ -556,7 +555,7 @@ export function createCanvasGenerationApi(
     }
   };
 
-  // 优化提示词：优先使用 gpt-5.5（君澜），失败则使用 deepseek-v4-flash
+  // 优化提示词：优先使用 gpt-5.5（codesonline），失败则使用 deepseek-v4-flash
   const handleOptimizePrompt = async (nodeId: string, text: string) => {
     const {
       setNodes,
@@ -591,7 +590,7 @@ ${text}`,
       let usedFallback = false;
 
       try {
-        result = (await callGeminiChatWithHistory(apiTurns, 'gpt-5.5-junlan')).text;
+        result = (await callGeminiChatWithHistory(apiTurns, 'gpt-5.5-codesonline')).text;
       } catch (err: any) {
         // GPT-5.5 失败，尝试 deepseek-v4-flash
         usedFallback = true;

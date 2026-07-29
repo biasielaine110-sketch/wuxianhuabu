@@ -4,8 +4,6 @@ import {
   getDeepSeekBaseUrl,
   getDeepSeekSavedKey,
   getGeminiSavedKey,
-  getJunlanBaseUrl,
-  getJunlanSavedKey,
   getMiniMaxBaseUrl,
   getMiniMaxSavedKey,
   getOpenAiBaseUrl,
@@ -33,12 +31,6 @@ const MAX_CHAT_HISTORY_TURNS = 48;
 function isDeepSeekChatModelId(modelName: string): boolean {
   const m = normalizeDeepSeekChatModelId(modelName).trim();
   return m === 'deepseek-v4-flash' || m === 'deepseek-v4-pro' || m.startsWith('deepseek-v4-');
-}
-
-/** 对话走君澜 OpenAI 兼容网关（与 ToAPIs 主通道分离，使用设置中的君澜 Base URL + Key） */
-function isJunlanChatModelId(modelName: string): boolean {
-  const m = (modelName || '').trim();
-  return m === 'gpt-5.5-junlan' || m === 'claude-sonnet-4-6';
 }
 
 /** MiniMax 对话模型 id */
@@ -189,9 +181,6 @@ export const generateNewImage = async (
     }
 
     const model = modelName || 'imagen-4';
-    if (model === 'gpt-image-2-junlan') {
-      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
-    }
     if (model === 'gpt-image-2-codesonline') {
       return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
     }
@@ -200,7 +189,7 @@ export const generateNewImage = async (
     }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {
       throw new Error(
-        'GPT Image 2（ToAPIs）等需在「设置 → API」中使用 OpenAI 兼容主通道，Base URL 指向 ToAPIs（https://toapis.com/v1）。君澜 / codesonline 通路请分别选择「GPT Image 2（君澜 AI）」「GPT Image 2（codesonline）」并填写对应密钥。'
+        'GPT Image 2（ToAPIs）等需在「设置 → API」中使用 OpenAI 兼容主通道，Base URL 指向 ToAPIs（https://toapis.com/v1）。codesonline 通路请选择「GPT Image 2（codesonline）」并填写对应密钥。'
       );
     }
     // 构建包含比例和尺寸要求的提示词
@@ -286,9 +275,6 @@ export const editExistingImage = async (
 
     const results: string[] = [];
     const model = modelName || 'gemini-3.1-flash-image-preview';
-    if (model === 'gpt-image-2-junlan') {
-      return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, pixelSize, signal);
-    }
     if (model === 'gpt-image-2-codesonline') {
       return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, pixelSize, signal);
     }
@@ -297,7 +283,7 @@ export const editExistingImage = async (
     }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {
       throw new Error(
-        'GPT Image 2（ToAPIs）图生图需使用 OpenAI 兼容主通道与 ToAPIs。君澜 / codesonline 请选择对应节点模型并填写密钥。'
+        'GPT Image 2（ToAPIs）图生图需使用 OpenAI 兼容主通道与 ToAPIs。codesonline 请选择对应节点模型并填写密钥。'
       );
     }
     const sizeHint = pixelSize
@@ -393,26 +379,6 @@ export const callGeminiChatWithHistory = async (
         base,
         key,
         normalizeDeepSeekChatModelId(modelName).trim(),
-        slice.map((t) => ({
-          role: t.role,
-          content: t.content,
-          imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
-          imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
-        }))
-      ) };
-    }
-
-    if (isJunlanChatModelId(modelName)) {
-      const jlKey = getJunlanSavedKey().trim();
-      if (!jlKey) {
-        throw new Error(
-          '使用 GPT-5.5 / Claude Sonnet 4-6（君澜）：请在「设置 → API」中填写「君澜 API Key」，并确认君澜 Base URL 为 https://www.junlanai.com/v1（与 ToAPIs 主通道密钥分开）。'
-        );
-      }
-      return { text: await chatCompletionHistoryAtBase(
-        getJunlanBaseUrl(),
-        jlKey,
-        modelName,
         slice.map((t) => ({
           role: t.role,
           content: t.content,

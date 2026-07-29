@@ -9,8 +9,6 @@ import {
   getCodesonlineSavedKey,
   getHfsyBaseUrl,
   getHfsySavedKey,
-  getJunlanBaseUrl,
-  getJunlanSavedKey,
   getManxueBaseUrl,
   getManxueSavedKey,
   getMiniMaxBaseUrl,
@@ -174,16 +172,6 @@ function isDeepSeekHost(baseNormalized: string): boolean {
   }
 }
 
-/** 判断是否为君澜 AI 域名（www.junlanai.com） */
-function isJunlanHost(baseNormalized: string): boolean {
-  try {
-    const host = new URL(baseNormalized).hostname.toLowerCase();
-    return host === 'www.junlanai.com' || host.endsWith('.junlanai.com');
-  } catch {
-    return false;
-  }
-}
-
 /** 判断是否为满 eAPI 域名（manxueapi.com） */
 function isManxueHost(baseNormalized: string): boolean {
   try {
@@ -320,7 +308,6 @@ async function sleepInterruptible(ms: number, signal?: AbortSignal): Promise<voi
 function toApisT2iModel(modelName: string): string {
   const m = (modelName || '').trim();
   if (m === 'gpt-image-2-codesonline') return 'gpt-image-2';
-  if (m === 'gpt-image-2-junlan') return 'gpt-image-2';
   if (m.startsWith('imagen') || m.startsWith('gemini')) return m;
   if (m === 'gpt-image-2' || m === 'gpt-image-1' || m.startsWith('gpt-image')) return m;
   if (m === 'gpt-4o-image') return m;
@@ -3055,7 +3042,6 @@ function resolveT2iModel(modelName: string): string {
   const m = (modelName || '').trim();
   if (m === 'gpt-image-2-codesonline') return 'gpt-image-2';
   if (m === 'gpt-image-2-hfsy') return 'gpt-image-2';
-  if (m === 'gpt-image-2-junlan') return 'gpt-image-2';
   if (m === 'dall-e-2' || m === 'dall-e-3' || m === 'gpt-image-2' || m === 'gpt-image-2-vip' || m === 'gpt-image-2-official' || m === 'gpt-image-1') return m;
   return 'dall-e-3';
 }
@@ -3064,7 +3050,6 @@ function resolveEditModel(modelName: string): string {
   const m = (modelName || '').trim();
   if (m === 'gpt-image-2-codesonline') return 'gpt-image-2';
   if (m === 'gpt-image-2-hfsy') return 'gpt-image-2';
-  if (m === 'gpt-image-2-junlan') return 'gpt-image-2';
   if (m === 'gpt-image-2' || m === 'gpt-image-2-vip' || m === 'gpt-image-2-official') return m;
   if (m === 'dall-e-2' || m === 'gpt-image-1') return m;
   if (m === 'dall-e-3') return 'gpt-image-1';
@@ -3737,7 +3722,6 @@ function isManxueImageModel(modelName: string): boolean {
 function resolveChatModelForBase(baseNormalized: string, modelName: string): string {
   const m = (modelName || '').trim();
   /** 画布对话节点 id，上游 OpenAI 兼容 model 字段 */
-  if (m === 'gpt-5.5-junlan') return 'gpt-5.5';
   if (m === 'gpt-5.5-codesonline') return 'gpt-5.5';
   if (m === 'gpt-5.6-sol-codesonline') return 'gpt-5.6-sol';
   if (m === 'gpt-5.6-terra-codesonline') return 'gpt-5.6-terra';
@@ -4465,28 +4449,7 @@ export async function openAiGenerateNewImage(
 ): Promise<string[]> {
   const rawModel = (modelName || '').trim();
   if (rawModel === 'gpt-image-2-junlan') {
-    const jlKey = getJunlanSavedKey().trim();
-    if (!jlKey) {
-      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, 'gpt-image-2-codesonline', nodeResolution, quality, signal);
-    }
-    const jlBase = normalizeBaseUrl(getJunlanBaseUrl());
-    try {
-      return await generateImagesAtOpenAiCompatibleBase(
-        jlBase,
-        jlKey,
-        prompt,
-        aspectRatio,
-        numberOfImages,
-        'gpt-image-2',
-        nodeResolution,
-        quality,
-        signal
-      );
-    } catch (err) {
-      // 君澜服务不可用（503 等）时回退 codesonline
-      console.warn('[openAiGenerateNewImage] 君澜不可用，尝试回退:', err);
-      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, 'gpt-image-2-codesonline', nodeResolution, quality, signal);
-    }
+    return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, 'gpt-image-2-codesonline', nodeResolution, quality, signal, onStatus);
   }
 
   if (rawModel === 'gpt-image-2-codesonline') {
@@ -4564,29 +4527,7 @@ export async function openAiEditImage(
 ): Promise<string[]> {
   const rawModel = (modelName || '').trim();
   if (rawModel === 'gpt-image-2-junlan') {
-    const jlKey = getJunlanSavedKey().trim();
-    if (!jlKey) {
-      return openAiEditImage(base64Images, prompt, numberOfImages, 'gpt-image-2-codesonline', aspectRatio, nodeResolution, quality, pixelSize, signal);
-    }
-    const jlBase = normalizeBaseUrl(getJunlanBaseUrl());
-    try {
-      return await editImagesAtOpenAiCompatibleBase(
-        jlBase,
-        jlKey,
-        base64Images,
-        prompt,
-        numberOfImages,
-        'gpt-image-2',
-        aspectRatio,
-        quality,
-        pixelSize,
-        signal
-      );
-    } catch (err) {
-      // 君澜服务不可用（503 等）时回退 codesonline
-      console.warn('[openAiEditImage] 君澜不可用，尝试回退:', err);
-      return openAiEditImage(base64Images, prompt, numberOfImages, 'gpt-image-2-codesonline', aspectRatio, nodeResolution, quality, pixelSize, signal);
-    }
+    return openAiEditImage(base64Images, prompt, numberOfImages, 'gpt-image-2-codesonline', aspectRatio, nodeResolution, quality, pixelSize, signal, onStatus);
   }
 
   if (rawModel === 'gpt-image-2-codesonline') {

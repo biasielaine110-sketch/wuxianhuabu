@@ -1,6 +1,6 @@
 # 无限 AI 画布
 
-纯前端 React 应用（Vite），支持节点连线画布与多 AI 提供商（Gemini、ToAPIs、满 e、君澜等）。
+纯前端 React 应用（Vite），支持节点连线画布与多 AI 提供商（Gemini、ToAPIs、满 e、codesonline 等）。
 
 ## 本地运行
 

@@ -6,10 +6,7 @@ const OPENAI_API_KEY_STORAGE_KEY = 'openai-compatible-api-key-v1';
 const OPENAI_BASE_URL_STORAGE_KEY = 'openai-compatible-base-url-v1';
 const DEEPSEEK_API_KEY_STORAGE_KEY = 'deepseek-api-key-v1';
 const DEEPSEEK_BASE_URL_STORAGE_KEY = 'deepseek-base-url-v1';
-/** 君澜 AI OpenAI 兼容网关（与 ToAPIs / 主 OpenAI 兼容通道分离）：画布「GPT Image 2（君澜 AI）」与对话「GPT-5.5（君澜）」等 */
-const JUNLAN_API_KEY_STORAGE_KEY = 'junlan-openai-compatible-api-key-v1';
-const JUNLAN_BASE_URL_STORAGE_KEY = 'junlan-openai-compatible-base-url-v1';
-/** [codesonline 控制台](https://image.codesonline.dev/personal/docs) OpenAI 兼容图像网关；画布模型 id 为 `gpt-image-2-codesonline`，与 ToAPIs/君澜的 gpt-image-2 分流 */
+/** [codesonline 控制台](https://image.codesonline.dev/personal/docs) OpenAI 兼容图像网关；画布模型 id 为 `gpt-image-2-codesonline`，与 ToAPIs 的 gpt-image-2 分流 */
 const CODESONLINE_IMAGE_API_KEY_STORAGE_KEY = 'codesonline-image-openai-api-key-v1';
 const CODESONLINE_IMAGE_BASE_URL_STORAGE_KEY = 'codesonline-image-openai-base-url-v1';
 /** hfsyapi.cn OpenAI 兼容图像网关；画布模型 id 为 `gpt-image-2-hfsy`；文档 https://www.hfsyapi.cn/docs */
@@ -31,8 +28,6 @@ const AIID_BASE_URL_STORAGE_KEY = 'aiid-openai-compatible-base-url-v1';
 export const DEFAULT_OPENAI_BASE_URL = 'https://toapis.com/v1';
 /** AIID 豆包Seedance2.0 视频生成 Base URL */
 export const DEFAULT_AIID_BASE_URL = 'https://api.aiid.edu.kg';
-/** 文档：https://stsg17lkjz.apifox.cn/8682367m0 — Base URL 须含 /v1 */
-export const DEFAULT_JUNLAN_BASE_URL = 'https://www.junlanai.com/v1';
 /** DeepSeek 官方 OpenAI 兼容入口 */
 export const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1';
 /** 画布「AI 对话」默认 DeepSeek 模型（与 {@link DEFAULT_DEEPSEEK_BASE_URL} 配合；官方 ID：deepseek-v4-flash / deepseek-v4-pro） */
@@ -50,6 +45,16 @@ export const DEFAULT_MINIMAX_BASE_URL = 'https://api.minimaxi.com/v1';
 export function normalizeDeepSeekChatModelId(modelId: string): string {
   const m = (modelId || '').trim();
   if (m === 'deepseek-chat' || m === 'deepseek-reasoner') return DEFAULT_DEEPSEEK_CHAT_MODEL_ID;
+  // 君澜通道已下线：映射到 codesonline / 默认 DeepSeek
+  if (m === 'gpt-5.5-junlan') return 'gpt-5.5-codesonline';
+  if (m === 'claude-sonnet-4-6') return DEFAULT_DEEPSEEK_CHAT_MODEL_ID;
+  return m;
+}
+
+/** 已下线图像通道的 model id → 当前替代（君澜已移除） */
+export function normalizeLegacyImageModelId(modelId: string): string {
+  const m = (modelId || '').trim();
+  if (m === 'gpt-image-2-junlan') return 'gpt-image-2-codesonline';
   return m;
 }
 
@@ -160,43 +165,6 @@ export function setOpenAiBaseUrl(url: string): void {
   try {
     if (normalized) localStorage.setItem(OPENAI_BASE_URL_STORAGE_KEY, normalized);
     else localStorage.removeItem(OPENAI_BASE_URL_STORAGE_KEY);
-  } catch {
-    /* ignore */
-  }
-}
-
-export function getJunlanSavedKey(): string {
-  try {
-    return localStorage.getItem(JUNLAN_API_KEY_STORAGE_KEY)?.trim() || '';
-  } catch {
-    return '';
-  }
-}
-
-export function setJunlanKey(apiKey: string): void {
-  const normalized = apiKey.trim();
-  try {
-    if (normalized) localStorage.setItem(JUNLAN_API_KEY_STORAGE_KEY, normalized);
-    else localStorage.removeItem(JUNLAN_API_KEY_STORAGE_KEY);
-  } catch {
-    /* ignore */
-  }
-}
-
-export function getJunlanBaseUrl(): string {
-  try {
-    const raw = localStorage.getItem(JUNLAN_BASE_URL_STORAGE_KEY)?.trim();
-    return raw || DEFAULT_JUNLAN_BASE_URL;
-  } catch {
-    return DEFAULT_JUNLAN_BASE_URL;
-  }
-}
-
-export function setJunlanBaseUrl(url: string): void {
-  const normalized = url.trim();
-  try {
-    if (normalized) localStorage.setItem(JUNLAN_BASE_URL_STORAGE_KEY, normalized);
-    else localStorage.removeItem(JUNLAN_BASE_URL_STORAGE_KEY);
   } catch {
     /* ignore */
   }
@@ -489,8 +457,6 @@ export type AiSettingsSnapshot = {
   geminiKey: string;
   openAiKey: string;
   openAiBaseUrl: string;
-  junlanKey: string;
-  junlanBaseUrl: string;
   codesonlineKey: string;
   codesonlineBaseUrl: string;
   hfsyKey: string;
@@ -509,8 +475,6 @@ export function getAiSettingsSnapshot(): AiSettingsSnapshot {
     geminiKey: getGeminiSavedKey(),
     openAiKey: getOpenAiSavedKey(),
     openAiBaseUrl: getOpenAiBaseUrl(),
-    junlanKey: getJunlanSavedKey(),
-    junlanBaseUrl: getJunlanBaseUrl(),
     codesonlineKey: getCodesonlineSavedKey(),
     codesonlineBaseUrl: getCodesonlineBaseUrl(),
     hfsyKey: getHfsySavedKey(),
@@ -533,9 +497,6 @@ export type PersistAiSettingsInput = {
   /** 仅在选择 OpenAI 兼容时写入；不传则保留原值 */
   openAiApiKey?: string;
   openAiBaseUrl?: string;
-  /** 君澜 GPT Image 2 专用；不传则保留原值 */
-  junlanApiKey?: string;
-  junlanBaseUrl?: string;
   /** codesonline GPT Image 2 专用（画布 id：gpt-image-2-codesonline）；不传则保留原值 */
   codesonlineApiKey?: string;
   codesonlineBaseUrl?: string;
@@ -561,8 +522,6 @@ export function persistAiSettings(opts: PersistAiSettingsInput): void {
   if (opts.geminiApiKey !== undefined) setGeminiKey(opts.geminiApiKey);
   if (opts.openAiApiKey !== undefined) setOpenAiKey(opts.openAiApiKey);
   if (opts.openAiBaseUrl !== undefined) setOpenAiBaseUrl(opts.openAiBaseUrl);
-  if (opts.junlanApiKey !== undefined) setJunlanKey(opts.junlanApiKey);
-  if (opts.junlanBaseUrl !== undefined) setJunlanBaseUrl(opts.junlanBaseUrl);
   if (opts.codesonlineApiKey !== undefined) setCodesonlineKey(opts.codesonlineApiKey);
   if (opts.codesonlineBaseUrl !== undefined) setCodesonlineBaseUrl(opts.codesonlineBaseUrl);
   if (opts.hfsyApiKey !== undefined) setHfsyKey(opts.hfsyApiKey);

@@ -6,7 +6,6 @@ import {
   DEFAULT_CODESONLINE_IMAGE_BASE_URL,
   DEFAULT_DEEPSEEK_BASE_URL,
   DEFAULT_HFSY_IMAGE_BASE_URL,
-  DEFAULT_JUNLAN_BASE_URL,
   DEFAULT_MANXUE_BASE_URL,
   DEFAULT_MINIMAX_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
@@ -93,9 +92,6 @@ export type CanvasSettingsModalProps = {
   deepSeekKeyInput: string;
   setDeepSeekKeyInput: Dispatch<SetStateAction<string>>;
   deepSeekBaseInput: string;
-  junlanBaseInput: string;
-  junlanKeyInput: string;
-  setJunlanKeyInput: Dispatch<SetStateAction<string>>;
   codesonlineBaseInput: string;
   codesonlineKeyInput: string;
   setCodesonlineKeyInput: Dispatch<SetStateAction<string>>;
@@ -172,9 +168,6 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
     deepSeekKeyInput,
     setDeepSeekKeyInput,
     deepSeekBaseInput,
-    junlanBaseInput,
-    junlanKeyInput,
-    setJunlanKeyInput,
     codesonlineBaseInput,
     codesonlineKeyInput,
     setCodesonlineKeyInput,
@@ -301,29 +294,8 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
               <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1 -mr-1">
               {settingsTab === 'api' && (
                 <div>
-                  {/* ① 君澜 */}
+                  {/* ① codesonline */}
                   <div>
-                    <h3 className="text-sm font-semibold text-gray-200 mb-2">君澜 AI</h3>
-                    <span hidden><label className="text-xs text-gray-500 block mb-1">君澜 Base URL</label>
-                    <input
-                      type="text"
-                      readOnly
-                      value={junlanBaseInput}
-                      placeholder={DEFAULT_JUNLAN_BASE_URL}
-                      className="w-full mb-3 bg-[#252525] border border-[#333] rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
-                    /></span>
-                    <label className="text-xs text-gray-500 block mb-1">君澜 API Key</label>
-                    <input
-                      type="password"
-                      value={junlanKeyInput}
-                      onChange={(e) => setJunlanKeyInput(e.target.value)}
-                      placeholder="sk-..."
-                      className="w-full bg-[#222222] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-600 transition-colors text-sm"
-                    />
-                  </div>
-
-                  {/* ② codesonline */}
-                  <div className="mt-5 pt-4 border-t border-[#333]">
                     <h3 className="text-sm font-semibold text-gray-200 mb-2">codesonline（GPT Image 2）</h3>
                     <span hidden><label className="text-xs text-gray-500 block mb-1">codesonline Base URL</label>
                     <input
@@ -492,8 +464,6 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                                 provider: aiProvider,
                                 openAiApiKey: apiKeyInput.trim(),
                                 openAiBaseUrl: openAiBaseInput.trim() || DEFAULT_OPENAI_BASE_URL,
-                                junlanApiKey: junlanKeyInput.trim(),
-                                junlanBaseUrl: junlanBaseInput.trim() || DEFAULT_JUNLAN_BASE_URL,
                                 codesonlineApiKey: codesonlineKeyInput.trim(),
                                 codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
                                 hfsyApiKey: hfsyKeyInput.trim(),
@@ -529,8 +499,6 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                                 provider: aiProvider,
                                 geminiApiKey: apiKeyInput.trim(),
                                 openAiBaseUrl: openAiBaseInput.trim() || DEFAULT_OPENAI_BASE_URL,
-                                junlanApiKey: junlanKeyInput.trim(),
-                                junlanBaseUrl: junlanBaseInput.trim() || DEFAULT_JUNLAN_BASE_URL,
                                 codesonlineApiKey: codesonlineKeyInput.trim(),
                                 codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
                                 hfsyApiKey: hfsyKeyInput.trim(),
@@ -578,8 +546,6 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                             provider: aiProvider,
                             openAiApiKey: aiProvider === 'openai-compatible' ? apiKeyInput.trim() : undefined,
                             openAiBaseUrl: (openAiBaseInput.trim() || DEFAULT_OPENAI_BASE_URL),
-                            junlanApiKey: junlanKeyInput.trim(),
-                            junlanBaseUrl: junlanBaseInput.trim() || DEFAULT_JUNLAN_BASE_URL,
                             codesonlineApiKey: codesonlineKeyInput.trim(),
                             codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
                             hfsyApiKey: hfsyKeyInput.trim(),
@@ -617,8 +583,6 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                           geminiApiKey: aiProvider === 'gemini' ? apiKeyInput.trim() : undefined,
                           openAiApiKey: aiProvider === 'openai-compatible' ? apiKeyInput.trim() : undefined,
                           openAiBaseUrl: (openAiBaseInput.trim() || DEFAULT_OPENAI_BASE_URL),
-                          junlanApiKey: junlanKeyInput.trim(),
-                          junlanBaseUrl: junlanBaseInput.trim() || DEFAULT_JUNLAN_BASE_URL,
                           codesonlineApiKey: codesonlineKeyInput.trim(),
                           codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
                           hfsyApiKey: hfsyKeyInput.trim(),
