@@ -321,6 +321,9 @@
   [data-selected="false"] [class*="flex-col"][class*="border-t"] {
     display: none !important;
   }
+  [data-selected="false"] [class*="overflow-hidden"][class*="border-t"] {
+    display: none !important;
+  }
   [data-selected="false"] [class*="overflow-y-auto"][class*="border-t"] {
     display: none !important;
   }

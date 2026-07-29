@@ -1091,10 +1091,10 @@ export function ChatNodeContent({
         )}
       </div>
 
-      {/* 输入区域（与上方消息区 grid 2:1） */}
-      <div className={`flex min-h-0 flex-col overflow-y-auto border-t border-[#333] bg-[#252525] p-2 ${isSelected ? '' : 'hidden'}`}>
+      {/* 输入区域（与上方消息区 grid 2:1）；工具栏固定不滚动，仅消息区可上下滑动 */}
+      <div className={`flex min-h-0 flex-col overflow-hidden border-t border-[#333] bg-[#252525] p-2 ${isSelected ? '' : 'hidden'}`}>
         {/* 快捷功能：置于文字输入框上方 */}
-        <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-md border border-[#333] bg-[#3A3A3A] px-2 py-1.5" style={{ fontSize: 50 }}>
+        <div className="mb-2 flex shrink-0 flex-wrap items-center gap-1.5 rounded-md border border-[#333] bg-[#3A3A3A] px-2 py-1.5" style={{ fontSize: 50 }}>
           <span className="shrink-0 text-gray-500">功能</span>
           {CHAT_FEATURE_BUTTON_SPECS.map((btn) => {
             const toneClass = CHAT_FEATURE_BUTTON_TONE_CLASSES[btn.tone ?? 'rose'];
@@ -1124,7 +1124,7 @@ export function ChatNodeContent({
           })}
         </div>
         {/* 生图比例和分辨率选择器 */}
-        <div className="mb-2 flex items-center gap-2 flex-wrap">
+        <div className="mb-2 flex shrink-0 items-center gap-2 flex-wrap">
           <span className="text-gray-400 shrink-0" style={{ fontSize: fs(10) }}>比例:</span>
           <select
             className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-purple-500"
@@ -1207,20 +1207,20 @@ export function ChatNodeContent({
             <span className="ml-1">AI生图</span>
           </button>
         </div>
-        <RefPickBar
-          slots={refSlots}
-          disabled={node.isGenerating}
-          uiScale={CHAT_PANEL_FONT_SCALE}
-          onInsert={(tok) => insertPromptToken(tok.endsWith(' ') ? tok : `${tok} `)}
-        />
-        <div className="flex gap-2">
+        <div className="shrink-0">
+          <RefPickBar
+            slots={refSlots}
+            disabled={node.isGenerating}
+            uiScale={CHAT_PANEL_FONT_SCALE}
+            onInsert={(tok) => insertPromptToken(tok.endsWith(' ') ? tok : `${tok} `)}
+          />
+        </div>
+        <div className="flex min-h-0 flex-1 gap-2">
           <textarea
             ref={chatPromptRef}
-            className="flex-1 bg-[#222222] text-gray-200 p-2.5 rounded border border-[#444] focus:outline-none focus:border-rose-500 resize-y"
+            className="min-h-0 flex-1 resize-none bg-[#222222] text-gray-200 p-2.5 rounded border border-[#444] focus:outline-none focus:border-rose-500"
             style={{
               fontSize: chatFontScaled,
-              minHeight: fs(108),
-              height: node.chatInputHeight ?? fs(152),
               overflowY: 'auto',
             }}
             value={node.prompt || ''}
@@ -1308,10 +1308,6 @@ export function ChatNodeContent({
             onPointerUp={(e) => {
               e.stopPropagation();
               syncPromptCursor();
-              const nextHeight = Math.max(fs(108), Math.round((e.currentTarget as HTMLTextAreaElement).offsetHeight));
-              if (nextHeight !== (node.chatInputHeight ?? fs(152))) {
-                onUpdate({ chatInputHeight: nextHeight });
-              }
             }}
           />
           {showAtPicker && (
