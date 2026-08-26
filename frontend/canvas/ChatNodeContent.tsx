@@ -671,6 +671,7 @@ export function ChatNodeContent({
           <optgroup label="DeepSeek">
             <option value="deepseek-v4-flash">DeepSeek-V4-Flash</option>
             <option value="deepseek-v4-pro">DeepSeek-V4-Pro</option>
+            <option value="deepseek-v4-flash-vision-exp">DeepSeek-V4-Flash-Vision-Exp</option>
           </optgroup>
           <optgroup label="codesonline">
             <option value="gpt-5.5-codesonline">GPT-5.5（codesonline）</option>
