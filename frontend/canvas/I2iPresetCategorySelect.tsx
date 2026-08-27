@@ -127,7 +127,6 @@ export function I2iPresetCategorySelect({
           <option value="" style={{ fontSize: 30 }}>未使用</option>
           <option value={COMMON_TEMPLATE_KEY} style={{ fontSize: 30 }}>通用模板</option>
           <option value="真人写实" style={{ fontSize: 30 }}>真人写实</option>
-          <option value="真人古风" style={{ fontSize: 30 }}>真人古风</option>
           <option value="古风国漫3D" style={{ fontSize: 30 }}>古风国漫3D</option>
           <option value="游戏cg动画" style={{ fontSize: 30 }}>游戏cg动画</option>
           <option value="二维新海诚" style={{ fontSize: 30 }}>二维新海诚</option>
