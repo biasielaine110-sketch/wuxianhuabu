@@ -1,5 +1,5 @@
 /** 画布节点预览缩略图分辨率比例（相对基准长边，5–150%） */
-let thumbResolutionPercent = 10;
+let thumbResolutionPercent = 150;
 
 export function getThumbResolutionPercent(): number {
   return thumbResolutionPercent;
