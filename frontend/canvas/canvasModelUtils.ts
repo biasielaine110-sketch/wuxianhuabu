@@ -8,11 +8,17 @@ export function isGptImage2CanvasModelId(id: string): boolean {
   return (
     id === 'gpt-image-2-codesonline' ||
     id === 'gpt-image-2-hfsy' ||
+    id === 'gpt-image-2pro-hfsy' ||
     id === 'gpt-image-2' ||
     id === 'gpt-image-2-vip' ||
     id === 'gpt-image-2-official' ||
     id === 'gpt-image-2-manxue'
   );
+}
+
+/** hfsyapi.cn GPT Image 2 Pro 4K：选择时默认切到 4K */
+export function isHfsyGptImage2Pro4kModel(id: string): boolean {
+  return id === 'gpt-image-2pro-4k-hfsy';
 }
 
 /** ToAPIs GPT Image 2：支持 low / medium / high quality 选项 */

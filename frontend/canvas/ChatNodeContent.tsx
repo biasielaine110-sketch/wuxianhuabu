@@ -1168,6 +1168,8 @@ export function ChatNodeContent({
             <option value="gpt-image-2-official">GPT Image 2 Official（ToAPIs）</option>
             <optgroup label="hfsyapi.cn">
               <option value="gpt-image-2-hfsy">GPT Image 2（hfsyapi.cn）</option>
+              <option value="gpt-image-2pro-hfsy">GPT Image 2 Pro（hfsyapi.cn）</option>
+              <option value="gpt-image-2pro-4k-hfsy">GPT Image 2 Pro 4K（hfsyapi.cn）</option>
               <option value="nano-banana-2-hfsy">Nano-Banana 2（hfsyapi.cn）</option>
               <option value="nano-banana-pro-hfsy">Nano-Banana Pro（hfsyapi.cn）</option>
             </optgroup>

@@ -3048,6 +3048,8 @@ function resolveT2iModel(modelName: string): string {
   const m = (modelName || '').trim();
   if (m === 'gpt-image-2-codesonline') return 'gpt-image-2';
   if (m === 'gpt-image-2-hfsy') return 'gpt-image-2';
+  if (m === 'gpt-image-2pro-hfsy') return 'gpt-image-2pro';
+  if (m === 'gpt-image-2pro-4k-hfsy') return 'gpt-image-2pro-4k';
   if (m === 'dall-e-2' || m === 'dall-e-3' || m === 'gpt-image-2' || m === 'gpt-image-2-vip' || m === 'gpt-image-2-official' || m === 'gpt-image-1') return m;
   return 'dall-e-3';
 }
@@ -3056,6 +3058,8 @@ function resolveEditModel(modelName: string): string {
   const m = (modelName || '').trim();
   if (m === 'gpt-image-2-codesonline') return 'gpt-image-2';
   if (m === 'gpt-image-2-hfsy') return 'gpt-image-2';
+  if (m === 'gpt-image-2pro-hfsy') return 'gpt-image-2pro';
+  if (m === 'gpt-image-2pro-4k-hfsy') return 'gpt-image-2pro-4k';
   if (m === 'gpt-image-2' || m === 'gpt-image-2-vip' || m === 'gpt-image-2-official') return m;
   if (m === 'dall-e-2' || m === 'gpt-image-1') return m;
   if (m === 'dall-e-3') return 'gpt-image-1';
@@ -3064,13 +3068,21 @@ function resolveEditModel(modelName: string): string {
 
 function isHfsyImageModel(modelName: string): boolean {
   const m = (modelName || '').trim();
-  return m === 'gpt-image-2-hfsy' || m === 'nano-banana-2-hfsy' || m === 'nano-banana-pro-hfsy';
+  return (
+    m === 'gpt-image-2-hfsy' ||
+    m === 'gpt-image-2pro-hfsy' ||
+    m === 'gpt-image-2pro-4k-hfsy' ||
+    m === 'nano-banana-2-hfsy' ||
+    m === 'nano-banana-pro-hfsy'
+  );
 }
 
 function toHfsyImageModel(modelName: string): string {
   const m = (modelName || '').trim();
   if (m === 'nano-banana-2-hfsy') return 'nano-banana-2';
   if (m === 'nano-banana-pro-hfsy') return 'nano-banana-pro';
+  if (m === 'gpt-image-2pro-hfsy') return 'gpt-image-2pro';
+  if (m === 'gpt-image-2pro-4k-hfsy') return 'gpt-image-2pro-4k';
   return 'gpt-image-2';
 }
 
@@ -3299,10 +3311,50 @@ const HFSY_GPT_IMAGE_2_ASPECT_SIZES: Record<string, string> = {
   '21:9': '1344x576',
 };
 
-function hfsyGptImage2Size(aspectRatio: string, pixelSize?: string): string {
+/** gpt-image-2pro 等 2K 档位（边长为 16 的倍数） */
+const HFSY_GPT_IMAGE_2_2K_ASPECT_SIZES: Record<string, string> = {
+  '1:1': '2048x2048',
+  '5:4': '2080x1664',
+  '9:16': '1440x2560',
+  '16:9': '2560x1440',
+  '4:3': '2048x1536',
+  '3:2': '2016x1344',
+  '4:5': '1664x2080',
+  '3:4': '1536x2048',
+  '2:3': '1344x2016',
+  '21:9': '2688x1152',
+};
+
+/** gpt-image-2pro-4k 等 4K 档位（边长为 16 的倍数） */
+const HFSY_GPT_IMAGE_2_4K_ASPECT_SIZES: Record<string, string> = {
+  '1:1': '2880x2880',
+  '5:4': '3200x2560',
+  '9:16': '2160x3840',
+  '16:9': '3840x2160',
+  '4:3': '3840x2880',
+  '3:2': '3840x2560',
+  '4:5': '2560x3200',
+  '3:4': '2880x3840',
+  '2:3': '2560x3840',
+  '21:9': '3840x1648',
+};
+
+function hfsyGptImage2Size(aspectRatio: string, pixelSize?: string, modelName?: string, nodeResolution?: string): string {
   if (pixelSize?.trim()) return pixelSize.trim();
   const key = (aspectRatio || '1:1').trim();
-  return HFSY_GPT_IMAGE_2_ASPECT_SIZES[key] || HFSY_GPT_IMAGE_2_ASPECT_SIZES['1:1'];
+  const m = (modelName || '').trim();
+  const res = (nodeResolution || '').trim().toLowerCase();
+
+  let table = HFSY_GPT_IMAGE_2_ASPECT_SIZES;
+  if (m === 'gpt-image-2pro-4k-hfsy') {
+    table = HFSY_GPT_IMAGE_2_4K_ASPECT_SIZES;
+  } else if (m === 'gpt-image-2pro-hfsy') {
+    if (res === '4k') table = HFSY_GPT_IMAGE_2_4K_ASPECT_SIZES;
+    else if (res === '1k') table = HFSY_GPT_IMAGE_2_ASPECT_SIZES;
+    else table = HFSY_GPT_IMAGE_2_2K_ASPECT_SIZES;
+  }
+
+  return table[key] || table['1:1'];
 }
 
 function isHfsyNanoBananaModel(modelName: string): boolean {
@@ -3458,7 +3510,7 @@ async function hfsyRequestOneImage(
     model: toHfsyImageModel(modelName),
     prompt,
     n: 1,
-    size: hfsyGptImage2Size(aspectRatio, pixelSize),
+    size: hfsyGptImage2Size(aspectRatio, pixelSize, modelName, nodeResolution),
     response_format: 'b64_json',
   };
   if (referenceImages?.length) {

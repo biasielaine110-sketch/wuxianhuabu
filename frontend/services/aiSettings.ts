@@ -9,7 +9,7 @@ const DEEPSEEK_BASE_URL_STORAGE_KEY = 'deepseek-base-url-v1';
 /** [codesonline 控制台](https://image.codesonline.dev/personal/docs) OpenAI 兼容图像网关；画布模型 id 为 `gpt-image-2-codesonline`，与 ToAPIs 的 gpt-image-2 分流 */
 const CODESONLINE_IMAGE_API_KEY_STORAGE_KEY = 'codesonline-image-openai-api-key-v1';
 const CODESONLINE_IMAGE_BASE_URL_STORAGE_KEY = 'codesonline-image-openai-base-url-v1';
-/** hfsyapi.cn OpenAI 兼容图像网关；画布模型 id 为 `gpt-image-2-hfsy`；文档 https://www.hfsyapi.cn/docs */
+/** hfsyapi.cn OpenAI 兼容图像网关；画布模型 id：`gpt-image-2-hfsy` / `gpt-image-2pro-hfsy` / `gpt-image-2pro-4k-hfsy`；文档 https://www.hfsyapi.cn/docs */
 const HFSY_IMAGE_API_KEY_STORAGE_KEY = 'hfsy-image-openai-api-key-v1';
 const HFSY_IMAGE_BASE_URL_STORAGE_KEY = 'hfsy-image-openai-base-url-v1';
 /** codesonline GPT-5.5 对话专用 */
