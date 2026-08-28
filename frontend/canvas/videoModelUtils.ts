@@ -68,15 +68,26 @@ export function isVideoDoubaoSeedance2Model(vm: string): boolean {
 }
 
 export function isHfsySd2VideoModel(vm?: string): boolean {
-  return vm === 'hfsy-sd-2' || vm === 'hfsy-sd-2-fast';
+  return (
+    vm === 'hfsy-sd-2' ||
+    vm === 'hfsy-sd-2-fast' ||
+    vm === 'hfsy-sd-2-vip' ||
+    vm === 'hfsy-sd-2-vip-720' ||
+    vm === 'hfsy-sd-2.5-480' ||
+    vm === 'hfsy-sd-2.5-720'
+  );
 }
 
 export function isHfsyMinimaxH3VideoModel(vm?: string): boolean {
   return vm === 'hfsy-minimax-h3';
 }
 
+export function isHfsyGrokImagineVideoModel(vm?: string): boolean {
+  return vm === 'hfsy-grok-imagine-video-1.5';
+}
+
 export function isHfsyVideoModel(vm?: string): boolean {
-  return isHfsySd2VideoModel(vm) || isHfsyMinimaxH3VideoModel(vm);
+  return isHfsySd2VideoModel(vm) || isHfsyMinimaxH3VideoModel(vm) || isHfsyGrokImagineVideoModel(vm);
 }
 
 /** 切换视频模型时同步时长、分辨率、画幅等默认值 */
@@ -121,6 +132,25 @@ export function getVideoModelSwitchUpdates(m: string, node: CanvasNode): Partial
     updates.videoResolution = '720p';
     const ar = node.aspectRatio || '16:9';
     if (ar !== '16:9' && ar !== '9:16') updates.aspectRatio = '16:9';
+  } else if (isHfsyGrokImagineVideoModel(m)) {
+    const d = node.videoDuration ?? 10;
+    updates.videoDuration = d >= 1 && d <= 15 ? d : 10;
+    updates.videoResolution =
+      node.videoResolution === '480p' || node.videoResolution === '1080p' ? node.videoResolution : '720p';
+    const ar = node.aspectRatio || '16:9';
+    if (!['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].includes(ar)) updates.aspectRatio = '16:9';
+  } else if (m === 'hfsy-sd-2.5-480') {
+    const d = node.videoDuration ?? 8;
+    updates.videoDuration = [5, 8, 10, 12, 15].includes(d) ? d : 8;
+    updates.videoResolution = '480p';
+    const ar = node.aspectRatio || '16:9';
+    if (!['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'].includes(ar)) updates.aspectRatio = '16:9';
+  } else if (m === 'hfsy-sd-2.5-720' || m === 'hfsy-sd-2-vip-720') {
+    const d = node.videoDuration ?? 8;
+    updates.videoDuration = [5, 8, 10, 12, 15].includes(d) ? d : 8;
+    updates.videoResolution = '720p';
+    const ar = node.aspectRatio || '16:9';
+    if (!['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'].includes(ar)) updates.aspectRatio = '16:9';
   } else if (isHfsySd2VideoModel(m)) {
     const d = node.videoDuration ?? 8;
     updates.videoDuration = [5, 8, 10, 12, 15].includes(d) ? d : 8;

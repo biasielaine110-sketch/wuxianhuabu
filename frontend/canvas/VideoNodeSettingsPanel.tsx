@@ -5,6 +5,7 @@ import { OptimizedImage } from './OptimizedImage';
 import { EyedropperIcon } from './canvasIcons';
 import {
   getVideoModelSwitchUpdates,
+  isHfsyGrokImagineVideoModel,
   isHfsyMinimaxH3VideoModel,
   isHfsySd2VideoModel,
   isJimengVideoModel,
@@ -47,6 +48,10 @@ export function VideoNodeSettingsPanel({
   const isSeedance2Fast = vm === 'seedance-2-fast';
   const isHfsySd2 = isHfsySd2VideoModel(vm);
   const isHfsyMinimaxH3 = isHfsyMinimaxH3VideoModel(vm);
+  const isHfsyGrokImagine = isHfsyGrokImagineVideoModel(vm);
+  const isHfsySdFixed480 = vm === 'hfsy-sd-2.5-480';
+  const isHfsySdFixed720 = vm === 'hfsy-sd-2.5-720' || vm === 'hfsy-sd-2-vip-720';
+  const isHfsySdSizeLarge = isHfsySd2 && !isHfsySdFixed480 && !isHfsySdFixed720;
   const isGemini = vm === 'gemini-omni-flash';
   const isDoubaoSeedance2 = isVideoDoubaoSeedance2Model(vm);
   const isManxueGrokImagine = isManxueGrokImagineVideoModel(vm);
@@ -181,9 +186,11 @@ export function VideoNodeSettingsPanel({
                   ? ' · 满 e Grok Imagine：10/15 秒、720p；需满 e API Key'
                   : isHfsyMinimaxH3
                     ? ' · MiniMax-H3（hfsy）：4–15 秒；画幅 16:9 / 9:16；默认 720p；需 hfsyapi.cn API Key'
-                    : isHfsySd2
-                      ? ' · SD-2（hfsy）：5–15 秒；多画幅；需 hfsyapi.cn API Key'
-                      : ''}
+                    : isHfsyGrokImagine
+                      ? ' · Grok Imagine Video 1.5（hfsy）：1–15 秒；多画幅；480p/720p/1080p；需 hfsyapi.cn API Key'
+                      : isHfsySd2
+                        ? ' · Seedance（hfsy）：5–15 秒；多画幅；需 hfsyapi.cn API Key'
+                        : ''}
       </div>
       {!isSora && !isVeo && isGroDur && (
         <div className="text-[9px] text-amber-600/95 px-1 leading-snug">
@@ -233,7 +240,12 @@ export function VideoNodeSettingsPanel({
             <option value="gemini-omni-flash">Gemini Omni Flash</option>
           </optgroup>
           <optgroup label="hfsyapi.cn">
+            <option value="hfsy-grok-imagine-video-1.5">Grok Imagine Video 1.5（hfsyapi.cn）</option>
             <option value="hfsy-minimax-h3">MiniMax-H3（hfsyapi.cn）</option>
+            <option value="hfsy-sd-2.5-720">SD-2.5 720（hfsyapi.cn）</option>
+            <option value="hfsy-sd-2.5-480">SD-2.5 480（hfsyapi.cn）</option>
+            <option value="hfsy-sd-2-vip-720">SD-2 VIP 720（hfsyapi.cn）</option>
+            <option value="hfsy-sd-2-vip">SD-2 VIP（hfsyapi.cn）</option>
             <option value="hfsy-sd-2-fast">SD-2 Fast（hfsyapi.cn）</option>
             <option value="hfsy-sd-2">SD-2（hfsyapi.cn）</option>
           </optgroup>
@@ -345,6 +357,21 @@ export function VideoNodeSettingsPanel({
             >
               <option value={4}>4 秒</option>
               <option value={5}>5 秒</option>
+              <option value={8}>8 秒</option>
+              <option value={10}>10 秒</option>
+              <option value={12}>12 秒</option>
+              <option value={15}>15 秒</option>
+            </select>
+          ) : isHfsyGrokImagine ? (
+            <select
+              className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+              value={[4, 5, 6, 8, 10, 12, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 10}
+              onChange={(e) => onUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <option value={4}>4 秒</option>
+              <option value={5}>5 秒</option>
+              <option value={6}>6 秒</option>
               <option value={8}>8 秒</option>
               <option value={10}>10 秒</option>
               <option value={12}>12 秒</option>
@@ -501,6 +528,27 @@ export function VideoNodeSettingsPanel({
           )}
           {isSora || isHfsyMinimaxH3 ? (
             <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p</span>
+          ) : isHfsySdFixed480 ? (
+            <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">480p</span>
+          ) : isHfsySdFixed720 ? (
+            <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p</span>
+          ) : isHfsyGrokImagine ? (
+            <select
+              className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+              value={
+                node.videoResolution === '480p' || node.videoResolution === '1080p'
+                  ? node.videoResolution
+                  : '720p'
+              }
+              onChange={(e) =>
+                onUpdateNode(node.id, { videoResolution: e.target.value as '480p' | '720p' | '1080p' })
+              }
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <option value="480p">480p</option>
+              <option value="720p">720p</option>
+              <option value="1080p">1080p</option>
+            </select>
           ) : isVeo ? (
             <select
               className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
@@ -546,7 +594,7 @@ export function VideoNodeSettingsPanel({
             </select>
           ) : isSeedance2Fast ? (
             <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p (8毛/秒)</span>
-          ) : isHfsySd2 ? (
+          ) : isHfsySdSizeLarge ? (
             <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">size: large</span>
           ) : isGemini ? (
             <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p</span>

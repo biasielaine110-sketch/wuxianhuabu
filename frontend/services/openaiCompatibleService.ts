@@ -1596,23 +1596,83 @@ async function toApisUploadVideoReferenceImageUrls(
   return imageUrls;
 }
 
-export type ToApisVideoModelId = 'grok-video-3' | 'grok-video-1.5-preview' | 'sora-2-vvip' | 'veo3.1-fast' | 'doubao-seedance-1-5-pro' | 'jimeng-video-v3' | 'jimeng-image-to-video' | 'gemini-omni-flash' | 'seedance-2' | 'seedance-2-fast' | 'hfsy-sd-2' | 'hfsy-sd-2-fast' | 'hfsy-minimax-h3' | 'doubao-seedance-2-0-260128' | 'doubao-seedance-2-0-fast-260128' | 'grok-imagine-video-1.5-preview' | 'grok-imagine-video-1.5-preview-aiid';
+export type ToApisVideoModelId =
+  | 'grok-video-3'
+  | 'grok-video-1.5-preview'
+  | 'sora-2-vvip'
+  | 'veo3.1-fast'
+  | 'doubao-seedance-1-5-pro'
+  | 'jimeng-video-v3'
+  | 'jimeng-image-to-video'
+  | 'gemini-omni-flash'
+  | 'seedance-2'
+  | 'seedance-2-fast'
+  | 'hfsy-sd-2'
+  | 'hfsy-sd-2-fast'
+  | 'hfsy-sd-2-vip'
+  | 'hfsy-sd-2-vip-720'
+  | 'hfsy-sd-2.5-480'
+  | 'hfsy-sd-2.5-720'
+  | 'hfsy-minimax-h3'
+  | 'hfsy-grok-imagine-video-1.5'
+  | 'doubao-seedance-2-0-260128'
+  | 'doubao-seedance-2-0-fast-260128'
+  | 'grok-imagine-video-1.5-preview'
+  | 'grok-imagine-video-1.5-preview-aiid';
 
-function isHfsySd2VideoModel(model?: string): model is 'hfsy-sd-2' | 'hfsy-sd-2-fast' {
-  return model === 'hfsy-sd-2' || model === 'hfsy-sd-2-fast';
+type HfsyVideoModelId =
+  | 'hfsy-sd-2'
+  | 'hfsy-sd-2-fast'
+  | 'hfsy-sd-2-vip'
+  | 'hfsy-sd-2-vip-720'
+  | 'hfsy-sd-2.5-480'
+  | 'hfsy-sd-2.5-720'
+  | 'hfsy-minimax-h3'
+  | 'hfsy-grok-imagine-video-1.5';
+
+type HfsyUpstreamVideoModel =
+  | 'sd-2'
+  | 'sd-2-fast'
+  | 'sd-2-vip'
+  | 'sd-2-vip-720'
+  | 'sd-2.5-480'
+  | 'sd-2.5-720'
+  | 'minimax-h3'
+  | 'grok-imagine-video-1.5';
+
+function isHfsySd2VideoModel(
+  model?: string
+): model is 'hfsy-sd-2' | 'hfsy-sd-2-fast' | 'hfsy-sd-2-vip' | 'hfsy-sd-2-vip-720' | 'hfsy-sd-2.5-480' | 'hfsy-sd-2.5-720' {
+  return (
+    model === 'hfsy-sd-2' ||
+    model === 'hfsy-sd-2-fast' ||
+    model === 'hfsy-sd-2-vip' ||
+    model === 'hfsy-sd-2-vip-720' ||
+    model === 'hfsy-sd-2.5-480' ||
+    model === 'hfsy-sd-2.5-720'
+  );
 }
 
 function isHfsyMinimaxH3VideoModel(model?: string): model is 'hfsy-minimax-h3' {
   return model === 'hfsy-minimax-h3';
 }
 
-function isHfsyVideoModel(model?: string): model is 'hfsy-sd-2' | 'hfsy-sd-2-fast' | 'hfsy-minimax-h3' {
-  return isHfsySd2VideoModel(model) || isHfsyMinimaxH3VideoModel(model);
+function isHfsyGrokImagineVideoModel(model?: string): model is 'hfsy-grok-imagine-video-1.5' {
+  return model === 'hfsy-grok-imagine-video-1.5';
 }
 
-function toHfsyVideoModel(model: 'hfsy-sd-2' | 'hfsy-sd-2-fast' | 'hfsy-minimax-h3'): 'sd-2' | 'sd-2-fast' | 'minimax-h3' {
+function isHfsyVideoModel(model?: string): model is HfsyVideoModelId {
+  return isHfsySd2VideoModel(model) || isHfsyMinimaxH3VideoModel(model) || isHfsyGrokImagineVideoModel(model);
+}
+
+function toHfsyVideoModel(model: HfsyVideoModelId): HfsyUpstreamVideoModel {
   if (model === 'hfsy-sd-2-fast') return 'sd-2-fast';
+  if (model === 'hfsy-sd-2-vip') return 'sd-2-vip';
+  if (model === 'hfsy-sd-2-vip-720') return 'sd-2-vip-720';
+  if (model === 'hfsy-sd-2.5-480') return 'sd-2.5-480';
+  if (model === 'hfsy-sd-2.5-720') return 'sd-2.5-720';
   if (model === 'hfsy-minimax-h3') return 'minimax-h3';
+  if (model === 'hfsy-grok-imagine-video-1.5') return 'grok-imagine-video-1.5';
   return 'sd-2';
 }
 
@@ -1740,6 +1800,12 @@ function normalizeHfsyMinimaxH3Duration(uiSeconds: number): number {
   return Math.min(15, Math.max(4, n));
 }
 
+/** hfsy Grok Imagine Video 1.5：时长 1–15 秒 */
+function normalizeHfsyGrokImagineDuration(uiSeconds: number): number {
+  const n = Math.round(Number(uiSeconds) || 10);
+  return Math.min(15, Math.max(1, n));
+}
+
 function normalizeHfsyVideoRatio(aspectRatio: string): string {
   const r = (aspectRatio || '').trim();
   return ['auto', '9:16', '3:4', '1:1', '4:3', '16:9', '21:9'].includes(r) ? r : '16:9';
@@ -1749,9 +1815,21 @@ function normalizeHfsyMinimaxH3Ratio(aspectRatio: string): '16:9' | '9:16' {
   return (aspectRatio || '').trim() === '9:16' ? '9:16' : '16:9';
 }
 
+function normalizeHfsyGrokImagineRatio(aspectRatio: string): string {
+  const r = (aspectRatio || '').trim();
+  return ['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].includes(r) ? r : '16:9';
+}
+
+function normalizeHfsyGrokImagineResolution(resolution?: string): '480p' | '720p' | '1080p' {
+  const r = (resolution || '').trim().toLowerCase();
+  if (r === '480p') return '480p';
+  if (r === '1080p' || r === '2k') return '1080p';
+  return '720p';
+}
+
 function hfsyVideoOrientation(aspectRatio: string): 'landscape' | 'portrait' {
-  const r = normalizeHfsyVideoRatio(aspectRatio);
-  return r === '9:16' || r === '3:4' ? 'portrait' : 'landscape';
+  const r = (aspectRatio || '').trim();
+  return r === '9:16' || r === '3:4' || r === '2:3' ? 'portrait' : 'landscape';
 }
 
 async function toApisSubmitVideoGeneration(body: Record<string, unknown>, signal?: AbortSignal): Promise<{ id: string }> {
@@ -1952,7 +2030,7 @@ async function hfsyPollVideoTaskToPlayableUrl(taskId: string, signal?: AbortSign
 
 async function hfsyVideoGenerate(params: {
   prompt: string;
-  videoModel: 'hfsy-sd-2' | 'hfsy-sd-2-fast' | 'hfsy-minimax-h3';
+  videoModel: HfsyVideoModelId;
   durationSeconds: number;
   aspectRatio: string;
   resolution?: string;
@@ -1992,6 +2070,17 @@ async function hfsyVideoGenerate(params: {
       resolution: params.resolution === '1080p' || params.resolution === '2k' ? '2K' : '720p',
       watermark: false,
     };
+  } else if (params.videoModel === 'hfsy-grok-imagine-video-1.5') {
+    const ratio = normalizeHfsyGrokImagineRatio(params.aspectRatio);
+    body = {
+      model: upstreamModel,
+      orientation: hfsyVideoOrientation(ratio),
+      ratio,
+      prompt: params.prompt,
+      duration: normalizeHfsyGrokImagineDuration(params.durationSeconds),
+      resolution: normalizeHfsyGrokImagineResolution(params.resolution),
+      watermark: false,
+    };
   } else {
     const ratio = normalizeHfsyVideoRatio(params.aspectRatio);
     body = {
@@ -2000,9 +2089,16 @@ async function hfsyVideoGenerate(params: {
       ratio,
       prompt: params.prompt,
       duration: normalizeHfsyVideoDuration(params.durationSeconds),
-      size: 'large',
       watermark: false,
     };
+    // 分辨率写在模型名里的档位：显式传 resolution；其余 Seedance 系沿用 size: large
+    if (params.videoModel === 'hfsy-sd-2.5-480') {
+      body.resolution = '480p';
+    } else if (params.videoModel === 'hfsy-sd-2.5-720' || params.videoModel === 'hfsy-sd-2-vip-720') {
+      body.resolution = '720p';
+    } else {
+      body.size = 'large';
+    }
   }
 
   if (imageUrls.length > 0) body.images = imageUrls;

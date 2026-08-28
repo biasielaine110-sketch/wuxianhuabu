@@ -859,9 +859,17 @@ ${text}`,
                     ? '720p'
                     : videoModel === 'doubao-seedance-2-0-260128' || videoModel === 'doubao-seedance-2-0-fast-260128'
                       ? (['480p', '1080p'].includes(node.videoResolution || '') ? (node.videoResolution as '480p' | '1080p') : '720p')
+                      : videoModel === 'hfsy-grok-imagine-video-1.5'
+                        ? (['480p', '1080p'].includes(node.videoResolution || '') ? (node.videoResolution as '480p' | '1080p') : '720p')
+                        : videoModel === 'hfsy-sd-2.5-480'
+                          ? '480p'
+                          : videoModel === 'hfsy-sd-2.5-720' || videoModel === 'hfsy-sd-2-vip-720'
+                            ? '720p'
                       : node.videoResolution === '480p'
                   ? '480p'
-                  : '720p';
+                  : node.videoResolution === '1080p'
+                    ? '1080p'
+                    : '720p';
 
         videoUrl = await generateCanvasVideoViaToApis(combinedPrompt, {
           videoModel,
