@@ -46,6 +46,10 @@
       "destination": "https://files.toapis.com/:path*"
     },
     {
+      "source": "/cdn-files-toapis-xyz/:path*",
+      "destination": "https://files.toapis.xyz/:path*"
+    },
+    {
       "source": "/cdn-files-dashlyai/:path*",
       "destination": "https://files.dashlyai.cc/:path*"
     },

@@ -24,6 +24,9 @@ export function rewriteImageUrlForBrowserDisplay(imageUrl: string): string {
     if (host === 'files.toapis.com') {
       return `${origin}/cdn-files-toapis${u.pathname}${u.search}`;
     }
+    if (host === 'files.toapis.xyz') {
+      return `${origin}/cdn-files-toapis-xyz${u.pathname}${u.search}`;
+    }
     if (host === 'files.dashlyai.cc') {
       return `${origin}/cdn-files-dashlyai${u.pathname}${u.search}`;
     }
