@@ -149,7 +149,7 @@ function openAiCompatFailureHint(status: number, kind: 'generations-json' | 'ima
       : '（503：上游不可用或暂时过载。）';
   }
   if (status === 413) {
-    return '（413：请求体过大；经本站代理时单次 JSON 不宜超过约 4MB。已自动尝试上传参考图 URL 与压缩；若仍失败请换更小参考图或检查云智是否开放 /v1/uploads/images。）';
+    return '（413：请求体过大；经本站代理时单次 JSON 不宜超过约 4MB。已自动尝试上传参考图 URL 与压缩；若仍失败请减少参考图数量或换更小参考图。）';
   }
   return '';
 }
@@ -3400,6 +3400,57 @@ function hfsyNormalizeReferenceImage(input: string): string {
   return parseBase64ImageInput(trimmed).raw;
 }
 
+/**
+ * hfsy 图生图参考图：优先上传得公网 URL（经 /api/hfsy-image-proxy 时避免 Vercel 413），
+ * 失败则压缩为 JPEG 裸 base64，控制单次 generations JSON 体积。
+ */
+async function buildHfsyReferenceImages(
+  inputs: string[],
+  apiKey: string,
+  signal?: AbortSignal
+): Promise<string[]> {
+  const base = hfsyFetchBase();
+  const out: string[] = [];
+  const maxSide = 1280;
+  const jpegQ = 0.78;
+  for (let i = 0; i < Math.min(inputs.length, 6); i++) {
+    assertNotAborted(signal);
+    const trimmed = (inputs[i] || '').trim();
+    if (!trimmed) continue;
+    if (/^https?:\/\//i.test(trimmed)) {
+      out.push(trimmed);
+      continue;
+    }
+
+    let uploaded: string | null = null;
+    try {
+      const parsed = parseBase64ImageInput(trimmed);
+      let blob = base64ToBlob(parsed.raw, parsed.mime || 'image/jpeg');
+      if (blob.size > 900_000) {
+        const dataUrl = await shrinkBase64ImageToJpegDataUrl(trimmed, maxSide, jpegQ);
+        const shrunk = parseBase64ImageInput(dataUrl);
+        blob = base64ToBlob(shrunk.raw, 'image/jpeg');
+      }
+      uploaded = await openAiCompatUploadImageBlob(base, apiKey, blob, `hfsy-i2i-ref-${i}.jpg`, signal);
+    } catch {
+      uploaded = null;
+    }
+    const u = uploaded?.trim() ?? '';
+    if (u && /^https?:\/\//i.test(u)) {
+      out.push(u);
+      continue;
+    }
+
+    try {
+      const dataUrl = await shrinkBase64ImageToJpegDataUrl(trimmed, maxSide, jpegQ);
+      out.push(parseBase64ImageInput(dataUrl).raw);
+    } catch {
+      out.push(hfsyNormalizeReferenceImage(trimmed));
+    }
+  }
+  return out;
+}
+
 async function hfsyRequestOneNanoBananaImage(
   modelName: string,
   prompt: string,
@@ -3571,7 +3622,8 @@ async function hfsyEditImage(
       '未配置 hfsyapi.cn 图像通道。请在「设置 → API」填写「hfsyapi.cn（GPT Image 2）」API Key；文档：https://www.hfsyapi.cn/docs'
     );
   }
-  const referenceImages = base64Images.map(hfsyNormalizeReferenceImage).filter(Boolean);
+  const referenceImages = await buildHfsyReferenceImages(base64Images, apiKey, signal);
+  if (!referenceImages.length) throw new Error('图生图参考图处理失败，请换更小的图片后重试。');
   const count = Math.min(Math.max(numberOfImages, 1), 4);
   const out: string[] = [];
   for (let i = 0; i < count; i++) {
