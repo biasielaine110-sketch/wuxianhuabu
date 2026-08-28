@@ -673,15 +673,15 @@ export function ChatNodeContent({
             <option value="deepseek-v4-pro">DeepSeek-V4-Pro</option>
             <option value="deepseek-v4-flash-vision-exp">DeepSeek-V4-Flash-Vision-Exp</option>
           </optgroup>
+          <optgroup label="hfsyapi.cn">
+            <option value="gpt-5.6-terra-hfsy">GPT-5.6 Terra（hfsyapi.cn）</option>
+            <option value="grok-4.6-hfsy">Grok 4.6（hfsyapi.cn）</option>
+          </optgroup>
           <optgroup label="codesonline">
             <option value="gpt-5.5-codesonline">GPT-5.5（codesonline）</option>
             <option value="gpt-5.6-sol-codesonline">GPT-5.6 Sol（codesonline）</option>
             <option value="gpt-5.6-terra-codesonline">GPT-5.6 Terra（codesonline）</option>
             <option value="claude-haiku-4-5-codesonline">Claude Haiku 4.5（codesonline）</option>
-          </optgroup>
-          <optgroup label="hfsyapi.cn">
-            <option value="gpt-5.6-terra-hfsy">GPT-5.6 Terra（hfsyapi.cn）</option>
-            <option value="grok-4.6-hfsy">Grok 4.6（hfsyapi.cn）</option>
           </optgroup>
           <optgroup label="MiniMax">
             <option value="minimax-m2.7">MiniMax M2.7</option>
