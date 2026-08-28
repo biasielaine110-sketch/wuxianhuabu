@@ -726,7 +726,7 @@ export function ChatNodeContent({
       >
       <div
         ref={messagesScrollRef}
-        className={`chat-messages overflow-y-scroll p-3 space-y-3 overscroll-contain ${isSelected ? 'min-h-0' : 'flex-1 min-h-0'}`}
+        className={`chat-messages canvas-selectable-text overflow-y-scroll p-3 space-y-3 overscroll-contain ${isSelected ? 'min-h-0' : 'flex-1 min-h-0'}`}
         style={{ userSelect: 'text' }}
         onPointerDown={(e) => {
           const target = e.target as HTMLElement;

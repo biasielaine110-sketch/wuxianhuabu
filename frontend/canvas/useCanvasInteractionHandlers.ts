@@ -454,12 +454,10 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
       const inBar = e.clientX > rect.right - 72 && scrollHost.scrollHeight > scrollHost.clientHeight;
       return inBar;
     })();
-    /** 节点内表单控件：不应触发整块节点拖拽；文本节点预览区（.text-node-content）除外，未选中时可拖动 */
-    const isInteractiveSurface =
-      !!targetEl?.closest(
-        'input, textarea, select, button, a, [role="button"], [role="slider"], [role="listbox"], [contenteditable="true"], [data-resize-handle], .text-node-content::-webkit-scrollbar'
-      ) &&
-      !(pickedNode?.type === 'text' && targetEl?.closest('.text-node-content'));
+    /** 节点内表单 / 可选中正文：不触发整块节点拖拽（便于划选复制文字；文本节点改由标题栏拖动） */
+    const isInteractiveSurface = !!targetEl?.closest(
+      'input, textarea, select, button, a, [role="button"], [role="slider"], [role="listbox"], [contenteditable="true"], [data-resize-handle], .canvas-selectable-text, .text-node-content, .chat-bubble-wrap, .chat-messages'
+    );
 
     /** 吸管模式：点击节点窗口任意非表单区域即可与「吸取目标」节点连线（与预览区点击行为一致） */
     const eyeT = eyedropperTargetNodeIdRef.current;

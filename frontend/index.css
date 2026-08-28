@@ -3,6 +3,18 @@
 @tailwind utilities;
 
 /**
+ * 画布根节点使用 select-none 避免拖拽时误选；输入区与正文需显式恢复可选中，
+ * 以便 Ctrl+C / Ctrl+V 复制粘贴文字。
+ */
+.canvas-app-root textarea,
+.canvas-app-root input:not([type='button']):not([type='submit']):not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+.canvas-app-root [contenteditable='true'],
+.canvas-app-root .canvas-selectable-text {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/**
  * 画布节点内正文字号：在 Tailwind text-* 基础上 ×1.95×1.5（相对原始再 ×1.5；画幅/分辨率/张数见 .nodemeta-skip-scale）。
  * AI 对话节点用 CHAT_PANEL_FONT_SCALE（与 1.95×1.5 对齐）；顶栏标题单独规则。
  */

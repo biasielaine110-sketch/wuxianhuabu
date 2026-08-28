@@ -1996,7 +1996,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
   );
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-[#0f0f0f] text-neutral-100 select-none font-sans" onContextMenu={handleContextMenu} onDoubleClick={handleCanvasDoubleClick}>
+    <div className="canvas-app-root relative w-screen h-screen overflow-hidden bg-[#0f0f0f] text-neutral-100 select-none font-sans" onContextMenu={handleContextMenu} onDoubleClick={handleCanvasDoubleClick}>
 
       {/* 保存成功提示 */}
       {saveSuccessMsg && (

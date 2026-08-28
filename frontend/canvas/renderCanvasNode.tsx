@@ -574,8 +574,8 @@ return (
             )}
             {node.type === 'text' && !(isSelected && editingTextNodeIds.has(node.id)) ? (
               <div
-                className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] overflow-y-auto leading-relaxed whitespace-pre-wrap break-words text-node-content relative cursor-grab active:cursor-grabbing"
-                style={{ fontSize: textNodeFontSizeLocal + 'px', minHeight: '120px' }}
+                className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] overflow-y-auto leading-relaxed whitespace-pre-wrap break-words text-node-content canvas-selectable-text relative cursor-text"
+                style={{ fontSize: textNodeFontSizeLocal + 'px', minHeight: '120px', userSelect: 'text' }}
                 onPointerDown={(e) => {
                   // 滚动条 thumb 区域（容器右侧 72px 内、且确实可滚）：交给浏览器原生滚动，
                   // 不要进双击检测/选中/拖拽逻辑，否则仅拖动滚动条会把文本节点置为选中。
@@ -584,6 +584,8 @@ return (
                     const inScrollbar = e.clientX > rect.right - 72 && e.currentTarget.scrollHeight > e.currentTarget.clientHeight;
                     if (inScrollbar) return;
                   }
+                  // 正文区阻止冒泡：允许划选复制，拖动节点请用标题栏
+                  e.stopPropagation();
                   // pointerdown 时间戳 + 位置 dblclick 检测 (兼容 node 拖拽干扰浏览器原生 dblclick 的场景)
                   if (e.button !== 0) return;
                   const now = Date.now();
@@ -594,13 +596,13 @@ return (
                   if (inTime && inPlace) {
                     // 二次按下: 触发"双击进入编辑"（不走浏览器 dblclick, 避免被 node 拖拽/选区等行为干扰）
                     s.textNodeLastClickAtRef.current = 0;
-                    e.stopPropagation();
                     e.preventDefault();
                     if (!isSelected) s.setSelectedIds([node.id]);
                     s.setEditingTextNodeIds(prev => { const next = new Set(prev); next.add(node.id); return next; });
                   } else {
                     s.textNodeLastClickAtRef.current = now;
                     s.textNodeLastClickPosRef.current = { x: e.clientX, y: e.clientY };
+                    if (!isSelected) s.setSelectedIds([node.id]);
                   }
                 }}
                 onDoubleClick={(e) => {

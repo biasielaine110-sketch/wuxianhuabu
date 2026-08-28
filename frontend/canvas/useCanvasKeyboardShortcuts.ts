@@ -288,13 +288,9 @@ export function attachCanvasKeyboardShortcuts(
           sel.forEach((id) => d.handleDeleteNode(id));
         }
       } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC' && !isInput) {
-        // 节点内 textarea 或消息气泡内选中文本时，交给浏览器默认复制
-        const sel = window.getSelection();
-        const activeTextarea = document.activeElement?.closest?.('textarea');
-        // 消息气泡内（chat-bubble-wrap）选中文字时允许浏览器默认复制
-        const selAnchor = sel?.anchorNode;
-        const activeChatBubble = selAnchor ? !!selAnchor.parentElement?.closest?.('.chat-bubble-wrap') : false;
-        if ((activeTextarea || activeChatBubble) && sel && sel.toString().length > 0) return;
+        // 画布内已有文字选区时，优先交给浏览器复制文字（对话气泡 / 文本节点 / textarea 等）
+        const selectedText = window.getSelection()?.toString() ?? '';
+        if (selectedText.length > 0) return;
         // 阻止浏览器默认复制行为（如复制选中文本）
         e.preventDefault();
         // 画布模式下复制选中节点
