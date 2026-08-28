@@ -619,6 +619,9 @@ function rewriteKnownImageCdnToSameOrigin(imageUrl: string): string {
     if (host === 'files.toapis.xyz') {
       return `${origin}/cdn-files-toapis-xyz${u.pathname}${u.search}`;
     }
+    if (host === 'www.qixinai.net' || host === 'qixinai.net') {
+      return `${origin}/cdn-files-qixinai${u.pathname}${u.search}`;
+    }
     if (host === 'files.dashlyai.cc') {
       return `${origin}/cdn-files-dashlyai${u.pathname}${u.search}`;
     }

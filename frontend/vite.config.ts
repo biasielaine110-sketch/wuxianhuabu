@@ -73,6 +73,12 @@ const toapisFileCdnProxy = {
     secure: true,
     rewrite: (p: string) => p.replace(/^\/cdn-files-toapis-xyz/, ''),
   },
+  '/cdn-files-qixinai': {
+    target: 'https://www.qixinai.net',
+    changeOrigin: true,
+    secure: true,
+    rewrite: (p: string) => p.replace(/^\/cdn-files-qixinai/, ''),
+  },
   '/cdn-files-dashlyai': {
     target: 'https://files.dashlyai.cc',
     changeOrigin: true,

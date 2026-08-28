@@ -50,6 +50,10 @@
       "destination": "https://files.toapis.xyz/:path*"
     },
     {
+      "source": "/cdn-files-qixinai/:path*",
+      "destination": "https://www.qixinai.net/:path*"
+    },
+    {
       "source": "/cdn-files-dashlyai/:path*",
       "destination": "https://files.dashlyai.cc/:path*"
     },
