@@ -78,10 +78,6 @@
       "destination": "https://manxueapi.com/:path*"
     },
     {
-      "source": "/api/aiid/(.*)",
-      "destination": "https://api.aiid.edu.kg/$1"
-    },
-    {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }

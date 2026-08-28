@@ -126,15 +126,12 @@ import {
   DEFAULT_MANXUE_BASE_URL,
   DEFAULT_MINIMAX_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
-  DEFAULT_AIID_BASE_URL,
   getAiSettingsSnapshot,
   getCodesonlineSavedKey,
   getCodesonlineChatSavedKey,
   setCodesonlineChatKey,
   migrateAiSettingsIfLegacy,
   persistAiSettings,
-  getAiidBaseUrl,
-  getAiidSavedKey,
 } from './services/aiSettings';
 import { saveProjectLibrary } from './services/projectPersistence';
 import { useJimengAuth } from './integrations/jimeng/jimengAuthContext';

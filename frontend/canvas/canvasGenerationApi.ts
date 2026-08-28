@@ -857,9 +857,7 @@ ${text}`,
                   ? (node.videoResolution === '1080p' ? '1080p' : '720p')
                   : videoModel === 'seedance-2-fast'
                     ? '720p'
-                    : videoModel === 'doubao-seedance-2-0-260128' || videoModel === 'doubao-seedance-2-0-fast-260128'
-                      ? (['480p', '1080p'].includes(node.videoResolution || '') ? (node.videoResolution as '480p' | '1080p') : '720p')
-                      : videoModel === 'hfsy-grok-imagine-video-1.5'
+                    : videoModel === 'hfsy-grok-imagine-video-1.5'
                         ? (['480p', '1080p'].includes(node.videoResolution || '') ? (node.videoResolution as '480p' | '1080p') : '720p')
                         : videoModel === 'hfsy-sd-2.5-480'
                           ? '480p'
@@ -878,7 +876,7 @@ ${text}`,
             (videoModel === 'sora-2-vvip' || videoModel === 'veo3.1-fast' ? 8 : 10),
           aspectRatio: node.aspectRatio || '16:9',
           resolution,
-          referenceImagesBase64: (videoModel === 'doubao-seedance-1-5-pro' || videoModel === 'gemini-omni-flash' || videoModel === 'seedance-2' || videoModel === 'seedance-2-fast' || videoModel === 'doubao-seedance-2-0-260128' || videoModel === 'doubao-seedance-2-0-fast-260128') ? imageInputs.slice(0, 2) : imageInputs.slice(0, 3),
+          referenceImagesBase64: (videoModel === 'doubao-seedance-1-5-pro' || videoModel === 'gemini-omni-flash' || videoModel === 'seedance-2' || videoModel === 'seedance-2-fast') ? imageInputs.slice(0, 2) : imageInputs.slice(0, 3),
           referenceVideoUrls,
           referenceAudioBase64: audioBase64,
           signal: ac.signal,

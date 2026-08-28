@@ -21,7 +21,6 @@ import {
   DEFAULT_MANXUE_BASE_URL,
   DEFAULT_MINIMAX_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
-  DEFAULT_AIID_BASE_URL,
   persistAiSettings,
   setCodesonlineChatKey,
 } from '../services/aiSettings';
@@ -108,9 +107,6 @@ export type CanvasSettingsModalProps = {
   minimaxBaseInput: string;
   minimaxKeyInput: string;
   setMiniMaxKeyInput: Dispatch<SetStateAction<string>>;
-  aiidBaseInput: string;
-  aiidKeyInput: string;
-  setAiidKeyInput: Dispatch<SetStateAction<string>>;
   promptPresets: Record<string, string>;
   setPromptPresets: Dispatch<SetStateAction<Record<string, string>>>;
   promptPresetDomainOverrides: Record<string, PresetDomainId>;
@@ -182,9 +178,6 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
     minimaxBaseInput,
     minimaxKeyInput,
     setMiniMaxKeyInput,
-    aiidBaseInput,
-    aiidKeyInput,
-    setAiidKeyInput,
     promptPresets,
     setPromptPresets,
     promptPresetDomainOverrides,

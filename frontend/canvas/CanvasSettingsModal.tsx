@@ -9,7 +9,6 @@ import {
   DEFAULT_MANXUE_BASE_URL,
   DEFAULT_MINIMAX_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
-  DEFAULT_AIID_BASE_URL,
   persistAiSettings,
   setCodesonlineChatKey,
   getAiSettingsSnapshot,
@@ -105,9 +104,6 @@ export type CanvasSettingsModalProps = {
   minimaxBaseInput: string;
   minimaxKeyInput: string;
   setMiniMaxKeyInput: Dispatch<SetStateAction<string>>;
-  aiidBaseInput: string;
-  aiidKeyInput: string;
-  setAiidKeyInput: Dispatch<SetStateAction<string>>;
   promptPresets: Record<string, string>;
   setPromptPresets: Dispatch<SetStateAction<Record<string, string>>>;
   promptPresetDomainOverrides: Record<string, PresetDomainId>;
@@ -181,9 +177,6 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
     minimaxBaseInput,
     minimaxKeyInput,
     setMiniMaxKeyInput,
-    aiidBaseInput,
-    aiidKeyInput,
-    setAiidKeyInput,
     promptPresets,
     setPromptPresets,
     promptPresetDomainOverrides,
@@ -477,8 +470,6 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                                 manxueBaseUrl: manxueBaseInput.trim() || DEFAULT_MANXUE_BASE_URL,
                                 minimaxApiKey: minimaxKeyInput.trim(),
                                 minimaxBaseUrl: minimaxBaseInput.trim() || DEFAULT_MINIMAX_BASE_URL,
-                                aiidApiKey: aiidKeyInput.trim(),
-                                aiidBaseUrl: aiidBaseInput.trim() || DEFAULT_AIID_BASE_URL,
                               });
                               setCodesonlineChatKey(codesonlineChatKeyInput.trim());
                               initGeminiClientFromStorage();
@@ -512,8 +503,6 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                                 manxueBaseUrl: manxueBaseInput.trim() || DEFAULT_MANXUE_BASE_URL,
                                 minimaxApiKey: minimaxKeyInput.trim(),
                                 minimaxBaseUrl: minimaxBaseInput.trim() || DEFAULT_MINIMAX_BASE_URL,
-                                aiidApiKey: aiidKeyInput.trim(),
-                                aiidBaseUrl: aiidBaseInput.trim() || DEFAULT_AIID_BASE_URL,
                               });
                               setCodesonlineChatKey(codesonlineChatKeyInput.trim());
                               initGeminiClientFromStorage();
@@ -525,51 +514,6 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                         />
                       </>
                     )}
-                  </div>
-
-                  {/* ⑥ AIID (豆包Seedance2.0) */}
-                  <div className="mt-5 pt-4 border-t border-[#333]">
-                    <h3 className="text-sm font-semibold text-gray-200 mb-2">AIID (豆包Seedance2.0)</h3>
-                    <label className="text-xs text-gray-500 block mb-1">Base URL</label>
-                    <input
-                      type="text"
-                      readOnly
-                      value={aiidBaseInput}
-                      placeholder={DEFAULT_AIID_BASE_URL}
-                      className="w-full mb-3 bg-[#252525] border border-[#333] rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
-                    />
-                    <label className="text-xs text-gray-500 block mb-1">AIID API Key</label>
-                    <input
-                      type="password"
-                      value={aiidKeyInput}
-                      onChange={(e) => setAiidKeyInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          persistAiSettings({
-                            provider: aiProvider,
-                            openAiApiKey: aiProvider === 'openai-compatible' ? apiKeyInput.trim() : undefined,
-                            openAiBaseUrl: (openAiBaseInput.trim() || DEFAULT_OPENAI_BASE_URL),
-                            codesonlineApiKey: codesonlineKeyInput.trim(),
-                            codesonlineBaseUrl: codesonlineBaseInput.trim() || DEFAULT_CODESONLINE_IMAGE_BASE_URL,
-                            hfsyApiKey: hfsyKeyInput.trim(),
-                            hfsyBaseUrl: DEFAULT_HFSY_IMAGE_BASE_URL,
-                            deepSeekApiKey: deepSeekKeyInput.trim(),
-                            deepSeekBaseUrl: deepSeekBaseInput.trim() || DEFAULT_DEEPSEEK_BASE_URL,
-                            manxueApiKey: manxueKeyInput.trim(),
-                            manxueBaseUrl: manxueBaseInput.trim() || DEFAULT_MANXUE_BASE_URL,
-                            minimaxApiKey: minimaxKeyInput.trim(),
-                            minimaxBaseUrl: minimaxBaseInput.trim() || DEFAULT_MINIMAX_BASE_URL,
-                            aiidApiKey: aiidKeyInput.trim(),
-                            aiidBaseUrl: aiidBaseInput.trim() || DEFAULT_AIID_BASE_URL,
-                          });
-                          setCodesonlineChatKey(codesonlineChatKeyInput.trim());
-                          initGeminiClientFromStorage();
-                          onClose();
-                        }
-                      }}
-                      placeholder="sk-..."
-                      className="w-full bg-[#222222] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-orange-500 transition-colors text-sm"
-                    />
                   </div>
 
                   <div className="flex gap-3 mt-4">
@@ -596,8 +540,6 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                           manxueBaseUrl: manxueBaseInput.trim() || DEFAULT_MANXUE_BASE_URL,
                           minimaxApiKey: minimaxKeyInput.trim(),
                           minimaxBaseUrl: minimaxBaseInput.trim() || DEFAULT_MINIMAX_BASE_URL,
-                          aiidApiKey: aiidKeyInput.trim(),
-                          aiidBaseUrl: aiidBaseInput.trim() || DEFAULT_AIID_BASE_URL,
                         });
                         setCodesonlineChatKey(codesonlineChatKeyInput.trim());
                         initGeminiClientFromStorage();

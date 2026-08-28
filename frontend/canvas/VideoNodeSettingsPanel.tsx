@@ -11,7 +11,6 @@ import {
   isJimengVideoModel,
   isManxueGrokImagineVideoModel,
   isVideoDoubaoFamilyModel,
-  isVideoDoubaoSeedance2Model,
   isVideoGrokDurationStyleModel,
   isVideoSoraStyleModel,
   isVideoVeoStyleModel,
@@ -53,12 +52,10 @@ export function VideoNodeSettingsPanel({
   const isHfsySdFixed720 = vm === 'hfsy-sd-2.5-720' || vm === 'hfsy-sd-2-vip-720';
   const isHfsySdSizeLarge = isHfsySd2 && !isHfsySdFixed480 && !isHfsySdFixed720;
   const isGemini = vm === 'gemini-omni-flash';
-  const isDoubaoSeedance2 = isVideoDoubaoSeedance2Model(vm);
   const isManxueGrokImagine = isManxueGrokImagineVideoModel(vm);
   const isToApisGrokVideo15 = vm === 'grok-video-1.5-preview';
-  const isAiidGrokImagine = vm === 'grok-imagine-video-1.5-preview-aiid';
   // 任一 grok 视频模型都需要参考图画幅探测提示
-  const isGrokWithRefAspectDetect = isManxueGrokImagine || isToApisGrokVideo15 || isAiidGrokImagine;
+  const isGrokWithRefAspectDetect = isManxueGrokImagine || isToApisGrokVideo15;
 
   const vSlots = useMemo(() => buildIncomingRefSlots(node.id, edges, nodes), [node.id, edges, nodes]);
   const imageSlots = vSlots.filter((s) => s.kind === 'image');
@@ -207,17 +204,10 @@ export function VideoNodeSettingsPanel({
         >
           参考图：{refAspect.width}×{refAspect.height}（{refAspect.canonical}）。
           {aspectMismatch
-            ? isAiidGrokImagine
-              ? `当前选 ${node.aspectRatio || '16:9'} ≠ 参考图 ${refAspect.canonical}，提交时将按所选 ${node.aspectRatio || '16:9'} 输出（AIID 走异步任务，aspect_ratio 字段会按字面生效）。`
-              : isToApisGrokVideo15
-                ? `当前选 ${node.aspectRatio || '16:9'} ≠ 参考图 ${refAspect.canonical}，提交时将按所选 ${node.aspectRatio || '16:9'} 拉伸参考图（ToAPIs grok-video-1.5-preview 支持 aspect_ratio override）。`
-                : `当前选 ${node.aspectRatio || '16:9'} ≠ 参考图 ${refAspect.canonical}，提交时将按所选 ${node.aspectRatio || '16:9'} 拉伸参考图（满 e chat 路由需 prompt + 字段双管齐下，可能仍被忽略）。`
+            ? isToApisGrokVideo15
+              ? `当前选 ${node.aspectRatio || '16:9'} ≠ 参考图 ${refAspect.canonical}，提交时将按所选 ${node.aspectRatio || '16:9'} 拉伸参考图（ToAPIs grok-video-1.5-preview 支持 aspect_ratio override）。`
+              : `当前选 ${node.aspectRatio || '16:9'} ≠ 参考图 ${refAspect.canonical}，提交时将按所选 ${node.aspectRatio || '16:9'} 拉伸参考图（满 e chat 路由需 prompt + 字段双管齐下，可能仍被忽略）。`
             : '画幅与参考图一致。'}
-        </div>
-      )}
-      {isAiidGrokImagine && imageSlots.length === 0 && (
-        <div className="text-[10px] px-2 py-1.5 rounded leading-snug border text-amber-200 bg-amber-950/40 border-amber-700/60">
-          Grok Imagine Video 1.5 Preview **仅支持图生视频**（I2V），请连接至少一张参考图。
         </div>
       )}
       <div className="flex flex-wrap items-center gap-3">
@@ -251,11 +241,6 @@ export function VideoNodeSettingsPanel({
           </optgroup>
           <optgroup label="满 e (manxueapi.com)">
             <option value={MANXUE_GROK_IMAGINE_VIDEO_MODEL}>Grok Imagine Video 1.5 Preview（满 e）</option>
-          </optgroup>
-          <optgroup label="AIID (豆包Seedance2.0)">
-            <option value="doubao-seedance-2-0-260128">Doubao Seedance 2.0</option>
-            <option value="doubao-seedance-2-0-fast-260128">Doubao Seedance 2.0 Fast</option>
-            <option value="grok-imagine-video-1.5-preview-aiid">Grok Imagine Video 1.5 Preview（AIID · 图生视频）</option>
           </optgroup>
           <optgroup label="即梦 (Dreamina)">
             <option value="jimeng-seedance2.0fast">即梦 Seedance 2.0 (Fast)</option>
@@ -302,20 +287,6 @@ export function VideoNodeSettingsPanel({
             >
               <option value={4}>4 秒</option>
               <option value={5}>5 秒</option>
-              <option value={8}>8 秒</option>
-              <option value={10}>10 秒</option>
-              <option value={12}>12 秒</option>
-              <option value={15}>15 秒</option>
-            </select>
-          ) : isDoubaoSeedance2 ? (
-            <select
-              className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-              value={[4, 6, 8, 10, 12, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 8}
-              onChange={(e) => onUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
-              onPointerDown={(e) => e.stopPropagation()}
-            >
-              <option value={4}>4 秒</option>
-              <option value={6}>6 秒</option>
               <option value={8}>8 秒</option>
               <option value={10}>10 秒</option>
               <option value={12}>12 秒</option>
@@ -408,23 +379,6 @@ export function VideoNodeSettingsPanel({
               onPointerDown={(e) => e.stopPropagation()}
             >
               <option value={10}>10 秒</option>
-              <option value={15}>15 秒</option>
-            </select>
-          ) : isAiidGrokImagine ? (
-            <select
-              className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-              value={node.videoDuration ?? 10}
-              onChange={(e) => onUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
-              onPointerDown={(e) => e.stopPropagation()}
-            >
-              <option value={3}>3 秒</option>
-              <option value={4}>4 秒</option>
-              <option value={5}>5 秒</option>
-              <option value={6}>6 秒</option>
-              <option value={7}>7 秒</option>
-              <option value={8}>8 秒</option>
-              <option value={10}>10 秒</option>
-              <option value={12}>12 秒</option>
               <option value={15}>15 秒</option>
             </select>
           ) : isJimengVideoModel(node.model) ? (

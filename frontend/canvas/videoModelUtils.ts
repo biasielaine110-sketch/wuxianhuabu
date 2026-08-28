@@ -60,11 +60,15 @@ export function isJimengImageModel(model?: string): boolean {
 }
 
 export function isVideoDoubaoFamilyModel(vm: string): boolean {
-  return vm === 'doubao-seedance-1-5-pro' || vm === 'doubao-seedance-2-0-260128' || vm === 'doubao-seedance-2-0-fast-260128';
+  return vm === 'doubao-seedance-1-5-pro';
 }
 
-export function isVideoDoubaoSeedance2Model(vm: string): boolean {
-  return vm === 'doubao-seedance-2-0-260128' || vm === 'doubao-seedance-2-0-fast-260128';
+/** 已下线 AIID 视频模型 → 当前替代 */
+export function normalizeLegacyVideoModelId(modelId: string): string {
+  const m = (modelId || '').trim();
+  if (m === 'doubao-seedance-2-0-260128' || m === 'doubao-seedance-2-0-fast-260128') return 'seedance-2';
+  if (m === 'grok-imagine-video-1.5-preview-aiid') return 'hfsy-grok-imagine-video-1.5';
+  return m;
 }
 
 export function isHfsySd2VideoModel(vm?: string): boolean {
@@ -91,7 +95,8 @@ export function isHfsyVideoModel(vm?: string): boolean {
 }
 
 /** 切换视频模型时同步时长、分辨率、画幅等默认值 */
-export function getVideoModelSwitchUpdates(m: string, node: CanvasNode): Partial<CanvasNode> {
+export function getVideoModelSwitchUpdates(mRaw: string, node: CanvasNode): Partial<CanvasNode> {
+  const m = normalizeLegacyVideoModelId(mRaw);
   const updates: Partial<CanvasNode> = { model: m };
   if (m === 'sora-2-vvip') {
     updates.videoResolution = '720p';
@@ -170,30 +175,12 @@ export function getVideoModelSwitchUpdates(m: string, node: CanvasNode): Partial
     updates.videoResolution = '720p';
     const ar = node.aspectRatio || '16:9';
     if (!['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].includes(ar)) updates.aspectRatio = '16:9';
-  } else if (m === 'grok-imagine-video-1.5-preview-aiid') {
-    // AIID grok-imagine-video-1.5-preview：xAI Grok Imagine Video 1.5 Preview
-    // **只能图生视频**（必须连参考图）；时长 1-15 秒，分辨率 720p
-    // 7 种画幅都支持：1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3
-    const d = node.videoDuration ?? 10;
-    updates.videoDuration = d >= 1 && d <= 15 ? d : 10;
-    updates.videoResolution = '720p';
-    const ar = node.aspectRatio || '16:9';
-    if (!['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].includes(ar)) updates.aspectRatio = '16:9';
   } else if (m === MANXUE_GROK_IMAGINE_VIDEO_MODEL) {
     const d = node.videoDuration ?? 10;
     updates.videoDuration = [10, 15].includes(d) ? d : 10;
     updates.videoResolution = '720p';
     const ar = node.aspectRatio || '16:9';
     if (!['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].includes(ar)) updates.aspectRatio = '16:9';
-  } else if (m === 'doubao-seedance-2-0-260128' || m === 'doubao-seedance-2-0-fast-260128') {
-    const d = node.videoDuration ?? 8;
-    updates.videoDuration = [4, 6, 8, 10, 12, 15].includes(d) ? d : 8;
-    updates.videoResolution =
-      node.videoResolution === '480p' || node.videoResolution === '1080p'
-        ? node.videoResolution
-        : '720p';
-    const ar = node.aspectRatio || '16:9';
-    if (!['16:9', '9:16', '1:1', '4:3', '3:4'].includes(ar)) updates.aspectRatio = '16:9';
   } else {
     const d = node.videoDuration ?? 8;
     if (d === 4 || d === 8 || d === 12) updates.videoDuration = 10;
@@ -206,16 +193,14 @@ export function getVideoModelSwitchUpdates(m: string, node: CanvasNode): Partial
 
 /** 视频节点模型 → ToAPIs 模型 */
 export function videoNodeModelToToApis(m?: string): ToApisVideoModelId {
-  const vm = (m || '').trim();
+  const vm = normalizeLegacyVideoModelId(m || '').trim();
   if (vm === 'sora-2-vvip') return 'sora-2-vvip';
   if (isVeo31FastVideoModel(vm)) return 'veo3.1-fast';
   if (vm === 'doubao-seedance-1-5-pro') return 'doubao-seedance-1-5-pro';
-  if (vm === 'doubao-seedance-2-0-260128' || vm === 'doubao-seedance-2-0-fast-260128') return vm as ToApisVideoModelId;
   if (vm === 'seedance-2' || vm === 'seedance-2-fast') return vm as ToApisVideoModelId;
   if (isHfsyVideoModel(vm)) return vm as ToApisVideoModelId;
   if (vm === 'gemini-omni-flash') return 'gemini-omni-flash';
   if (vm === 'grok-video-1.5-preview') return 'grok-video-1.5-preview';
-  if (vm === 'grok-imagine-video-1.5-preview-aiid') return 'grok-imagine-video-1.5-preview-aiid';
   if (isManxueGrokImagineVideoModel(vm)) return MANXUE_GROK_IMAGINE_VIDEO_MODEL as ToApisVideoModelId;
   if (vm === 'jimeng-video-v3' || vm === 'jimeng-image-to-video') return vm as ToApisVideoModelId;
   return 'grok-video-3';

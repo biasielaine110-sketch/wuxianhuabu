@@ -5,8 +5,6 @@ import {
   getAiSettingsSnapshot,
   getCodesonlineChatSavedKey,
   migrateAiSettingsIfLegacy,
-  getAiidBaseUrl,
-  getAiidSavedKey,
   getHfsySavedKey,
 } from '../services/aiSettings';
 import {
@@ -107,8 +105,6 @@ export function useCanvasSettingsPanelState({
   const [manxueKeyInput, setManxueKeyInput] = useState(() => getAiSettingsSnapshot().manxueKey);
   const [minimaxBaseInput, setMiniMaxBaseInput] = useState(() => getAiSettingsSnapshot().minimaxBaseUrl);
   const [minimaxKeyInput, setMiniMaxKeyInput] = useState(() => getAiSettingsSnapshot().minimaxKey);
-  const [aiidBaseInput, setAiidBaseInput] = useState(() => getAiidBaseUrl());
-  const [aiidKeyInput, setAiidKeyInput] = useState(() => getAiidSavedKey());
 
   useEffect(() => {
     const s = getAiSettingsSnapshot();
@@ -381,10 +377,6 @@ export function useCanvasSettingsPanelState({
       setMiniMaxBaseInput,
       minimaxKeyInput,
       setMiniMaxKeyInput,
-      aiidBaseInput,
-      setAiidBaseInput,
-      aiidKeyInput,
-      setAiidKeyInput,
       promptPresets,
       setPromptPresets,
       promptPresetDomainOverrides,
