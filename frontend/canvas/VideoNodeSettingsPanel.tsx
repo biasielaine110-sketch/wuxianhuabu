@@ -5,7 +5,8 @@ import { OptimizedImage } from './OptimizedImage';
 import { EyedropperIcon } from './canvasIcons';
 import {
   getVideoModelSwitchUpdates,
-  isHfsyVideoModel,
+  isHfsyMinimaxH3VideoModel,
+  isHfsySd2VideoModel,
   isJimengVideoModel,
   isManxueGrokImagineVideoModel,
   isVideoDoubaoFamilyModel,
@@ -44,7 +45,8 @@ export function VideoNodeSettingsPanel({
   const isDoubao = isVideoDoubaoFamilyModel(vm);
   const isSeedance2 = vm === 'seedance-2';
   const isSeedance2Fast = vm === 'seedance-2-fast';
-  const isHfsyVideo = isHfsyVideoModel(vm);
+  const isHfsySd2 = isHfsySd2VideoModel(vm);
+  const isHfsyMinimaxH3 = isHfsyMinimaxH3VideoModel(vm);
   const isGemini = vm === 'gemini-omni-flash';
   const isDoubaoSeedance2 = isVideoDoubaoSeedance2Model(vm);
   const isManxueGrokImagine = isManxueGrokImagineVideoModel(vm);
@@ -177,7 +179,11 @@ export function VideoNodeSettingsPanel({
                 ? ' · Seedance 2：5-10 秒；画幅 16:9/9:16/1:1'
                 : isManxueGrokImagine
                   ? ' · 满 e Grok Imagine：10/15 秒、720p；需满 e API Key'
-                  : ''}
+                  : isHfsyMinimaxH3
+                    ? ' · MiniMax-H3（hfsy）：4–15 秒；画幅 16:9 / 9:16；默认 720p；需 hfsyapi.cn API Key'
+                    : isHfsySd2
+                      ? ' · SD-2（hfsy）：5–15 秒；多画幅；需 hfsyapi.cn API Key'
+                      : ''}
       </div>
       {!isSora && !isVeo && isGroDur && (
         <div className="text-[9px] text-amber-600/95 px-1 leading-snug">
@@ -227,6 +233,7 @@ export function VideoNodeSettingsPanel({
             <option value="gemini-omni-flash">Gemini Omni Flash</option>
           </optgroup>
           <optgroup label="hfsyapi.cn">
+            <option value="hfsy-minimax-h3">MiniMax-H3（hfsyapi.cn）</option>
             <option value="hfsy-sd-2-fast">SD-2 Fast（hfsyapi.cn）</option>
             <option value="hfsy-sd-2">SD-2（hfsyapi.cn）</option>
           </optgroup>
@@ -329,7 +336,21 @@ export function VideoNodeSettingsPanel({
               <option value={10}>10 秒</option>
               <option value={12}>12 秒</option>
             </select>
-          ) : isHfsyVideo ? (
+          ) : isHfsyMinimaxH3 ? (
+            <select
+              className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+              value={[4, 5, 8, 10, 12, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 5}
+              onChange={(e) => onUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <option value={4}>4 秒</option>
+              <option value={5}>5 秒</option>
+              <option value={8}>8 秒</option>
+              <option value={10}>10 秒</option>
+              <option value={12}>12 秒</option>
+              <option value={15}>15 秒</option>
+            </select>
+          ) : isHfsySd2 ? (
             <select
               className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
               value={[5, 8, 10, 12, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 8}
@@ -424,7 +445,7 @@ export function VideoNodeSettingsPanel({
               <option value="3:2">3:2（按 16:9 提交）</option>
               <option value="2:3">2:3（按 16:9 提交）</option>
             </select>
-          ) : isSora ? (
+          ) : isHfsyMinimaxH3 || isSora ? (
             <select
               className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
               value={node.aspectRatio === '9:16' ? '9:16' : '16:9'}
@@ -448,7 +469,7 @@ export function VideoNodeSettingsPanel({
               <option value="3:4">3:4</option>
               <option value="21:9">21:9</option>
             </select>
-          ) : isHfsyVideo ? (
+          ) : isHfsySd2 ? (
             <select
               className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
               value={['9:16', '3:4', '1:1', '4:3', '16:9', '21:9'].includes(node.aspectRatio || '') ? node.aspectRatio : '16:9'}
@@ -478,7 +499,7 @@ export function VideoNodeSettingsPanel({
               <option value="3:4">3:4</option>
             </select>
           )}
-          {isSora ? (
+          {isSora || isHfsyMinimaxH3 ? (
             <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p</span>
           ) : isVeo ? (
             <select
@@ -525,7 +546,7 @@ export function VideoNodeSettingsPanel({
             </select>
           ) : isSeedance2Fast ? (
             <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p (8毛/秒)</span>
-          ) : isHfsyVideo ? (
+          ) : isHfsySd2 ? (
             <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">size: large</span>
           ) : isGemini ? (
             <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p</span>

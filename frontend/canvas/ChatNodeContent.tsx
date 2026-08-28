@@ -679,6 +679,10 @@ export function ChatNodeContent({
             <option value="gpt-5.6-terra-codesonline">GPT-5.6 Terra（codesonline）</option>
             <option value="claude-haiku-4-5-codesonline">Claude Haiku 4.5（codesonline）</option>
           </optgroup>
+          <optgroup label="hfsyapi.cn">
+            <option value="gpt-5.6-terra-hfsy">GPT-5.6 Terra（hfsyapi.cn）</option>
+            <option value="grok-4.6-hfsy">Grok 4.6（hfsyapi.cn）</option>
+          </optgroup>
           <optgroup label="MiniMax">
             <option value="minimax-m2.7">MiniMax M2.7</option>
             <option value="minimax-m3">MiniMax M3</option>

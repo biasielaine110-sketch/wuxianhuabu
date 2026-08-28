@@ -12,6 +12,8 @@ import {
   setGeminiKey,
   getCodesonlineChatSavedKey,
   getCodesonlineChatBaseUrl,
+  getHfsySavedKey,
+  getHfsyBaseUrl,
 } from './aiSettings';
 import {
   chatCompletionHistoryAtBase,
@@ -57,6 +59,20 @@ function resolveCodesonlineChatUpstreamModelId(modelName: string): string {
   if (m === 'gpt-5.6-terra-codesonline') return 'gpt-5.6-terra';
   if (m === 'claude-haiku-4-5-codesonline') return 'claude-haiku-4-5';
   return 'gpt-5.5';
+}
+
+/** hfsyapi.cn 对话模型 id（与图像通道共用 Key / Base URL） */
+function isHfsyChatModelId(modelName: string): boolean {
+  const m = (modelName || '').trim();
+  return m === 'gpt-5.6-terra-hfsy' || m === 'grok-4.6-hfsy';
+}
+
+/** UI 模型 id → www.hfsyapi.cn 上游 model 字段 */
+function resolveHfsyChatUpstreamModelId(modelName: string): string {
+  const m = (modelName || '').trim();
+  if (m === 'grok-4.6-hfsy') return 'grok-4.6';
+  if (m === 'gpt-5.6-terra-hfsy') return 'gpt-5.6-terra';
+  return m;
 }
 
 /** 满 eAPI（manxueapi.com）对话模型 id；与 ToAPIs 的 gemini-3.1-flash-lite-preview-official 区分 */
@@ -421,6 +437,27 @@ export const callGeminiChatWithHistory = async (
         '/codesonline-chat-api',
         coKey,
         resolveCodesonlineChatUpstreamModelId(modelName),
+        slice.map((t) => ({
+          role: t.role,
+          content: t.content,
+          imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
+          imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
+        }))
+      ) };
+    }
+
+    // hfsyapi.cn 对话：GPT-5.6 Terra / Grok 4.6（OpenAI 兼容 /v1/chat/completions，经同源代理）
+    if (isHfsyChatModelId(modelName)) {
+      const hfsyKey = getHfsySavedKey().trim();
+      if (!hfsyKey) {
+        throw new Error(
+          '使用 hfsyapi.cn 对话模型：请在「设置 → API」中填写「hfsyapi.cn」API Key。'
+        );
+      }
+      return { text: await chatCompletionHistoryAtBase(
+        getHfsyBaseUrl(),
+        hfsyKey,
+        resolveHfsyChatUpstreamModelId(modelName),
         slice.map((t) => ({
           role: t.role,
           content: t.content,

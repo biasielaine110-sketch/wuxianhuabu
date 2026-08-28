@@ -67,8 +67,16 @@ export function isVideoDoubaoSeedance2Model(vm: string): boolean {
   return vm === 'doubao-seedance-2-0-260128' || vm === 'doubao-seedance-2-0-fast-260128';
 }
 
-export function isHfsyVideoModel(vm?: string): boolean {
+export function isHfsySd2VideoModel(vm?: string): boolean {
   return vm === 'hfsy-sd-2' || vm === 'hfsy-sd-2-fast';
+}
+
+export function isHfsyMinimaxH3VideoModel(vm?: string): boolean {
+  return vm === 'hfsy-minimax-h3';
+}
+
+export function isHfsyVideoModel(vm?: string): boolean {
+  return isHfsySd2VideoModel(vm) || isHfsyMinimaxH3VideoModel(vm);
 }
 
 /** 切换视频模型时同步时长、分辨率、画幅等默认值 */
@@ -107,7 +115,13 @@ export function getVideoModelSwitchUpdates(m: string, node: CanvasNode): Partial
     updates.videoResolution = '720p';
     const ar = node.aspectRatio || '16:9';
     if (!['16:9', '9:16', '1:1'].includes(ar)) updates.aspectRatio = '16:9';
-  } else if (isHfsyVideoModel(m)) {
+  } else if (isHfsyMinimaxH3VideoModel(m)) {
+    const d = node.videoDuration ?? 5;
+    updates.videoDuration = [4, 5, 8, 10, 12, 15].includes(d) ? d : 5;
+    updates.videoResolution = '720p';
+    const ar = node.aspectRatio || '16:9';
+    if (ar !== '16:9' && ar !== '9:16') updates.aspectRatio = '16:9';
+  } else if (isHfsySd2VideoModel(m)) {
     const d = node.videoDuration ?? 8;
     updates.videoDuration = [5, 8, 10, 12, 15].includes(d) ? d : 8;
     updates.videoResolution = node.videoResolution === '480p' || node.videoResolution === '1080p' ? node.videoResolution : '720p';

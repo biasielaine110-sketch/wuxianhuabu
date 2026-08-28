@@ -315,9 +315,12 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                     />
                   </div>
 
-                  {/* ②b hfsyapi.cn（GPT Image 2） */}
+                  {/* ②b hfsyapi.cn（图像 + 对话） */}
                   <div className="mt-5 pt-4 border-t border-[#333]">
-                    <h3 className="text-sm font-semibold text-gray-200 mb-2">hfsyapi.cn（GPT Image 2）</h3>
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">hfsyapi.cn（图像 / 对话）</h3>
+                    <p className="text-xs text-gray-500 mb-2">
+                      图像：GPT Image 2 等；对话：GPT-5.6 Terra / Grok 4.6
+                    </p>
                     <div className="text-xs text-gray-500 mb-2">Base URL：<code className="text-gray-400">{DEFAULT_HFSY_IMAGE_BASE_URL}</code>（固定）</div>
                     <label className="text-xs text-gray-500 block mb-1">hfsyapi.cn API Key</label>
                     <input

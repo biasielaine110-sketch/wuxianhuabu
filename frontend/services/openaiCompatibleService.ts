@@ -1596,14 +1596,24 @@ async function toApisUploadVideoReferenceImageUrls(
   return imageUrls;
 }
 
-export type ToApisVideoModelId = 'grok-video-3' | 'grok-video-1.5-preview' | 'sora-2-vvip' | 'veo3.1-fast' | 'doubao-seedance-1-5-pro' | 'jimeng-video-v3' | 'jimeng-image-to-video' | 'gemini-omni-flash' | 'seedance-2' | 'seedance-2-fast' | 'hfsy-sd-2' | 'hfsy-sd-2-fast' | 'doubao-seedance-2-0-260128' | 'doubao-seedance-2-0-fast-260128' | 'grok-imagine-video-1.5-preview' | 'grok-imagine-video-1.5-preview-aiid';
+export type ToApisVideoModelId = 'grok-video-3' | 'grok-video-1.5-preview' | 'sora-2-vvip' | 'veo3.1-fast' | 'doubao-seedance-1-5-pro' | 'jimeng-video-v3' | 'jimeng-image-to-video' | 'gemini-omni-flash' | 'seedance-2' | 'seedance-2-fast' | 'hfsy-sd-2' | 'hfsy-sd-2-fast' | 'hfsy-minimax-h3' | 'doubao-seedance-2-0-260128' | 'doubao-seedance-2-0-fast-260128' | 'grok-imagine-video-1.5-preview' | 'grok-imagine-video-1.5-preview-aiid';
 
-function isHfsyVideoModel(model?: string): model is 'hfsy-sd-2' | 'hfsy-sd-2-fast' {
+function isHfsySd2VideoModel(model?: string): model is 'hfsy-sd-2' | 'hfsy-sd-2-fast' {
   return model === 'hfsy-sd-2' || model === 'hfsy-sd-2-fast';
 }
 
-function toHfsyVideoModel(model: 'hfsy-sd-2' | 'hfsy-sd-2-fast'): 'sd-2' | 'sd-2-fast' {
-  return model === 'hfsy-sd-2-fast' ? 'sd-2-fast' : 'sd-2';
+function isHfsyMinimaxH3VideoModel(model?: string): model is 'hfsy-minimax-h3' {
+  return model === 'hfsy-minimax-h3';
+}
+
+function isHfsyVideoModel(model?: string): model is 'hfsy-sd-2' | 'hfsy-sd-2-fast' | 'hfsy-minimax-h3' {
+  return isHfsySd2VideoModel(model) || isHfsyMinimaxH3VideoModel(model);
+}
+
+function toHfsyVideoModel(model: 'hfsy-sd-2' | 'hfsy-sd-2-fast' | 'hfsy-minimax-h3'): 'sd-2' | 'sd-2-fast' | 'minimax-h3' {
+  if (model === 'hfsy-sd-2-fast') return 'sd-2-fast';
+  if (model === 'hfsy-minimax-h3') return 'minimax-h3';
+  return 'sd-2';
 }
 
 function isHttpUrlString(v: unknown): v is string {
@@ -1724,9 +1734,19 @@ function normalizeHfsyVideoDuration(uiSeconds: number): number {
   return Math.min(15, Math.max(5, n));
 }
 
+/** MiniMax-H3：时长 4–15 秒 */
+function normalizeHfsyMinimaxH3Duration(uiSeconds: number): number {
+  const n = Math.round(Number(uiSeconds) || 5);
+  return Math.min(15, Math.max(4, n));
+}
+
 function normalizeHfsyVideoRatio(aspectRatio: string): string {
   const r = (aspectRatio || '').trim();
   return ['auto', '9:16', '3:4', '1:1', '4:3', '16:9', '21:9'].includes(r) ? r : '16:9';
+}
+
+function normalizeHfsyMinimaxH3Ratio(aspectRatio: string): '16:9' | '9:16' {
+  return (aspectRatio || '').trim() === '9:16' ? '9:16' : '16:9';
 }
 
 function hfsyVideoOrientation(aspectRatio: string): 'landscape' | 'portrait' {
@@ -1932,9 +1952,10 @@ async function hfsyPollVideoTaskToPlayableUrl(taskId: string, signal?: AbortSign
 
 async function hfsyVideoGenerate(params: {
   prompt: string;
-  videoModel: 'hfsy-sd-2' | 'hfsy-sd-2-fast';
+  videoModel: 'hfsy-sd-2' | 'hfsy-sd-2-fast' | 'hfsy-minimax-h3';
   durationSeconds: number;
   aspectRatio: string;
+  resolution?: string;
   referenceImagesBase64?: string[];
   referenceVideoUrls?: string[];
   signal?: AbortSignal;
@@ -1953,19 +1974,37 @@ async function hfsyVideoGenerate(params: {
 
   const videoUrls = (params.referenceVideoUrls || []).filter((u) => /^https?:\/\//i.test(u.trim())).slice(0, 3);
   if (imageUrls.length + videoUrls.length > 4) {
-    throw new Error('hfsyapi.cn sd-2/sd-2-fast 参考素材总数不能超过 4 个。');
+    throw new Error('hfsyapi.cn 参考素材总数不能超过 4 个。');
   }
 
-  const ratio = normalizeHfsyVideoRatio(params.aspectRatio);
-  const body: Record<string, unknown> = {
-    model: toHfsyVideoModel(params.videoModel),
-    orientation: hfsyVideoOrientation(ratio),
-    ratio,
-    prompt: params.prompt,
-    duration: normalizeHfsyVideoDuration(params.durationSeconds),
-    size: 'large',
-    watermark: false,
-  };
+  const upstreamModel = toHfsyVideoModel(params.videoModel);
+  let body: Record<string, unknown>;
+
+  if (params.videoModel === 'hfsy-minimax-h3') {
+    const ratio = normalizeHfsyMinimaxH3Ratio(params.aspectRatio);
+    body = {
+      model: upstreamModel,
+      orientation: hfsyVideoOrientation(ratio),
+      ratio,
+      prompt: params.prompt,
+      duration: normalizeHfsyMinimaxH3Duration(params.durationSeconds),
+      // UI 默认 720p；上游 MiniMax-H3 常用 768P，同时传 720p 兼容网关映射
+      resolution: params.resolution === '1080p' || params.resolution === '2k' ? '2K' : '720p',
+      watermark: false,
+    };
+  } else {
+    const ratio = normalizeHfsyVideoRatio(params.aspectRatio);
+    body = {
+      model: upstreamModel,
+      orientation: hfsyVideoOrientation(ratio),
+      ratio,
+      prompt: params.prompt,
+      duration: normalizeHfsyVideoDuration(params.durationSeconds),
+      size: 'large',
+      watermark: false,
+    };
+  }
+
   if (imageUrls.length > 0) body.images = imageUrls;
   if (videoUrls.length > 0) body.videos = videoUrls;
 
@@ -2935,6 +2974,7 @@ export async function toApisCanvasVideoGenerate(params: {
       prompt: params.prompt,
       durationSeconds: params.durationSeconds,
       aspectRatio: params.aspectRatio,
+      resolution: params.resolution,
       referenceImagesBase64: params.referenceImagesBase64,
       referenceVideoUrls: params.referenceVideoUrls,
       videoModel: params.videoModel,
@@ -3836,6 +3876,8 @@ function resolveChatModelForBase(baseNormalized: string, modelName: string): str
   if (m === 'gpt-5.6-sol-codesonline') return 'gpt-5.6-sol';
   if (m === 'gpt-5.6-terra-codesonline') return 'gpt-5.6-terra';
   if (m === 'claude-haiku-4-5-codesonline') return 'claude-haiku-4-5';
+  if (m === 'gpt-5.6-terra-hfsy') return 'gpt-5.6-terra';
+  if (m === 'grok-4.6-hfsy') return 'grok-4.6';
   if (m === 'claude-sonnet-4-6' || m.startsWith('claude-')) return m;
   if (isToApisHost(baseNormalized)) {
     if (m) return m;
@@ -3858,6 +3900,7 @@ function resolveChatModelForBase(baseNormalized: string, modelName: string): str
   if (m.startsWith('gpt-') || m.startsWith('o1') || m.startsWith('o3')) return m;
   if (m.startsWith('deepseek-')) return m;
   if (m.startsWith('minimax-')) return m;
+  if (m.startsWith('grok-')) return m;
   // ToAPIs 等网关使用 Gemini 模型 id 透传；其它 OpenAI 兼容站若也支持该 id，同样原样发送
   if (m === 'gemini-2.0-flash-official' || m === 'gemini-3.1-flash-lite-preview-official') return m;
   const geminiToOpenAi: Record<string, string> = {
