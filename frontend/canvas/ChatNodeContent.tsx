@@ -366,6 +366,24 @@ export function ChatNodeContent({
     ]);
     if (removedToApis.has(m)) {
       onUpdate({ model: 'gpt-5.6-terra-toapis' });
+      return;
+    }
+    const hfsyToToApis: Record<string, string> = {
+      'gpt-5.6-terra-hfsy': 'gpt-5.6-terra-toapis',
+      'grok-4.6-hfsy': 'grok-4.6-toapis',
+    };
+    if (hfsyToToApis[m]) {
+      onUpdate({ model: hfsyToToApis[m] });
+      return;
+    }
+    const codesonlineToToApis: Record<string, string> = {
+      'gpt-5.5-codesonline': 'gpt-5.4-mini-toapis',
+      'gpt-5.6-sol-codesonline': 'gpt-5.6-terra-toapis',
+      'gpt-5.6-terra-codesonline': 'gpt-5.6-terra-toapis',
+      'claude-haiku-4-5-codesonline': 'claude-haiku-4-5-toapis',
+    };
+    if (codesonlineToToApis[m]) {
+      onUpdate({ model: codesonlineToToApis[m] });
     }
   }, [node.id, node.model, onUpdate]);
 
@@ -789,16 +807,6 @@ export function ChatNodeContent({
             <option value="deepseek-v4-flash">DeepSeek-V4-Flash</option>
             <option value="deepseek-v4-pro">DeepSeek-V4-Pro</option>
             <option value="deepseek-v4-flash-vision-exp">DeepSeek-V4-Flash-Vision-Exp</option>
-          </optgroup>
-          <optgroup label="hfsyapi.cn">
-            <option value="gpt-5.6-terra-hfsy">GPT-5.6 Terra（hfsyapi.cn）</option>
-            <option value="grok-4.6-hfsy">Grok 4.6（hfsyapi.cn）</option>
-          </optgroup>
-          <optgroup label="codesonline">
-            <option value="gpt-5.5-codesonline">GPT-5.5（codesonline）</option>
-            <option value="gpt-5.6-sol-codesonline">GPT-5.6 Sol（codesonline）</option>
-            <option value="gpt-5.6-terra-codesonline">GPT-5.6 Terra（codesonline）</option>
-            <option value="claude-haiku-4-5-codesonline">Claude Haiku 4.5（codesonline）</option>
           </optgroup>
           <optgroup label="ToAPIs">
             <option value="grok-4.6-toapis">Grok 4.6（ToAPIs）</option>
