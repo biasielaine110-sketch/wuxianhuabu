@@ -422,6 +422,13 @@
   .canvas-node-font-195 select.nodemodel-select optgroup {
     font-weight: 600 !important;
   }
+  /** ToAPIs GPT Image 2：下拉项与闭合框文字为紫色 */
+  .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2"] {
+    color: #c084fc !important;
+  }
+  .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2"]:checked) {
+    color: #c084fc !important;
+  }
   .canvas-node-root--chat select.nodemodel-select {
     font-size: 30px !important;
     line-height: 1.1 !important;

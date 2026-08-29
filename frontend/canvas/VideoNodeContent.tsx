@@ -5,9 +5,11 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   DownloadIcon,
+  LoaderIcon,
   MaximizeIcon,
   VideoIcon,
 } from './canvasIcons';
+import { GenerationHoloOverlay } from './GenerationHoloOverlay';
 import { GenerationTimer } from './GenerationTimer';
 
 export interface VideoNodeContentProps {
@@ -46,8 +48,11 @@ export function VideoNodeContent({
 
   return (
     <div
-      className={`w-full ${!isSelected && videoUrls.length > 0 ? 'flex-1 min-h-0' : 'h-[680px] shrink-0'} relative border-b border-[#333] overflow-hidden group ${isSelected ? 'bg-[#2a2a2a]' : 'bg-[#1a1a1a]'}`}
+      className={`w-full relative overflow-hidden group ${
+        isSelected ? 'h-[680px] shrink-0 border-b border-[#333] bg-[#2a2a2a]' : 'flex-1 min-h-0 border-b-0 bg-black'
+      }`}
     >
+      {node.isGenerating ? <GenerationHoloOverlay /> : null}
       {videoUrls.length > 0 ? (
         <>
           <div ref={videoRootRef} className="relative w-full h-full">
@@ -72,10 +77,13 @@ export function VideoNodeContent({
               }}
               className={`w-full h-full object-contain bg-black ${isSelected ? '' : 'pointer-events-none'}`}
             />
-            <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded opacity-50 hover:opacity-100">
-              {currentUrl?.includes('localhost:3107') ? '本地' : '远程'}
-            </div>
+            {isSelected ? (
+              <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded opacity-50 hover:opacity-100">
+                {currentUrl?.includes('localhost:3107') ? '本地' : '远程'}
+              </div>
+            ) : null}
           </div>
+          {isSelected ? (
           <div className="absolute top-2 right-2 z-10 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             {videoUrls.length > 1 && (
               <>
@@ -178,6 +186,7 @@ export function VideoNodeContent({
               <DownloadIcon size={40} />
             </button>
           </div>
+          ) : null}
         </>
       ) : (
         <div className="absolute inset-0 flex items-center justify-center text-gray-600 text-sm">
@@ -193,77 +202,17 @@ export function VideoNodeContent({
             />
           ) : null}
           {node.isGenerating ? (
-            <div className="relative z-[2] flex flex-col items-center gap-1.5">
-              <div
-                className="absolute inset-0 -m-8"
-                style={{
-                  background:
-                    'radial-gradient(ellipse at 50% 50%, rgba(255,170,0,0.2) 0%, rgba(255,100,0,0.1) 40%, transparent 70%)',
-                  animation: 'videoGenPulse 2s ease-in-out infinite',
-                }}
-              />
-              <div className="relative w-16 h-16">
-                <div
-                  style={{
-                    position: 'absolute',
-                    inset: 0,
-                    border: '3px solid transparent',
-                    borderTopColor: '#ffaa00',
-                    borderRightColor: '#ff6600',
-                    borderRadius: '50%',
-                    animation: 'videoEnergySpin 1s linear infinite',
-                    boxShadow: '0 0 15px rgba(255,170,0,0.5), inset 0 0 15px rgba(255,170,0,0.3)',
-                  }}
-                />
-                <div
-                  style={{
-                    position: 'absolute',
-                    inset: '4px',
-                    border: '2px solid transparent',
-                    borderBottomColor: '#ff8800',
-                    borderLeftColor: '#ff4400',
-                    borderRadius: '50%',
-                    animation: 'videoEnergySpin 0.8s linear reverse infinite',
-                    boxShadow: '0 0 10px rgba(255,136,0,0.4)',
-                  }}
-                />
-                <div
-                  style={{
-                    position: 'absolute',
-                    inset: '8px',
-                    background:
-                      'radial-gradient(circle, rgba(255,170,0,0.8) 0%, rgba(255,100,0,0.4) 50%, transparent 70%)',
-                    borderRadius: '50%',
-                    animation: 'videoCorePulse 1s ease-in-out infinite',
-                  }}
-                />
-              </div>
+            <div className="relative z-[4] flex flex-col items-center gap-1.5 text-gray-400">
+              <LoaderIcon size={24} />
               {generationStartedAt != null ? (
                 <GenerationTimer
                   startedAt={generationStartedAt}
                   prefix="已用时"
-                  className="relative text-amber-400 text-xs tabular-nums tracking-tight"
+                  className="text-xs tabular-nums tracking-tight"
                   showSeconds
-                  secondsClassName="relative text-amber-500/70 text-[10px]"
-                  glitch="amber"
+                  secondsClassName="text-[10px] text-gray-500"
                 />
               ) : null}
-              {[...Array(8)].map((_, i) => (
-                <div
-                  key={i}
-                  style={{
-                    position: 'absolute',
-                    width: i % 2 === 0 ? '4px' : '3px',
-                    height: i % 2 === 0 ? '4px' : '3px',
-                    borderRadius: '50%',
-                    background: i % 3 === 0 ? '#ffaa00' : i % 3 === 1 ? '#ff6600' : '#ff8800',
-                    boxShadow: `0 0 6px ${i % 3 === 0 ? '#ffaa00' : i % 3 === 1 ? '#ff6600' : '#ff8800'}`,
-                    left: `${15 + i * 10}%`,
-                    top: `${20 + (i % 4) * 15}%`,
-                    animation: `videoParticleFloat ${1.5 + i * 0.1}s ease-in-out ${i * 0.1}s infinite`,
-                  }}
-                />
-              ))}
             </div>
           ) : (
             <span className="relative z-[2]">生成后在此预览（链接约 24 小时内有效）</span>

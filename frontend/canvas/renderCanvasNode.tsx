@@ -476,7 +476,7 @@ return (
       />
     </div>
 
-    {node.type === 'video' && (
+    {node.type === 'video' && isSelected && (
       <Suspense fallback={<HeavyNodeFallback label="加载视频参数…" />}>
         <VideoNodeSettingsPanel
           node={node}
