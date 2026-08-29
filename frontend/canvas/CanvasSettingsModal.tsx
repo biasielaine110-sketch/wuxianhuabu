@@ -364,8 +364,8 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                   <div className="mt-5 pt-4 border-t border-[#333]">
                     <h3 className="text-sm font-semibold text-gray-200 mb-2">火山方舟 Agent Plan（对话）</h3>
                     <p className="text-xs text-gray-500 mb-2">
-                      须使用 Agent Plan 专属 API Key（控制台 → 开通管理 → Agent Plan），不能使用方舟按量计费（/api/v3）Key。
-                      OpenAI 兼容地址为 <code className="text-gray-400">https://ark.cn-beijing.volces.com/api/plan/v3/chat/completions</code>。
+                      填写方舟控制台生成的 API Key 并在本站保存。代理会先走 Agent Plan（/api/plan/v3），若 401 再试 Coding Plan 与按量 /api/v3。
+                      须在当前网站域名下保存；密钥不要提交到 Git，泄露后请在控制台作废并重新生成。
                     </p>
                     <div className="text-xs text-gray-500 mb-2">
                       文档：

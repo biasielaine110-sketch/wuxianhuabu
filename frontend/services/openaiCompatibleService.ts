@@ -141,7 +141,7 @@ function openAiCompatFailureHint(
 ): string {
   if (status === 401) {
     if (fetchBase && isVolcengineArkFetchBase(fetchBase)) {
-      return '（401：火山方舟 Agent Plan 鉴权失败。请使用控制台「开通管理 → Agent Plan」生成的专属 Key（与按量 /api/v3 Key 不能混用），并在本站「设置 → API → 火山方舟 Agent Plan」保存。官方调用：POST https://ark.cn-beijing.volces.com/api/plan/v3/chat/completions ，Header 为 Authorization: Bearer <Key>。文档：https://console.volcengine.com/ark/region:cn-beijing/docs/82379/2373746 ）';
+      return '（401：火山方舟鉴权失败。请在控制台重新生成 API Key，在本站「设置 → API → 火山方舟」保存后重试；曾提交到 Git 的密钥通常已失效。文档：https://console.volcengine.com/ark/region:cn-beijing/docs/82379/2373746 ）';
     }
     return '（401：鉴权失败。若使用 hfsyapi.cn 模型，请在「设置 → API」填写并保存 hfsyapi.cn API Key；确认不要误填 ToAPIs、满 e 或 OpenAI 兼容通道的 Key。）';
   }
