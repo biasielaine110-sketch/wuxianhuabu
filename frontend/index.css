@@ -429,15 +429,16 @@
   .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2"]:checked) {
     color: #c084fc !important;
   }
+  /** codesonline GPT Image 2 / ToAPIs GPT Image 2 VIP / hfsy GPT Image 2：红色 */
   .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2-codesonline"],
   .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2-vip"],
   .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2-hfsy"] {
-    color: #4ade80 !important;
+    color: #f87171 !important;
   }
   .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2-codesonline"]:checked),
   .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2-vip"]:checked),
   .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2-hfsy"]:checked) {
-    color: #4ade80 !important;
+    color: #f87171 !important;
   }
   .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2pro-hfsy"],
   .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2pro-4k-hfsy"],

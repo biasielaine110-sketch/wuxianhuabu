@@ -323,7 +323,7 @@ async function sleepInterruptible(ms: number, signal?: AbortSignal): Promise<voi
   });
 }
 
-/** ToAPIs：透传 imagen / gemini / gpt-image-* 等模型 id（含 gemini-3.1-flash-image-preview 文生图/图生图） */
+/** ToAPIs：透传 imagen / gemini / gpt-image-* 等模型 id（含 gemini-3.1-flash-lite-image-official） */
 function toApisT2iModel(modelName: string): string {
   const m = (modelName || '').trim();
   if (m === 'gpt-image-2-codesonline') return 'gpt-image-2';
@@ -333,7 +333,7 @@ function toApisT2iModel(modelName: string): string {
   if (m === 'dall-e-3' || m === 'dall-e-2') return 'gemini-3-pro-image-preview';
   if (m === 'nano-banana-2') return 'gemini-2.5-flash-image-preview';
   if (m === 'qwen-image-3.0') return 'qwen-image-3.0';
-  return m || 'gemini-3.1-flash-image-preview';
+  return m || 'gemini-3.1-flash-lite-image-official';
 }
 
 /** 满 eAPI 模型名映射（将 UI id 转为 API model 名） */
@@ -570,9 +570,10 @@ function toApisAspectSize(aspectRatio: string): string {
   return '1:1';
 }
 
-/** ToAPIs Gemini 3.1 Flash Image：输出档位在 metadata.resolution（文档），非顶层 resolution */
+/** ToAPIs Gemini 图像：输出档位在 metadata.resolution（文档），非顶层 resolution */
 function isToApisGemini31FlashImageModel(modelId: string): boolean {
-  return (modelId || '').trim() === 'gemini-3.1-flash-image-preview';
+  const m = (modelId || '').trim();
+  return m === 'gemini-3.1-flash-lite-image-official' || m === 'gemini-3.1-flash-image-preview';
 }
 
 function isToApisQwenImage30Model(modelId: string): boolean {

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { CanvasNode, ChatMessage, ChatNode, Edge } from '../types';
-import { DEFAULT_DEEPSEEK_CHAT_MODEL_ID, normalizeDeepSeekChatModelId } from '../services/aiSettings';
+import { DEFAULT_DEEPSEEK_CHAT_MODEL_ID, normalizeDeepSeekChatModelId, normalizeLegacyImageModelId } from '../services/aiSettings';
 import { buildIncomingRefSlots } from '../referenceSlots';
 import { OptimizedImage } from './OptimizedImage';
 import { RefPickBar } from './RefPickBar';
@@ -1289,7 +1289,7 @@ export function ChatNodeContent({
           <select
             className="bg-[#222222] border border-[#444] rounded px-1.5 py-0.5 text-xs text-gray-200 outline-none focus:border-purple-500"
             style={{ fontSize: fs(10) }}
-            value={node.imageModel || 'gpt-image-2-codesonline'}
+            value={normalizeLegacyImageModelId(node.imageModel || 'gpt-image-2-codesonline')}
             onChange={(e) => onUpdate({ imageModel: e.target.value })}
             onPointerDown={(e) => e.stopPropagation()}
           >
@@ -1310,7 +1310,7 @@ export function ChatNodeContent({
             </optgroup>
             <option value="gpt-image-2-manxue">GPT Image 2（满 e）</option>
             <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
-            <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option>
+            <option value="gemini-3.1-flash-lite-image-official">Gemini 3.1 Flash Lite Image Official（ToAPIs）</option>
             <option value="qwen-image-3.0">Qwen-Image-3.0（ToAPIs）</option>
             <option value="gemini-3.1-flash-image-preview-2k-manxue">Gemini 3.1 Flash Image 2K（满 e）</option>
             <option value="gemini-3-pro-image-preview-2k-manxue">Gemini 3 Pro Image 2K（满 e）</option>

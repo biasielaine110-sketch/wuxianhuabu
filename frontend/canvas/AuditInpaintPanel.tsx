@@ -296,6 +296,12 @@ export function AuditInpaintPanel({
             disabled={isGenerating}
           >
             <option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option>
+            <optgroup label="ToAPIs">
+              <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
+              <option value="gemini-3.1-flash-lite-image-official">Gemini 3.1 Flash Lite Image Official（ToAPIs）</option>
+              <option value="qwen-image-3.0">Qwen-Image-3.0（ToAPIs）</option>
+              <option value="nano-banana-2">Nano-Banana 2（ToAPIs）</option>
+            </optgroup>
             <optgroup label="满 e（manxueapi.com）">
               <option value="gemini-3.1-flash-image-preview-2k-manxue">Gemini 3.1 Flash 2K（满 e）</option>
               <option value="gemini-3-pro-image-preview-2k-manxue">Gemini 3 Pro 2K（满 e）</option>
@@ -303,19 +309,6 @@ export function AuditInpaintPanel({
               <option value="gpt-image-2-pro-manxue">GPT Image 2 Pro（满 e）</option>
               <option value="gemini-3-pro-image-preview-4k-manxue">Gemini 3 Pro 4K（满 e）</option>
               <option value="gemini-3.1-flash-image-preview-4k-manxue">Gemini 3.1 Flash 4K（满 e）</option>
-            </optgroup>
-            <optgroup label="ToAPIs">
-              <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
-              <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash（ToAPIs）</option>
-              <option value="qwen-image-3.0">Qwen-Image-3.0（ToAPIs）</option>
-              <option value="nano-banana-2">Nano-Banana 2（ToAPIs）</option>
-              <option value="gemini-2.5-flash-image">Gemini 2.5 Flash</option>
-            </optgroup>
-            <optgroup label="即梦 (Dreamina)">
-              <option value="jimeng-image-5.0">即梦 5.0</option>
-              <option value="jimeng-image-4.6">即梦 4.6</option>
-              <option value="jimeng-image-4.5">即梦 4.5</option>
-              <option value="jimeng-image-4.0">即梦 4.0</option>
             </optgroup>
           </select>
 

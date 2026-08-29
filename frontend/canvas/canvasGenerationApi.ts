@@ -9,7 +9,7 @@ import {
   isVeo31FastVideoModel,
   videoNodeModelToToApis,
 } from './videoModelUtils';
-import { DEFAULT_DEEPSEEK_CHAT_MODEL_ID, normalizeDeepSeekChatModelId, getCodesonlineSavedKey, getHfsySavedKey, getOpenAiSavedKey, getAliyunMaasSavedKey } from '../services/aiSettings';
+import { DEFAULT_DEEPSEEK_CHAT_MODEL_ID, normalizeDeepSeekChatModelId, normalizeLegacyImageModelId, getCodesonlineSavedKey, getHfsySavedKey, getOpenAiSavedKey, getAliyunMaasSavedKey } from '../services/aiSettings';
 import { normalizeCanvasGenerationImages } from '../services/openaiCompatibleService';
 import { hasCanvasImagePayload } from '../services/canvasAssetResolver';
 import {
@@ -105,7 +105,7 @@ export function createCanvasGenerationApi(
 
     try {
       // ---- 即梦生图分支 ----
-      const imageModel = node.model || defaultCanvasImageModel();
+      const imageModel = normalizeLegacyImageModelId(node.model || defaultCanvasImageModel());
       if (isJimengImageModel(imageModel)) {
         const isI2i = node.type === 'i2i' || node.type === 'panoramaT2i';
 
@@ -206,7 +206,7 @@ export function createCanvasGenerationApi(
           finalPrompt2,
           node.aspectRatio || '16:9',
           node.imageCount || 1,
-          node.model || defaultCanvasImageModel(),
+          imageModel,
           node.resolution,
           node.quality,
           ac.signal
@@ -235,7 +235,7 @@ export function createCanvasGenerationApi(
           imageInputs,
           promptForEdit,
           node.imageCount || 1,
-          node.model || defaultCanvasImageModel(),
+          imageModel,
           aspectRatio,
           node.resolution,
           node.quality,
@@ -420,7 +420,7 @@ export function createCanvasGenerationApi(
           generationStartedAtRef.current.delete(nodeId);
           return;
         }
-        const imageModel = (node as ChatNode).imageModel || 'gpt-image-2-codesonline';
+        const imageModel = normalizeLegacyImageModelId((node as ChatNode).imageModel || 'gpt-image-2-codesonline');
         const aspectRatio = (node as ChatNode).imageAspectRatio || '16:9';
         const resolution = (node as ChatNode).imageResolution || '2k';
         const imageQuality = (node as ChatNode).imageQuality || 'low';

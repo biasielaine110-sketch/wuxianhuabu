@@ -551,7 +551,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
         reason: 'AI 服务额度已用完，请前往充值后重试。',
         fixes: [
           { label: '💰 充值额度', action: () => { window.open('https://manxueapi.com/recharge', '_blank'); handleUpdateNode(node.id, { error: undefined }); } },
-          { label: '切换免费模型', action: () => handleUpdateNode(node.id, { model: node.type === 'chat' ? 'gemini-2.5-flash' : 'gemini-3.1-flash-image-preview', error: undefined }) },
+          { label: '切换免费模型', action: () => handleUpdateNode(node.id, { model: node.type === 'chat' ? 'gemini-2.5-flash' : 'gemini-3.1-flash-lite-image-official', error: undefined }) },
         ]
       };
     }
@@ -590,7 +590,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
       reason: '接口鉴权失败、服务不可用或返回格式异常。',
       fixes: [
         { label: '⚙️ 检查 API Key', action: () => { setSettingsTab('api'); setShowSettingsModal(true); handleUpdateNode(node.id, { error: undefined }); } },
-        { label: '🔄 切换模型', action: () => handleUpdateNode(node.id, { model: node.type === 'chat' ? 'gemini-2.5-flash' : 'gemini-3.1-flash-image-preview', error: undefined }) },
+        { label: '🔄 切换模型', action: () => handleUpdateNode(node.id, { model: node.type === 'chat' ? 'gemini-2.5-flash' : 'gemini-3.1-flash-lite-image-official', error: undefined }) },
       ]
     };
   }, [handleUpdateNode]);

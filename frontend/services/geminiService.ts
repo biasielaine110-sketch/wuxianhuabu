@@ -252,7 +252,7 @@ export const generateNewImage = async (
   aspectRatio: string = '1:1',
   numberOfImages: number = 1,
   modelName: string = 'imagen-4',
-  /** 画布节点 1k/2k/4k；OpenAI 兼容 + ToAPIs 且 gemini-3.1-flash-image-preview 时映射为 metadata.resolution */
+  /** 画布节点 1k/2k/4k；OpenAI 兼容 + ToAPIs Gemini 图像模型时映射为 metadata.resolution */
   outputResolution?: string,
   quality?: string,
   signal?: AbortSignal
@@ -274,7 +274,7 @@ export const generateNewImage = async (
     if (isAliyunMaasImageModel(model)) {
       return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
     }
-    if (model === 'qwen-image-3.0') {
+    if (model === 'qwen-image-3.0' || model === 'gemini-3.1-flash-lite-image-official') {
       return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
     }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {
@@ -374,7 +374,7 @@ export const editExistingImage = async (
     if (isAliyunMaasImageModel(model)) {
       return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, pixelSize, signal);
     }
-    if (model === 'qwen-image-3.0') {
+    if (model === 'qwen-image-3.0' || model === 'gemini-3.1-flash-lite-image-official') {
       return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, pixelSize, signal);
     }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {
