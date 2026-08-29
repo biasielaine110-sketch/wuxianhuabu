@@ -412,40 +412,38 @@
     font-size: 35px !important;
     line-height: 1.1 !important;
     font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+    color: #ffffff !important;
   }
   .canvas-node-font-195 select.nodemodel-select option,
   .canvas-node-font-195 select.nodemodel-select optgroup {
     font-size: 15px !important;
     line-height: 1.35 !important;
     font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+    color: #ffffff !important;
   }
   .canvas-node-font-195 select.nodemodel-select optgroup {
     font-weight: 600 !important;
   }
-  /** ToAPIs GPT Image 2：下拉项与闭合框文字为紫色 */
-  .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2"] {
-    color: #c084fc !important;
-  }
-  .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2"]:checked) {
-    color: #c084fc !important;
-  }
-  /** codesonline GPT Image 2 / ToAPIs GPT Image 2 VIP / hfsy GPT Image 2：红色 */
+  /** 绿色：codesonline GPT Image 2 / ToAPIs GPT Image 2 VIP / hfsy GPT Image 2 */
   .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2-codesonline"],
   .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2-vip"],
   .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2-hfsy"] {
-    color: #f87171 !important;
+    color: #4ade80 !important;
   }
   .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2-codesonline"]:checked),
   .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2-vip"]:checked),
   .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2-hfsy"]:checked) {
-    color: #f87171 !important;
+    color: #4ade80 !important;
   }
+  /** 紫色：ToAPIs GPT Image 2 / hfsy GPT Image 2 Pro、Pro 4K、Nano-Banana 2、Nano-Banana Pro */
+  .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2"],
   .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2pro-hfsy"],
   .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2pro-4k-hfsy"],
   .canvas-node-font-195 select.nodemodel-select option[value="nano-banana-2-hfsy"],
   .canvas-node-font-195 select.nodemodel-select option[value="nano-banana-pro-hfsy"] {
     color: #c084fc !important;
   }
+  .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2"]:checked),
   .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2pro-hfsy"]:checked),
   .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2pro-4k-hfsy"]:checked),
   .canvas-node-font-195 select.nodemodel-select:has(option[value="nano-banana-2-hfsy"]:checked),
