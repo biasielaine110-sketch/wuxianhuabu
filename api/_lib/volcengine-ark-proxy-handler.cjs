@@ -1,8 +1,31 @@
 /**
  * 火山方舟同源代理。对话优先 Agent Plan，401 再试 Coding Plan / 按量 /api/v3。
  */
-const { Readable } = require('node:stream');
-const { pipeline } = require('node:stream/promises');
+function isUnsafeForwardedResponseHeader(name) {
+  const n = String(name).toLowerCase();
+  return (
+    n === 'connection' ||
+    n === 'keep-alive' ||
+    n === 'transfer-encoding' ||
+    n === 'content-encoding' ||
+    n === 'content-length'
+  );
+}
+
+async function writeUpstreamResponse(res, upstream) {
+  res.statusCode = upstream.status;
+  upstream.headers.forEach((value, key) => {
+    if (isUnsafeForwardedResponseHeader(key)) return;
+    try {
+      res.setHeader(key, value);
+    } catch {
+      /* ignore */
+    }
+  });
+  const buf = Buffer.from(await upstream.arrayBuffer());
+  res.setHeader('Content-Length', String(buf.length));
+  res.end(buf);
+}
 
 const PLAN_CHAT = 'https://ark.cn-beijing.volces.com/api/plan/v3/chat/completions';
 const CODING_CHAT = 'https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions';
@@ -159,8 +182,8 @@ async function handler(req, res) {
     return;
   }
 
-  res.statusCode = upstream.status;
   if (upstream.status === 401) {
+    res.statusCode = 401;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     const text = await upstream.text();
     let payload;
@@ -176,31 +199,18 @@ async function handler(req, res) {
     return;
   }
 
-  upstream.headers.forEach((value, key) => {
-    const n = String(key).toLowerCase();
-    if (n === 'connection' || n === 'transfer-encoding' || n === 'content-encoding') return;
-    try {
-      res.setHeader(key, value);
-    } catch {
-      /* ignore */
-    }
-  });
-
-  if (!upstream.body) {
-    res.end();
-    return;
-  }
-
   try {
-    const out = Readable.fromWeb(upstream.body);
-    await pipeline(out, res);
+    await writeUpstreamResponse(res, upstream);
   } catch (e) {
-    if (!res.writableEnded) {
-      try {
-        res.destroy(e);
-      } catch {
-        /* ignore */
-      }
+    if (!res.headersSent) {
+      res.statusCode = 502;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end(
+        JSON.stringify({
+          error: 'volcengine_ark_upstream_read_failed',
+          message: e instanceof Error ? e.message : String(e),
+        })
+      );
     }
   }
 }

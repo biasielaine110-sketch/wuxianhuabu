@@ -4043,7 +4043,11 @@ async function postJsonAtBase<T>(base: string, path: string, body: unknown, apiK
       `兼容接口错误 (${res.status}): ${text.slice(0, 800)}${openAiCompatFailureHint(res.status, 'generations-json', fetchBase)}`
     );
   }
-  return JSON.parse(text) as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`兼容接口返回的 JSON 不完整 (${res.status}): ${text.slice(0, 240)}`);
+  }
 }
 
 /** OpenAI 兼容 images/generations | edits：常见 data[]；条目多为 b64_json，New API 等常仅返回 url */
