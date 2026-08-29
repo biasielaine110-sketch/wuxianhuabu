@@ -357,6 +357,15 @@ export function ChatNodeContent({
     ]);
     if (removed.has(m)) {
       onUpdate({ model: DEFAULT_DEEPSEEK_CHAT_MODEL_ID });
+      return;
+    }
+    const removedToApis = new Set([
+      'gemini-2.0-flash-official',
+      'gemini-3.1-flash-lite-preview-official',
+      'glm-5.3-flash-toapis',
+    ]);
+    if (removedToApis.has(m)) {
+      onUpdate({ model: 'gpt-5.6-terra-toapis' });
     }
   }, [node.id, node.model, onUpdate]);
 
@@ -791,13 +800,15 @@ export function ChatNodeContent({
             <option value="gpt-5.6-terra-codesonline">GPT-5.6 Terra（codesonline）</option>
             <option value="claude-haiku-4-5-codesonline">Claude Haiku 4.5（codesonline）</option>
           </optgroup>
-          <optgroup label="Google Gemini / ToAPIs">
-            <option value="gemini-2.0-flash-official">Gemini 2.0 Flash（ToAPIs）</option>
-            <option value="gemini-3.1-flash-lite-preview-official">Gemini 3.1 Flash Lite（ToAPIs）</option>
-            <option value="glm-5.3-flash-toapis">GLM-5.3-Flash（ToAPIs）</option>
+          <optgroup label="ToAPIs">
             <option value="grok-4.6-toapis">Grok 4.6（ToAPIs）</option>
             <option value="gpt-5.4-mini-toapis">GPT-5.4 Mini（ToAPIs）</option>
+            <option value="gpt-5.6-terra-toapis">GPT-5.6 Terra（ToAPIs）</option>
+            <option value="claude-haiku-4-5-toapis">Claude Haiku 4.5（ToAPIs）</option>
+            <option value="gemini-3.6-flash-toapis">Gemini 3.6 Flash（ToAPIs）</option>
             <option value="qwen3.5-flash-toapis">Qwen3.5-Flash（ToAPIs）</option>
+            <option value="qwen3.5-plus-toapis">Qwen3.5-Plus（ToAPIs）</option>
+            <option value="deepseek-v4-flash-toapis">DeepSeek-V4-Flash（ToAPIs）</option>
           </optgroup>
         </select>
         <label className="flex items-center gap-1 shrink-0 text-gray-500" style={{ fontSize: 45 }}>

@@ -40,7 +40,7 @@ const MAX_CHAT_HISTORY_TURNS = 48;
 
 function isDeepSeekChatModelId(modelName: string): boolean {
   const m = normalizeDeepSeekChatModelId(modelName).trim();
-  if (m.endsWith('-ark') || m.endsWith('-aliyun')) return false;
+  if (m.endsWith('-ark') || m.endsWith('-aliyun') || m.endsWith('-toapis')) return false;
   return m === 'deepseek-v4-flash' || m === 'deepseek-v4-pro' || m.startsWith('deepseek-v4-');
 }
 
@@ -113,14 +113,19 @@ function resolveHfsyChatUpstreamModelId(modelName: string): string {
   return m;
 }
 
-/** ToAPIs（https://toapis.com/v1）对话模型；与 hfsy 的 grok-4.6-hfsy 分流 */
+/** ToAPIs（https://toapis.com/v1）对话模型；与 hfsy / codesonline / 官方 DeepSeek 分流 */
 function isToApisChatModelId(modelName: string): boolean {
   const m = (modelName || '').trim();
   return (
     m === 'glm-5.3-flash-toapis' ||
     m === 'grok-4.6-toapis' ||
     m === 'gpt-5.4-mini-toapis' ||
-    m === 'qwen3.5-flash-toapis'
+    m === 'qwen3.5-flash-toapis' ||
+    m === 'gpt-5.6-terra-toapis' ||
+    m === 'claude-haiku-4-5-toapis' ||
+    m === 'gemini-3.6-flash-toapis' ||
+    m === 'qwen3.5-plus-toapis' ||
+    m === 'deepseek-v4-flash-toapis'
   );
 }
 
@@ -130,6 +135,11 @@ function resolveToApisChatUpstreamModelId(modelName: string): string {
   if (m === 'grok-4.6-toapis') return 'grok-4.6';
   if (m === 'gpt-5.4-mini-toapis') return 'gpt-5.4-mini';
   if (m === 'qwen3.5-flash-toapis') return 'qwen3.5-flash';
+  if (m === 'gpt-5.6-terra-toapis') return 'gpt-5.6-terra';
+  if (m === 'claude-haiku-4-5-toapis') return 'claude-haiku-4-5';
+  if (m === 'gemini-3.6-flash-toapis') return 'gemini-3.6-flash';
+  if (m === 'qwen3.5-plus-toapis') return 'qwen3.5-plus';
+  if (m === 'deepseek-v4-flash-toapis') return 'deepseek-v4-flash';
   return m.replace(/-toapis$/, '');
 }
 

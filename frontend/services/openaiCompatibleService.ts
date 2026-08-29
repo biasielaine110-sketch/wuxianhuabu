@@ -3677,6 +3677,11 @@ function resolveChatModelForBase(baseNormalized: string, modelName: string): str
   if (m === 'grok-4.6-toapis') return 'grok-4.6';
   if (m === 'gpt-5.4-mini-toapis') return 'gpt-5.4-mini';
   if (m === 'qwen3.5-flash-toapis') return 'qwen3.5-flash';
+  if (m === 'gpt-5.6-terra-toapis') return 'gpt-5.6-terra';
+  if (m === 'claude-haiku-4-5-toapis') return 'claude-haiku-4-5';
+  if (m === 'gemini-3.6-flash-toapis') return 'gemini-3.6-flash';
+  if (m === 'qwen3.5-plus-toapis') return 'qwen3.5-plus';
+  if (m === 'deepseek-v4-flash-toapis') return 'deepseek-v4-flash';
   if (m === 'glm-5.3-flash' || m === 'glm-5.3' || m.startsWith('glm-')) return m;
   if (m === 'kimi-k2.7-code' || m.startsWith('kimi-')) return m;
   if (m.startsWith('doubao-')) return m;
