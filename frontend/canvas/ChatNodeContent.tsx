@@ -772,7 +772,9 @@ export function ChatNodeContent({
             <option value="qwen3.8-max-aliyun">Qwen3.8-Max（阿里云百炼）</option>
             <option value="qwen3-vl-plus-aliyun">Qwen3-VL-Plus（阿里云百炼）</option>
             <option value="deepseek-v4-pro-0813-aliyun">DeepSeek-V4-Pro-0813（阿里云百炼）</option>
+            <option value="deepseek-v4-flash-0731-aliyun">DeepSeek-V4-Flash-0731（阿里云百炼）</option>
             <option value="kimi-k3-aliyun">Kimi-K3（阿里云百炼）</option>
+            <option value="glm-5.2-aliyun">GLM-5.2（阿里云百炼）</option>
           </optgroup>
           <optgroup label="DeepSeek">
             <option value="deepseek-v4-flash">DeepSeek-V4-Flash</option>
@@ -1274,6 +1276,7 @@ export function ChatNodeContent({
             <option value="gpt-image-2-official">GPT Image 2 Official（ToAPIs）</option>
             <optgroup label="阿里云百炼">
               <option value="z-image-turbo-aliyun">Z-Image-Turbo（阿里云百炼）</option>
+              <option value="qwen-image-3.0-pro-aliyun">Qwen-Image-3.0-Pro（阿里云百炼）</option>
             </optgroup>
             <optgroup label="hfsyapi.cn">
               <option value="gpt-image-2-hfsy">GPT Image 2（hfsyapi.cn）</option>

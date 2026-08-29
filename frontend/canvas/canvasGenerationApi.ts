@@ -66,7 +66,7 @@ export function createCanvasGenerationApi(
     const m = (model || '').trim();
     if (m === 'gpt-image-2-codesonline') return getCodesonlineSavedKey() || undefined;
     if (m === 'gpt-image-2-hfsy' || m === 'gpt-image-2pro-hfsy' || m === 'gpt-image-2pro-4k-hfsy' || m === 'nano-banana-2-hfsy' || m === 'nano-banana-pro-hfsy') return getHfsySavedKey() || undefined;
-    if (m === 'z-image-turbo-aliyun' || m === 'z-image-turbo') return getAliyunMaasSavedKey() || undefined;
+    if (m === 'z-image-turbo-aliyun' || m === 'z-image-turbo' || m === 'qwen-image-3.0-pro-aliyun' || m === 'qwen-image-3.0-pro') return getAliyunMaasSavedKey() || undefined;
     if (m.startsWith('gpt-image-')) return getOpenAiSavedKey() || undefined;
     return undefined;
   };

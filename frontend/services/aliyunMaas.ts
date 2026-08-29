@@ -9,7 +9,9 @@ export function isAliyunMaasChatModelId(modelName: string): boolean {
     m === 'qwen3.8-max-aliyun' ||
     m === 'qwen3-vl-plus-aliyun' ||
     m === 'deepseek-v4-pro-0813-aliyun' ||
-    m === 'kimi-k3-aliyun'
+    m === 'deepseek-v4-flash-0731-aliyun' ||
+    m === 'kimi-k3-aliyun' ||
+    m === 'glm-5.2-aliyun'
   );
 }
 
@@ -19,13 +21,29 @@ export function resolveAliyunMaasChatUpstreamModelId(modelName: string): string 
   if (m === 'qwen3.8-max-aliyun') return 'qwen3.8-max';
   if (m === 'qwen3-vl-plus-aliyun') return 'qwen3-vl-plus';
   if (m === 'deepseek-v4-pro-0813-aliyun') return 'deepseek-v4-pro-0813';
+  if (m === 'deepseek-v4-flash-0731-aliyun') return 'deepseek-v4-flash-0731';
   if (m === 'kimi-k3-aliyun') return 'kimi-k3';
+  if (m === 'glm-5.2-aliyun') return 'glm-5.2';
   return m.replace(/-aliyun$/, '');
 }
 
 export function isAliyunMaasZImageModel(modelName: string): boolean {
   const m = (modelName || '').trim();
   return m === 'z-image-turbo-aliyun' || m === 'z-image-turbo';
+}
+
+export function isAliyunMaasQwenImageModel(modelName: string): boolean {
+  const m = (modelName || '').trim();
+  return m === 'qwen-image-3.0-pro-aliyun' || m === 'qwen-image-3.0-pro';
+}
+
+export function isAliyunMaasImageModel(modelName: string): boolean {
+  return isAliyunMaasZImageModel(modelName) || isAliyunMaasQwenImageModel(modelName);
+}
+
+export function resolveAliyunMaasImageUpstreamModelId(modelName: string): string {
+  if (isAliyunMaasQwenImageModel(modelName)) return 'qwen-image-3.0-pro';
+  return 'z-image-turbo';
 }
 
 export function aliyunMaasChatFetchBase(): string {

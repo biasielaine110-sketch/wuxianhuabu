@@ -394,9 +394,9 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                   </div>
 
                   <div className="mt-5 pt-4 border-t border-[#333]">
-                    <h3 className="text-sm font-semibold text-gray-200 mb-2">阿里云百炼（对话 / Z-Image）</h3>
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">阿里云百炼（对话 / 生图）</h3>
                     <p className="text-xs text-gray-500 mb-2">
-                      填写百炼 API Key 并在本站保存。对话走 compatible-mode/v1（Qwen3.7-Plus / Qwen3.8-Max / Qwen3-VL-Plus / DeepSeek-V4-Pro-0813 / Kimi-K3），文生图与图生图走 Z-Image-Turbo。须在当前网站域名下保存。
+                      填写百炼 API Key 并在本站保存。对话走 compatible-mode/v1（Qwen / DeepSeek-V4-Pro-0813 / DeepSeek-V4-Flash-0731 / Kimi-K3 / GLM-5.2），文生图与图生图走 Z-Image-Turbo 与 Qwen-Image-3.0-Pro。须在当前网站域名下保存。
                     </p>
                     <label className="text-xs text-gray-500 block mb-1">百炼 API Key</label>
                     <input

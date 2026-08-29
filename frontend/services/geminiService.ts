@@ -28,7 +28,7 @@ import {
 import {
   aliyunMaasChatFetchBase,
   isAliyunMaasChatModelId,
-  isAliyunMaasZImageModel,
+  isAliyunMaasImageModel,
   resolveAliyunMaasChatUpstreamModelId,
 } from './aliyunMaas';
 import { normalizeGcpVertexModelWhenDisabled } from './vertexGeminiModelUtils';
@@ -241,7 +241,7 @@ export const generateNewImage = async (
     if (model === 'gpt-image-2-hfsy' || model === 'gpt-image-2pro-hfsy' || model === 'gpt-image-2pro-4k-hfsy' || model === 'nano-banana-2-hfsy' || model === 'nano-banana-pro-hfsy') {
       return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
     }
-    if (isAliyunMaasZImageModel(model)) {
+    if (isAliyunMaasImageModel(model)) {
       return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
     }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {
@@ -338,7 +338,7 @@ export const editExistingImage = async (
     if (model === 'gpt-image-2-hfsy' || model === 'gpt-image-2pro-hfsy' || model === 'gpt-image-2pro-4k-hfsy' || model === 'nano-banana-2-hfsy' || model === 'nano-banana-pro-hfsy') {
       return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, pixelSize, signal);
     }
-    if (isAliyunMaasZImageModel(model)) {
+    if (isAliyunMaasImageModel(model)) {
       return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, pixelSize, signal);
     }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {

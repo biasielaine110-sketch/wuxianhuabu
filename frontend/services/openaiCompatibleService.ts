@@ -16,7 +16,7 @@ import {
   getOpenAiSavedKey,
   getAliyunMaasSavedKey,
 } from './aiSettings';
-import { aliyunMaasMultimodalFetchUrl, aliyunZImageSize, isAliyunMaasZImageModel } from './aliyunMaas';
+import { aliyunMaasMultimodalFetchUrl, aliyunZImageSize, isAliyunMaasImageModel, resolveAliyunMaasImageUpstreamModelId } from './aliyunMaas';
 
 function normalizeBaseUrl(url: string): string {
   let u = url.trim().replace(/\/+$/, '');
@@ -3673,7 +3673,7 @@ function resolveChatModelForBase(baseNormalized: string, modelName: string): str
   if (m === 'claude-haiku-4-5-codesonline') return 'claude-haiku-4-5';
   if (m === 'gpt-5.6-terra-hfsy') return 'gpt-5.6-terra';
   if (m === 'grok-4.6-hfsy') return 'grok-4.6';
-  if (m === 'glm-5.3-flash' || m === 'glm-5.3') return m;
+  if (m === 'glm-5.3-flash' || m === 'glm-5.3' || m.startsWith('glm-')) return m;
   if (m === 'kimi-k2.7-code' || m.startsWith('kimi-')) return m;
   if (m.startsWith('doubao-')) return m;
   if (m === 'claude-sonnet-4-6' || m.startsWith('claude-')) return m;
@@ -4402,39 +4402,45 @@ async function editImagesAtOpenAiCompatibleBase(
   return results;
 }
 
-async function extractAliyunZImageUrl(json: unknown): Promise<string> {
+async function extractAliyunImageUrls(json: unknown): Promise<string[]> {
   if (!json || typeof json !== 'object') throw new Error('阿里云生图未返回 JSON');
   const o = json as Record<string, unknown>;
   if (typeof o.code === 'string' && o.code) {
     throw new Error(`阿里云生图失败: ${o.code} ${String(o.message || '')}`.trim());
   }
+  const urls: string[] = [];
   const output = o.output;
   if (output && typeof output === 'object') {
     const choices = (output as Record<string, unknown>).choices;
-    if (Array.isArray(choices) && choices[0] && typeof choices[0] === 'object') {
-      const msg = (choices[0] as Record<string, unknown>).message;
-      if (msg && typeof msg === 'object') {
+    if (Array.isArray(choices)) {
+      for (const choice of choices) {
+        if (!choice || typeof choice !== 'object') continue;
+        const msg = (choice as Record<string, unknown>).message;
+        if (!msg || typeof msg !== 'object') continue;
         const content = (msg as Record<string, unknown>).content;
-        if (Array.isArray(content)) {
-          for (const part of content) {
-            if (part && typeof part === 'object' && typeof (part as { image?: unknown }).image === 'string') {
-              const img = String((part as { image: string }).image).trim();
-              if (img) return img;
-            }
+        if (!Array.isArray(content)) continue;
+        for (const part of content) {
+          if (part && typeof part === 'object' && typeof (part as { image?: unknown }).image === 'string') {
+            const img = String((part as { image: string }).image).trim();
+            if (img) urls.push(img);
           }
         }
       }
     }
   }
-  throw new Error(`阿里云生图未返回图像 URL: ${JSON.stringify(json).slice(0, 400)}`);
+  if (!urls.length) {
+    throw new Error(`阿里云生图未返回图像 URL: ${JSON.stringify(json).slice(0, 400)}`);
+  }
+  return urls;
 }
 
-async function aliyunZImageGenerate(
+async function aliyunMaasImageGenerate(
   prompt: string,
   aspectRatio: string,
   numberOfImages: number,
   nodeResolution: string | undefined,
   refBase64s: string[] | undefined,
+  canvasModelId: string,
   signal?: AbortSignal
 ): Promise<string[]> {
   const apiKey = getAliyunMaasSavedKey().trim();
@@ -4443,21 +4449,25 @@ async function aliyunZImageGenerate(
   }
   const url = aliyunMaasMultimodalFetchUrl();
   const size = aliyunZImageSize(aspectRatio, nodeResolution);
-  const text = (prompt || '').slice(0, 800);
-  const n = Math.max(1, Math.min(4, numberOfImages || 1));
-  const out: string[] = [];
-  for (let i = 0; i < n; i += 1) {
-    const content: Array<Record<string, string>> = [];
-    const refs = (refBase64s || []).filter(Boolean).slice(0, 1);
-    for (const b64 of refs) {
-      const raw = b64.replace(/^data:image\/\w+;base64,/i, '');
-      content.push({ image: `data:image/jpeg;base64,${raw}` });
-    }
-    content.push({ text });
+  const upstream = resolveAliyunMaasImageUpstreamModelId(canvasModelId);
+  const isQwen = upstream === 'qwen-image-3.0-pro';
+  const text = (prompt || '').slice(0, isQwen ? 4000 : 800);
+  const refs = (refBase64s || []).filter(Boolean).slice(0, isQwen ? 3 : 1);
+  const content: Array<Record<string, string>> = [];
+  for (const b64 of refs) {
+    const raw = b64.replace(/^data:image\/\w+;base64,/i, '');
+    content.push({ image: `data:image/jpeg;base64,${raw}` });
+  }
+  content.push({ text });
+  const label = isQwen ? 'Qwen-Image-3.0-Pro' : 'Z-Image-Turbo';
+
+  const postOnce = async (n: number): Promise<string[]> => {
+    const parameters: Record<string, unknown> = { prompt_extend: false, size };
+    if (isQwen) parameters.n = n;
     const body = {
-      model: 'z-image-turbo',
+      model: upstream,
       input: { messages: [{ role: 'user', content }] },
-      parameters: { prompt_extend: false, size },
+      parameters,
     };
     const res = await fetch(url, {
       method: 'POST',
@@ -4472,10 +4482,10 @@ async function aliyunZImageGenerate(
     const rawText = await res.text();
     if (!res.ok) {
       const hint =
-        refs.length && /InvalidParameter|仅.*text|only one text/i.test(rawText)
-          ? ' Z-Image-Turbo 官方接口文生图仅允许一条 text；图生图若被拒绝，请改用其它图生图模型或仅用文生图。'
+        !isQwen && refs.length && /InvalidParameter|仅.*text|only one text/i.test(rawText)
+          ? ' Z-Image-Turbo 官方接口文生图仅允许一条 text；图生图请改用 Qwen-Image-3.0-Pro 或其他模型。'
           : '';
-      throw new Error(`阿里云 Z-Image-Turbo 错误 (${res.status}): ${rawText.slice(0, 800)}${hint}`);
+      throw new Error(`阿里云 ${label} 错误 (${res.status}): ${rawText.slice(0, 800)}${hint}`);
     }
     let json: unknown;
     try {
@@ -4483,8 +4493,21 @@ async function aliyunZImageGenerate(
     } catch {
       throw new Error(`阿里云生图响应不是 JSON: ${rawText.slice(0, 300)}`);
     }
-    const imageUrl = await extractAliyunZImageUrl(json);
-    out.push(await fetchUrlAsBase64(imageUrl, signal));
+    const imageUrls = await extractAliyunImageUrls(json);
+    const out: string[] = [];
+    for (const imageUrl of imageUrls) {
+      out.push(await fetchUrlAsBase64(imageUrl, signal));
+    }
+    return out;
+  };
+
+  if (isQwen) {
+    return postOnce(Math.max(1, Math.min(6, numberOfImages || 1)));
+  }
+  const n = Math.max(1, Math.min(4, numberOfImages || 1));
+  const out: string[] = [];
+  for (let i = 0; i < n; i += 1) {
+    out.push(...(await postOnce(1)));
   }
   return out;
 }
@@ -4540,8 +4563,8 @@ export async function openAiGenerateNewImage(
     );
   }
 
-  if (isAliyunMaasZImageModel(rawModel)) {
-    return aliyunZImageGenerate(prompt, aspectRatio, numberOfImages, nodeResolution, undefined, signal);
+  if (isAliyunMaasImageModel(rawModel)) {
+    return aliyunMaasImageGenerate(prompt, aspectRatio, numberOfImages, nodeResolution, undefined, rawModel, signal);
   }
 
   // 满 eAPI 图像模型
@@ -4626,8 +4649,8 @@ export async function openAiEditImage(
     );
   }
 
-  if (isAliyunMaasZImageModel(rawModel)) {
-    return aliyunZImageGenerate(prompt, aspectRatio, numberOfImages, nodeResolution, base64Images, signal);
+  if (isAliyunMaasImageModel(rawModel)) {
+    return aliyunMaasImageGenerate(prompt, aspectRatio, numberOfImages, nodeResolution, base64Images, rawModel, signal);
   }
 
   // 满 eAPI 图像模型图生图

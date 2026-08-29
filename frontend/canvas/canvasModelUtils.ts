@@ -37,6 +37,15 @@ export function isAliyunMaasZImageModel(id: string): boolean {
   return m === 'z-image-turbo-aliyun' || m === 'z-image-turbo';
 }
 
+export function isAliyunMaasQwenImageModel(id: string): boolean {
+  const m = (id || '').trim();
+  return m === 'qwen-image-3.0-pro-aliyun' || m === 'qwen-image-3.0-pro';
+}
+
+export function isAliyunMaasImageModel(id: string): boolean {
+  return isAliyunMaasZImageModel(id) || isAliyunMaasQwenImageModel(id);
+}
+
 /** 满 eAPI Gemini 图像模型 */
 export function isManxueGeminiImageModel(id: string): boolean {
   return (
