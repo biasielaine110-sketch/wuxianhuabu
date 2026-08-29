@@ -59,6 +59,7 @@ export function normalizeDeepSeekChatModelId(modelId: string): string {
 export function normalizeLegacyImageModelId(modelId: string): string {
   const m = (modelId || '').trim();
   if (m === 'gpt-image-2-junlan') return 'gpt-image-2-codesonline';
+  if (m === 'gemini-3-pro-image-preview') return 'qwen-image-3.0';
   return m;
 }
 

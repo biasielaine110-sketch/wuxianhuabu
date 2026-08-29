@@ -783,7 +783,7 @@ export function ChatNodeContent({
       >
         <span className="text-gray-400">模型:</span>
         <select
-          className="nodemodel-select bg-[#222222] border border-[#444] rounded px-2 py-1 text-gray-300 outline-none focus:border-rose-500 max-w-[330px]"
+          className="nodemodel-select bg-[#222222] border border-[#444] rounded px-2 py-1 text-white outline-none focus:border-rose-500 max-w-[330px]"
           value={normalizeDeepSeekChatModelId(node.model || DEFAULT_DEEPSEEK_CHAT_MODEL_ID).trim()}
           onChange={(e) => onUpdate({ model: e.target.value })}
           onPointerDown={(e) => e.stopPropagation()}
@@ -1311,6 +1311,7 @@ export function ChatNodeContent({
             <option value="gpt-image-2-manxue">GPT Image 2（满 e）</option>
             <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
             <option value="gemini-3.1-flash-image-preview">Gemini 3.1 Flash Image（ToAPIs）</option>
+            <option value="qwen-image-3.0">Qwen-Image-3.0（ToAPIs）</option>
             <option value="gemini-3.1-flash-image-preview-2k-manxue">Gemini 3.1 Flash Image 2K（满 e）</option>
             <option value="gemini-3-pro-image-preview-2k-manxue">Gemini 3 Pro Image 2K（满 e）</option>
           </select>

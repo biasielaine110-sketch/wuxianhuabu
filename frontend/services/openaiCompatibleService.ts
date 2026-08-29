@@ -332,7 +332,8 @@ function toApisT2iModel(modelName: string): string {
   if (m === 'gpt-4o-image') return m;
   if (m === 'dall-e-3' || m === 'dall-e-2') return 'gemini-3-pro-image-preview';
   if (m === 'nano-banana-2') return 'gemini-2.5-flash-image-preview';
-  return m || 'gemini-3-pro-image-preview';
+  if (m === 'qwen-image-3.0') return 'qwen-image-3.0';
+  return m || 'gemini-3.1-flash-image-preview';
 }
 
 /** 满 eAPI 模型名映射（将 UI id 转为 API model 名） */
@@ -574,6 +575,10 @@ function isToApisGemini31FlashImageModel(modelId: string): boolean {
   return (modelId || '').trim() === 'gemini-3.1-flash-image-preview';
 }
 
+function isToApisQwenImage30Model(modelId: string): boolean {
+  return (modelId || '').trim() === 'qwen-image-3.0';
+}
+
 function isToApisGptImage2Model(modelId: string): boolean {
   const m = (modelId || '').trim();
   return m === 'gpt-image-2' || m === 'gpt-image-2-vip' || m === 'gpt-image-2-official';
@@ -605,7 +610,7 @@ function buildToApisImageGenerationBody(params: {
     response_format: 'url',
   };
   if (image_urls?.length) {
-    if (isToApisGptImage2Model(model)) body.reference_images = image_urls;
+    if (isToApisGptImage2Model(model) || isToApisQwenImage30Model(model)) body.reference_images = image_urls;
     body.image_urls = image_urls;
   }
   if (isToApisGptImage2Model(model)) {

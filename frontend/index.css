@@ -429,16 +429,40 @@
   .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2"]:checked) {
     color: #c084fc !important;
   }
+  .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2-codesonline"],
+  .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2-vip"],
+  .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2-hfsy"] {
+    color: #4ade80 !important;
+  }
+  .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2-codesonline"]:checked),
+  .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2-vip"]:checked),
+  .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2-hfsy"]:checked) {
+    color: #4ade80 !important;
+  }
+  .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2pro-hfsy"],
+  .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2pro-4k-hfsy"],
+  .canvas-node-font-195 select.nodemodel-select option[value="nano-banana-2-hfsy"],
+  .canvas-node-font-195 select.nodemodel-select option[value="nano-banana-pro-hfsy"] {
+    color: #c084fc !important;
+  }
+  .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2pro-hfsy"]:checked),
+  .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2pro-4k-hfsy"]:checked),
+  .canvas-node-font-195 select.nodemodel-select:has(option[value="nano-banana-2-hfsy"]:checked),
+  .canvas-node-font-195 select.nodemodel-select:has(option[value="nano-banana-pro-hfsy"]:checked) {
+    color: #c084fc !important;
+  }
   .canvas-node-root--chat select.nodemodel-select {
     font-size: 30px !important;
     line-height: 1.1 !important;
     font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+    color: #ffffff !important;
   }
   .canvas-node-root--chat select.nodemodel-select option,
   .canvas-node-root--chat select.nodemodel-select optgroup {
     font-size: 15px !important;
     line-height: 1.35 !important;
     font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+    color: #ffffff !important;
   }
   .canvas-node-root--chat select.nodemodel-select optgroup {
     font-weight: 600 !important;
