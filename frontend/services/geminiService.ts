@@ -47,29 +47,21 @@ function isMiniMaxChatModelId(modelName: string): boolean {
 function isVolcengineArkChatModelId(modelName: string): boolean {
   const m = (modelName || '').trim();
   return (
-    m === 'glm-5.3-flash-ark' ||
-    m === 'glm-5.3-ark' ||
     m === 'deepseek-v4-flash-ark' ||
     m === 'deepseek-v4-pro-ark' ||
     m === 'doubao-seed-evolving-ark' ||
     m === 'doubao-seed-2.0-lite-ark' ||
-    m === 'doubao-seed-2.1-turbo-ark' ||
-    m === 'minimax-m3-ark' ||
-    m === 'kimi-k2.7-code-ark'
+    m === 'doubao-seed-2.1-turbo-ark'
   );
 }
 
 function resolveVolcengineArkChatUpstreamModelId(modelName: string): string {
   const m = (modelName || '').trim();
-  if (m === 'glm-5.3-flash-ark') return 'glm-5.3-flash';
-  if (m === 'glm-5.3-ark') return 'glm-5.3';
   if (m === 'deepseek-v4-flash-ark') return 'deepseek-v4-flash';
   if (m === 'deepseek-v4-pro-ark') return 'deepseek-v4-pro';
   if (m === 'doubao-seed-evolving-ark') return 'doubao-seed-evolving';
   if (m === 'doubao-seed-2.0-lite-ark') return 'doubao-seed-2.0-lite';
   if (m === 'doubao-seed-2.1-turbo-ark') return 'doubao-seed-2.1-turbo';
-  if (m === 'minimax-m3-ark') return 'minimax-m3';
-  if (m === 'kimi-k2.7-code-ark') return 'kimi-k2.7-code';
   return m.replace(/-ark$/, '');
 }
 

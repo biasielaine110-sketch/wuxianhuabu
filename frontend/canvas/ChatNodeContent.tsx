@@ -340,10 +340,22 @@ export function ChatNodeContent({
     if (node.isGenerating) setEditingUserMessageId(null);
   }, [node.isGenerating]);
 
-  /** 旧 DeepSeek 模型 id 写入画布数据后，打开节点时升级为官方 V4 命名 */
+  /** 下线或旧模型 id 打开节点时改成当前默认 DeepSeek */
   useEffect(() => {
     const m = (node.model || '').trim();
     if (m === 'deepseek-chat' || m === 'deepseek-reasoner') {
+      onUpdate({ model: DEFAULT_DEEPSEEK_CHAT_MODEL_ID });
+      return;
+    }
+    const removed = new Set([
+      'glm-5.3-flash-ark',
+      'glm-5.3-ark',
+      'minimax-m3-ark',
+      'kimi-k2.7-code-ark',
+      'minimax-m2.7',
+      'minimax-m3',
+    ]);
+    if (removed.has(m)) {
       onUpdate({ model: DEFAULT_DEEPSEEK_CHAT_MODEL_ID });
     }
   }, [node.id, node.model, onUpdate]);
@@ -749,15 +761,11 @@ export function ChatNodeContent({
           onPointerDown={(e) => e.stopPropagation()}
         >
           <optgroup label="火山方舟 Agent Plan">
-            <option value="glm-5.3-flash-ark">GLM-5.3-Flash（火山方舟）</option>
             <option value="deepseek-v4-flash-ark">DeepSeek-V4-Flash（火山方舟）</option>
             <option value="deepseek-v4-pro-ark">DeepSeek-V4-Pro（火山方舟）</option>
-            <option value="glm-5.3-ark">GLM-5.3（火山方舟）</option>
             <option value="doubao-seed-evolving-ark">Doubao-Seed-Evolving（火山方舟）</option>
             <option value="doubao-seed-2.0-lite-ark">Doubao-Seed-2.0-lite（火山方舟）</option>
             <option value="doubao-seed-2.1-turbo-ark">Doubao-Seed-2.1-turbo（火山方舟）</option>
-            <option value="minimax-m3-ark">MiniMax-M3（火山方舟）</option>
-            <option value="kimi-k2.7-code-ark">Kimi-K2.7-Code（火山方舟）</option>
           </optgroup>
           <optgroup label="DeepSeek">
             <option value="deepseek-v4-flash">DeepSeek-V4-Flash</option>
@@ -773,10 +781,6 @@ export function ChatNodeContent({
             <option value="gpt-5.6-sol-codesonline">GPT-5.6 Sol（codesonline）</option>
             <option value="gpt-5.6-terra-codesonline">GPT-5.6 Terra（codesonline）</option>
             <option value="claude-haiku-4-5-codesonline">Claude Haiku 4.5（codesonline）</option>
-          </optgroup>
-          <optgroup label="MiniMax">
-            <option value="minimax-m2.7">MiniMax M2.7</option>
-            <option value="minimax-m3">MiniMax M3</option>
           </optgroup>
           <optgroup label="Google Gemini / ToAPIs">
             <option value="gemini-2.0-flash-official">Gemini 2.0 Flash（ToAPIs）</option>
