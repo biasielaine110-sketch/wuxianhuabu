@@ -9,7 +9,6 @@ import {
   DEFAULT_MANXUE_BASE_URL,
   DEFAULT_MINIMAX_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
-  DEFAULT_VOLCENGINE_ARK_BASE_URL,
   persistAiSettings,
   setCodesonlineChatKey,
   setVolcengineArkKey,
@@ -365,12 +364,21 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                   <div className="mt-5 pt-4 border-t border-[#333]">
                     <h3 className="text-sm font-semibold text-gray-200 mb-2">火山方舟 Agent Plan（对话）</h3>
                     <p className="text-xs text-gray-500 mb-2">
-                      GLM-5.3 / DeepSeek-V4 / Doubao-Seed / MiniMax-M3 / Kimi-K2.7-Code
+                      须使用 Agent Plan 专属 API Key（控制台 → 开通管理 → Agent Plan），不能使用方舟按量计费（/api/v3）Key。
+                      OpenAI 兼容地址为 <code className="text-gray-400">https://ark.cn-beijing.volces.com/api/plan/v3/chat/completions</code>。
                     </p>
                     <div className="text-xs text-gray-500 mb-2">
-                      Base URL：<code className="text-gray-400">{DEFAULT_VOLCENGINE_ARK_BASE_URL}</code>（固定）
+                      文档：
+                      <a
+                        href="https://console.volcengine.com/ark/region:cn-beijing/docs/82379/2373746?lang=zh"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-sky-500 hover:text-sky-400"
+                      >
+                        Agent Plan 调用说明
+                      </a>
                     </div>
-                    <label className="text-xs text-gray-500 block mb-1">火山方舟 API Key</label>
+                    <label className="text-xs text-gray-500 block mb-1">Agent Plan API Key</label>
                     <input
                       type="password"
                       value={volcengineArkKeyInput}

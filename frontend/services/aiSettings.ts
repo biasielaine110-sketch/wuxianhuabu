@@ -378,16 +378,23 @@ export function setMiniMaxBaseUrl(url: string): void {
   }
 }
 
+export function normalizeVolcengineArkApiKey(apiKey: string): string {
+  let k = (apiKey || '').trim();
+  k = k.replace(/^Bearer\s+/i, '').trim();
+  k = k.replace(/^["'`]+|["'`]+$/g, '');
+  return k;
+}
+
 export function getVolcengineArkSavedKey(): string {
   try {
-    return localStorage.getItem(VOLCENGINE_ARK_API_KEY_STORAGE_KEY)?.trim() || '';
+    return normalizeVolcengineArkApiKey(localStorage.getItem(VOLCENGINE_ARK_API_KEY_STORAGE_KEY) || '');
   } catch {
     return '';
   }
 }
 
 export function setVolcengineArkKey(apiKey: string): void {
-  const normalized = apiKey.trim();
+  const normalized = normalizeVolcengineArkApiKey(apiKey);
   try {
     if (normalized) localStorage.setItem(VOLCENGINE_ARK_API_KEY_STORAGE_KEY, normalized);
     else localStorage.removeItem(VOLCENGINE_ARK_API_KEY_STORAGE_KEY);

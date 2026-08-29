@@ -1,43 +1,41 @@
 /**
- * 火山方舟 Agent Plan 同源代理（https://ark.cn-beijing.volces.com/api/plan/v3）。
+ * 火山方舟 Agent Plan 同源代理。
+ * 官方：POST https://ark.cn-beijing.volces.com/api/plan/v3/chat/completions
+ * Authorization: Bearer <Agent Plan 专属 Key>
  */
 const { Readable } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 
-const UPSTREAM_ORIGIN = 'https://ark.cn-beijing.volces.com';
-
-function isHopByHopHeader(name) {
-  const n = String(name).toLowerCase();
-  return new Set([
-    'connection',
-    'keep-alive',
-    'proxy-authenticate',
-    'proxy-authorization',
-    'te',
-    'trailers',
-    'transfer-encoding',
-    'upgrade',
-    'host',
-  ]).has(n);
-}
-
-function toUpstreamPath(sub) {
-  const s = String(sub || '').replace(/^\/+/, '');
-  const rest = s.replace(/^v1\/?/, '');
-  return rest ? `/api/plan/v3/${rest}` : '/api/plan/v3';
-}
+const UPSTREAM_CHAT = 'https://ark.cn-beijing.volces.com/api/plan/v3/chat/completions';
 
 function headerVal(v) {
   if (!v) return '';
   return String(Array.isArray(v) ? v[0] : v).trim();
 }
 
+function normalizeArkKey(raw) {
+  let k = headerVal(raw);
+  k = k.replace(/^Bearer\s+/i, '').trim();
+  k = k.replace(/^["'`]+|["'`]+$/g, '');
+  return k;
+}
+
 function pickArkApiKey(req) {
-  const custom = headerVal(req.headers['x-volcengine-ark-key']);
-  const auth = headerVal(req.headers.authorization);
-  const fromAuth = auth.replace(/^Bearer\s+/i, '').trim();
-  const env = String(process.env.VOLCENGINE_ARK_API_KEY || process.env.ARK_API_KEY || '').trim();
+  const custom = normalizeArkKey(req.headers['x-volcengine-ark-key']);
+  const fromAuth = normalizeArkKey(req.headers.authorization);
+  const env = normalizeArkKey(
+    process.env.ARK_AGENT_PLAN_API_KEY ||
+      process.env.VOLCENGINE_ARK_PLAN_API_KEY ||
+      process.env.VOLCENGINE_ARK_API_KEY ||
+      process.env.ARK_API_KEY ||
+      ''
+  );
   return custom || fromAuth || env;
+}
+
+function isChatCompletionsPath(sub) {
+  const s = String(sub || '').replace(/^\/+/, '');
+  return /(^|\/)(v1\/)?chat\/completions\/?$/i.test(s) || s === '';
 }
 
 async function handler(req, res) {
@@ -48,29 +46,17 @@ async function handler(req, res) {
   if (!sub) {
     sub = url.pathname.replace(/^\/api\/volcengine-ark-proxy\/?/, '').replace(/^\/+/, '');
   }
-  if (!sub) {
-    res.statusCode = 400;
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.end(JSON.stringify({ error: 'missing path after /api/volcengine-ark-proxy' }));
+
+  const method = req.method || 'GET';
+  if (method === 'OPTIONS') {
+    res.statusCode = 204;
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-volcengine-ark-key');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.end();
     return;
   }
-  const upstreamSearch = new URLSearchParams(url.searchParams);
-  upstreamSearch.delete('path');
-  const qs = upstreamSearch.toString();
-  const targetUrl = `${UPSTREAM_ORIGIN}${toUpstreamPath(sub)}${qs ? `?${qs}` : ''}`;
 
-  const headers = new Headers();
-  for (const [k, v] of Object.entries(req.headers)) {
-    if (!v || isHopByHopHeader(k)) continue;
-    const lk = k.toLowerCase();
-    if (lk === 'host' || lk === 'accept-encoding' || lk === 'authorization' || lk === 'x-volcengine-ark-key') continue;
-    if (Array.isArray(v)) {
-      for (const item of v) headers.append(k, item);
-    } else {
-      headers.set(k, v);
-    }
-  }
-  headers.set('accept-encoding', 'identity');
   const arkKey = pickArkApiKey(req);
   if (!arkKey) {
     res.statusCode = 401;
@@ -80,16 +66,24 @@ async function handler(req, res) {
         error: {
           code: 'AuthenticationError',
           message:
-            '未提供火山方舟密钥。请在本站「设置 → API → 火山方舟 Agent Plan」填写 ark- 开头的 Key 并保存；或在 Vercel 环境变量设置 VOLCENGINE_ARK_API_KEY。',
+            '未提供 Agent Plan 密钥。请在设置中填写 Agent Plan 专属 Key，或配置环境变量 ARK_AGENT_PLAN_API_KEY。普通方舟 /api/v3 Key 无效。',
           type: 'Unauthorized',
         },
       })
     );
     return;
   }
-  headers.set('Authorization', `Bearer ${arkKey}`);
 
-  const method = req.method || 'GET';
+  const targetUrl = isChatCompletionsPath(sub)
+    ? UPSTREAM_CHAT
+    : `https://ark.cn-beijing.volces.com/api/plan/v3/${String(sub || '').replace(/^\/+/, '').replace(/^v1\//i, '')}`;
+
+  const contentType = headerVal(req.headers['content-type']) || 'application/json';
+  const headers = new Headers();
+  headers.set('Content-Type', contentType);
+  headers.set('Authorization', `Bearer ${arkKey}`);
+  headers.set('Accept', 'application/json');
+
   const hasBody = !['GET', 'HEAD'].includes(method);
   const body = hasBody ? Readable.toWeb(Readable.from(req)) : undefined;
 
@@ -115,8 +109,25 @@ async function handler(req, res) {
   }
 
   res.statusCode = upstream.status;
+  if (upstream.status === 401) {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    const text = await upstream.text();
+    let payload;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = { error: { message: text.slice(0, 800), type: 'Unauthorized' } };
+    }
+    const err = payload.error && typeof payload.error === 'object' ? payload.error : {};
+    err.message = `${err.message || 'AuthenticationError'}（请确认使用 Agent Plan 专属 Key，且请求为 POST ${UPSTREAM_CHAT}）`;
+    payload.error = err;
+    res.end(JSON.stringify(payload));
+    return;
+  }
+
   upstream.headers.forEach((value, key) => {
-    if (isHopByHopHeader(key) || String(key).toLowerCase() === 'content-encoding') return;
+    const n = String(key).toLowerCase();
+    if (n === 'connection' || n === 'transfer-encoding' || n === 'content-encoding') return;
     try {
       res.setHeader(key, value);
     } catch {

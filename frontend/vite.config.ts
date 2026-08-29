@@ -169,7 +169,7 @@ const toapisFileCdnProxy = {
     secure: true,
     rewrite: (p: string) => p.replace(/^\/codesonline-chat-api/, ''),
   },
-  /** 火山方舟 Agent Plan：浏览器 CORS 不开放；/v1 映射到 /api/plan/v3 */
+  /** 火山方舟 Agent Plan：文档 Base URL 为 /api/plan/v3，其后直接 /chat/completions */
   '/volcengine-ark-api': {
     target: 'https://ark.cn-beijing.volces.com',
     changeOrigin: true,
@@ -189,7 +189,8 @@ const toapisFileCdnProxy = {
       const path = p.startsWith('/') ? p : `/${p}`;
       const stripped = path.replace(/^\/volcengine-ark-api(?=\/|$)/, '');
       const rest = stripped.replace(/^\/v1(?=\/|$)/, '') || '/';
-      return `/api/plan/v3${rest === '/' ? '' : rest}`;
+      const suffix = rest === '/' ? '/chat/completions' : rest;
+      return `/api/plan/v3${suffix}`;
     },
   },
   '/api/volcengine-ark-proxy': {
@@ -211,7 +212,8 @@ const toapisFileCdnProxy = {
       const path = p.startsWith('/') ? p : `/${p}`;
       const stripped = path.replace(/^\/api\/volcengine-ark-proxy(?=\/|$)/, '');
       const rest = stripped.replace(/^\/v1(?=\/|$)/, '') || '/';
-      return `/api/plan/v3${rest === '/' ? '' : rest}`;
+      const suffix = rest === '/' ? '/chat/completions' : rest;
+      return `/api/plan/v3${suffix}`;
     },
   },
   /** hfsyapi.cn 图像 API 未开放 CORS；经同源转发到 www.hfsyapi.cn（OpenAI 兼容 /v1/images/*） */

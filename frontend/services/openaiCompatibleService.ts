@@ -18,6 +18,8 @@ import {
 
 function normalizeBaseUrl(url: string): string {
   let u = url.trim().replace(/\/+$/, '');
+  // 火山方舟 Agent Plan 文档 Base URL 已含 /api/plan/v3，其后直接拼 /chat/completions，不要再加 /v1
+  if (/volcengine-ark/i.test(u)) return u;
   if (!/\/v1$/i.test(u)) u = `${u}/v1`;
   return u.replace(/\/+$/, '');
 }
@@ -139,7 +141,7 @@ function openAiCompatFailureHint(
 ): string {
   if (status === 401) {
     if (fetchBase && isVolcengineArkFetchBase(fetchBase)) {
-      return '（401：火山方舟鉴权失败。请在「设置 → API → 火山方舟 Agent Plan」填写 ark- 开头的密钥并保存（须在当前网站域名下保存）；生产环境也可在 Vercel 配置 VOLCENGINE_ARK_API_KEY。不要填 ToAPIs / hfsy / 满 e 的 Key。）';
+      return '（401：火山方舟 Agent Plan 鉴权失败。请使用控制台「开通管理 → Agent Plan」生成的专属 Key（与按量 /api/v3 Key 不能混用），并在本站「设置 → API → 火山方舟 Agent Plan」保存。官方调用：POST https://ark.cn-beijing.volces.com/api/plan/v3/chat/completions ，Header 为 Authorization: Bearer <Key>。文档：https://console.volcengine.com/ark/region:cn-beijing/docs/82379/2373746 ）';
     }
     return '（401：鉴权失败。若使用 hfsyapi.cn 模型，请在「设置 → API」填写并保存 hfsyapi.cn API Key；确认不要误填 ToAPIs、满 e 或 OpenAI 兼容通道的 Key。）';
   }
@@ -4017,7 +4019,9 @@ function buildYunzhiI2iUserText(params: {
 async function postJsonAtBase<T>(base: string, path: string, body: unknown, apiKey: string): Promise<T> {
   const fetchBase = rewriteRemoteOpenAiCompatBaseForBrowserCors(base);
   const ark = isVolcengineArkFetchBase(fetchBase) || isVolcengineArkFetchBase(base);
-  const key = apiKey.trim();
+  const key = ark
+    ? apiKey.trim().replace(/^Bearer\s+/i, '').trim().replace(/^["'`]+|["'`]+$/g, '')
+    : apiKey.trim();
   if (!key && !ark) throw new Error('未配置 OpenAI 兼容 API Key，请在设置中选择「OpenAI 兼容」并填写密钥。');
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (ark) {
