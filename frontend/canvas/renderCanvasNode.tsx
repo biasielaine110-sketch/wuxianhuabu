@@ -23,6 +23,7 @@ import { GenerationTimer } from './GenerationTimer';
 import { ThreeEngineGate } from './ThreeEngineGate';
 import { TextNodeFontSizeSelect } from './TextNodeFontSizeSelect';
 import { TextNodeWordLibrarySelect } from './TextNodeWordLibrarySelect';
+import { isTextInputBlankHit } from './textInputBlankHit';
 import { I2iPresetCategorySelect } from './I2iPresetCategorySelect';
 import { I2iAspectRatioSelect } from './I2iAspectRatioSelect';
 import { T2iPresetCategorySelect } from './T2iPresetCategorySelect';
@@ -92,6 +93,9 @@ export function renderCanvasNode(node: CanvasNode, s: CanvasNodeRenderState): Re
   const canvasEdges = s.edges;
   const hasInputPort = s.canReceiveConnection(node);
   const hasOutputPort = true;
+  const openTextNodeBigEditor = () => {
+    s.openBigEditor(node.prompt || '', (v) => s.handleUpdateNode(node.id, { prompt: v }));
+  };
 
   const { headerIcon, headerTitle, borderColor, shadowColor } = getNodeHeaderMeta(node.type, isSelected);
 
@@ -594,11 +598,15 @@ return (
                   const inTime = now - s.textNodeLastClickAtRef.current < 380;
                   const inPlace = dx < 12 && dy < 12;
                   if (inTime && inPlace) {
-                    // 二次按下: 触发"双击进入编辑"（不走浏览器 dblclick, 避免被 node 拖拽/选区等行为干扰）
+                    // 二次按下: 空白处打开独立编辑窗口；点到文字则进入行内编辑
                     s.textNodeLastClickAtRef.current = 0;
                     e.preventDefault();
                     if (!isSelected) s.setSelectedIds([node.id]);
-                    s.setEditingTextNodeIds(prev => { const next = new Set(prev); next.add(node.id); return next; });
+                    if (isTextInputBlankHit(e.currentTarget, e.clientX, e.clientY)) {
+                      openTextNodeBigEditor();
+                    } else {
+                      s.setEditingTextNodeIds(prev => { const next = new Set(prev); next.add(node.id); return next; });
+                    }
                   } else {
                     s.textNodeLastClickAtRef.current = now;
                     s.textNodeLastClickPosRef.current = { x: e.clientX, y: e.clientY };
@@ -609,7 +617,11 @@ return (
                   e.stopPropagation();
                   s.textNodeLastClickAtRef.current = 0;
                   if (!isSelected) s.setSelectedIds([node.id]);
-                  s.setEditingTextNodeIds(prev => { const next = new Set(prev); next.add(node.id); return next; });
+                  if (isTextInputBlankHit(e.currentTarget, e.clientX, e.clientY)) {
+                    openTextNodeBigEditor();
+                  } else {
+                    s.setEditingTextNodeIds(prev => { const next = new Set(prev); next.add(node.id); return next; });
+                  }
                 }}
               >
                 {node.isGenerating ? (
@@ -633,7 +645,7 @@ return (
                     ) : null}
                   </div>
                 ) : null}
-                {node.prompt || <span className="text-gray-500">双击编辑文本</span>}
+                {node.prompt || <span className="text-gray-500">双击空白处打开编辑窗口</span>}
                 <style>{`
                   .text-node-content::-webkit-scrollbar { width: 72px; }
                   .text-node-content::-webkit-scrollbar-track { background: #2a2a2a; border-radius: 4px; }
@@ -665,18 +677,22 @@ return (
                   if (inScrollbar) return;
                 }
                 e.stopPropagation();
-                // 双击检测：基于时间戳
+                // 双击检测：基于时间戳。文本节点仅空白处弹出独立窗口，避免抢走划选。
                 const now = Date.now();
                 if (now - s.bigEditorLastClickRef.current < 320) {
                   s.bigEditorLastClickRef.current = 0;
-                  s.openBigEditor(node.prompt || '', (v) => s.handleUpdateNode(node.id, { prompt: v }));
+                  if (node.type !== 'text' || isTextInputBlankHit(e.currentTarget, e.clientX, e.clientY)) {
+                    s.openBigEditor(node.prompt || '', (v) => s.handleUpdateNode(node.id, { prompt: v }));
+                  }
                 } else {
                   s.bigEditorLastClickRef.current = now;
                 }
               }}
               onDoubleClick={(e) => {
                 e.stopPropagation();
-                s.openBigEditor(node.prompt || '', (v) => s.handleUpdateNode(node.id, { prompt: v }));
+                if (node.type !== 'text' || isTextInputBlankHit(e.currentTarget, e.clientX, e.clientY)) {
+                  s.openBigEditor(node.prompt || '', (v) => s.handleUpdateNode(node.id, { prompt: v }));
+                }
               }}
             />
             )}
