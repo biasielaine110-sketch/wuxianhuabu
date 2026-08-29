@@ -363,6 +363,7 @@ export function ChatNodeContent({
       'gemini-2.0-flash-official',
       'gemini-3.1-flash-lite-preview-official',
       'glm-5.3-flash-toapis',
+      'claude-haiku-4-5-toapis',
     ]);
     if (removedToApis.has(m)) {
       onUpdate({ model: 'gpt-5.6-terra-toapis' });
@@ -380,7 +381,7 @@ export function ChatNodeContent({
       'gpt-5.5-codesonline': 'gpt-5.4-mini-toapis',
       'gpt-5.6-sol-codesonline': 'gpt-5.6-terra-toapis',
       'gpt-5.6-terra-codesonline': 'gpt-5.6-terra-toapis',
-      'claude-haiku-4-5-codesonline': 'claude-haiku-4-5-toapis',
+      'claude-haiku-4-5-codesonline': 'gpt-5.6-terra-toapis',
     };
     if (codesonlineToToApis[m]) {
       onUpdate({ model: codesonlineToToApis[m] });
@@ -494,7 +495,7 @@ export function ChatNodeContent({
         reason: '未填写 DeepSeek 密钥、密钥无效，或 OpenAI 兼容未指向 DeepSeek。',
         fixes: [
           { label: '打开 API 设置', action: () => onOpenApiSettings() },
-          { label: '切换到 DeepSeek-V4-Flash', action: () => onUpdate({ model: DEFAULT_DEEPSEEK_CHAT_MODEL_ID, error: undefined }) },
+          { label: '切换到 DeepSeek-V4-Flash-Vision-Exp', action: () => onUpdate({ model: DEFAULT_DEEPSEEK_CHAT_MODEL_ID, error: undefined }) },
           { label: '切换到 GPT-5.5（codesonline）', action: () => onUpdate({ model: 'gpt-5.5-codesonline', error: undefined }) },
           { label: '清除报错', action: () => onUpdate({ error: undefined }) },
         ],
@@ -812,7 +813,6 @@ export function ChatNodeContent({
             <option value="grok-4.6-toapis">Grok 4.6（ToAPIs）</option>
             <option value="gpt-5.4-mini-toapis">GPT-5.4 Mini（ToAPIs）</option>
             <option value="gpt-5.6-terra-toapis">GPT-5.6 Terra（ToAPIs）</option>
-            <option value="claude-haiku-4-5-toapis">Claude Haiku 4.5（ToAPIs）</option>
             <option value="gemini-3.6-flash-toapis">Gemini 3.6 Flash（ToAPIs）</option>
             <option value="qwen3.5-flash-toapis">Qwen3.5-Flash（ToAPIs）</option>
             <option value="qwen3.5-plus-toapis">Qwen3.5-Plus（ToAPIs）</option>

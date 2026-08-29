@@ -443,6 +443,26 @@
   .canvas-node-root--chat select.nodemodel-select optgroup {
     font-weight: 600 !important;
   }
+  .canvas-node-root--chat select.nodemodel-select option[value="deepseek-v4-flash-vision-exp"],
+  .canvas-node-root--chat select.nodemodel-select option[value="gpt-5.4-mini-toapis"],
+  .canvas-node-root--chat select.nodemodel-select option[value="gemini-3.6-flash-toapis"],
+  .canvas-node-root--chat select.nodemodel-select option[value="qwen3.5-flash-toapis"],
+  .canvas-node-root--chat select.nodemodel-select option[value="doubao-seed-2.1-turbo-ark"],
+  .canvas-node-root--chat select.nodemodel-select option[value="qwen3.7-plus-aliyun"],
+  .canvas-node-root--chat select.nodemodel-select option[value="kimi-k3-aliyun"],
+  .canvas-node-root--chat select.nodemodel-select option[value="glm-5.2-aliyun"] {
+    color: #c084fc !important;
+  }
+  .canvas-node-root--chat select.nodemodel-select:has(option[value="deepseek-v4-flash-vision-exp"]:checked),
+  .canvas-node-root--chat select.nodemodel-select:has(option[value="gpt-5.4-mini-toapis"]:checked),
+  .canvas-node-root--chat select.nodemodel-select:has(option[value="gemini-3.6-flash-toapis"]:checked),
+  .canvas-node-root--chat select.nodemodel-select:has(option[value="qwen3.5-flash-toapis"]:checked),
+  .canvas-node-root--chat select.nodemodel-select:has(option[value="doubao-seed-2.1-turbo-ark"]:checked),
+  .canvas-node-root--chat select.nodemodel-select:has(option[value="qwen3.7-plus-aliyun"]:checked),
+  .canvas-node-root--chat select.nodemodel-select:has(option[value="kimi-k3-aliyun"]:checked),
+  .canvas-node-root--chat select.nodemodel-select:has(option[value="glm-5.2-aliyun"]:checked) {
+    color: #c084fc !important;
+  }
 
   /**
    * 图生图：分类 / 预设下拉 — 统一 30px

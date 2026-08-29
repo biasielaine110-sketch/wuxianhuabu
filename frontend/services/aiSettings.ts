@@ -29,8 +29,8 @@ const ALIYUN_MAAS_API_KEY_STORAGE_KEY = 'aliyun-maas-api-key-v1';
 export const DEFAULT_OPENAI_BASE_URL = 'https://toapis.com/v1';
 /** DeepSeek 官方 OpenAI 兼容入口 */
 export const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1';
-/** 画布「AI 对话」默认 DeepSeek 模型（与 {@link DEFAULT_DEEPSEEK_BASE_URL} 配合；官方 ID：deepseek-v4-flash / deepseek-v4-pro / deepseek-v4-flash-vision-exp） */
-export const DEFAULT_DEEPSEEK_CHAT_MODEL_ID = 'deepseek-v4-flash';
+/** 画布「AI 对话」默认 DeepSeek 模型（官方 ID：deepseek-v4-flash / deepseek-v4-pro / deepseek-v4-flash-vision-exp） */
+export const DEFAULT_DEEPSEEK_CHAT_MODEL_ID = 'deepseek-v4-flash-vision-exp';
 
 /** codesonline 对话专用 Base URL（GPT-5.5 / GPT-5.6 Sol / GPT-5.6 Terra / Claude Haiku 4.5） */
 export const DEFAULT_CODESONLINE_CHAT_BASE_URL = 'https://ai.codesonline.dev/v1';
