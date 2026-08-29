@@ -4,6 +4,7 @@ import type { AiProvider } from '../services/aiSettings';
 import {
   getAiSettingsSnapshot,
   getCodesonlineChatSavedKey,
+  getVolcengineArkSavedKey,
   migrateAiSettingsIfLegacy,
   getHfsySavedKey,
 } from '../services/aiSettings';
@@ -100,6 +101,7 @@ export function useCanvasSettingsPanelState({
   );
   const [codesonlineKeyInput, setCodesonlineKeyInput] = useState(() => getAiSettingsSnapshot().codesonlineKey);
   const [codesonlineChatKeyInput, setCodesonlineChatKeyInput] = useState(() => getCodesonlineChatSavedKey());
+  const [volcengineArkKeyInput, setVolcengineArkKeyInput] = useState(() => getVolcengineArkSavedKey());
   const [hfsyKeyInput, setHfsyKeyInput] = useState(() => getHfsySavedKey());
   const [manxueBaseInput, setManxueBaseInput] = useState(() => getAiSettingsSnapshot().manxueBaseUrl);
   const [manxueKeyInput, setManxueKeyInput] = useState(() => getAiSettingsSnapshot().manxueKey);
@@ -116,6 +118,7 @@ export function useCanvasSettingsPanelState({
     setCodesonlineBaseInput(s.codesonlineBaseUrl);
     setCodesonlineKeyInput(s.codesonlineKey);
     setCodesonlineChatKeyInput(getCodesonlineChatSavedKey());
+    setVolcengineArkKeyInput(getVolcengineArkSavedKey());
     setHfsyKeyInput(getHfsySavedKey());
     setManxueBaseInput(s.manxueBaseUrl);
     setManxueKeyInput(s.manxueKey);
@@ -148,6 +151,7 @@ export function useCanvasSettingsPanelState({
     setCodesonlineBaseInput(s.codesonlineBaseUrl);
     setCodesonlineKeyInput(s.codesonlineKey);
     setHfsyKeyInput(getHfsySavedKey());
+    setVolcengineArkKeyInput(getVolcengineArkSavedKey());
     setDownloadPathSettings(loadDownloadPathSettings());
     setCreditPricingRows(loadCreditPricingRows());
     void hydrateDownloadDirectoryHandlesFromIDB().then(() => refreshDownloadDirLabels());
@@ -367,6 +371,8 @@ export function useCanvasSettingsPanelState({
       setCodesonlineKeyInput,
       codesonlineChatKeyInput,
       setCodesonlineChatKeyInput,
+      volcengineArkKeyInput,
+      setVolcengineArkKeyInput,
       hfsyKeyInput,
       setHfsyKeyInput,
       manxueBaseInput,

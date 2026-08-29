@@ -9,8 +9,10 @@ import {
   DEFAULT_MANXUE_BASE_URL,
   DEFAULT_MINIMAX_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
+  DEFAULT_VOLCENGINE_ARK_BASE_URL,
   persistAiSettings,
   setCodesonlineChatKey,
+  setVolcengineArkKey,
   getAiSettingsSnapshot,
 } from '../services/aiSettings';
 import { initGeminiClientFromStorage } from '../services/geminiService';
@@ -96,6 +98,8 @@ export type CanvasSettingsModalProps = {
   setCodesonlineKeyInput: Dispatch<SetStateAction<string>>;
   codesonlineChatKeyInput: string;
   setCodesonlineChatKeyInput: Dispatch<SetStateAction<string>>;
+  volcengineArkKeyInput: string;
+  setVolcengineArkKeyInput: Dispatch<SetStateAction<string>>;
   hfsyKeyInput: string;
   setHfsyKeyInput: Dispatch<SetStateAction<string>>;
   manxueBaseInput: string;
@@ -169,6 +173,8 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
     setCodesonlineKeyInput,
     codesonlineChatKeyInput,
     setCodesonlineChatKeyInput,
+    volcengineArkKeyInput,
+    setVolcengineArkKeyInput,
     hfsyKeyInput,
     setHfsyKeyInput,
     manxueBaseInput,
@@ -355,6 +361,25 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                     />
                   </div>
 
+                  {/* 火山方舟 Agent Plan 对话 */}
+                  <div className="mt-5 pt-4 border-t border-[#333]">
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">火山方舟 Agent Plan（对话）</h3>
+                    <p className="text-xs text-gray-500 mb-2">
+                      GLM-5.3 / DeepSeek-V4 / Doubao-Seed / MiniMax-M3 / Kimi-K2.7-Code
+                    </p>
+                    <div className="text-xs text-gray-500 mb-2">
+                      Base URL：<code className="text-gray-400">{DEFAULT_VOLCENGINE_ARK_BASE_URL}</code>（固定）
+                    </div>
+                    <label className="text-xs text-gray-500 block mb-1">火山方舟 API Key</label>
+                    <input
+                      type="password"
+                      value={volcengineArkKeyInput}
+                      onChange={(e) => setVolcengineArkKeyInput(e.target.value)}
+                      placeholder="ark-..."
+                      className="w-full bg-[#222222] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-orange-500 transition-colors text-sm"
+                    />
+                  </div>
+
                   {/* ③ DeepSeek */}
                   <div className="mt-5 pt-4 border-t border-[#333]">
                     <h3 className="text-sm font-semibold text-gray-200 mb-2">DeepSeek</h3>
@@ -472,6 +497,7 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                                 minimaxBaseUrl: minimaxBaseInput.trim() || DEFAULT_MINIMAX_BASE_URL,
                               });
                               setCodesonlineChatKey(codesonlineChatKeyInput.trim());
+                              setVolcengineArkKey(volcengineArkKeyInput.trim());
                               initGeminiClientFromStorage();
                               onClose();
                             }
@@ -505,6 +531,7 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                                 minimaxBaseUrl: minimaxBaseInput.trim() || DEFAULT_MINIMAX_BASE_URL,
                               });
                               setCodesonlineChatKey(codesonlineChatKeyInput.trim());
+                              setVolcengineArkKey(volcengineArkKeyInput.trim());
                               initGeminiClientFromStorage();
                               onClose();
                             }
@@ -542,6 +569,7 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                           minimaxBaseUrl: minimaxBaseInput.trim() || DEFAULT_MINIMAX_BASE_URL,
                         });
                         setCodesonlineChatKey(codesonlineChatKeyInput.trim());
+                        setVolcengineArkKey(volcengineArkKeyInput.trim());
                         initGeminiClientFromStorage();
                           onClose();
                       }}

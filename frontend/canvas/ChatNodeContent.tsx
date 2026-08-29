@@ -668,6 +668,17 @@ export function ChatNodeContent({
           onChange={(e) => onUpdate({ model: e.target.value })}
           onPointerDown={(e) => e.stopPropagation()}
         >
+          <optgroup label="火山方舟 Agent Plan">
+            <option value="glm-5.3-flash-ark">GLM-5.3-Flash（火山方舟）</option>
+            <option value="deepseek-v4-flash-ark">DeepSeek-V4-Flash（火山方舟）</option>
+            <option value="deepseek-v4-pro-ark">DeepSeek-V4-Pro（火山方舟）</option>
+            <option value="glm-5.3-ark">GLM-5.3（火山方舟）</option>
+            <option value="doubao-seed-evolving-ark">Doubao-Seed-Evolving（火山方舟）</option>
+            <option value="doubao-seed-2.0-lite-ark">Doubao-Seed-2.0-lite（火山方舟）</option>
+            <option value="doubao-seed-2.1-turbo-ark">Doubao-Seed-2.1-turbo（火山方舟）</option>
+            <option value="minimax-m3-ark">MiniMax-M3（火山方舟）</option>
+            <option value="kimi-k2.7-code-ark">Kimi-K2.7-Code（火山方舟）</option>
+          </optgroup>
           <optgroup label="DeepSeek">
             <option value="deepseek-v4-flash">DeepSeek-V4-Flash</option>
             <option value="deepseek-v4-pro">DeepSeek-V4-Pro</option>

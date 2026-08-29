@@ -58,6 +58,14 @@
       "destination": "https://files.dashlyai.cc/:path*"
     },
     {
+      "source": "/volcengine-ark-api/v1/(.*)",
+      "destination": "/api/volcengine-ark-proxy?path=v1/$1"
+    },
+    {
+      "source": "/api/volcengine-ark-proxy/(.*)",
+      "destination": "/api/volcengine-ark-proxy?path=$1"
+    },
+    {
       "source": "/codesonline-image-api/(.*)",
       "destination": "/api/codesonline-image-proxy?path=$1"
     },

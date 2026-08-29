@@ -14,6 +14,7 @@ import {
   getCodesonlineChatBaseUrl,
   getHfsySavedKey,
   getHfsyBaseUrl,
+  getVolcengineArkSavedKey,
 } from './aiSettings';
 import {
   chatCompletionHistoryAtBase,
@@ -32,13 +33,51 @@ const MAX_CHAT_HISTORY_TURNS = 48;
 
 function isDeepSeekChatModelId(modelName: string): boolean {
   const m = normalizeDeepSeekChatModelId(modelName).trim();
+  if (m.endsWith('-ark')) return false;
   return m === 'deepseek-v4-flash' || m === 'deepseek-v4-pro' || m.startsWith('deepseek-v4-');
 }
 
-/** MiniMax 对话模型 id */
+/** MiniMax 对话模型 id（不含火山方舟 -ark 后缀） */
 function isMiniMaxChatModelId(modelName: string): boolean {
   const m = (modelName || '').trim();
-  return m === 'minimax-m2.7' || m.startsWith('minimax-');
+  if (m.endsWith('-ark')) return false;
+  return m === 'minimax-m2.7' || m === 'minimax-m3' || m.startsWith('minimax-');
+}
+
+function isVolcengineArkChatModelId(modelName: string): boolean {
+  const m = (modelName || '').trim();
+  return (
+    m === 'glm-5.3-flash-ark' ||
+    m === 'glm-5.3-ark' ||
+    m === 'deepseek-v4-flash-ark' ||
+    m === 'deepseek-v4-pro-ark' ||
+    m === 'doubao-seed-evolving-ark' ||
+    m === 'doubao-seed-2.0-lite-ark' ||
+    m === 'doubao-seed-2.1-turbo-ark' ||
+    m === 'minimax-m3-ark' ||
+    m === 'kimi-k2.7-code-ark'
+  );
+}
+
+function resolveVolcengineArkChatUpstreamModelId(modelName: string): string {
+  const m = (modelName || '').trim();
+  if (m === 'glm-5.3-flash-ark') return 'glm-5.3-flash';
+  if (m === 'glm-5.3-ark') return 'glm-5.3';
+  if (m === 'deepseek-v4-flash-ark') return 'deepseek-v4-flash';
+  if (m === 'deepseek-v4-pro-ark') return 'deepseek-v4-pro';
+  if (m === 'doubao-seed-evolving-ark') return 'doubao-seed-evolving';
+  if (m === 'doubao-seed-2.0-lite-ark') return 'doubao-seed-2.0-lite';
+  if (m === 'doubao-seed-2.1-turbo-ark') return 'doubao-seed-2.1-turbo';
+  if (m === 'minimax-m3-ark') return 'minimax-m3';
+  if (m === 'kimi-k2.7-code-ark') return 'kimi-k2.7-code';
+  return m.replace(/-ark$/, '');
+}
+
+function volcengineArkChatFetchBase(): string {
+  if (typeof import.meta !== 'undefined' && import.meta.env?.PROD) {
+    return '/api/volcengine-ark-proxy';
+  }
+  return '/volcengine-ark-api';
 }
 
 /** codesonline（ai.codesonline.dev）对话模型 id */
@@ -369,6 +408,26 @@ export const callGeminiChatWithHistory = async (
 
   try {
     modelName = normalizeGcpVertexModelWhenDisabled(modelName);
+
+    if (isVolcengineArkChatModelId(modelName)) {
+      const arkKey = getVolcengineArkSavedKey().trim();
+      if (!arkKey) {
+        throw new Error(
+          '使用火山方舟 Agent Plan 对话模型：请在「设置 → API」填写「火山方舟 API Key」。'
+        );
+      }
+      return { text: await chatCompletionHistoryAtBase(
+        volcengineArkChatFetchBase(),
+        arkKey,
+        resolveVolcengineArkChatUpstreamModelId(modelName),
+        slice.map((t) => ({
+          role: t.role,
+          content: t.content,
+          imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
+          imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
+        }))
+      ) };
+    }
 
     if (isManxueChatModelId(modelName)) {
       // 满 e 对话走 Vertex AI 风格 /v1beta/models/{model}:generateContent（?key= 鉴权），

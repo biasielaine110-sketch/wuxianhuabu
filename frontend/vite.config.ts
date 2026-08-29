@@ -169,6 +169,33 @@ const toapisFileCdnProxy = {
     secure: true,
     rewrite: (p: string) => p.replace(/^\/codesonline-chat-api/, ''),
   },
+  /** 火山方舟 Agent Plan：浏览器 CORS 不开放；/v1 映射到 /api/plan/v3 */
+  '/volcengine-ark-api': {
+    target: 'https://ark.cn-beijing.volces.com',
+    changeOrigin: true,
+    secure: true,
+    timeout: 1_800_000,
+    proxyTimeout: 1_800_000,
+    rewrite: (p: string) => {
+      const path = p.startsWith('/') ? p : `/${p}`;
+      const stripped = path.replace(/^\/volcengine-ark-api(?=\/|$)/, '');
+      const rest = stripped.replace(/^\/v1(?=\/|$)/, '') || '/';
+      return `/api/plan/v3${rest === '/' ? '' : rest}`;
+    },
+  },
+  '/api/volcengine-ark-proxy': {
+    target: 'https://ark.cn-beijing.volces.com',
+    changeOrigin: true,
+    secure: true,
+    timeout: 1_800_000,
+    proxyTimeout: 1_800_000,
+    rewrite: (p: string) => {
+      const path = p.startsWith('/') ? p : `/${p}`;
+      const stripped = path.replace(/^\/api\/volcengine-ark-proxy(?=\/|$)/, '');
+      const rest = stripped.replace(/^\/v1(?=\/|$)/, '') || '/';
+      return `/api/plan/v3${rest === '/' ? '' : rest}`;
+    },
+  },
   /** hfsyapi.cn 图像 API 未开放 CORS；经同源转发到 www.hfsyapi.cn（OpenAI 兼容 /v1/images/*） */
   '/api/hfsy-image-proxy': {
     target: 'https://www.hfsyapi.cn',

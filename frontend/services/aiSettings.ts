@@ -21,6 +21,8 @@ const MANXUE_BASE_URL_STORAGE_KEY = 'manxue-openai-compatible-base-url-v1';
 /** MiniMax OpenAI 兼容网关：AI 对话「MiniMax M2.7」等 */
 const MINIMAX_API_KEY_STORAGE_KEY = 'minimax-openai-compatible-api-key-v1';
 const MINIMAX_BASE_URL_STORAGE_KEY = 'minimax-openai-compatible-base-url-v1';
+/** 火山方舟 Agent Plan（ark.cn-beijing.volces.com/api/plan/v3）对话 */
+const VOLCENGINE_ARK_API_KEY_STORAGE_KEY = 'volcengine-ark-agent-plan-api-key-v1';
 
 export const DEFAULT_OPENAI_BASE_URL = 'https://toapis.com/v1';
 /** DeepSeek 官方 OpenAI 兼容入口 */
@@ -35,6 +37,9 @@ export const DEFAULT_CODESONLINE_CHAT_BASE_URL = 'https://ai.codesonline.dev/v1'
 export const DEFAULT_MANXUE_BASE_URL = 'https://manxueapi.com/v1';
 /** MiniMax API MiniMax OpenAI 兼容入口（Base URL 须含 /v1） */
 export const DEFAULT_MINIMAX_BASE_URL = 'https://api.minimaxi.com/v1';
+
+/** 火山方舟 Agent Plan OpenAI 兼容入口（实际请求走同源代理，映射 /v1 → /api/plan/v3） */
+export const DEFAULT_VOLCENGINE_ARK_BASE_URL = 'https://ark.cn-beijing.volces.com/api/plan/v3';
 
 /** 旧版存盘中的 model id → 当前官方命名（不在界面展示旧名） */
 export function normalizeDeepSeekChatModelId(modelId: string): string {
@@ -368,6 +373,24 @@ export function setMiniMaxBaseUrl(url: string): void {
   try {
     if (normalized) localStorage.setItem(MINIMAX_BASE_URL_STORAGE_KEY, normalized);
     else localStorage.removeItem(MINIMAX_BASE_URL_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getVolcengineArkSavedKey(): string {
+  try {
+    return localStorage.getItem(VOLCENGINE_ARK_API_KEY_STORAGE_KEY)?.trim() || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setVolcengineArkKey(apiKey: string): void {
+  const normalized = apiKey.trim();
+  try {
+    if (normalized) localStorage.setItem(VOLCENGINE_ARK_API_KEY_STORAGE_KEY, normalized);
+    else localStorage.removeItem(VOLCENGINE_ARK_API_KEY_STORAGE_KEY);
   } catch {
     /* ignore */
   }

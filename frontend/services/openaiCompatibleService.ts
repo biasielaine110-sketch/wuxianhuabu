@@ -3644,6 +3644,9 @@ function resolveChatModelForBase(baseNormalized: string, modelName: string): str
   if (m === 'claude-haiku-4-5-codesonline') return 'claude-haiku-4-5';
   if (m === 'gpt-5.6-terra-hfsy') return 'gpt-5.6-terra';
   if (m === 'grok-4.6-hfsy') return 'grok-4.6';
+  if (m === 'glm-5.3-flash' || m === 'glm-5.3') return m;
+  if (m === 'kimi-k2.7-code' || m.startsWith('kimi-')) return m;
+  if (m.startsWith('doubao-')) return m;
   if (m === 'claude-sonnet-4-6' || m.startsWith('claude-')) return m;
   if (isToApisHost(baseNormalized)) {
     if (m) return m;
@@ -4562,7 +4565,7 @@ export async function chatCompletionHistoryAtBase(
     return { role: 'user' as const, content: turn.content };
   });
 
-  const json = await postJsonAtBase<{ choices?: { message?: { content?: string } }[] }>(
+  const json = await postJsonAtBase<{ choices?: { message?: { content?: unknown } }[] }>(
     base,
     '/chat/completions',
     {
@@ -4571,9 +4574,22 @@ export async function chatCompletionHistoryAtBase(
     },
     key
   );
-  const text = json.choices?.[0]?.message?.content?.trim();
-  if (!text) throw new Error('对话接口未返回文本内容。');
-  return text;
+  const text = json.choices?.[0]?.message?.content;
+  const out =
+    typeof text === 'string'
+      ? text.trim()
+      : Array.isArray(text)
+        ? text
+            .map((part) => {
+              if (typeof part === 'string') return part;
+              if (part && typeof part === 'object' && 'text' in part) return String((part as { text?: unknown }).text || '');
+              return '';
+            })
+            .join('')
+            .trim()
+        : '';
+  if (!out) throw new Error('对话接口未返回文本内容。');
+  return out;
 }
 
 /** 指定 Base URL 与密钥的对话（用于 DeepSeek 等与全局 OpenAI 兼容配置分离的场景） */
