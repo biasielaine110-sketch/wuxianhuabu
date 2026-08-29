@@ -17,6 +17,7 @@ import {
 import { resolveCanvasImageSource } from '../services/canvasAssetResolver';
 import { loadChatPromptPresets, getLatestChatPromptPresets } from './loadChatPromptPresets';
 import { isToApisGptImage2MediumQualityModel, isToApisGptImage2QualityModel } from './canvasModelUtils';
+import { clampFixedMenuPos, getTextareaCaretViewport } from './textareaCaretCoords';
 const LoaderIcon = ({ size = 16 }: { size?: number }) => (
   <svg className="animate-spin" xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
 );
@@ -347,6 +348,18 @@ export function ChatNodeContent({
     }
   }, [node.id, node.model, onUpdate]);
 
+  useEffect(() => {
+    if (!showAtPicker) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (atPickerRef.current?.contains(t)) return;
+      if (chatPromptRef.current?.contains(t)) return;
+      setShowAtPicker(false);
+    };
+    window.addEventListener('pointerdown', onDown, true);
+    return () => window.removeEventListener('pointerdown', onDown, true);
+  }, [showAtPicker]);
+
   const messages = node.messages || [];
 
   const syncPromptCursor = useCallback(() => {
@@ -356,6 +369,12 @@ export function ChatNodeContent({
     const end = el.selectionEnd ?? start;
     savedCursorPosRef.current = { start, end };
     setSavedCursorPos({ start, end });
+  }, []);
+
+  /** 将 @ 引用菜单放到输入框光标处（视口坐标，不受画布缩放/节点 absolute 影响） */
+  const placeAtPickerAtCaret = useCallback((el: HTMLTextAreaElement, caretIndex: number) => {
+    const caret = getTextareaCaretViewport(el, caretIndex);
+    setAtPickerPos(clampFixedMenuPos(caret, 220, 260));
   }, []);
 
   /** 在光标处插入引用 token；若光标前有未完成的 @/@R/@M 则替换之 */
@@ -543,6 +562,67 @@ export function ChatNodeContent({
           </button>
         </div>
       </div>
+    </div>,
+    document.body
+  );
+
+  const atPickerOverlay = showAtPicker && createPortal(
+    <div
+      ref={atPickerRef}
+      className="fixed z-[10000] bg-[#1e1e1e] border border-[#444] rounded-lg shadow-xl overflow-hidden"
+      style={{ top: atPickerPos.top, left: atPickerPos.left, minWidth: 180 }}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      <div className="px-3 py-2 text-xs text-gray-400 border-b border-[#333]">选择引用</div>
+      {refSlots.length > 0 && (
+        <>
+          <div className="px-3 py-1 text-xs text-cyan-400">连线参考</div>
+          {refSlots.map((s) => (
+            <button
+              key={`at-r${s.n}`}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => insertPromptToken(`@R${s.n} `)}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-[#333]"
+            >
+              <span className="text-cyan-400">@R{s.n}</span> {s.label}
+            </button>
+          ))}
+        </>
+      )}
+      {(() => {
+        const aiReplies: { num: number; images: string[] }[] = [];
+        for (let i = 0; i < (node.messages || []).length; i++) {
+          const msg = (node.messages || [])[i];
+          if (msg.role === 'assistant' && (msg.images?.length || msg.image)) {
+            aiReplies.push({ num: aiReplies.length + 1, images: msg.images || (msg.image ? [msg.image] : []) });
+          }
+        }
+        if (aiReplies.length === 0) return null;
+        return (
+          <>
+            <div className="px-3 py-1 text-xs text-purple-400">消息图片</div>
+            {aiReplies.map((r) => (
+              <button
+                key={`at-m${r.num}`}
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => insertPromptToken(`@M${r.num} `)}
+                className="w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-[#333]"
+              >
+                <span className="text-purple-400">@M{r.num}</span> AI回复({r.images.length}张图)
+              </button>
+            ))}
+          </>
+        );
+      })()}
+      <button
+        type="button"
+        onClick={() => setShowAtPicker(false)}
+        className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-[#333] border-t border-[#333]"
+      >
+        取消
+      </button>
     </div>,
     document.body
   );
@@ -1252,33 +1332,7 @@ export function ChatNodeContent({
               if (textBefore.endsWith('@') || textBefore.endsWith('@R') || textBefore.endsWith('@M')) {
                 const el = chatPromptRef.current;
                 if (el) {
-                  // 使用 mirror div 精确测量光标位置
-                  const mirror = document.createElement('div');
-                  const style = window.getComputedStyle(el);
-                  mirror.style.cssText = `
-                    position: absolute;
-                    top: -9999px;
-                    left: -9999px;
-                    visibility: hidden;
-                    white-space: pre-wrap;
-                    word-wrap: break-word;
-                    width: ${el.offsetWidth}px;
-                    font-size: ${style.fontSize};
-                    font-family: ${style.fontFamily};
-                    line-height: ${style.lineHeight};
-                    padding: ${style.padding};
-                    border: ${style.border};
-                    box-sizing: border-box;
-                    overflow: hidden;
-                  `;
-                  const textUpToCursor = val.slice(0, el.selectionStart || 0);
-                  mirror.textContent = textUpToCursor;
-                  document.body.appendChild(mirror);
-                  const cursorHeight = mirror.offsetHeight;
-                  document.body.removeChild(mirror);
-                  const rect = el.getBoundingClientRect();
-                  const top = rect.top + cursorHeight;
-                  setAtPickerPos({ top: top + 4, left: rect.left });
+                  placeAtPickerAtCaret(el, el.selectionStart ?? sel);
                   savedCursorPosRef.current = { start: sel, end: sel };
                   setSavedCursorPos({ start: sel, end: sel });
                 }
@@ -1328,66 +1382,6 @@ export function ChatNodeContent({
               syncPromptCursor();
             }}
           />
-          {showAtPicker && (
-            <div
-              ref={atPickerRef}
-              className="absolute z-50 bg-[#1e1e1e] border border-[#444] rounded-lg shadow-xl overflow-hidden"
-              style={{ top: atPickerPos.top, left: atPickerPos.left, minWidth: 180 }}
-              onPointerDown={(e) => e.stopPropagation()}
-            >
-              <div className="px-3 py-2 text-xs text-gray-400 border-b border-[#333]">选择引用</div>
-              {/* 参考区图片 */}
-              {refSlots.length > 0 && (
-                <>
-                  <div className="px-3 py-1 text-xs text-cyan-400">连线参考</div>
-{refSlots.map((s) => (
-                    <button
-                      key={`at-r${s.n}`}
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => insertPromptToken(`@R${s.n} `)}
-                      className="w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-[#333]"
-                    >
-                      <span className="text-cyan-400">@R{s.n}</span> {s.label}
-                    </button>
-                  ))}
-                </>
-              )}
-              {/* 历史消息图片 */}
-              {(() => {
-                const aiReplies: { num: number; images: string[] }[] = [];
-                for (let i = 0; i < (node.messages || []).length; i++) {
-                  const msg = (node.messages || [])[i];
-                  if (msg.role === 'assistant' && (msg.images?.length || msg.image)) {
-                    aiReplies.push({ num: aiReplies.length + 1, images: msg.images || (msg.image ? [msg.image] : []) });
-                  }
-                }
-                if (aiReplies.length === 0) return null;
-                return (
-                  <>
-                    <div className="px-3 py-1 text-xs text-purple-400">消息图片</div>
-{aiReplies.map((r) => (
-                      <button
-                        key={`at-m${r.num}`}
-                        type="button"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => insertPromptToken(`@M${r.num} `)}
-                        className="w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-[#333]"
-                      >
-                        <span className="text-purple-400">@M{r.num}</span> AI回复({r.images.length}张图)
-                      </button>
-                    ))}
-                  </>
-                );
-              })()}
-              <button
-                onClick={() => setShowAtPicker(false)}
-                className="w-full text-left px-3 py-1.5 text-xs text-gray-500 hover:bg-[#333] border-t border-[#333]"
-              >
-                取消
-              </button>
-            </div>
-          )}
           <button
             onPointerDown={(e) => {
               e.stopPropagation();
@@ -1419,6 +1413,8 @@ export function ChatNodeContent({
         </div>
       </div>
       </div>
+      {atPickerOverlay}
+      {bigInputOverlay}
     </div>
   );
 }
