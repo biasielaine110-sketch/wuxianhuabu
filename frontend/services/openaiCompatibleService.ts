@@ -128,8 +128,19 @@ function rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNormalized: string): st
 }
 
 /** 502/504 等为网关层错误，多为上游或反向代理；与 Chrome 扩展报的 runtime.lastError 无关 */
-function openAiCompatFailureHint(status: number, kind: 'generations-json' | 'image-edit'): string {
+function isVolcengineArkFetchBase(base: string): boolean {
+  return /volcengine-ark/i.test(base);
+}
+
+function openAiCompatFailureHint(
+  status: number,
+  kind: 'generations-json' | 'image-edit',
+  fetchBase?: string
+): string {
   if (status === 401) {
+    if (fetchBase && isVolcengineArkFetchBase(fetchBase)) {
+      return '（401：火山方舟鉴权失败。请在「设置 → API → 火山方舟 Agent Plan」填写 ark- 开头的密钥并保存（须在当前网站域名下保存）；生产环境也可在 Vercel 配置 VOLCENGINE_ARK_API_KEY。不要填 ToAPIs / hfsy / 满 e 的 Key。）';
+    }
     return '（401：鉴权失败。若使用 hfsyapi.cn 模型，请在「设置 → API」填写并保存 hfsyapi.cn API Key；确认不要误填 ToAPIs、满 e 或 OpenAI 兼容通道的 Key。）';
   }
   if (status === 404) {
@@ -4004,20 +4015,28 @@ function buildYunzhiI2iUserText(params: {
 }
 
 async function postJsonAtBase<T>(base: string, path: string, body: unknown, apiKey: string): Promise<T> {
-  if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key，请在设置中选择「OpenAI 兼容」并填写密钥。');
   const fetchBase = rewriteRemoteOpenAiCompatBaseForBrowserCors(base);
+  const ark = isVolcengineArkFetchBase(fetchBase) || isVolcengineArkFetchBase(base);
+  const key = apiKey.trim();
+  if (!key && !ark) throw new Error('未配置 OpenAI 兼容 API Key，请在设置中选择「OpenAI 兼容」并填写密钥。');
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (ark) {
+    if (key) {
+      headers['x-volcengine-ark-key'] = key;
+      headers.Authorization = `Bearer ${key}`;
+    }
+  } else {
+    headers.Authorization = `Bearer ${key}`;
+  }
   const res = await fetch(`${fetchBase}${path}`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
+    headers,
     body: JSON.stringify(body),
   });
   const text = await res.text();
   if (!res.ok) {
     throw new Error(
-      `兼容接口错误 (${res.status}): ${text.slice(0, 800)}${openAiCompatFailureHint(res.status, 'generations-json')}`
+      `兼容接口错误 (${res.status}): ${text.slice(0, 800)}${openAiCompatFailureHint(res.status, 'generations-json', fetchBase)}`
     );
   }
   return JSON.parse(text) as T;
@@ -4536,7 +4555,8 @@ export async function chatCompletionHistoryAtBase(
   turns: ChatCompletionHistoryTurn[]
 ): Promise<string> {
   const key = apiKey.trim();
-  if (!key) throw new Error('未配置对话 API Key。');
+  const isArk = /volcengine-ark/i.test(baseUrlRaw);
+  if (!key && !isArk) throw new Error('未配置对话 API Key。');
   if (!turns.length) throw new Error('对话内容为空。');
   const base = normalizeBaseUrl(baseUrlRaw);
   const model = resolveChatModelForBase(base, modelName);

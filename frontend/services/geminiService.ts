@@ -411,11 +411,6 @@ export const callGeminiChatWithHistory = async (
 
     if (isVolcengineArkChatModelId(modelName)) {
       const arkKey = getVolcengineArkSavedKey().trim();
-      if (!arkKey) {
-        throw new Error(
-          '使用火山方舟 Agent Plan 对话模型：请在「设置 → API」填写「火山方舟 API Key」。'
-        );
-      }
       return { text: await chatCompletionHistoryAtBase(
         volcengineArkChatFetchBase(),
         arkKey,

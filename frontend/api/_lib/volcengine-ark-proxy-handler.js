@@ -28,6 +28,20 @@ function toUpstreamPath(sub) {
   return rest ? `/api/plan/v3/${rest}` : '/api/plan/v3';
 }
 
+function headerVal(v) {
+  if (!v) return '';
+  return String(Array.isArray(v) ? v[0] : v).trim();
+}
+
+/** 浏览器 Authorization 在 Vercel 上常被部署保护吃掉；改用自定义头，并用环境变量兜底 */
+function pickArkApiKey(req) {
+  const custom = headerVal(req.headers['x-volcengine-ark-key']);
+  const auth = headerVal(req.headers.authorization);
+  const fromAuth = auth.replace(/^Bearer\s+/i, '').trim();
+  const env = String(process.env.VOLCENGINE_ARK_API_KEY || process.env.ARK_API_KEY || '').trim();
+  return custom || fromAuth || env;
+}
+
 async function handler(req, res) {
   const host = req.headers.host || 'localhost';
   const url = new URL(req.url || '/', `http://${host}`);
@@ -50,8 +64,8 @@ async function handler(req, res) {
   const headers = new Headers();
   for (const [k, v] of Object.entries(req.headers)) {
     if (!v || isHopByHopHeader(k)) continue;
-    if (k.toLowerCase() === 'host') continue;
-    if (k.toLowerCase() === 'accept-encoding') continue;
+    const lk = k.toLowerCase();
+    if (lk === 'host' || lk === 'accept-encoding' || lk === 'authorization' || lk === 'x-volcengine-ark-key') continue;
     if (Array.isArray(v)) {
       for (const item of v) headers.append(k, item);
     } else {
@@ -59,6 +73,23 @@ async function handler(req, res) {
     }
   }
   headers.set('accept-encoding', 'identity');
+  const arkKey = pickArkApiKey(req);
+  if (!arkKey) {
+    res.statusCode = 401;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(
+      JSON.stringify({
+        error: {
+          code: 'AuthenticationError',
+          message:
+            '未提供火山方舟密钥。请在本站「设置 → API → 火山方舟 Agent Plan」填写 ark- 开头的 Key 并保存；或在 Vercel 环境变量设置 VOLCENGINE_ARK_API_KEY。',
+          type: 'Unauthorized',
+        },
+      })
+    );
+    return;
+  }
+  headers.set('Authorization', `Bearer ${arkKey}`);
 
   const method = req.method || 'GET';
   const hasBody = !['GET', 'HEAD'].includes(method);

@@ -176,6 +176,15 @@ const toapisFileCdnProxy = {
     secure: true,
     timeout: 1_800_000,
     proxyTimeout: 1_800_000,
+    configure(proxy) {
+      proxy.on('proxyReq', (proxyReq, req) => {
+        const raw = (req as { headers?: Record<string, unknown> }).headers?.['x-volcengine-ark-key'];
+        const custom = String(Array.isArray(raw) ? raw[0] : raw || '').trim();
+        if (custom && !proxyReq.getHeader('Authorization')) {
+          proxyReq.setHeader('Authorization', `Bearer ${custom}`);
+        }
+      });
+    },
     rewrite: (p: string) => {
       const path = p.startsWith('/') ? p : `/${p}`;
       const stripped = path.replace(/^\/volcengine-ark-api(?=\/|$)/, '');
@@ -189,6 +198,15 @@ const toapisFileCdnProxy = {
     secure: true,
     timeout: 1_800_000,
     proxyTimeout: 1_800_000,
+    configure(proxy) {
+      proxy.on('proxyReq', (proxyReq, req) => {
+        const raw = (req as { headers?: Record<string, unknown> }).headers?.['x-volcengine-ark-key'];
+        const custom = String(Array.isArray(raw) ? raw[0] : raw || '').trim();
+        if (custom && !proxyReq.getHeader('Authorization')) {
+          proxyReq.setHeader('Authorization', `Bearer ${custom}`);
+        }
+      });
+    },
     rewrite: (p: string) => {
       const path = p.startsWith('/') ? p : `/${p}`;
       const stripped = path.replace(/^\/api\/volcengine-ark-proxy(?=\/|$)/, '');
