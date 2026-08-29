@@ -4,7 +4,13 @@ export const DEFAULT_ALIYUN_MAAS_COMPAT_BASE_URL = `${ALIYUN_MAAS_ORIGIN}/compat
 
 export function isAliyunMaasChatModelId(modelName: string): boolean {
   const m = (modelName || '').trim();
-  return m === 'qwen3.7-plus-aliyun' || m === 'qwen3.8-max-aliyun' || m === 'qwen3-vl-plus-aliyun';
+  return (
+    m === 'qwen3.7-plus-aliyun' ||
+    m === 'qwen3.8-max-aliyun' ||
+    m === 'qwen3-vl-plus-aliyun' ||
+    m === 'deepseek-v4-pro-0813-aliyun' ||
+    m === 'kimi-k3-aliyun'
+  );
 }
 
 export function resolveAliyunMaasChatUpstreamModelId(modelName: string): string {
@@ -12,6 +18,8 @@ export function resolveAliyunMaasChatUpstreamModelId(modelName: string): string 
   if (m === 'qwen3.7-plus-aliyun') return 'qwen3.7-plus';
   if (m === 'qwen3.8-max-aliyun') return 'qwen3.8-max';
   if (m === 'qwen3-vl-plus-aliyun') return 'qwen3-vl-plus';
+  if (m === 'deepseek-v4-pro-0813-aliyun') return 'deepseek-v4-pro-0813';
+  if (m === 'kimi-k3-aliyun') return 'kimi-k3';
   return m.replace(/-aliyun$/, '');
 }
 

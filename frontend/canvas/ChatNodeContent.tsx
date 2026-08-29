@@ -771,6 +771,8 @@ export function ChatNodeContent({
             <option value="qwen3.7-plus-aliyun">Qwen3.7-Plus（阿里云百炼）</option>
             <option value="qwen3.8-max-aliyun">Qwen3.8-Max（阿里云百炼）</option>
             <option value="qwen3-vl-plus-aliyun">Qwen3-VL-Plus（阿里云百炼）</option>
+            <option value="deepseek-v4-pro-0813-aliyun">DeepSeek-V4-Pro-0813（阿里云百炼）</option>
+            <option value="kimi-k3-aliyun">Kimi-K3（阿里云百炼）</option>
           </optgroup>
           <optgroup label="DeepSeek">
             <option value="deepseek-v4-flash">DeepSeek-V4-Flash</option>

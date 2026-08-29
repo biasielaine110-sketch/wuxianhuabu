@@ -40,7 +40,7 @@ const MAX_CHAT_HISTORY_TURNS = 48;
 
 function isDeepSeekChatModelId(modelName: string): boolean {
   const m = normalizeDeepSeekChatModelId(modelName).trim();
-  if (m.endsWith('-ark')) return false;
+  if (m.endsWith('-ark') || m.endsWith('-aliyun')) return false;
   return m === 'deepseek-v4-flash' || m === 'deepseek-v4-pro' || m.startsWith('deepseek-v4-');
 }
 

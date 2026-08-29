@@ -4712,7 +4712,9 @@ export async function chatCompletionHistoryAtBase(
     return { role: 'user' as const, content: turn.content };
   });
 
-  const json = await postJsonAtBase<{ choices?: { message?: { content?: unknown } }[] }>(
+  const json = await postJsonAtBase<{
+    choices?: { message?: { content?: unknown; reasoning_content?: unknown } }[];
+  }>(
     base,
     '/chat/completions',
     {
@@ -4721,20 +4723,24 @@ export async function chatCompletionHistoryAtBase(
     },
     key
   );
-  const text = json.choices?.[0]?.message?.content;
-  const out =
-    typeof text === 'string'
-      ? text.trim()
-      : Array.isArray(text)
-        ? text
-            .map((part) => {
-              if (typeof part === 'string') return part;
-              if (part && typeof part === 'object' && 'text' in part) return String((part as { text?: unknown }).text || '');
-              return '';
-            })
-            .join('')
-            .trim()
-        : '';
+  const message = json.choices?.[0]?.message;
+  const text = message?.content;
+  const reasoning = message?.reasoning_content;
+  const stringifyChatPart = (value: unknown): string => {
+    if (typeof value === 'string') return value.trim();
+    if (Array.isArray(value)) {
+      return value
+        .map((part) => {
+          if (typeof part === 'string') return part;
+          if (part && typeof part === 'object' && 'text' in part) return String((part as { text?: unknown }).text || '');
+          return '';
+        })
+        .join('')
+        .trim();
+    }
+    return '';
+  };
+  const out = stringifyChatPart(text) || stringifyChatPart(reasoning);
   if (!out) throw new Error('对话接口未返回文本内容。');
   return out;
 }
