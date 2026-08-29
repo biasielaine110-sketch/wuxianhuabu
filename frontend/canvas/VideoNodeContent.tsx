@@ -84,6 +84,7 @@ export function VideoNodeContent({
             ) : null}
           </div>
           {isSelected ? (
+            <>
           <div className="absolute top-2 right-2 z-10 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             {videoUrls.length > 1 && (
               <>
@@ -186,6 +187,7 @@ export function VideoNodeContent({
               <DownloadIcon size={40} />
             </button>
           </div>
+            </>
           ) : null}
         </>
       ) : (
