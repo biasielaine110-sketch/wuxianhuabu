@@ -61,8 +61,8 @@ export function normalizeLegacyImageModelId(modelId: string): string {
   if (m === 'gpt-image-2-junlan') return 'gpt-image-2-codesonline';
   if (m === 'gemini-3-pro-image-preview') return 'qwen-image-3.0';
   if (m.startsWith('jimeng-image-')) return 'gpt-image-2-codesonline';
-  if (m === 'gemini-3.1-flash-image-preview' || m === 'gemini-2.5-flash-image') {
-    return 'gemini-3.1-flash-lite-image-official';
+  if (m === 'gemini-3.1-flash-image-preview' || m === 'gemini-2.5-flash-image' || m === 'gemini-3.1-flash-lite-image-official') {
+    return 'qwen-image-3.0';
   }
   return m;
 }

@@ -274,7 +274,7 @@ export const generateNewImage = async (
     if (isAliyunMaasImageModel(model)) {
       return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
     }
-    if (model === 'qwen-image-3.0' || model === 'gemini-3.1-flash-lite-image-official') {
+    if (model === 'qwen-image-3.0') {
       return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
     }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {
@@ -374,7 +374,7 @@ export const editExistingImage = async (
     if (isAliyunMaasImageModel(model)) {
       return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, pixelSize, signal);
     }
-    if (model === 'qwen-image-3.0' || model === 'gemini-3.1-flash-lite-image-official') {
+    if (model === 'qwen-image-3.0') {
       return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, pixelSize, signal);
     }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {

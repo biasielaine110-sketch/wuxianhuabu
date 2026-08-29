@@ -1310,7 +1310,6 @@ export function ChatNodeContent({
             </optgroup>
             <option value="gpt-image-2-manxue">GPT Image 2（满 e）</option>
             <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
-            <option value="gemini-3.1-flash-lite-image-official">Gemini 3.1 Flash Lite Image Official（ToAPIs）</option>
             <option value="qwen-image-3.0">Qwen-Image-3.0（ToAPIs）</option>
             <option value="gemini-3.1-flash-image-preview-2k-manxue">Gemini 3.1 Flash Image 2K（满 e）</option>
             <option value="gemini-3-pro-image-preview-2k-manxue">Gemini 3 Pro Image 2K（满 e）</option>

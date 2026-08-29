@@ -298,7 +298,6 @@ export function AuditInpaintPanel({
             <option value="gpt-image-2-codesonline">GPT Image 2（codesonline）</option>
             <optgroup label="ToAPIs">
               <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
-              <option value="gemini-3.1-flash-lite-image-official">Gemini 3.1 Flash Lite Image Official（ToAPIs）</option>
               <option value="qwen-image-3.0">Qwen-Image-3.0（ToAPIs）</option>
               <option value="nano-banana-2">Nano-Banana 2（ToAPIs）</option>
             </optgroup>

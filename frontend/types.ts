@@ -221,7 +221,7 @@ export interface CanvasNode {
   resolution?: string; // '1k', '2k', '4k'
   quality?: string; // 'low', 'medium', 'high', 'auto' — GPT Image 2 等模型画质
   imageCount?: number; // 1, 2, or 4
-  model?: string; // t2i/i2i：含 gemini-3.1-flash-lite-image-official（ToAPIs 异步）等
+  model?: string; // t2i/i2i：含 qwen-image-3.0（ToAPIs 异步）等
   viewMode?: 'single' | 'grid'; // Display mode for multiple images
   currentImageIndex?: number; // For pagination in single view
   textOverlays?: TextOverlay[]; // 图片上的文字覆盖
