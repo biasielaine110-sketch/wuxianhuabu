@@ -794,6 +794,10 @@ export function ChatNodeContent({
           <optgroup label="Google Gemini / ToAPIs">
             <option value="gemini-2.0-flash-official">Gemini 2.0 Flash（ToAPIs）</option>
             <option value="gemini-3.1-flash-lite-preview-official">Gemini 3.1 Flash Lite（ToAPIs）</option>
+            <option value="glm-5.3-flash-toapis">GLM-5.3-Flash（ToAPIs）</option>
+            <option value="grok-4.6-toapis">Grok 4.6（ToAPIs）</option>
+            <option value="gpt-5.4-mini-toapis">GPT-5.4 Mini（ToAPIs）</option>
+            <option value="qwen3.5-flash-toapis">Qwen3.5-Flash（ToAPIs）</option>
           </optgroup>
         </select>
         <label className="flex items-center gap-1 shrink-0 text-gray-500" style={{ fontSize: 45 }}>

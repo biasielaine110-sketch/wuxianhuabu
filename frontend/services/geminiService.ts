@@ -113,6 +113,26 @@ function resolveHfsyChatUpstreamModelId(modelName: string): string {
   return m;
 }
 
+/** ToAPIs（https://toapis.com/v1）对话模型；与 hfsy 的 grok-4.6-hfsy 分流 */
+function isToApisChatModelId(modelName: string): boolean {
+  const m = (modelName || '').trim();
+  return (
+    m === 'glm-5.3-flash-toapis' ||
+    m === 'grok-4.6-toapis' ||
+    m === 'gpt-5.4-mini-toapis' ||
+    m === 'qwen3.5-flash-toapis'
+  );
+}
+
+function resolveToApisChatUpstreamModelId(modelName: string): string {
+  const m = (modelName || '').trim();
+  if (m === 'glm-5.3-flash-toapis') return 'glm-5.3-flash';
+  if (m === 'grok-4.6-toapis') return 'grok-4.6';
+  if (m === 'gpt-5.4-mini-toapis') return 'gpt-5.4-mini';
+  if (m === 'qwen3.5-flash-toapis') return 'qwen3.5-flash';
+  return m.replace(/-toapis$/, '');
+}
+
 /** 满 eAPI（manxueapi.com）对话模型 id；与 ToAPIs 的 gemini-3.1-flash-lite-preview-official 区分 */
 function isManxueChatModelId(modelName: string): boolean {
   const m = (modelName || '').trim();
@@ -535,6 +555,26 @@ export const callGeminiChatWithHistory = async (
         getHfsyBaseUrl(),
         hfsyKey,
         resolveHfsyChatUpstreamModelId(modelName),
+        slice.map((t) => ({
+          role: t.role,
+          content: t.content,
+          imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
+          imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
+        }))
+      ) };
+    }
+
+    if (isToApisChatModelId(modelName)) {
+      const apiKey = getOpenAiSavedKey();
+      if (!apiKey) {
+        throw new Error(
+          '使用 ToAPIs 对话模型：请在「设置 → API」选择「OpenAI 兼容」，填写 ToAPIs API Key（Base URL 为 https://toapis.com/v1）。'
+        );
+      }
+      return { text: await chatCompletionHistoryAtBase(
+        getOpenAiBaseUrl(),
+        apiKey,
+        resolveToApisChatUpstreamModelId(modelName),
         slice.map((t) => ({
           role: t.role,
           content: t.content,
