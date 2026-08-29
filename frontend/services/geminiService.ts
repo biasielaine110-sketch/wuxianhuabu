@@ -15,6 +15,7 @@ import {
   getHfsySavedKey,
   getHfsyBaseUrl,
   getVolcengineArkSavedKey,
+  getAliyunMaasSavedKey,
 } from './aiSettings';
 import {
   chatCompletionHistoryAtBase,
@@ -24,6 +25,12 @@ import {
   toApisCanvasVideoGenerate,
   type ToApisVideoModelId,
 } from './openaiCompatibleService';
+import {
+  aliyunMaasChatFetchBase,
+  isAliyunMaasChatModelId,
+  isAliyunMaasZImageModel,
+  resolveAliyunMaasChatUpstreamModelId,
+} from './aliyunMaas';
 import { normalizeGcpVertexModelWhenDisabled } from './vertexGeminiModelUtils';
 import type { ChatCompletionOptions, ChatCompletionResult, ChatCompletionTurn } from './chatCompletionTypes';
 
@@ -234,6 +241,9 @@ export const generateNewImage = async (
     if (model === 'gpt-image-2-hfsy' || model === 'gpt-image-2pro-hfsy' || model === 'gpt-image-2pro-4k-hfsy' || model === 'nano-banana-2-hfsy' || model === 'nano-banana-pro-hfsy') {
       return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
     }
+    if (isAliyunMaasZImageModel(model)) {
+      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
+    }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {
       throw new Error(
         'GPT Image 2（ToAPIs）等需在「设置 → API」中使用 OpenAI 兼容主通道，Base URL 指向 ToAPIs（https://toapis.com/v1）。codesonline 通路请选择「GPT Image 2（codesonline）」并填写对应密钥。'
@@ -328,6 +338,9 @@ export const editExistingImage = async (
     if (model === 'gpt-image-2-hfsy' || model === 'gpt-image-2pro-hfsy' || model === 'gpt-image-2pro-4k-hfsy' || model === 'nano-banana-2-hfsy' || model === 'nano-banana-pro-hfsy') {
       return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, pixelSize, signal);
     }
+    if (isAliyunMaasZImageModel(model)) {
+      return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, pixelSize, signal);
+    }
     if (model === 'gpt-image-2' || model === 'gpt-image-1' || model.startsWith('gpt-image-')) {
       throw new Error(
         'GPT Image 2（ToAPIs）图生图需使用 OpenAI 兼容主通道与 ToAPIs。codesonline 请选择对应节点模型并填写密钥。'
@@ -407,6 +420,24 @@ export const callGeminiChatWithHistory = async (
         volcengineArkChatFetchBase(),
         arkKey,
         resolveVolcengineArkChatUpstreamModelId(modelName),
+        slice.map((t) => ({
+          role: t.role,
+          content: t.content,
+          imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
+          imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
+        }))
+      ) };
+    }
+
+    if (isAliyunMaasChatModelId(modelName)) {
+      const aliyunKey = getAliyunMaasSavedKey().trim();
+      if (!aliyunKey) {
+        throw new Error('使用阿里云百炼对话模型：请在「设置 → API → 阿里云百炼」填写 API Key 并保存。');
+      }
+      return { text: await chatCompletionHistoryAtBase(
+        aliyunMaasChatFetchBase(),
+        aliyunKey,
+        resolveAliyunMaasChatUpstreamModelId(modelName),
         slice.map((t) => ({
           role: t.role,
           content: t.content,

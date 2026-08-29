@@ -31,6 +31,12 @@ export function isToApisGptImage2MediumQualityModel(id: string): boolean {
   return id === 'gpt-image-2-vip';
 }
 
+/** 阿里云百炼 Z-Image-Turbo */
+export function isAliyunMaasZImageModel(id: string): boolean {
+  const m = (id || '').trim();
+  return m === 'z-image-turbo-aliyun' || m === 'z-image-turbo';
+}
+
 /** 满 eAPI Gemini 图像模型 */
 export function isManxueGeminiImageModel(id: string): boolean {
   return (

@@ -14,12 +14,14 @@ import {
   getMiniMaxSavedKey,
   getOpenAiBaseUrl,
   getOpenAiSavedKey,
+  getAliyunMaasSavedKey,
 } from './aiSettings';
+import { aliyunMaasMultimodalFetchUrl, aliyunZImageSize, isAliyunMaasZImageModel } from './aliyunMaas';
 
 function normalizeBaseUrl(url: string): string {
   let u = url.trim().replace(/\/+$/, '');
   // 火山方舟 Agent Plan 文档 Base URL 已含 /api/plan/v3，其后直接拼 /chat/completions，不要再加 /v1
-  if (/volcengine-ark/i.test(u)) return u;
+  if (/volcengine-ark/i.test(u) || /aliyun-maas/i.test(u)) return u;
   if (!/\/v1$/i.test(u)) u = `${u}/v1`;
   return u.replace(/\/+$/, '');
 }
@@ -134,6 +136,10 @@ function isVolcengineArkFetchBase(base: string): boolean {
   return /volcengine-ark/i.test(base);
 }
 
+function isAliyunMaasFetchBase(base: string): boolean {
+  return /aliyun-maas/i.test(base);
+}
+
 function openAiCompatFailureHint(
   status: number,
   kind: 'generations-json' | 'image-edit',
@@ -142,6 +148,9 @@ function openAiCompatFailureHint(
   if (status === 401) {
     if (fetchBase && isVolcengineArkFetchBase(fetchBase)) {
       return '（401：火山方舟鉴权失败。请在控制台重新生成 API Key，在本站「设置 → API → 火山方舟」保存后重试；曾提交到 Git 的密钥通常已失效。文档：https://console.volcengine.com/ark/region:cn-beijing/docs/82379/2373746 ）';
+    }
+    if (fetchBase && isAliyunMaasFetchBase(fetchBase)) {
+      return '（401：阿里云百炼鉴权失败。请在「设置 → API → 阿里云百炼」填写 API Key 并在当前域名下保存。）';
     }
     return '（401：鉴权失败。若使用 hfsyapi.cn 模型，请在「设置 → API」填写并保存 hfsyapi.cn API Key；确认不要误填 ToAPIs、满 e 或 OpenAI 兼容通道的 Key。）';
   }
@@ -640,6 +649,13 @@ function rewriteKnownImageCdnToSameOrigin(imageUrl: string): string {
     }
     if (host === 'www.hfsyapi.cn' || host === 'hfsyapi.cn') {
       return `${origin}${hfsyImageProxyPathPrefix()}${u.pathname}${u.search}`;
+    }
+    if (host.includes('aliyuncs.com') && (host.includes('dashscope') || host.includes('oss-'))) {
+      const q = `path=oss-fetch&u=${encodeURIComponent(imageUrl)}`;
+      if (import.meta.env.PROD) {
+        return `${origin}/api/aliyun-maas-proxy?${q}`;
+      }
+      return `${origin}/aliyun-maas-api/oss-fetch?u=${encodeURIComponent(imageUrl)}`;
     }
   } catch {
     /* ignore */
@@ -3683,6 +3699,7 @@ function resolveChatModelForBase(baseNormalized: string, modelName: string): str
   if (m.startsWith('deepseek-')) return m;
   if (m.startsWith('minimax-')) return m;
   if (m.startsWith('grok-')) return m;
+  if (m.startsWith('qwen')) return m;
   // ToAPIs 等网关使用 Gemini 模型 id 透传；其它 OpenAI 兼容站若也支持该 id，同样原样发送
   if (m === 'gemini-2.0-flash-official' || m === 'gemini-3.1-flash-lite-preview-official') return m;
   const geminiToOpenAi: Record<string, string> = {
@@ -4019,14 +4036,20 @@ function buildYunzhiI2iUserText(params: {
 async function postJsonAtBase<T>(base: string, path: string, body: unknown, apiKey: string): Promise<T> {
   const fetchBase = rewriteRemoteOpenAiCompatBaseForBrowserCors(base);
   const ark = isVolcengineArkFetchBase(fetchBase) || isVolcengineArkFetchBase(base);
-  const key = ark
+  const aliyun = isAliyunMaasFetchBase(fetchBase) || isAliyunMaasFetchBase(base);
+  const key = ark || aliyun
     ? apiKey.trim().replace(/^Bearer\s+/i, '').trim().replace(/^["'`]+|["'`]+$/g, '')
     : apiKey.trim();
-  if (!key && !ark) throw new Error('未配置 OpenAI 兼容 API Key，请在设置中选择「OpenAI 兼容」并填写密钥。');
+  if (!key && !ark && !aliyun) throw new Error('未配置 OpenAI 兼容 API Key，请在设置中选择「OpenAI 兼容」并填写密钥。');
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (ark) {
     if (key) {
       headers['x-volcengine-ark-key'] = key;
+      headers.Authorization = `Bearer ${key}`;
+    }
+  } else if (aliyun) {
+    if (key) {
+      headers['x-aliyun-maas-key'] = key;
       headers.Authorization = `Bearer ${key}`;
     }
   } else {
@@ -4379,6 +4402,93 @@ async function editImagesAtOpenAiCompatibleBase(
   return results;
 }
 
+async function extractAliyunZImageUrl(json: unknown): Promise<string> {
+  if (!json || typeof json !== 'object') throw new Error('阿里云生图未返回 JSON');
+  const o = json as Record<string, unknown>;
+  if (typeof o.code === 'string' && o.code) {
+    throw new Error(`阿里云生图失败: ${o.code} ${String(o.message || '')}`.trim());
+  }
+  const output = o.output;
+  if (output && typeof output === 'object') {
+    const choices = (output as Record<string, unknown>).choices;
+    if (Array.isArray(choices) && choices[0] && typeof choices[0] === 'object') {
+      const msg = (choices[0] as Record<string, unknown>).message;
+      if (msg && typeof msg === 'object') {
+        const content = (msg as Record<string, unknown>).content;
+        if (Array.isArray(content)) {
+          for (const part of content) {
+            if (part && typeof part === 'object' && typeof (part as { image?: unknown }).image === 'string') {
+              const img = String((part as { image: string }).image).trim();
+              if (img) return img;
+            }
+          }
+        }
+      }
+    }
+  }
+  throw new Error(`阿里云生图未返回图像 URL: ${JSON.stringify(json).slice(0, 400)}`);
+}
+
+async function aliyunZImageGenerate(
+  prompt: string,
+  aspectRatio: string,
+  numberOfImages: number,
+  nodeResolution: string | undefined,
+  refBase64s: string[] | undefined,
+  signal?: AbortSignal
+): Promise<string[]> {
+  const apiKey = getAliyunMaasSavedKey().trim();
+  if (!apiKey) {
+    throw new Error('未配置阿里云百炼 API Key。请在「设置 → API → 阿里云百炼」填写并保存。');
+  }
+  const url = aliyunMaasMultimodalFetchUrl();
+  const size = aliyunZImageSize(aspectRatio, nodeResolution);
+  const text = (prompt || '').slice(0, 800);
+  const n = Math.max(1, Math.min(4, numberOfImages || 1));
+  const out: string[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const content: Array<Record<string, string>> = [];
+    const refs = (refBase64s || []).filter(Boolean).slice(0, 1);
+    for (const b64 of refs) {
+      const raw = b64.replace(/^data:image\/\w+;base64,/i, '');
+      content.push({ image: `data:image/jpeg;base64,${raw}` });
+    }
+    content.push({ text });
+    const body = {
+      model: 'z-image-turbo',
+      input: { messages: [{ role: 'user', content }] },
+      parameters: { prompt_extend: false, size },
+    };
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        'x-aliyun-maas-key': apiKey,
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+    const rawText = await res.text();
+    if (!res.ok) {
+      const hint =
+        refs.length && /InvalidParameter|仅.*text|only one text/i.test(rawText)
+          ? ' Z-Image-Turbo 官方接口文生图仅允许一条 text；图生图若被拒绝，请改用其它图生图模型或仅用文生图。'
+          : '';
+      throw new Error(`阿里云 Z-Image-Turbo 错误 (${res.status}): ${rawText.slice(0, 800)}${hint}`);
+    }
+    let json: unknown;
+    try {
+      json = JSON.parse(rawText);
+    } catch {
+      throw new Error(`阿里云生图响应不是 JSON: ${rawText.slice(0, 300)}`);
+    }
+    const imageUrl = await extractAliyunZImageUrl(json);
+    out.push(await fetchUrlAsBase64(imageUrl, signal));
+  }
+  return out;
+}
+
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   const apiKey = getOpenAiSavedKey();
   if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key，请在设置中选择「OpenAI 兼容」并填写密钥。');
@@ -4428,6 +4538,10 @@ export async function openAiGenerateNewImage(
       quality,
       signal
     );
+  }
+
+  if (isAliyunMaasZImageModel(rawModel)) {
+    return aliyunZImageGenerate(prompt, aspectRatio, numberOfImages, nodeResolution, undefined, signal);
   }
 
   // 满 eAPI 图像模型
@@ -4512,6 +4626,10 @@ export async function openAiEditImage(
     );
   }
 
+  if (isAliyunMaasZImageModel(rawModel)) {
+    return aliyunZImageGenerate(prompt, aspectRatio, numberOfImages, nodeResolution, base64Images, signal);
+  }
+
   // 满 eAPI 图像模型图生图
   if (isManxueImageModel(rawModel)) {
     const mxKey = getManxueSavedKey().trim();
@@ -4564,7 +4682,8 @@ export async function chatCompletionHistoryAtBase(
 ): Promise<string> {
   const key = apiKey.trim();
   const isArk = /volcengine-ark/i.test(baseUrlRaw);
-  if (!key && !isArk) throw new Error('未配置对话 API Key。');
+  const isAliyun = /aliyun-maas/i.test(baseUrlRaw);
+  if (!key && !isArk && !isAliyun) throw new Error('未配置对话 API Key。');
   if (!turns.length) throw new Error('对话内容为空。');
   const base = normalizeBaseUrl(baseUrlRaw);
   const model = resolveChatModelForBase(base, modelName);

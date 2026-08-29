@@ -23,6 +23,8 @@ const MINIMAX_API_KEY_STORAGE_KEY = 'minimax-openai-compatible-api-key-v1';
 const MINIMAX_BASE_URL_STORAGE_KEY = 'minimax-openai-compatible-base-url-v1';
 /** 火山方舟 Agent Plan（ark.cn-beijing.volces.com/api/plan/v3）对话 */
 const VOLCENGINE_ARK_API_KEY_STORAGE_KEY = 'volcengine-ark-agent-plan-api-key-v1';
+/** 阿里云百炼（maas.aliyuncs.com compatible-mode）对话 / Z-Image-Turbo */
+const ALIYUN_MAAS_API_KEY_STORAGE_KEY = 'aliyun-maas-api-key-v1';
 
 export const DEFAULT_OPENAI_BASE_URL = 'https://toapis.com/v1';
 /** DeepSeek 官方 OpenAI 兼容入口 */
@@ -40,6 +42,8 @@ export const DEFAULT_MINIMAX_BASE_URL = 'https://api.minimaxi.com/v1';
 
 /** 火山方舟 Agent Plan OpenAI 兼容入口（实际请求走同源代理，映射 /v1 → /api/plan/v3） */
 export const DEFAULT_VOLCENGINE_ARK_BASE_URL = 'https://ark.cn-beijing.volces.com/api/plan/v3';
+export const DEFAULT_ALIYUN_MAAS_COMPAT_BASE_URL =
+  'https://ws-qlxmp9rbllkaq6yy.cn-beijing.maas.aliyuncs.com/compatible-mode/v1';
 
 /** 旧版存盘中的 model id → 当前官方命名（不在界面展示旧名） */
 export function normalizeDeepSeekChatModelId(modelId: string): string {
@@ -398,6 +402,24 @@ export function setVolcengineArkKey(apiKey: string): void {
   try {
     if (normalized) localStorage.setItem(VOLCENGINE_ARK_API_KEY_STORAGE_KEY, normalized);
     else localStorage.removeItem(VOLCENGINE_ARK_API_KEY_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getAliyunMaasSavedKey(): string {
+  try {
+    return normalizeVolcengineArkApiKey(localStorage.getItem(ALIYUN_MAAS_API_KEY_STORAGE_KEY) || '');
+  } catch {
+    return '';
+  }
+}
+
+export function setAliyunMaasKey(apiKey: string): void {
+  const normalized = normalizeVolcengineArkApiKey(apiKey);
+  try {
+    if (normalized) localStorage.setItem(ALIYUN_MAAS_API_KEY_STORAGE_KEY, normalized);
+    else localStorage.removeItem(ALIYUN_MAAS_API_KEY_STORAGE_KEY);
   } catch {
     /* ignore */
   }

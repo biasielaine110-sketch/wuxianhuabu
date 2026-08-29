@@ -66,6 +66,14 @@
       "destination": "/api/volcengine-ark-proxy?path=$1"
     },
     {
+      "source": "/aliyun-maas-api/(.*)",
+      "destination": "/api/aliyun-maas-proxy?path=$1"
+    },
+    {
+      "source": "/api/aliyun-maas-proxy/(.*)",
+      "destination": "/api/aliyun-maas-proxy?path=$1"
+    },
+    {
       "source": "/codesonline-image-api/(.*)",
       "destination": "/api/codesonline-image-proxy?path=$1"
     },

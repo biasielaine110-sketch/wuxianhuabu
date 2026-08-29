@@ -12,6 +12,7 @@ import {
   persistAiSettings,
   setCodesonlineChatKey,
   setVolcengineArkKey,
+  setAliyunMaasKey,
   getAiSettingsSnapshot,
 } from '../services/aiSettings';
 import { initGeminiClientFromStorage } from '../services/geminiService';
@@ -99,6 +100,8 @@ export type CanvasSettingsModalProps = {
   setCodesonlineChatKeyInput: Dispatch<SetStateAction<string>>;
   volcengineArkKeyInput: string;
   setVolcengineArkKeyInput: Dispatch<SetStateAction<string>>;
+  aliyunMaasKeyInput: string;
+  setAliyunMaasKeyInput: Dispatch<SetStateAction<string>>;
   hfsyKeyInput: string;
   setHfsyKeyInput: Dispatch<SetStateAction<string>>;
   manxueBaseInput: string;
@@ -174,6 +177,8 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
     setCodesonlineChatKeyInput,
     volcengineArkKeyInput,
     setVolcengineArkKeyInput,
+    aliyunMaasKeyInput,
+    setAliyunMaasKeyInput,
     hfsyKeyInput,
     setHfsyKeyInput,
     manxueBaseInput,
@@ -388,6 +393,21 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                     />
                   </div>
 
+                  <div className="mt-5 pt-4 border-t border-[#333]">
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">阿里云百炼（对话 / Z-Image）</h3>
+                    <p className="text-xs text-gray-500 mb-2">
+                      填写百炼 API Key 并在本站保存。对话走 compatible-mode/v1（Qwen3.7-Plus / Qwen3.8-Max / Qwen3-VL-Plus），文生图与图生图走 Z-Image-Turbo。须在当前网站域名下保存。
+                    </p>
+                    <label className="text-xs text-gray-500 block mb-1">百炼 API Key</label>
+                    <input
+                      type="password"
+                      value={aliyunMaasKeyInput}
+                      onChange={(e) => setAliyunMaasKeyInput(e.target.value)}
+                      placeholder="sk-..."
+                      className="w-full bg-[#222222] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-orange-500 transition-colors text-sm"
+                    />
+                  </div>
+
                   {/* ③ DeepSeek */}
                   <div className="mt-5 pt-4 border-t border-[#333]">
                     <h3 className="text-sm font-semibold text-gray-200 mb-2">DeepSeek</h3>
@@ -506,6 +526,7 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                               });
                               setCodesonlineChatKey(codesonlineChatKeyInput.trim());
                               setVolcengineArkKey(volcengineArkKeyInput.trim());
+                              setAliyunMaasKey(aliyunMaasKeyInput.trim());
                               initGeminiClientFromStorage();
                               onClose();
                             }
@@ -540,6 +561,7 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                               });
                               setCodesonlineChatKey(codesonlineChatKeyInput.trim());
                               setVolcengineArkKey(volcengineArkKeyInput.trim());
+                              setAliyunMaasKey(aliyunMaasKeyInput.trim());
                               initGeminiClientFromStorage();
                               onClose();
                             }
@@ -578,6 +600,7 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                         });
                         setCodesonlineChatKey(codesonlineChatKeyInput.trim());
                         setVolcengineArkKey(volcengineArkKeyInput.trim());
+                        setAliyunMaasKey(aliyunMaasKeyInput.trim());
                         initGeminiClientFromStorage();
                           onClose();
                       }}

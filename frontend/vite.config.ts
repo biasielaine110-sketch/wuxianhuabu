@@ -42,6 +42,49 @@ function faviconFallbackPlugin(): Plugin {
   };
 }
 
+/** 开发环境：把阿里云 OSS 临时图转到同源拉取，避免 CORS */
+function aliyunMaasOssFetchPlugin(): Plugin {
+  const middleware = async (
+    req: { url?: string },
+    res: { statusCode: number; setHeader: (k: string, v: string) => void; end: (b?: unknown) => void },
+    next: () => void
+  ) => {
+    const raw = req.url || '';
+    if (!raw.startsWith('/aliyun-maas-api/oss-fetch')) {
+      next();
+      return;
+    }
+    try {
+      const target = new URL(raw, 'http://localhost').searchParams.get('u') || '';
+      const host = new URL(target).hostname.toLowerCase();
+      if (!(host.includes('aliyuncs.com') && (host.includes('dashscope') || host.includes('oss-')))) {
+        res.statusCode = 400;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(JSON.stringify({ error: 'invalid_oss_url' }));
+        return;
+      }
+      const upstream = await fetch(target);
+      res.statusCode = upstream.status;
+      const ct = upstream.headers.get('content-type');
+      if (ct) res.setHeader('Content-Type', ct);
+      res.end(Buffer.from(await upstream.arrayBuffer()));
+    } catch (e) {
+      res.statusCode = 502;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end(JSON.stringify({ error: 'oss_fetch_failed', message: e instanceof Error ? e.message : String(e) }));
+    }
+  };
+  return {
+    name: 'aliyun-maas-oss-fetch',
+    configureServer(server) {
+      server.middlewares.use(middleware);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(middleware);
+    },
+  };
+}
+
 /** hfsy 图像代理：支持 ?path=v1beta/models/...:generateContent，避免路径冒号被错误解析 */
 function configureHfsyImageProxyPathQuery(proxy: { on: (event: string, handler: (...args: unknown[]) => void) => void }) {
   proxy.on('proxyReq', (proxyReq, req) => {
@@ -216,6 +259,52 @@ const toapisFileCdnProxy = {
       return `/api/plan/v3${suffix}`;
     },
   },
+  '/aliyun-maas-api': {
+    target: 'https://ws-qlxmp9rbllkaq6yy.cn-beijing.maas.aliyuncs.com',
+    changeOrigin: true,
+    secure: true,
+    timeout: 1_800_000,
+    proxyTimeout: 1_800_000,
+    bypass(req) {
+      const u = req.url || '';
+      if (u.includes('/oss-fetch')) return u;
+    },
+    configure(proxy) {
+      proxy.on('proxyReq', (proxyReq, req) => {
+        const raw = (req as { headers?: Record<string, unknown> }).headers?.['x-aliyun-maas-key'];
+        const custom = String(Array.isArray(raw) ? raw[0] : raw || '').trim();
+        if (custom && !proxyReq.getHeader('Authorization')) {
+          proxyReq.setHeader('Authorization', `Bearer ${custom}`);
+        }
+      });
+    },
+    rewrite: (p: string) => {
+      const path = p.startsWith('/') ? p : `/${p}`;
+      const stripped = path.replace(/^\/aliyun-maas-api(?=\/|$)/, '');
+      return stripped.length ? stripped : '/';
+    },
+  },
+  '/api/aliyun-maas-proxy': {
+    target: 'https://ws-qlxmp9rbllkaq6yy.cn-beijing.maas.aliyuncs.com',
+    changeOrigin: true,
+    secure: true,
+    timeout: 1_800_000,
+    proxyTimeout: 1_800_000,
+    configure(proxy) {
+      proxy.on('proxyReq', (proxyReq, req) => {
+        const raw = (req as { headers?: Record<string, unknown> }).headers?.['x-aliyun-maas-key'];
+        const custom = String(Array.isArray(raw) ? raw[0] : raw || '').trim();
+        if (custom && !proxyReq.getHeader('Authorization')) {
+          proxyReq.setHeader('Authorization', `Bearer ${custom}`);
+        }
+      });
+    },
+    rewrite: (p: string) => {
+      const path = p.startsWith('/') ? p : `/${p}`;
+      const stripped = path.replace(/^\/api\/aliyun-maas-proxy(?=\/|$)/, '');
+      return stripped.length ? stripped : '/';
+    },
+  },
   /** hfsyapi.cn 图像 API 未开放 CORS；经同源转发到 www.hfsyapi.cn（OpenAI 兼容 /v1/images/*） */
   '/api/hfsy-image-proxy': {
     target: 'https://www.hfsyapi.cn',
@@ -380,7 +469,7 @@ export default defineConfig(({ mode }) => {
       preview: {
         proxy: { ...toapisFileCdnProxy },
       },
-      plugins: [react(), injectSitePasswordPlugin(sitePassword), faviconFallbackPlugin()],
+      plugins: [react(), injectSitePasswordPlugin(sitePassword), faviconFallbackPlugin(), aliyunMaasOssFetchPlugin()],
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),

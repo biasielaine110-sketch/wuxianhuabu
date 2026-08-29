@@ -767,6 +767,11 @@ export function ChatNodeContent({
             <option value="doubao-seed-2.0-lite-ark">Doubao-Seed-2.0-lite（火山方舟）</option>
             <option value="doubao-seed-2.1-turbo-ark">Doubao-Seed-2.1-turbo（火山方舟）</option>
           </optgroup>
+          <optgroup label="阿里云百炼">
+            <option value="qwen3.7-plus-aliyun">Qwen3.7-Plus（阿里云百炼）</option>
+            <option value="qwen3.8-max-aliyun">Qwen3.8-Max（阿里云百炼）</option>
+            <option value="qwen3-vl-plus-aliyun">Qwen3-VL-Plus（阿里云百炼）</option>
+          </optgroup>
           <optgroup label="DeepSeek">
             <option value="deepseek-v4-flash">DeepSeek-V4-Flash</option>
             <option value="deepseek-v4-pro">DeepSeek-V4-Pro</option>
@@ -1265,6 +1270,9 @@ export function ChatNodeContent({
             
             <option value="gpt-image-2-vip">GPT Image 2 VIP（ToAPIs）</option>
             <option value="gpt-image-2-official">GPT Image 2 Official（ToAPIs）</option>
+            <optgroup label="阿里云百炼">
+              <option value="z-image-turbo-aliyun">Z-Image-Turbo（阿里云百炼）</option>
+            </optgroup>
             <optgroup label="hfsyapi.cn">
               <option value="gpt-image-2-hfsy">GPT Image 2（hfsyapi.cn）</option>
               <option value="gpt-image-2pro-hfsy">GPT Image 2 Pro（hfsyapi.cn）</option>
