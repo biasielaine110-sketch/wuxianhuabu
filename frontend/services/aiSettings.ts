@@ -64,6 +64,16 @@ export function normalizeLegacyImageModelId(modelId: string): string {
   if (m === 'gemini-3.1-flash-image-preview' || m === 'gemini-2.5-flash-image' || m === 'gemini-3.1-flash-lite-image-official') {
     return 'qwen-image-3.0';
   }
+  if (
+    m === 'gpt-image-2-manxue' ||
+    m === 'gpt-image-2-pro-manxue' ||
+    m === 'gemini-3.1-flash-image-preview-2k-manxue' ||
+    m === 'gemini-3-pro-image-preview-2k-manxue' ||
+    m === 'gemini-3-pro-image-preview-4k-manxue' ||
+    m === 'gemini-3.1-flash-image-preview-4k-manxue'
+  ) {
+    return 'gpt-image-2-4k-manxue';
+  }
   return m;
 }
 

@@ -818,6 +818,11 @@ export function ChatNodeContent({
             <option value="qwen3.5-plus-toapis">Qwen3.5-Plus（ToAPIs）</option>
             <option value="deepseek-v4-flash-toapis">DeepSeek-V4-Flash（ToAPIs）</option>
           </optgroup>
+          <optgroup label="满 e">
+            <option value="gpt-5.4-mini-manxue">GPT-5.4 Mini（满 e）</option>
+            <option value="gpt-5.6-luna-manxue">GPT-5.6 Luna（满 e）</option>
+            <option value="claude-sonnet-4-6-thinking-manxue">Claude Sonnet 4.6 Thinking（满 e）</option>
+          </optgroup>
         </select>
         <label className="flex items-center gap-1 shrink-0 text-gray-500" style={{ fontSize: 45 }}>
           <span className="whitespace-nowrap">字号</span>
@@ -1308,12 +1313,9 @@ export function ChatNodeContent({
               <option value="nano-banana-2-hfsy">Nano-Banana 2（hfsyapi.cn）</option>
               <option value="nano-banana-pro-hfsy">Nano-Banana Pro（hfsyapi.cn）</option>
             </optgroup>
-            <option value="gpt-image-2-manxue">GPT Image 2（满 e）</option>
             <option value="gpt-image-2-4k-manxue">GPT Image 2 4K（满 e）</option>
             <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
             <option value="qwen-image-3.0">Qwen-Image-3.0（ToAPIs）</option>
-            <option value="gemini-3.1-flash-image-preview-2k-manxue">Gemini 3.1 Flash Image 2K（满 e）</option>
-            <option value="gemini-3-pro-image-preview-2k-manxue">Gemini 3 Pro Image 2K（满 e）</option>
           </select>
           {isToApisGptImage2QualityModel(node.imageModel || 'gpt-image-2-codesonline') && (
             <select

@@ -66,7 +66,7 @@ function rewriteManxueBaseForBrowserCors(baseNormalized: string): string {
   }
 }
 
-function manxueFetchBase(): string {
+export function manxueFetchBase(): string {
   return rewriteManxueBaseForBrowserCors(normalizeBaseUrl(getManxueBaseUrl()));
 }
 
@@ -201,12 +201,17 @@ function isManxueHost(baseNormalized: string): boolean {
   }
 }
 
-/** 满 eAPI 视频模型（Grok Imagine Video 系列） */
+/** 画布节点 id（兼容旧项目）；上游 media/generate 使用 grok-imagine-1.5 */
 export const MANXUE_GROK_IMAGINE_VIDEO_MODEL_ID = 'grok-imagine-video-1.5-preview';
+const MANXUE_GROK_IMAGINE_UPSTREAM_MODEL = 'grok-imagine-1.5';
 
 export function isManxueVideoModel(m?: string): boolean {
   if (!m) return false;
-  return m === MANXUE_GROK_IMAGINE_VIDEO_MODEL_ID || m.endsWith('-manxue-video');
+  return (
+    m === MANXUE_GROK_IMAGINE_VIDEO_MODEL_ID ||
+    m === MANXUE_GROK_IMAGINE_UPSTREAM_MODEL ||
+    m.endsWith('-manxue-video')
+  );
 }
 
 /** 判断是否为 MiniMax 域名（api.minimaxi.com） */
@@ -1736,6 +1741,14 @@ function extractVideoUrlFromPollPayload(data: unknown): string | null {
     const v = o[k];
     if (isHttpUrlString(v)) return v.trim();
   }
+  for (const k of ['result_urls', 'resultUrls', 'video_urls'] as const) {
+    const arr = o[k];
+    if (Array.isArray(arr)) {
+      for (const item of arr) {
+        if (isHttpUrlString(item)) return item.trim();
+      }
+    }
+  }
 
   // doubao-seedance-1-5-pro 等模型可能直接在顶层 data 数组返回
   const topData = o.data;
@@ -1826,7 +1839,7 @@ function extractVideoUrlFromPollPayload(data: unknown): string | null {
 
 function isVideoTaskCompletedStatus(status: unknown): boolean {
   const s = String(status || '').toLowerCase();
-  return s === 'completed' || s === 'succeeded' || s === 'success' || s === 'done';
+  return s === 'completed' || s === 'succeeded' || s === 'success' || s === 'done' || s === 'finished';
 }
 
 function normalizeHfsyVideoDuration(uiSeconds: number): number {
@@ -2154,12 +2167,7 @@ const MANXUE_VIDEO_TASK_MAX_WAIT_MS = 1_800_000;
 const MANXUE_VIDEO_MAX_REFERENCE_IMAGES = 3;
 
 /**
- * 满 eAPI（manxueapi.com）视频生成参考图：`grok-imagine-video-1.5-preview` 在
- * `/v1/chat/completions` 模式下直接接受「公网 HTTPS URL」或「base64 data URI」（同 xAI Grok 视频 API）。
- * 该路由不强制走 `/uploads/images` 上传端点；满 eAPI 视频路由下 `/v1/upload/image` 实测返回 404。
- * 旧实现：先尝试 `/uploads/images` 失败回退为 data URI（保留作为兜底）。
- *
- * CORS 已由 `/manxue-api` 同源代理处理（Vite dev + Vercel rewrite）。
+ * 满 eAPI 视频参考图：media/generate 接受公网 URL 或 data URI。
  */
 async function manxueUploadReferenceImageUrls(
   refs: string[],
@@ -2172,14 +2180,49 @@ async function manxueUploadReferenceImageUrls(
   const out: string[] = [];
   for (let i = 0; i < list.length; i++) {
     const { raw, mime } = parseBase64ImageInput(list[i]);
-    // 满 e Grok Video 走 /v1/chat/completions，不暴露独立的 /upload/image 端点（实测 404）。
-    // 直接用 data URI 作为多模态 image_url，manxue 网关在 chat 路由可透传至上游。
-    // 若将来网关支持上传，可在此处插入 openAiCompatUploadImageBlob 优先路径。
     const cleanRaw = raw.replace(/\s/g, '');
     const m = mime || sniffMimeFromBase64(cleanRaw) || 'image/jpeg';
     out.push(`data:${m};base64,${cleanRaw}`);
   }
   return out;
+}
+
+function pickManxueAsyncTaskId(json: unknown): string | undefined {
+  if (!json || typeof json !== 'object') return undefined;
+  const o = json as Record<string, unknown>;
+  const asId = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+  for (const k of ['task_id', 'taskId', 'id']) {
+    const s = asId(o[k]);
+    if (s) return s;
+  }
+  const data = o.data;
+  if (Array.isArray(data) && data[0] && typeof data[0] === 'object') {
+    const first = data[0] as Record<string, unknown>;
+    for (const k of ['task_id', 'taskId', 'id']) {
+      const s = asId(first[k]);
+      if (s) return s;
+    }
+  } else if (data && typeof data === 'object') {
+    const d = data as Record<string, unknown>;
+    for (const k of ['task_id', 'taskId', 'id']) {
+      const s = asId(d[k]);
+      if (s) return s;
+    }
+  }
+  return undefined;
+}
+
+function pickManxueTaskStatus(json: unknown): string {
+  if (!json || typeof json !== 'object') return '';
+  const o = json as Record<string, unknown>;
+  const asSt = (v: unknown) => (typeof v === 'string' ? v : '');
+  if (asSt(o.status) || asSt(o.state)) return asSt(o.status) || asSt(o.state);
+  const data = o.data;
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    const d = data as Record<string, unknown>;
+    return asSt(d.status) || asSt(d.state);
+  }
+  return '';
 }
 
 async function manxueSubmitVideoGeneration(
@@ -2189,29 +2232,37 @@ async function manxueSubmitVideoGeneration(
   const apiKey = getManxueSavedKey();
   if (!apiKey) throw new Error('未配置满 e API Key。请在「设置 → API → 满 e」填写。');
   const base = manxueFetchBase();
-  const res = await fetch(`${base}/videos/generations`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
-  const text = await res.text();
-  if (!res.ok) {
-    throw new Error(`满 e 视频提交失败 (${res.status}): ${text.slice(0, 800)}`);
+  const endpoints = [`${base}/media/generate`, `${base}/videos/generations`];
+  let lastErr = '';
+  for (const url of endpoints) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      lastErr = `满 e 视频提交失败 (${res.status} ${url.slice(url.lastIndexOf('/'))}): ${text.slice(0, 800)}`;
+      if (res.status === 404 || res.status === 405) continue;
+      throw new Error(lastErr);
+    }
+    let json: unknown;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      throw new Error(`满 e 响应非 JSON: ${text.slice(0, 400)}`);
+    }
+    const rec = json as { error?: { message?: string } };
+    if (rec.error?.message) throw new Error(`满 e: ${rec.error.message}`);
+    const id = pickManxueAsyncTaskId(json);
+    if (!id) throw new Error(`满 e 未返回视频任务 id：${text.slice(0, 400)}`);
+    return { id };
   }
-  let json: { id?: string; task_id?: string; taskId?: string; error?: { message?: string } };
-  try {
-    json = JSON.parse(text);
-  } catch {
-    throw new Error(`满 e 响应非 JSON: ${text.slice(0, 400)}`);
-  }
-  if (json.error?.message) throw new Error(`满 e: ${json.error.message}`);
-  const id = json.id || json.task_id || json.taskId;
-  if (!id) throw new Error(`满 e 未返回视频任务 id：${text.slice(0, 400)}`);
-  return { id: String(id) };
+  throw new Error(lastErr || '满 e 视频提交失败：media/generate 不可用。');
 }
 
 async function manxuePollVideoTaskToPlayableUrl(
@@ -2221,40 +2272,48 @@ async function manxuePollVideoTaskToPlayableUrl(
   const apiKey = getManxueSavedKey();
   const base = manxueFetchBase();
   const deadline = Date.now() + MANXUE_VIDEO_TASK_MAX_WAIT_MS;
+  const pollUrls = (id: string) => [
+    `${base}/media/tasks/${encodeURIComponent(id)}`,
+    `${base}/tasks/${encodeURIComponent(id)}`,
+    `${base}/media/result?task_id=${encodeURIComponent(id)}`,
+    `${base}/media/generate/${encodeURIComponent(id)}`,
+    `${base}/videos/generations/${encodeURIComponent(id)}`,
+  ];
   await sleepInterruptible(5_000, signal);
 
   while (Date.now() < deadline) {
     assertNotAborted(signal);
-    const res = await fetch(`${base}/videos/generations/${encodeURIComponent(taskId)}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal,
-    });
-    const text = await res.text();
-    if (!res.ok) {
-      // 偶发 5xx 继续重试
-      await sleepInterruptible(10_000, signal);
-      continue;
-    }
-    let data: { status?: string; error?: { message?: string } };
-    try {
-      data = JSON.parse(text);
-    } catch {
-      await sleepInterruptible(5_000, signal);
-      continue;
-    }
-    if (isVideoTaskCompletedStatus(data.status)) {
-      const rawUrl = extractVideoUrlFromPollPayload(data);
-      if (!rawUrl) {
-        throw new Error(
-          `满 e 视频任务完成但未返回可播放 URL。完整响应：${text.slice(0, 2000)}`
-        );
+    let parsed: unknown = null;
+    let rawText = '';
+    for (const url of pollUrls(taskId)) {
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal,
+      });
+      rawText = await res.text();
+      if (!res.ok) continue;
+      try {
+        parsed = JSON.parse(rawText);
+        break;
+      } catch {
+        continue;
       }
-      const normalizedUrl = rawUrl.replace(/^(https?:\/)([^/])/i, '$1/$2');
-      return normalizedUrl;
     }
-    const st = String(data.status || '').toLowerCase();
-    if (st === 'failed' || st === 'error' || st === 'cancelled') {
-      throw new Error(`满 e 视频生成失败: ${data.error?.message || text.slice(0, 300)}`);
+    if (parsed) {
+      const st = pickManxueTaskStatus(parsed);
+      if (isVideoTaskCompletedStatus(st) || extractVideoUrlFromPollPayload(parsed)) {
+        const rawUrl = extractVideoUrlFromPollPayload(parsed);
+        if (!rawUrl) {
+          throw new Error(`满 e 视频任务完成但未返回可播放 URL。完整响应：${rawText.slice(0, 2000)}`);
+        }
+        const normalizedUrl = rawUrl.replace(/^(https?:\/)([^/])/i, '$1/$2');
+        return rewriteKnownImageCdnToSameOrigin(normalizedUrl);
+      }
+      const failed = String(st).toLowerCase();
+      if (failed === 'failed' || failed === 'error' || failed === 'cancelled') {
+        const rec = parsed as { error?: { message?: string }; message?: string };
+        throw new Error(`满 e 视频生成失败: ${rec.error?.message || rec.message || rawText.slice(0, 300)}`);
+      }
     }
     await sleepInterruptible(10_000, signal);
   }
@@ -2264,11 +2323,8 @@ async function manxuePollVideoTaskToPlayableUrl(
 }
 
 /**
- * 满 eAPI：`grok-imagine-video-1.5-preview` 文生 / 图生视频。
- * - 10 / 15 秒；720p（固定）。
- * - 参考图 0 张 = 文生；1+ 张 = 图生（取首张作为关键帧）。
- * - 字段名沿用 OpenAI 兼容 / Sora 风格（seconds / aspect_ratio / resolution），
- *   同时附 `resolution_name` 双字段以兼容部分聚合网关的命名。
+ * 满 eAPI：`grok-imagine-1.5` 文生 / 图生视频（异步 POST /v1/media/generate，轮询 task_id）。
+ * 该模型不能走 /v1/chat/completions。
  */
 export async function manxueVideoGenerate(params: {
   prompt: string;
@@ -2281,148 +2337,26 @@ export async function manxueVideoGenerate(params: {
   const { prompt, durationSeconds, aspectRatio, referenceImagesBase64 = [], signal } = params;
   const apiKey = getManxueSavedKey();
   if (!apiKey) throw new Error('未配置满 e API Key。请在「设置 → API → 满 e」填写。');
-  const key = apiKey.trim();
-  const base = manxueFetchBase();
 
   const imageUrls = await manxueUploadReferenceImageUrls(referenceImagesBase64, signal);
+  const duration = Math.min(15, Math.max(1, Number(durationSeconds) || 10));
+  const effectiveAspectRatio = (aspectRatio || '16:9').trim() || '16:9';
 
-  // 拼装 user 消息：若带参考图，作为多模态 content；纯文生则直接文本。
-  const duration = Number(durationSeconds) || 10;
-  const resolution = '720p';
-
-  // xAI 官方 Grok 视频 API（grok-imagine-video-1.5-preview）：
-  //   - 字段名：duration（数字 1-15），aspect_ratio，resolution
-  //   - image-to-video 模式：默认按参考图画幅，但 aspect_ratio 字段**可 override**（拉伸）
-  //   - default duration = 6 秒（不传 duration 时回退）
-  // 满 eAPI 在 chat/completions 路由上是否解析这些字段取决于网关实现。
-  // 为最大化兼容：
-  //   - 图生视频：探测参考图实际画幅，aspect_ratio 仍按用户选择（不强制等于参考图），
-  //     提示中明示用户"图生时将按 aspect_ratio 拉伸"
-  //   - prompt 显式说明 duration（防 fallback 到 6 秒）
-  let probedAspect: { width: number; height: number; canonical: string } | null = null;
-  if (imageUrls.length > 0 && referenceImagesBase64.length > 0) {
-    const probed = await readImageBase64AspectRatio(referenceImagesBase64[0], signal);
-    if (probed) {
-      probedAspect = { width: probed.width, height: probed.height, canonical: probed.canonical };
-    }
-  }
-
-  const effectiveAspectRatio = aspectRatio;
-
-  // 双向夹击保证画幅与时长（满 e 网关不解析 aspect_ratio / duration top-level 字段）：
-  // 1) top-level body 字段（多字段兜底，万一网关某天支持就有用）
-  // 2) system 强 prompt（chat 路由唯一能识别的形式）
-  // 3) user 末尾强提示（防止 system 丢失）
-  //
-  // 关键 prompt 策略：
-  //   - 不能说"按 aspect_ratio 拉伸"——上游 Grok video 默认就是拉伸，
-  //     但用户反馈 16:9→9:16 说明 chat 路由**根本没让上游拉伸**。
-  //   - 改为让 chat 模型**先在脑里把参考图重塑为 16:9 画幅**（左/右留白、画面主体居中），
-  //     再交给上游图生视频。这是 chat LLM 能听懂并影响其调用的指令。
-  //   - 时长同样：明确说"duration=15 秒"且禁止"自动缩短到 6 秒"。
-  const systemText =
-    '你是视频生成助手。' +
-    `本次任务必须生成：画幅=${effectiveAspectRatio}，时长=${duration} 秒。` +
-    `无论参考图是什么画幅，最终视频画幅必须是 ${effectiveAspectRatio}（不是参考图原画幅）。` +
-    (probedAspect
-      ? `参考图是 ${probedAspect.width}×${probedAspect.height}（约 ${probedAspect.canonical}）。` +
-        `请把参考图"扩展/外推"为 ${effectiveAspectRatio} 画幅后再生成视频——` +
-        '比如 9:16 变 16:9：把参考图主体居中，左右各加黑边/场景外推，使其变成 16:9；' +
-        '16:9 变 9:16：把参考图主体居中，上下各加黑边/场景外推。' +
-        '**绝不能**直接生成与参考图同画幅的视频。'
-      : '') +
-    `时长必须是 ${duration} 秒，**绝不能**自动缩短到 6 秒或默认时长。` +
-    '完成后只返回一行可播放的视频 URL（Markdown 链接或裸 URL），不要任何其他文字。';
-  const userHint =
-    `\n\n[params] aspect_ratio=${effectiveAspectRatio}, duration=${duration}。` +
-    `请生成 ${effectiveAspectRatio} 画幅（外推参考图到该画幅）、${duration} 秒的视频，` +
-    '完成后只返回一行可播放的视频 URL（Markdown 链接或裸 URL）。';
-  const userText = prompt + userHint;
-  const userContentParts: Array<{ type: 'image_url'; image_url: { url: string } } | { type: 'text'; text: string }> = [];
-  if (imageUrls.length) {
-    for (const u of imageUrls) {
-      userContentParts.push({ type: 'image_url', image_url: { url: u } });
-    }
-  }
-  userContentParts.push({ type: 'text', text: userText });
-  const userContent: string | typeof userContentParts = imageUrls.length ? userContentParts : userText;
-
-  // 字段命名兼容（基于 xAI 原生 + 满 e 网关实测反馈）：
-  // - duration: 数字 1-15（xAI 原生，default=6）
-  // - aspect_ratio: 字符串（xAI 原生）—— 这是上游认的画幅字段
-  // - 之前加 size 像素字符串（白名单 1280x720/720x1280/...）实测反而让 400 报错（与
-  //   原始 chat 路由不兼容），回退到只发 aspect_ratio。
-  // - 不发 size、不发 resolution（满 e 网关 chat 路由上验证过不需要）
   const body: Record<string, unknown> = {
-    model: MANXUE_GROK_IMAGINE_VIDEO_MODEL_ID,
-    messages: [
-      { role: 'system', content: systemText },
-      { role: 'user', content: userContent },
-    ],
-    stream: true,
+    model: MANXUE_GROK_IMAGINE_UPSTREAM_MODEL,
+    prompt,
     duration,
-    duration_name: duration,
     seconds: duration,
     aspect_ratio: effectiveAspectRatio,
-    aspect_ratio_name: effectiveAspectRatio,
-    aspectRatio: effectiveAspectRatio,
+    resolution: '720p',
   };
-
-  const res = await fetch(`${base}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${key}`,
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
-  if (!res.ok) {
-    const t = await res.text();
-    throw new Error(`满 e 视频提交失败 (${res.status}): ${t.slice(0, 800)}`);
+  if (imageUrls.length) {
+    body.images = imageUrls;
+    body.image_urls = imageUrls;
   }
-  if (!res.body) throw new Error('满 e 视频响应不支持流式读取。');
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let lineBuf = '';
-  let acc = '';
-  try {
-    while (true) {
-      assertNotAborted(signal);
-      const { done, value } = await reader.read();
-      if (done) break;
-      lineBuf += decoder.decode(value, { stream: true });
-      const lines = lineBuf.split('\n');
-      lineBuf = lines.pop() ?? '';
-      for (const rawLine of lines) {
-        const s = rawLine.trim();
-        if (!s.startsWith('data:')) continue;
-        const data = s.slice(5).trim();
-        if (data === '[DONE]') continue;
-        try {
-          const chunk = JSON.parse(data) as {
-            error?: { message?: string };
-            choices?: Array<{ delta?: { content?: string } }>;
-          };
-          if (chunk.error?.message) throw new Error(`满 e 视频: ${chunk.error.message}`);
-          const content = chunk.choices?.[0]?.delta?.content;
-          if (typeof content === 'string' && content) {
-            acc += content;
-            const url = extractVideoUrlFromManxueChatAccumulated(acc);
-            if (url) return url;
-          }
-        } catch (e) {
-          if (e instanceof Error && e.message.startsWith('满 e 视频:')) throw e;
-        }
-      }
-    }
-    const tail = extractVideoUrlFromManxueChatAccumulated(acc);
-    if (tail) return tail;
-    throw new Error(`满 e 视频流式响应中未解析到视频 URL。文本片段：${acc.slice(0, 500)}`);
-  } finally {
-    reader.releaseLock();
-  }
+  const { id } = await manxueSubmitVideoGeneration(body, signal);
+  return manxuePollVideoTaskToPlayableUrl(id, signal);
 }
 
 /**
@@ -3720,6 +3654,9 @@ function resolveChatModelForBase(baseNormalized: string, modelName: string): str
   if (m === 'claude-haiku-4-5-codesonline') return 'claude-haiku-4-5';
   if (m === 'gpt-5.6-terra-hfsy') return 'gpt-5.6-terra';
   if (m === 'grok-4.6-hfsy') return 'grok-4.6';
+  if (m === 'gpt-5.4-mini-manxue') return 'gpt-5.4-mini';
+  if (m === 'gpt-5.6-luna-manxue') return 'gpt-5.6-luna';
+  if (m === 'claude-sonnet-4-6-thinking-manxue') return 'claude-sonnet-4-6-thinking';
   if (m === 'glm-5.3-flash-toapis') return 'glm-5.3-flash';
   if (m === 'grok-4.6-toapis') return 'grok-4.6';
   if (m === 'gpt-5.4-mini-toapis') return 'gpt-5.4-mini';

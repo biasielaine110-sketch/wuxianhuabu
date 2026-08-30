@@ -21,7 +21,8 @@ export function isVideoSoraStyleModel(m?: string): boolean {
 export const MANXUE_GROK_IMAGINE_VIDEO_MODEL = MANXUE_GROK_IMAGINE_VIDEO_MODEL_ID;
 
 export function isManxueGrokImagineVideoModel(m?: string): boolean {
-  return m === MANXUE_GROK_IMAGINE_VIDEO_MODEL;
+  const x = (m || '').trim();
+  return x === MANXUE_GROK_IMAGINE_VIDEO_MODEL || x === 'grok-imagine-1.5';
 }
 
 /** 视频节点 Grok 秒数档 */

@@ -16,9 +16,11 @@ import {
   getHfsyBaseUrl,
   getVolcengineArkSavedKey,
   getAliyunMaasSavedKey,
+  getManxueSavedKey,
 } from './aiSettings';
 import {
   chatCompletionHistoryAtBase,
+  manxueFetchBase,
   manxueGeminiChatGenerate,
   openAiEditImage,
   openAiGenerateNewImage,
@@ -40,7 +42,7 @@ const MAX_CHAT_HISTORY_TURNS = 48;
 
 function isDeepSeekChatModelId(modelName: string): boolean {
   const m = normalizeDeepSeekChatModelId(modelName).trim();
-  if (m.endsWith('-ark') || m.endsWith('-aliyun') || m.endsWith('-toapis')) return false;
+  if (m.endsWith('-ark') || m.endsWith('-aliyun') || m.endsWith('-toapis') || m.endsWith('-manxue')) return false;
   return m === 'deepseek-v4-flash' || m === 'deepseek-v4-pro' || m.startsWith('deepseek-v4-');
 }
 
@@ -143,7 +145,25 @@ function resolveToApisChatUpstreamModelId(modelName: string): string {
   return m.replace(/-toapis$/, '');
 }
 
-/** 满 eAPI（manxueapi.com）对话模型 id；与 ToAPIs 的 gemini-3.1-flash-lite-preview-official 区分 */
+/** 满 eAPI（manxueapi.com）对话：OpenAI 兼容 /v1/chat/completions（GPT / Claude） */
+function isManxueOpenAiChatModelId(modelName: string): boolean {
+  const m = (modelName || '').trim();
+  return (
+    m === 'gpt-5.4-mini-manxue' ||
+    m === 'gpt-5.6-luna-manxue' ||
+    m === 'claude-sonnet-4-6-thinking-manxue'
+  );
+}
+
+function resolveManxueOpenAiChatUpstreamModelId(modelName: string): string {
+  const m = (modelName || '').trim();
+  if (m === 'gpt-5.4-mini-manxue') return 'gpt-5.4-mini';
+  if (m === 'gpt-5.6-luna-manxue') return 'gpt-5.6-luna';
+  if (m === 'claude-sonnet-4-6-thinking-manxue') return 'claude-sonnet-4-6-thinking';
+  return m.replace(/-manxue$/, '');
+}
+
+/** 满 eAPI Gemini 对话（Vertex generateContent）；与 GPT/Claude 满 e 分流 */
 function isManxueChatModelId(modelName: string): boolean {
   const m = (modelName || '').trim();
   return m === 'gemini-3.1-flash-manxue' || m === 'gemini-3.1-flash-preview-manxue';
@@ -474,6 +494,24 @@ export const callGeminiChatWithHistory = async (
         aliyunMaasChatFetchBase(),
         aliyunKey,
         resolveAliyunMaasChatUpstreamModelId(modelName),
+        slice.map((t) => ({
+          role: t.role,
+          content: t.content,
+          imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
+          imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
+        }))
+      ) };
+    }
+
+    if (isManxueOpenAiChatModelId(modelName)) {
+      const mxKey = getManxueSavedKey().trim();
+      if (!mxKey) {
+        throw new Error('使用满 e 对话模型：请在「设置 → API」中填写「满 e API Key」。');
+      }
+      return { text: await chatCompletionHistoryAtBase(
+        manxueFetchBase(),
+        mxKey,
+        resolveManxueOpenAiChatUpstreamModelId(modelName),
         slice.map((t) => ({
           role: t.role,
           content: t.content,

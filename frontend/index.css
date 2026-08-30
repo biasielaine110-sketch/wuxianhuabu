@@ -424,30 +424,40 @@
   .canvas-node-font-195 select.nodemodel-select optgroup {
     font-weight: 600 !important;
   }
-  /** 绿色：codesonline GPT Image 2 / ToAPIs GPT Image 2 VIP / hfsy GPT Image 2 */
+  /** 绿色：codesonline / VIP / hfsy GPT Image 2、满 e GPT Image 2 4K、hfsy Nano-Banana 2/Pro */
   .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2-codesonline"],
   .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2-vip"],
-  .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2-hfsy"] {
+  .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2-hfsy"],
+  .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2-4k-manxue"],
+  .canvas-node-font-195 select.nodemodel-select option[value="nano-banana-2-hfsy"],
+  .canvas-node-font-195 select.nodemodel-select option[value="nano-banana-pro-hfsy"] {
     color: #4ade80 !important;
   }
   .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2-codesonline"]:checked),
   .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2-vip"]:checked),
-  .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2-hfsy"]:checked) {
+  .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2-hfsy"]:checked),
+  .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2-4k-manxue"]:checked),
+  .canvas-node-font-195 select.nodemodel-select:has(option[value="nano-banana-2-hfsy"]:checked),
+  .canvas-node-font-195 select.nodemodel-select:has(option[value="nano-banana-pro-hfsy"]:checked) {
     color: #4ade80 !important;
   }
-  /** 紫色：ToAPIs GPT Image 2 / hfsy GPT Image 2 Pro、Pro 4K、Nano-Banana 2、Nano-Banana Pro */
+  /** 紫色：ToAPIs GPT Image 2 / hfsy Pro、Pro 4K / 阿里云百炼 / ToAPIs Qwen-Image-3.0、Nano-Banana 2 */
   .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2"],
   .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2pro-hfsy"],
   .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2pro-4k-hfsy"],
-  .canvas-node-font-195 select.nodemodel-select option[value="nano-banana-2-hfsy"],
-  .canvas-node-font-195 select.nodemodel-select option[value="nano-banana-pro-hfsy"] {
+  .canvas-node-font-195 select.nodemodel-select option[value="z-image-turbo-aliyun"],
+  .canvas-node-font-195 select.nodemodel-select option[value="qwen-image-3.0-pro-aliyun"],
+  .canvas-node-font-195 select.nodemodel-select option[value="qwen-image-3.0"],
+  .canvas-node-font-195 select.nodemodel-select option[value="nano-banana-2"] {
     color: #c084fc !important;
   }
   .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2"]:checked),
   .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2pro-hfsy"]:checked),
   .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2pro-4k-hfsy"]:checked),
-  .canvas-node-font-195 select.nodemodel-select:has(option[value="nano-banana-2-hfsy"]:checked),
-  .canvas-node-font-195 select.nodemodel-select:has(option[value="nano-banana-pro-hfsy"]:checked) {
+  .canvas-node-font-195 select.nodemodel-select:has(option[value="z-image-turbo-aliyun"]:checked),
+  .canvas-node-font-195 select.nodemodel-select:has(option[value="qwen-image-3.0-pro-aliyun"]:checked),
+  .canvas-node-font-195 select.nodemodel-select:has(option[value="qwen-image-3.0"]:checked),
+  .canvas-node-font-195 select.nodemodel-select:has(option[value="nano-banana-2"]:checked) {
     color: #c084fc !important;
   }
   .canvas-node-root--chat select.nodemodel-select {

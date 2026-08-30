@@ -309,13 +309,7 @@ export function AuditInpaintPanel({
               <option value="nano-banana-2">Nano-Banana 2（ToAPIs）</option>
             </optgroup>
             <optgroup label="满 e（manxueapi.com）">
-              <option value="gemini-3.1-flash-image-preview-2k-manxue">Gemini 3.1 Flash 2K（满 e）</option>
-              <option value="gemini-3-pro-image-preview-2k-manxue">Gemini 3 Pro 2K（满 e）</option>
-              <option value="gpt-image-2-manxue">GPT Image 2（满 e）</option>
-              <option value="gpt-image-2-pro-manxue">GPT Image 2 Pro（满 e）</option>
               <option value="gpt-image-2-4k-manxue">GPT Image 2 4K（满 e）</option>
-              <option value="gemini-3-pro-image-preview-4k-manxue">Gemini 3 Pro 4K（满 e）</option>
-              <option value="gemini-3.1-flash-image-preview-4k-manxue">Gemini 3.1 Flash 4K（满 e）</option>
             </optgroup>
           </select>
 
