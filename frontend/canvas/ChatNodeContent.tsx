@@ -359,6 +359,15 @@ export function ChatNodeContent({
       onUpdate({ model: DEFAULT_DEEPSEEK_CHAT_MODEL_ID });
       return;
     }
+    const removedManxueChat = new Set([
+      'gpt-5.4-mini-manxue',
+      'gpt-5.6-luna-manxue',
+      'claude-sonnet-4-6-thinking-manxue',
+    ]);
+    if (removedManxueChat.has(m)) {
+      onUpdate({ model: 'gpt-5.5-manxue' });
+      return;
+    }
     const removedToApis = new Set([
       'gemini-2.0-flash-official',
       'gemini-3.1-flash-lite-preview-official',
@@ -819,9 +828,9 @@ export function ChatNodeContent({
             <option value="deepseek-v4-flash-toapis">DeepSeek-V4-Flash（ToAPIs）</option>
           </optgroup>
           <optgroup label="满 e">
-            <option value="gpt-5.4-mini-manxue">GPT-5.4 Mini（满 e）</option>
-            <option value="gpt-5.6-luna-manxue">GPT-5.6 Luna（满 e）</option>
-            <option value="claude-sonnet-4-6-thinking-manxue">Claude Sonnet 4.6 Thinking（满 e）</option>
+            <option value="gpt-5.5-manxue">GPT-5.5（满 e）</option>
+            <option value="deepseek-v4-flash-manxue">DeepSeek-V4-Flash（满 e）</option>
+            <option value="deepseek-v4-pro-manxue">DeepSeek-V4-Pro（满 e）</option>
           </optgroup>
         </select>
         <label className="flex items-center gap-1 shrink-0 text-gray-500" style={{ fontSize: 45 }}>
@@ -1314,6 +1323,7 @@ export function ChatNodeContent({
               <option value="nano-banana-pro-hfsy">Nano-Banana Pro（hfsyapi.cn）</option>
             </optgroup>
             <option value="gpt-image-2-4k-manxue">GPT Image 2 4K（满 e）</option>
+            <option value="gemini-3-pro-image-preview-manxue">Gemini 3 Pro Image Preview（满 e）</option>
             <option value="gpt-image-2">GPT Image 2（ToAPIs）</option>
             <option value="qwen-image-3.0">Qwen-Image-3.0（ToAPIs）</option>
           </select>

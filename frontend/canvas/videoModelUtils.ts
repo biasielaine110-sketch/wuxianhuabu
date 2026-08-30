@@ -1,6 +1,6 @@
 import type { CanvasNode } from '../types';
 import type { ToApisVideoModelId } from '../services/openaiCompatibleService';
-import { MANXUE_GROK_IMAGINE_VIDEO_MODEL_ID } from '../services/openaiCompatibleService';
+import { MANXUE_C_DANCE2_PRO_720_VIDEO_MODEL_ID } from '../services/openaiCompatibleService';
 
 /** 视频节点 Veo：当前存 `veo3.1-fast`；旧工程可能仍为 `veo3.1-fast-official` */
 export function isVeo31FastVideoModel(m?: string): boolean {
@@ -17,12 +17,17 @@ export function isVideoSoraStyleModel(m?: string): boolean {
   return m === 'sora-2-vvip';
 }
 
-/** 满 eAPI（manxueapi.com）Grok Imagine Video 1.5 Preview */
-export const MANXUE_GROK_IMAGINE_VIDEO_MODEL = MANXUE_GROK_IMAGINE_VIDEO_MODEL_ID;
+/** 满 eAPI（manxueapi.com）C-Dance2 Pro 720 */
+export const MANXUE_C_DANCE2_PRO_720_VIDEO_MODEL = MANXUE_C_DANCE2_PRO_720_VIDEO_MODEL_ID;
+
+export function isManxueCDance2Pro720VideoModel(m?: string): boolean {
+  const x = (m || '').trim();
+  return x === MANXUE_C_DANCE2_PRO_720_VIDEO_MODEL || x === 'c-dance2-pro-720';
+}
 
 export function isManxueGrokImagineVideoModel(m?: string): boolean {
   const x = (m || '').trim();
-  return x === MANXUE_GROK_IMAGINE_VIDEO_MODEL || x === 'grok-imagine-1.5';
+  return x === 'grok-imagine-video-1.5-preview' || x === 'grok-imagine-1.5';
 }
 
 /** 视频节点 Grok 秒数档 */
@@ -69,6 +74,7 @@ export function normalizeLegacyVideoModelId(modelId: string): string {
   const m = (modelId || '').trim();
   if (m === 'doubao-seedance-2-0-260128' || m === 'doubao-seedance-2-0-fast-260128') return 'seedance-2';
   if (m === 'grok-imagine-video-1.5-preview-aiid') return 'hfsy-grok-imagine-video-1.5';
+  if (m === 'grok-imagine-video-1.5-preview' || m === 'grok-imagine-1.5') return MANXUE_C_DANCE2_PRO_720_VIDEO_MODEL;
   return m;
 }
 
@@ -176,9 +182,9 @@ export function getVideoModelSwitchUpdates(mRaw: string, node: CanvasNode): Part
     updates.videoResolution = '720p';
     const ar = node.aspectRatio || '16:9';
     if (!['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].includes(ar)) updates.aspectRatio = '16:9';
-  } else if (m === MANXUE_GROK_IMAGINE_VIDEO_MODEL) {
-    const d = node.videoDuration ?? 10;
-    updates.videoDuration = [10, 15].includes(d) ? d : 10;
+  } else if (isManxueCDance2Pro720VideoModel(m)) {
+    const d = node.videoDuration ?? 8;
+    updates.videoDuration = [5, 8, 10, 12, 15].includes(d) ? d : 8;
     updates.videoResolution = '720p';
     const ar = node.aspectRatio || '16:9';
     if (!['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].includes(ar)) updates.aspectRatio = '16:9';
@@ -202,7 +208,9 @@ export function videoNodeModelToToApis(m?: string): ToApisVideoModelId {
   if (isHfsyVideoModel(vm)) return vm as ToApisVideoModelId;
   if (vm === 'gemini-omni-flash') return 'gemini-omni-flash';
   if (vm === 'grok-video-1.5-preview') return 'grok-video-1.5-preview';
-  if (isManxueGrokImagineVideoModel(vm)) return MANXUE_GROK_IMAGINE_VIDEO_MODEL as ToApisVideoModelId;
+  if (isManxueCDance2Pro720VideoModel(vm) || isManxueGrokImagineVideoModel(vm)) {
+    return MANXUE_C_DANCE2_PRO_720_VIDEO_MODEL as ToApisVideoModelId;
+  }
   if (vm === 'jimeng-video-v3' || vm === 'jimeng-image-to-video') return vm as ToApisVideoModelId;
   return 'grok-video-3';
 }

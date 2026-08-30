@@ -155,6 +155,9 @@ function openAiCompatFailureHint(
     return '（401：鉴权失败。若使用 hfsyapi.cn 模型，请在「设置 → API」填写并保存 hfsyapi.cn API Key；确认不要误填 ToAPIs、满 e 或 OpenAI 兼容通道的 Key。）';
   }
   if (status === 404) {
+    if (fetchBase && /manxue-api|manxueapi\.com/i.test(fetchBase)) {
+      return '（404：满 e 当前 Key 所在分组未配置该模型，或该模型需走 /v1/responses 而非 /v1/chat/completions。请在 manxueapi.com 控制台核对模型 ID。）';
+    }
     return kind === 'image-edit'
       ? '（404：请确认请求为 POST multipart；开发环境须在 frontend 目录启动 Vite；生产环境需已部署 /api/codesonline-image-proxy 单入口代理。若出现 NOT_FOUND，请重新部署并硬刷新。）'
       : '（404：请检查 Base URL 与路径；开发环境需 Vite 代理 /yunzhi-openai 或 /codesonline-image-api。）';
@@ -204,14 +207,27 @@ function isManxueHost(baseNormalized: string): boolean {
 /** 画布节点 id（兼容旧项目）；上游 media/generate 使用 grok-imagine-1.5 */
 export const MANXUE_GROK_IMAGINE_VIDEO_MODEL_ID = 'grok-imagine-video-1.5-preview';
 const MANXUE_GROK_IMAGINE_UPSTREAM_MODEL = 'grok-imagine-1.5';
+export const MANXUE_C_DANCE2_PRO_720_VIDEO_MODEL_ID = 'c-dance2-pro-720-manxue';
+const MANXUE_C_DANCE2_PRO_720_UPSTREAM = 'c-dance2-pro-720';
 
 export function isManxueVideoModel(m?: string): boolean {
   if (!m) return false;
+  const x = m.trim();
   return (
-    m === MANXUE_GROK_IMAGINE_VIDEO_MODEL_ID ||
-    m === MANXUE_GROK_IMAGINE_UPSTREAM_MODEL ||
-    m.endsWith('-manxue-video')
+    x === MANXUE_C_DANCE2_PRO_720_VIDEO_MODEL_ID ||
+    x === MANXUE_C_DANCE2_PRO_720_UPSTREAM ||
+    x === MANXUE_GROK_IMAGINE_VIDEO_MODEL_ID ||
+    x === MANXUE_GROK_IMAGINE_UPSTREAM_MODEL ||
+    x.endsWith('-manxue-video')
   );
+}
+
+function manxueVideoUpstreamModel(model?: string): string {
+  const x = (model || '').trim();
+  if (x === MANXUE_GROK_IMAGINE_VIDEO_MODEL_ID || x === MANXUE_GROK_IMAGINE_UPSTREAM_MODEL) {
+    return MANXUE_GROK_IMAGINE_UPSTREAM_MODEL;
+  }
+  return MANXUE_C_DANCE2_PRO_720_UPSTREAM;
 }
 
 /** 判断是否为 MiniMax 域名（api.minimaxi.com） */
@@ -349,6 +365,7 @@ function manxueT2iModel(modelName: string): string {
   if (m === 'gpt-image-2-4k-manxue') return 'gpt-image-2-4k';
   if (m === 'gpt-image-2-manxue') return 'gpt-image-2';
   // Gemini 系列
+  if (m === 'gemini-3-pro-image-preview-manxue') return 'gemini-3-pro-image-preview';
   if (m === 'gemini-3-pro-image-preview-2k-manxue') return 'gemini-3-pro-image-preview-2k';
   if (m === 'gemini-3-pro-image-preview-4k-manxue') return 'gemini-3-pro-image-preview-4k';
   if (m === 'gemini-3.1-flash-image-preview-2k-manxue') return 'gemini-3.1-flash-image-preview-2k';
@@ -366,6 +383,7 @@ function manxueResolution(nodeResolution?: string): '2K' | '4K' {
 function isManxueGeminiModel(modelName: string): boolean {
   const m = (modelName || '').trim();
   return (
+    m === 'gemini-3-pro-image-preview-manxue' ||
     m === 'gemini-3-pro-image-preview-2k-manxue' ||
     m === 'gemini-3-pro-image-preview-4k-manxue' ||
     m === 'gemini-3.1-flash-image-preview-2k-manxue' ||
@@ -1663,7 +1681,8 @@ export type ToApisVideoModelId =
   | 'hfsy-sd-2.5-720'
   | 'hfsy-minimax-h3'
   | 'hfsy-grok-imagine-video-1.5'
-  | 'grok-imagine-video-1.5-preview';
+  | 'grok-imagine-video-1.5-preview'
+  | 'c-dance2-pro-720-manxue';
 
 type HfsyVideoModelId =
   | 'hfsy-sd-2'
@@ -2323,27 +2342,27 @@ async function manxuePollVideoTaskToPlayableUrl(
 }
 
 /**
- * 满 eAPI：`grok-imagine-1.5` 文生 / 图生视频（异步 POST /v1/media/generate，轮询 task_id）。
- * 该模型不能走 /v1/chat/completions。
+ * 满 eAPI 文生 / 图生视频（异步 POST /v1/media/generate，轮询 task_id）。
  */
 export async function manxueVideoGenerate(params: {
   prompt: string;
+  videoModel?: string;
   durationSeconds: number;
   aspectRatio: string;
   resolution: '720p';
   referenceImagesBase64?: string[];
   signal?: AbortSignal;
 }): Promise<string> {
-  const { prompt, durationSeconds, aspectRatio, referenceImagesBase64 = [], signal } = params;
+  const { prompt, videoModel, durationSeconds, aspectRatio, referenceImagesBase64 = [], signal } = params;
   const apiKey = getManxueSavedKey();
   if (!apiKey) throw new Error('未配置满 e API Key。请在「设置 → API → 满 e」填写。');
 
   const imageUrls = await manxueUploadReferenceImageUrls(referenceImagesBase64, signal);
-  const duration = Math.min(15, Math.max(1, Number(durationSeconds) || 10));
+  const duration = Math.min(15, Math.max(1, Number(durationSeconds) || 8));
   const effectiveAspectRatio = (aspectRatio || '16:9').trim() || '16:9';
 
   const body: Record<string, unknown> = {
-    model: MANXUE_GROK_IMAGINE_UPSTREAM_MODEL,
+    model: manxueVideoUpstreamModel(videoModel),
     prompt,
     duration,
     seconds: duration,
@@ -2669,6 +2688,7 @@ export async function toApisCanvasVideoGenerate(params: {
   if (isManxueVideoModel(params.videoModel)) {
     return manxueVideoGenerate({
       prompt: params.prompt,
+      videoModel: params.videoModel,
       durationSeconds: params.durationSeconds,
       aspectRatio: params.aspectRatio,
       resolution: '720p',
@@ -3638,6 +3658,7 @@ function isManxueImageModel(modelName: string): boolean {
     m === 'gpt-image-2-pro-manxue' ||
     m === 'gpt-image-2-4k-manxue' ||
     m === 'gpt-image-2-manxue' ||
+    m === 'gemini-3-pro-image-preview-manxue' ||
     m === 'gemini-3-pro-image-preview-2k-manxue' ||
     m === 'gemini-3-pro-image-preview-4k-manxue' ||
     m === 'gemini-3.1-flash-image-preview-2k-manxue' ||
@@ -3654,9 +3675,9 @@ function resolveChatModelForBase(baseNormalized: string, modelName: string): str
   if (m === 'claude-haiku-4-5-codesonline') return 'claude-haiku-4-5';
   if (m === 'gpt-5.6-terra-hfsy') return 'gpt-5.6-terra';
   if (m === 'grok-4.6-hfsy') return 'grok-4.6';
-  if (m === 'gpt-5.4-mini-manxue') return 'gpt-5.4-mini';
-  if (m === 'gpt-5.6-luna-manxue') return 'gpt-5.6-luna';
-  if (m === 'claude-sonnet-4-6-thinking-manxue') return 'claude-sonnet-4-6-thinking';
+  if (m === 'gpt-5.5-manxue') return 'gpt-5.5';
+  if (m === 'deepseek-v4-flash-manxue') return 'deepseek-v4-flash';
+  if (m === 'deepseek-v4-pro-manxue') return 'deepseek-v4-pro';
   if (m === 'glm-5.3-flash-toapis') return 'glm-5.3-flash';
   if (m === 'grok-4.6-toapis') return 'grok-4.6';
   if (m === 'gpt-5.4-mini-toapis') return 'gpt-5.4-mini';
@@ -4690,21 +4711,15 @@ export type ChatCompletionHistoryTurn = {
   imageBase64s?: string[];
 };
 
-export async function chatCompletionHistoryAtBase(
-  baseUrlRaw: string,
-  apiKey: string,
-  modelName: string,
-  turns: ChatCompletionHistoryTurn[]
-): Promise<string> {
-  const key = apiKey.trim();
-  const isArk = /volcengine-ark/i.test(baseUrlRaw);
-  const isAliyun = /aliyun-maas/i.test(baseUrlRaw);
-  if (!key && !isArk && !isAliyun) throw new Error('未配置对话 API Key。');
-  if (!turns.length) throw new Error('对话内容为空。');
-  const base = normalizeBaseUrl(baseUrlRaw);
-  const model = resolveChatModelForBase(base, modelName);
+type OpenAiChatMessage = {
+  role: 'assistant' | 'system' | 'user';
+  content:
+    | string
+    | Array<{ type: 'image_url'; image_url: { url: string } } | { type: 'text'; text: string }>;
+};
 
-  const messages = turns.map((turn) => {
+function turnsToOpenAiChatMessages(turns: ChatCompletionHistoryTurn[]): OpenAiChatMessage[] {
+  return turns.map((turn) => {
     if (turn.role === 'assistant') {
       return { role: 'assistant' as const, content: turn.content };
     }
@@ -4720,13 +4735,164 @@ export async function chatCompletionHistoryAtBase(
         parts.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } });
       }
       parts.push({ type: 'text', text: turn.content });
-      return {
-        role: 'user' as const,
-        content: parts,
-      };
+      return { role: 'user' as const, content: parts };
     }
     return { role: 'user' as const, content: turn.content };
   });
+}
+
+function stringifyChatMessageContent(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (Array.isArray(value)) {
+    return value
+      .map((part) => {
+        if (typeof part === 'string') return part;
+        if (part && typeof part === 'object' && 'text' in part) return String((part as { text?: unknown }).text || '');
+        return '';
+      })
+      .join('')
+      .trim();
+  }
+  return '';
+}
+
+function extractTextFromOpenAiChatJson(json: unknown): string {
+  if (!json || typeof json !== 'object') return '';
+  const message = (json as { choices?: { message?: { content?: unknown; reasoning_content?: unknown } }[] }).choices?.[0]
+    ?.message;
+  return stringifyChatMessageContent(message?.content) || stringifyChatMessageContent(message?.reasoning_content);
+}
+
+function extractTextFromResponsesJson(json: unknown): string {
+  const fromChat = extractTextFromOpenAiChatJson(json);
+  if (fromChat) return fromChat;
+  if (!json || typeof json !== 'object') return '';
+  const rec = json as Record<string, unknown>;
+  if (typeof rec.output_text === 'string' && rec.output_text.trim()) return rec.output_text.trim();
+  const chunks: string[] = [];
+  const output = rec.output;
+  if (Array.isArray(output)) {
+    for (const item of output) {
+      if (!item || typeof item !== 'object') continue;
+      const it = item as Record<string, unknown>;
+      if (typeof it.text === 'string') chunks.push(it.text);
+      if (Array.isArray(it.content)) {
+        for (const c of it.content) {
+          if (!c || typeof c !== 'object') continue;
+          const cr = c as Record<string, unknown>;
+          if (typeof cr.text === 'string') chunks.push(cr.text);
+        }
+      }
+    }
+  }
+  return chunks.join('').trim();
+}
+
+function chatMessagesToResponsesInput(messages: OpenAiChatMessage[]): unknown {
+  const nonSystem = messages.filter((m) => m.role !== 'system');
+  if (nonSystem.length === 1 && nonSystem[0].role === 'user' && typeof nonSystem[0].content === 'string') {
+    return nonSystem[0].content;
+  }
+  return nonSystem.map((m) => {
+    if (typeof m.content === 'string') return { role: m.role, content: m.content };
+    const content = m.content.map((p) => {
+      if (p.type === 'text') return { type: 'input_text', text: p.text };
+      return { type: 'input_image', image_url: p.image_url.url };
+    });
+    return { role: m.role, content };
+  });
+}
+
+/**
+ * 满 e GPT / Claude 对话：优先 /v1/responses（GPT-5.4 等常只挂在 Responses 渠道），
+ * 失败再回退 /v1/chat/completions。
+ */
+export async function manxueOpenAiCompatibleChatHistory(
+  turns: ChatCompletionHistoryTurn[],
+  upstreamModel: string
+): Promise<string> {
+  const apiKey = getManxueSavedKey().trim();
+  if (!apiKey) throw new Error('未配置满 eAPI Key，请在「设置 → API」中填写「满 e API Key」。');
+  if (!turns.length) throw new Error('对话内容为空。');
+  const base = manxueFetchBase();
+  const model = (upstreamModel || '').trim();
+  const messages = turnsToOpenAiChatMessages(turns);
+  const instructions = turns
+    .filter((t) => t.role === 'system' && t.content.trim())
+    .map((t) => t.content.trim())
+    .join('\n\n');
+  const errors: string[] = [];
+
+  const tryPost = async (
+    path: string,
+    body: Record<string, unknown>,
+    parse: (json: unknown) => string
+  ): Promise<string | null> => {
+    try {
+      const json = await postJsonAtBase(base, path, body, apiKey);
+      const text = parse(json);
+      if (text) return text;
+      errors.push(`${path} model=${String(body.model)}：未返回文本`);
+    } catch (e) {
+      errors.push(`${path} model=${String(body.model)}：${e instanceof Error ? e.message : String(e)}`);
+    }
+    return null;
+  };
+
+  const responsesBodies: Record<string, unknown>[] = [
+    {
+      model,
+      ...(instructions ? { instructions } : {}),
+      input: chatMessagesToResponsesInput(messages),
+    },
+    { model, messages },
+  ];
+  if (model === 'gpt-5.6-luna') {
+    responsesBodies.push({
+      model: 'gpt-5.6-luna-max',
+      ...(instructions ? { instructions } : {}),
+      input: chatMessagesToResponsesInput(messages),
+    });
+  }
+
+  for (const body of responsesBodies) {
+    const text = await tryPost('/responses', body, extractTextFromResponsesJson);
+    if (text) return text;
+  }
+
+  const chatAttempts: Record<string, unknown>[] = [{ model, messages }];
+  if (model === 'claude-sonnet-4-6-thinking') {
+    chatAttempts.push({
+      model: 'claude-sonnet-4-6',
+      messages,
+      thinking: { type: 'adaptive' },
+    });
+  }
+  if (model === 'gpt-5.6-luna') {
+    chatAttempts.push({ model: 'gpt-5.6-luna-max', messages });
+  }
+  for (const body of chatAttempts) {
+    const text = await tryPost('/chat/completions', body, extractTextFromOpenAiChatJson);
+    if (text) return text;
+  }
+
+  throw new Error(`满 e 对话失败（${model}）。${errors.join(' | ')}`);
+}
+
+export async function chatCompletionHistoryAtBase(
+  baseUrlRaw: string,
+  apiKey: string,
+  modelName: string,
+  turns: ChatCompletionHistoryTurn[]
+): Promise<string> {
+  const key = apiKey.trim();
+  const isArk = /volcengine-ark/i.test(baseUrlRaw);
+  const isAliyun = /aliyun-maas/i.test(baseUrlRaw);
+  if (!key && !isArk && !isAliyun) throw new Error('未配置对话 API Key。');
+  if (!turns.length) throw new Error('对话内容为空。');
+  const base = normalizeBaseUrl(baseUrlRaw);
+  const model = resolveChatModelForBase(base, modelName);
+  const messages = turnsToOpenAiChatMessages(turns);
 
   const json = await postJsonAtBase<{
     choices?: { message?: { content?: unknown; reasoning_content?: unknown } }[];
@@ -4739,24 +4905,7 @@ export async function chatCompletionHistoryAtBase(
     },
     key
   );
-  const message = json.choices?.[0]?.message;
-  const text = message?.content;
-  const reasoning = message?.reasoning_content;
-  const stringifyChatPart = (value: unknown): string => {
-    if (typeof value === 'string') return value.trim();
-    if (Array.isArray(value)) {
-      return value
-        .map((part) => {
-          if (typeof part === 'string') return part;
-          if (part && typeof part === 'object' && 'text' in part) return String((part as { text?: unknown }).text || '');
-          return '';
-        })
-        .join('')
-        .trim();
-    }
-    return '';
-  };
-  const out = stringifyChatPart(text) || stringifyChatPart(reasoning);
+  const out = extractTextFromOpenAiChatJson(json);
   if (!out) throw new Error('对话接口未返回文本内容。');
   return out;
 }

@@ -20,8 +20,8 @@ import {
 } from './aiSettings';
 import {
   chatCompletionHistoryAtBase,
-  manxueFetchBase,
   manxueGeminiChatGenerate,
+  manxueOpenAiCompatibleChatHistory,
   openAiEditImage,
   openAiGenerateNewImage,
   toApisCanvasVideoGenerate,
@@ -149,17 +149,17 @@ function resolveToApisChatUpstreamModelId(modelName: string): string {
 function isManxueOpenAiChatModelId(modelName: string): boolean {
   const m = (modelName || '').trim();
   return (
-    m === 'gpt-5.4-mini-manxue' ||
-    m === 'gpt-5.6-luna-manxue' ||
-    m === 'claude-sonnet-4-6-thinking-manxue'
+    m === 'gpt-5.5-manxue' ||
+    m === 'deepseek-v4-flash-manxue' ||
+    m === 'deepseek-v4-pro-manxue'
   );
 }
 
 function resolveManxueOpenAiChatUpstreamModelId(modelName: string): string {
   const m = (modelName || '').trim();
-  if (m === 'gpt-5.4-mini-manxue') return 'gpt-5.4-mini';
-  if (m === 'gpt-5.6-luna-manxue') return 'gpt-5.6-luna';
-  if (m === 'claude-sonnet-4-6-thinking-manxue') return 'claude-sonnet-4-6-thinking';
+  if (m === 'gpt-5.5-manxue') return 'gpt-5.5';
+  if (m === 'deepseek-v4-flash-manxue') return 'deepseek-v4-flash';
+  if (m === 'deepseek-v4-pro-manxue') return 'deepseek-v4-pro';
   return m.replace(/-manxue$/, '');
 }
 
@@ -508,17 +508,17 @@ export const callGeminiChatWithHistory = async (
       if (!mxKey) {
         throw new Error('使用满 e 对话模型：请在「设置 → API」中填写「满 e API Key」。');
       }
-      return { text: await chatCompletionHistoryAtBase(
-        manxueFetchBase(),
-        mxKey,
-        resolveManxueOpenAiChatUpstreamModelId(modelName),
-        slice.map((t) => ({
-          role: t.role,
-          content: t.content,
-          imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
-          imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
-        }))
-      ) };
+      return {
+        text: await manxueOpenAiCompatibleChatHistory(
+          slice.map((t) => ({
+            role: t.role,
+            content: t.content,
+            imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
+            imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
+          })),
+          resolveManxueOpenAiChatUpstreamModelId(modelName)
+        ),
+      };
     }
 
     if (isManxueChatModelId(modelName)) {

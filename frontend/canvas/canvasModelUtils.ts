@@ -49,6 +49,7 @@ export function isAliyunMaasImageModel(id: string): boolean {
 /** 满 eAPI Gemini 图像模型 */
 export function isManxueGeminiImageModel(id: string): boolean {
   return (
+    id === 'gemini-3-pro-image-preview-manxue' ||
     id === 'gemini-3-pro-image-preview-2k-manxue' ||
     id === 'gemini-3-pro-image-preview-4k-manxue' ||
     id === 'gemini-3.1-flash-image-preview-2k-manxue' ||

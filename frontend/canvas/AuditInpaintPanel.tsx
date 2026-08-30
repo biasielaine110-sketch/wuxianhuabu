@@ -310,6 +310,7 @@ export function AuditInpaintPanel({
             </optgroup>
             <optgroup label="满 e（manxueapi.com）">
               <option value="gpt-image-2-4k-manxue">GPT Image 2 4K（满 e）</option>
+              <option value="gemini-3-pro-image-preview-manxue">Gemini 3 Pro Image Preview（满 e）</option>
             </optgroup>
           </select>
 
