@@ -2251,7 +2251,11 @@ async function manxueSubmitVideoGeneration(
   const apiKey = getManxueSavedKey();
   if (!apiKey) throw new Error('未配置满 e API Key。请在「设置 → API → 满 e」填写。');
   const base = manxueFetchBase();
-  const endpoints = [`${base}/media/generate`, `${base}/videos/generations`];
+  const endpoints = [
+    `${base}/video/generations`,
+    `${base}/media/generate`,
+    `${base}/videos/generations`,
+  ];
   let lastErr = '';
   for (const url of endpoints) {
     const res = await fetch(url, {
@@ -2291,32 +2295,50 @@ async function manxuePollVideoTaskToPlayableUrl(
   const apiKey = getManxueSavedKey();
   const base = manxueFetchBase();
   const deadline = Date.now() + MANXUE_VIDEO_TASK_MAX_WAIT_MS;
-  const pollUrls = (id: string) => [
-    `${base}/media/tasks/${encodeURIComponent(id)}`,
-    `${base}/tasks/${encodeURIComponent(id)}`,
-    `${base}/media/result?task_id=${encodeURIComponent(id)}`,
-    `${base}/media/generate/${encodeURIComponent(id)}`,
-    `${base}/videos/generations/${encodeURIComponent(id)}`,
+  const enc = encodeURIComponent(taskId);
+  type PollAttempt = { method: 'GET' | 'POST'; url: string; body?: Record<string, string> };
+  /** New API 官方为 GET /v1/video/generations/{task_id}（单数 video）；旧路径 videos/generations 会 404 */
+  const attempts: PollAttempt[] = [
+    { method: 'GET', url: `${base}/video/generations/${enc}` },
+    { method: 'GET', url: `${base}/videos/${enc}` },
+    { method: 'GET', url: `${base}/video/query?id=${enc}` },
+    { method: 'POST', url: `${base}/video/query`, body: { id: taskId, task_id: taskId } },
+    { method: 'GET', url: `${base}/videos/generations/${enc}` },
   ];
+  let preferred: PollAttempt | null = null;
   await sleepInterruptible(5_000, signal);
+
+  const fetchAttempt = async (attempt: PollAttempt): Promise<{ parsed: unknown; rawText: string } | null> => {
+    const res = await fetch(attempt.url, {
+      method: attempt.method,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        ...(attempt.body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: attempt.body ? JSON.stringify(attempt.body) : undefined,
+      signal,
+    });
+    const rawText = await res.text();
+    if (!res.ok) return null;
+    try {
+      return { parsed: JSON.parse(rawText), rawText };
+    } catch {
+      return null;
+    }
+  };
 
   while (Date.now() < deadline) {
     assertNotAborted(signal);
     let parsed: unknown = null;
     let rawText = '';
-    for (const url of pollUrls(taskId)) {
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-        signal,
-      });
-      rawText = await res.text();
-      if (!res.ok) continue;
-      try {
-        parsed = JSON.parse(rawText);
-        break;
-      } catch {
-        continue;
-      }
+    const order = preferred ? [preferred, ...attempts.filter((a) => a.url !== preferred!.url || a.method !== preferred!.method)] : attempts;
+    for (const attempt of order) {
+      const hit = await fetchAttempt(attempt);
+      if (!hit) continue;
+      parsed = hit.parsed;
+      rawText = hit.rawText;
+      preferred = attempt;
+      break;
     }
     if (parsed) {
       const st = pickManxueTaskStatus(parsed);
@@ -2329,7 +2351,7 @@ async function manxuePollVideoTaskToPlayableUrl(
         return rewriteKnownImageCdnToSameOrigin(normalizedUrl);
       }
       const failed = String(st).toLowerCase();
-      if (failed === 'failed' || failed === 'error' || failed === 'cancelled') {
+      if (failed === 'failed' || failed === 'error' || failed === 'cancelled' || failed === 'canceled') {
         const rec = parsed as { error?: { message?: string }; message?: string };
         throw new Error(`满 e 视频生成失败: ${rec.error?.message || rec.message || rawText.slice(0, 300)}`);
       }

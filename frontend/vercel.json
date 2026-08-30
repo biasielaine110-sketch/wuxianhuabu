@@ -90,7 +90,11 @@
       "destination": "/api/hfsy-image-proxy?path=$1"
     },
     {
-      "source": "/((?!api/|assets/).*)",
+      "source": "/manxue-api/:path*",
+      "destination": "https://manxueapi.com/:path*"
+    },
+    {
+      "source": "/((?!api/|assets/|manxue-api/).*)",
       "destination": "/index.html"
     }
   ]

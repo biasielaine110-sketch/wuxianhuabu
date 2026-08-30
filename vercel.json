@@ -107,7 +107,7 @@
       "destination": "https://manxueapi.com/:path*"
     },
     {
-      "source": "/((?!api/|assets/).*)",
+      "source": "/((?!api/|assets/|manxue-api/).*)",
       "destination": "/index.html"
     }
   ]
