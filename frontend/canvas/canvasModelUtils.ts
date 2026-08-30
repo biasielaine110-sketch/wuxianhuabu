@@ -58,5 +58,22 @@ export function isManxueGeminiImageModel(id: string): boolean {
 
 /** 满 eAPI GPT Image 2 模型 */
 export function isManxueGptImage2Model(id: string): boolean {
-  return id === 'gpt-image-2-pro-manxue' || id === 'gpt-image-2-manxue';
+  return id === 'gpt-image-2-pro-manxue' || id === 'gpt-image-2-manxue' || id === 'gpt-image-2-4k-manxue';
+}
+
+/** 满 e GPT Image 2 4K：选择时默认切到 4K */
+export function isManxueGptImage24kModel(id: string): boolean {
+  return (id || '').trim() === 'gpt-image-2-4k-manxue';
+}
+
+/** ToAPIs Nano-Banana 2（画布 id，上游 gemini-2.5-flash-image-preview） */
+export function isToApisNanoBanana2Model(id: string): boolean {
+  return (id || '').trim() === 'nano-banana-2';
+}
+
+/** ToAPIs Nano-Banana 2 最高 2K；其它模型原样返回 */
+export function clampCanvasImageResolution(modelId: string, resolution?: string): string {
+  const r = (resolution || '2k').toLowerCase().replace(/\s/g, '');
+  if (isToApisNanoBanana2Model(modelId) && r === '4k') return '2k';
+  return r || '2k';
 }

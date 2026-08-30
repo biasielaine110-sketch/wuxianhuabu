@@ -1,3 +1,4 @@
+import { clampCanvasImageResolution } from './canvasModelUtils';
 import { editExistingImage } from '../services/geminiService';
 import { normalizeCanvasGenerationImages } from '../services/openaiCompatibleService';
 import { generateJimengImage } from '../integrations/jimeng/jimengClient';
@@ -101,7 +102,7 @@ export async function runAuditInpaintGeneration(
     1,
     model,
     resolvedAspect,
-    resolution,
+    clampCanvasImageResolution(model, resolution),
     quality || 'high',
     undefined,
     signal

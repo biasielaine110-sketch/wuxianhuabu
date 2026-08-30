@@ -3,9 +3,12 @@ import { base64ToImageDataUrl } from './auditImageUtils';
 import { MAX_AUDIT_INPAINT_REFERENCES } from './auditInpaintRefs';
 import { EyedropperIcon } from './canvasIcons';
 import {
+  clampCanvasImageResolution,
   defaultCanvasImageModel,
   isGptImage2CanvasModelId,
+  isManxueGptImage24kModel,
   isManxueGptImage2Model,
+  isToApisNanoBanana2Model,
 } from './canvasModelUtils';
 
 export interface AuditInpaintPanelProps {
@@ -289,7 +292,11 @@ export function AuditInpaintPanel({
             onChange={(e) => {
               const m = e.target.value;
               onModelChange(m);
-              if (isGptImage2CanvasModelId(m) || isManxueGptImage2Model(m)) {
+              if (isManxueGptImage24kModel(m)) {
+                onResolutionChange('4k');
+              } else if (isToApisNanoBanana2Model(m) && (resolution || '2k').toLowerCase() === '4k') {
+                onResolutionChange('2k');
+              } else if (isGptImage2CanvasModelId(m) || isManxueGptImage2Model(m)) {
                 onResolutionChange('2k');
               }
             }}
@@ -306,6 +313,7 @@ export function AuditInpaintPanel({
               <option value="gemini-3-pro-image-preview-2k-manxue">Gemini 3 Pro 2K（满 e）</option>
               <option value="gpt-image-2-manxue">GPT Image 2（满 e）</option>
               <option value="gpt-image-2-pro-manxue">GPT Image 2 Pro（满 e）</option>
+              <option value="gpt-image-2-4k-manxue">GPT Image 2 4K（满 e）</option>
               <option value="gemini-3-pro-image-preview-4k-manxue">Gemini 3 Pro 4K（满 e）</option>
               <option value="gemini-3.1-flash-image-preview-4k-manxue">Gemini 3.1 Flash 4K（满 e）</option>
             </optgroup>
@@ -328,11 +336,11 @@ export function AuditInpaintPanel({
 
           <select
             className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none focus:border-purple-500 min-w-0"
-            value={resolution}
-            onChange={(e) => onResolutionChange(e.target.value)}
+            value={clampCanvasImageResolution(model, resolution)}
+            onChange={(e) => onResolutionChange(clampCanvasImageResolution(model, e.target.value))}
             disabled={isGenerating}
           >
-            <option value="4k">4K</option>
+            {!isToApisNanoBanana2Model(model) && <option value="4k">4K</option>}
             <option value="2k">2K</option>
             <option value="1k">1K</option>
           </select>

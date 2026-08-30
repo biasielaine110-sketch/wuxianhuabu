@@ -341,6 +341,7 @@ function manxueT2iModel(modelName: string): string {
   const m = (modelName || '').trim();
   // GPT Image 2 系列
   if (m === 'gpt-image-2-pro-manxue') return 'gpt-image-2-pro';
+  if (m === 'gpt-image-2-4k-manxue') return 'gpt-image-2-4k';
   if (m === 'gpt-image-2-manxue') return 'gpt-image-2';
   // Gemini 系列
   if (m === 'gemini-3-pro-image-preview-2k-manxue') return 'gemini-3-pro-image-preview-2k';
@@ -1046,6 +1047,13 @@ async function toApisUploadAudioBlob(
   throw new Error(`语音参考上传失败 (404) ${lastFail}`);
 }
 
+function clampToApisNanoBanana2Resolution(modelName: string, nodeResolution?: string): string | undefined {
+  if ((modelName || '').trim() !== 'nano-banana-2') return nodeResolution;
+  const r = (nodeResolution || '2k').toLowerCase().replace(/\s/g, '');
+  if (r === '4k') return '2k';
+  return nodeResolution || '2k';
+}
+
 async function toApisEditImage(
   base64Images: string[],
   prompt: string,
@@ -1060,6 +1068,7 @@ async function toApisEditImage(
   const size = toApisAspectSize(aspectRatio);
   const maxRefs = 16;
   const imageUrls: string[] = [];
+  const clampedResolution = clampToApisNanoBanana2Resolution(modelName, nodeResolution);
   for (const img of base64Images.slice(0, maxRefs)) {
     assertNotAborted(signal);
     const { raw, mime } = parseBase64ImageInput(img);
@@ -1083,7 +1092,7 @@ async function toApisEditImage(
       model,
       promptLine: `${prompt}\n\n（画幅比例 ${aspectRatio}）`,
       size,
-      nodeResolution,
+      nodeResolution: clampedResolution,
       quality,
       image_urls: imageUrls,
     });
@@ -2849,6 +2858,7 @@ async function toApisGenerateNewImage(
   const size = toApisAspectSize(aspectRatio);
   const out: string[] = [];
   const count = Math.min(Math.max(numberOfImages, 1), 8);
+  const clampedResolution = clampToApisNanoBanana2Resolution(modelName, nodeResolution);
 
   for (let i = 0; i < count; i++) {
     assertNotAborted(signal);
@@ -2856,7 +2866,7 @@ async function toApisGenerateNewImage(
       model,
       promptLine: `${prompt}\n\n（画幅比例 ${aspectRatio}）`,
       size,
-      nodeResolution,
+      nodeResolution: clampedResolution,
       quality,
     });
     const { id } = await toApisSubmitGeneration(body, signal);
@@ -2946,6 +2956,30 @@ function manxueAspectSize(aspectRatio: string): string {
   return map[aspectRatio] || '1024x1024';
 }
 
+const MANXUE_GPT_IMAGE_2_4K_ASPECT_SIZES: Record<string, string> = {
+  '1:1': '2880x2880',
+  '16:9': '3840x2160',
+  '9:16': '2160x3840',
+  '4:3': '3840x2880',
+  '3:4': '2880x3840',
+  '2:1': '3840x1920',
+  '1:2': '1920x3840',
+  '21:9': '3840x1648',
+  '9:21': '1648x3840',
+  '3:2': '3840x2560',
+  '2:3': '2560x3840',
+  '5:4': '3200x2560',
+  '4:5': '2560x3200',
+};
+
+function manxueGptImage2Size(aspectRatio: string, modelName?: string): string {
+  if ((modelName || '').trim() === 'gpt-image-2-4k-manxue') {
+    const key = (aspectRatio || '1:1').trim();
+    return MANXUE_GPT_IMAGE_2_4K_ASPECT_SIZES[key] || MANXUE_GPT_IMAGE_2_4K_ASPECT_SIZES['1:1'];
+  }
+  return manxueAspectSize(aspectRatio);
+}
+
 /** 满 eAPI 文生图：GPT Image 2 用 /v1/images/generations，Gemini 用 Vertex AI 风格接口 */
 async function manxueGenerateNewImage(
   prompt: string,
@@ -2962,8 +2996,8 @@ async function manxueGenerateNewImage(
   }
 
   const model = manxueT2iModel(modelName);
-  const resolution = manxueResolution(nodeResolution);
-  const size = manxueAspectSize(aspectRatio);
+  const resolution = model === 'gpt-image-2-4k' ? '4K' : manxueResolution(nodeResolution);
+  const size = manxueGptImage2Size(aspectRatio, modelName);
   const apiKey = getManxueSavedKey();
   if (!apiKey) throw new Error('未配置满 eAPI Key。');
   const base = manxueFetchBase();
@@ -2979,8 +3013,9 @@ async function manxueGenerateNewImage(
       size,
       response_format: 'b64_json',
     };
+    body.resolution = resolution;
     // GPT Image 2 支持 quality 参数
-    if (quality && (model === 'gpt-image-2' || model === 'gpt-image-2-pro')) {
+    if (quality && (model === 'gpt-image-2' || model === 'gpt-image-2-pro' || model === 'gpt-image-2-4k')) {
       body.quality = quality;
     }
     const result = await manxueSubmitGeneration(base, apiKey, body, signal);
@@ -3031,7 +3066,7 @@ async function manxueEditImage(
   }
 
   // GPT 模型使用标准 OpenAI /images/edits（multipart 上传参考图）
-  const size = pixelSize || manxueAspectSize(aspectRatio);
+  const size = pixelSize || manxueGptImage2Size(aspectRatio, modelName);
   const imageBlobs: { blob: Blob; filename: string }[] = [];
   for (const img of base64Images.slice(0, 16)) {
     imageBlobs.push({
@@ -3064,7 +3099,10 @@ async function manxueEditImage(
     form.append('n', '1');
     form.append('size', size);
     form.append('response_format', 'b64_json');
-    if (quality && (model === 'gpt-image-2' || model === 'gpt-image-2-pro')) {
+    if (model === 'gpt-image-2-4k') {
+      form.append('resolution', '4K');
+    }
+    if (quality && (model === 'gpt-image-2' || model === 'gpt-image-2-pro' || model === 'gpt-image-2-4k')) {
       form.append('quality', quality);
     }
     const result = await manxueSubmitEdit(base, apiKey, form, signal);
@@ -3661,6 +3699,7 @@ function isManxueImageModel(modelName: string): boolean {
   const m = (modelName || '').trim();
   return (
     m === 'gpt-image-2-pro-manxue' ||
+    m === 'gpt-image-2-4k-manxue' ||
     m === 'gpt-image-2-manxue' ||
     m === 'gemini-3-pro-image-preview-2k-manxue' ||
     m === 'gemini-3-pro-image-preview-4k-manxue' ||

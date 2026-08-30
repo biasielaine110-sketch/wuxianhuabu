@@ -1,6 +1,6 @@
 import type { RefObject, MutableRefObject, Dispatch, SetStateAction } from 'react';
 import type { CanvasNode, ChatMessage, ChatNode, Edge } from '../types';
-import { defaultCanvasImageModel } from './canvasModelUtils';
+import { clampCanvasImageResolution, defaultCanvasImageModel } from './canvasModelUtils';
 import { upscaleImage } from './canvasImageUpscale';
 import { nextChatMessageId as nextMsgId } from './chatMessageIds';
 import {
@@ -9,7 +9,7 @@ import {
   isVeo31FastVideoModel,
   videoNodeModelToToApis,
 } from './videoModelUtils';
-import { DEFAULT_DEEPSEEK_CHAT_MODEL_ID, normalizeDeepSeekChatModelId, normalizeLegacyImageModelId, getCodesonlineSavedKey, getHfsySavedKey, getOpenAiSavedKey, getAliyunMaasSavedKey } from '../services/aiSettings';
+import { DEFAULT_DEEPSEEK_CHAT_MODEL_ID, normalizeDeepSeekChatModelId, normalizeLegacyImageModelId, getCodesonlineSavedKey, getHfsySavedKey, getOpenAiSavedKey, getAliyunMaasSavedKey, getManxueSavedKey } from '../services/aiSettings';
 import { normalizeCanvasGenerationImages } from '../services/openaiCompatibleService';
 import { hasCanvasImagePayload } from '../services/canvasAssetResolver';
 import {
@@ -67,6 +67,7 @@ export function createCanvasGenerationApi(
     if (m === 'gpt-image-2-codesonline') return getCodesonlineSavedKey() || undefined;
     if (m === 'gpt-image-2-hfsy' || m === 'gpt-image-2pro-hfsy' || m === 'gpt-image-2pro-4k-hfsy' || m === 'nano-banana-2-hfsy' || m === 'nano-banana-pro-hfsy') return getHfsySavedKey() || undefined;
     if (m === 'z-image-turbo-aliyun' || m === 'z-image-turbo' || m === 'qwen-image-3.0-pro-aliyun' || m === 'qwen-image-3.0-pro') return getAliyunMaasSavedKey() || undefined;
+    if (m.endsWith('-manxue')) return getManxueSavedKey() || undefined;
     if (m.startsWith('gpt-image-')) return getOpenAiSavedKey() || undefined;
     return undefined;
   };
@@ -106,6 +107,7 @@ export function createCanvasGenerationApi(
     try {
       // ---- 即梦生图分支 ----
       const imageModel = normalizeLegacyImageModelId(node.model || defaultCanvasImageModel());
+      const imageResolution = clampCanvasImageResolution(imageModel, node.resolution || '2k');
       if (isJimengImageModel(imageModel)) {
         const isI2i = node.type === 'i2i' || node.type === 'panoramaT2i';
 
@@ -207,7 +209,7 @@ export function createCanvasGenerationApi(
           node.aspectRatio || '16:9',
           node.imageCount || 1,
           imageModel,
-          node.resolution,
+          imageResolution,
           node.quality,
           ac.signal
         );
@@ -225,7 +227,7 @@ export function createCanvasGenerationApi(
           const resolved = await resolveI2iGenerationAspect(
             node.aspectRatio,
             imageInputs[0],
-            node.resolution
+            imageResolution
           );
           aspectRatio = resolved.aspectRatio;
           pixelSize = resolved.pixelSize;
@@ -237,7 +239,7 @@ export function createCanvasGenerationApi(
           node.imageCount || 1,
           imageModel,
           aspectRatio,
-          node.resolution,
+          imageResolution,
           node.quality,
           pixelSize,
           ac.signal
@@ -250,7 +252,7 @@ export function createCanvasGenerationApi(
         bearerToken: imageModelBearerToken(imageModel),
       });
       const upscaledImages = await Promise.all(
-        normalizedImages.map((img) => upscaleImage(img, node.resolution || '4k'))
+        normalizedImages.map((img) => upscaleImage(img, imageResolution))
       );
 
       const validImages = upscaledImages.filter((im) => im && hasCanvasImagePayload(im.trim()));
