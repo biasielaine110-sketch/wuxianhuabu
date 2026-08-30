@@ -67,6 +67,10 @@
       "destination": "https://files.dashlyai.cc/:path*"
     },
     {
+      "source": "/cdn-files-token6688/:path*",
+      "destination": "https://assets.token6688.com/:path*"
+    },
+    {
       "source": "/volcengine-ark-api/(.*)",
       "destination": "/api/volcengine-ark-proxy?path=$1"
     },
