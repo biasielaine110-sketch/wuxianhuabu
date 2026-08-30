@@ -10,6 +10,10 @@ import {
   isHfsySd2VideoModel,
   isJimengVideoModel,
   isManxueCDance2Pro720VideoModel,
+  isToApisGrokVideo15Model,
+  isToApisKlingV3OmniModel,
+  isToApisSeedance25Model,
+  isToApisSeedance2MiniModel,
   isVideoDoubaoFamilyModel,
   isVideoGrokDurationStyleModel,
   isVideoSoraStyleModel,
@@ -46,6 +50,9 @@ export function VideoNodeSettingsPanel({
   const isDoubao = isVideoDoubaoFamilyModel(vm);
   const isSeedance2 = vm === 'seedance-2';
   const isSeedance2Fast = vm === 'seedance-2-fast';
+  const isSeedance2Mini = isToApisSeedance2MiniModel(vm);
+  const isSeedance25 = isToApisSeedance25Model(vm);
+  const isKlingV3Omni = isToApisKlingV3OmniModel(vm);
   const isHfsySd2 = isHfsySd2VideoModel(vm);
   const isHfsyMinimaxH3 = isHfsyMinimaxH3VideoModel(vm);
   const isHfsyGrokImagine = isHfsyGrokImagineVideoModel(vm);
@@ -54,8 +61,14 @@ export function VideoNodeSettingsPanel({
   const isHfsySdSizeLarge = isHfsySd2 && !isHfsySdFixed480 && !isHfsySdFixed720;
   const isGemini = vm === 'gemini-omni-flash';
   const isManxueCDance = isManxueCDance2Pro720VideoModel(vm);
-  const isToApisGrokVideo15 = vm === 'grok-video-1.5-preview';
+  const isToApisGrokVideo15 = isToApisGrokVideo15Model(vm);
   const isGrokWithRefAspectDetect = isToApisGrokVideo15;
+
+  useEffect(() => {
+    if (vm && vm !== (node.model || '')) {
+      onUpdateNode(node.id, getVideoModelSwitchUpdates(vm, node));
+    }
+  }, [vm, node.id, node.model]);
 
   const vSlots = useMemo(() => buildIncomingRefSlots(node.id, edges, nodes), [node.id, edges, nodes]);
   const imageSlots = vSlots.filter((s) => s.kind === 'image');
@@ -171,7 +184,15 @@ export function VideoNodeSettingsPanel({
       </div>
       <div className="text-xs text-gray-500 px-1 leading-relaxed">
         需 OpenAI 兼容 + ToAPIs Base URL。最多 3 张参考图（视频将截取关键帧）{audioSlots.length > 0 && <span className="text-blue-400 font-medium">· 已连接语音参考</span>}。
-        {isVeo
+        {isToApisGrokVideo15
+          ? ' · grok-video-1.5：仅图生视频，必须连接 1 张参考图；1–15 秒；480p/720p'
+          : isSeedance2Mini
+            ? ' · seedance-2-mini：4–15 秒；画幅 16:9/9:16/1:1；最高 720p'
+            : isSeedance25
+              ? ' · seedance-2-5：4–15 秒；最高 720p'
+              : isKlingV3Omni
+                ? ' · kling-v3-omni：3–15 秒；画幅 16:9/9:16/1:1；720p（std）或 1080p（pro）'
+          : isVeo
           ? ' · Veo：固定 8 秒；画幅 16:9 或 9:16；720p/1080p/4k'
           : isSora
             ? ' · Sora 系：4/8/12 秒、16:9 或 9:16、720p'
@@ -204,7 +225,7 @@ export function VideoNodeSettingsPanel({
         >
           参考图：{refAspect.width}×{refAspect.height}（{refAspect.canonical}）。
           {aspectMismatch
-            ? `当前选 ${node.aspectRatio || '16:9'} ≠ 参考图 ${refAspect.canonical}，提交时将按所选 ${node.aspectRatio || '16:9'} 拉伸参考图（ToAPIs grok-video-1.5-preview 支持 aspect_ratio override）。`
+            ? `当前选 ${node.aspectRatio || '16:9'} ≠ 参考图 ${refAspect.canonical}，提交时将按所选 ${node.aspectRatio || '16:9'} 拉伸参考图（ToAPIs grok-video-1.5 支持 aspect_ratio override）。`
             : '画幅与参考图一致。'}
         </div>
       )}
@@ -218,10 +239,10 @@ export function VideoNodeSettingsPanel({
           onPointerDown={(e) => e.stopPropagation()}
         >
           <optgroup label="ToAPIs">
-            <option value="veo3.1-fast">Veo 3.1 Fast</option>
-            <option value="grok-video-3">Grok Video 3</option>
-            <option value="grok-video-1.5-preview">Grok Video 1.5 Preview</option>
-            <option value="sora-2-vvip">Sora2 VVIP</option>
+            <option value="grok-video-1.5">Grok Video 1.5</option>
+            <option value="seedance-2-mini">Seedance 2 Mini</option>
+            <option value="seedance-2-5">Seedance 2.5</option>
+            <option value="kling-v3-omni">Kling v3 Omni</option>
             <option value="doubao-seedance-1-5-pro">Doubao SeeDance 1.5 Pro</option>
             <option value="seedance-2">Seedance 2</option>
             <option value="seedance-2-fast">Seedance 2 Fast</option>
@@ -234,8 +255,6 @@ export function VideoNodeSettingsPanel({
             <option value="hfsy-sd-2.5-480">SD-2.5 480（hfsyapi.cn）</option>
             <option value="hfsy-sd-2-vip-720">SD-2 VIP 720（hfsyapi.cn）</option>
             <option value="hfsy-sd-2-vip">SD-2 VIP（hfsyapi.cn）</option>
-            <option value="hfsy-sd-2-fast">SD-2 Fast（hfsyapi.cn）</option>
-            <option value="hfsy-sd-2">SD-2（hfsyapi.cn）</option>
           </optgroup>
           <optgroup label="满 e (manxueapi.com)">
             <option value={MANXUE_C_DANCE2_PRO_720_VIDEO_MODEL}>C-Dance2 Pro 720（满 e）</option>
@@ -316,6 +335,52 @@ export function VideoNodeSettingsPanel({
               <option value={8}>8 秒</option>
               <option value={10}>10 秒</option>
               <option value={12}>12 秒</option>
+            </select>
+          ) : isSeedance2Mini || isSeedance25 ? (
+            <select
+              className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+              value={[4, 5, 8, 10, 12, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 8}
+              onChange={(e) => onUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <option value={4}>4 秒</option>
+              <option value={5}>5 秒</option>
+              <option value={8}>8 秒</option>
+              <option value={10}>10 秒</option>
+              <option value={12}>12 秒</option>
+              <option value={15}>15 秒</option>
+            </select>
+          ) : isToApisGrokVideo15 ? (
+            <select
+              className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+              value={[1, 4, 5, 6, 8, 10, 12, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 8}
+              onChange={(e) => onUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <option value={1}>1 秒</option>
+              <option value={4}>4 秒</option>
+              <option value={5}>5 秒</option>
+              <option value={6}>6 秒</option>
+              <option value={8}>8 秒</option>
+              <option value={10}>10 秒</option>
+              <option value={12}>12 秒</option>
+              <option value={15}>15 秒</option>
+            </select>
+          ) : isKlingV3Omni ? (
+            <select
+              className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+              value={[3, 4, 5, 6, 8, 10, 12, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 5}
+              onChange={(e) => onUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <option value={3}>3 秒</option>
+              <option value={4}>4 秒</option>
+              <option value={5}>5 秒</option>
+              <option value={6}>6 秒</option>
+              <option value={8}>8 秒</option>
+              <option value={10}>10 秒</option>
+              <option value={12}>12 秒</option>
+              <option value={15}>15 秒</option>
             </select>
           ) : isHfsyMinimaxH3 ? (
             <select
@@ -427,6 +492,19 @@ export function VideoNodeSettingsPanel({
               <option value="3:2">3:2（按 16:9 提交）</option>
               <option value="2:3">2:3（按 16:9 提交）</option>
             </select>
+          ) : isToApisGrokVideo15 ? (
+            <select
+              className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+              value={['1:1', '16:9', '9:16', '3:2', '2:3'].includes(node.aspectRatio || '') ? node.aspectRatio : '16:9'}
+              onChange={(e) => onUpdateNode(node.id, { aspectRatio: e.target.value })}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <option value="16:9">16:9</option>
+              <option value="9:16">9:16</option>
+              <option value="1:1">1:1</option>
+              <option value="3:2">3:2</option>
+              <option value="2:3">2:3</option>
+            </select>
           ) : isHfsyMinimaxH3 || isSora ? (
             <select
               className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
@@ -441,6 +519,31 @@ export function VideoNodeSettingsPanel({
             <select
               className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
               value={node.aspectRatio || '16:9'}
+              onChange={(e) => onUpdateNode(node.id, { aspectRatio: e.target.value })}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <option value="16:9">16:9</option>
+              <option value="9:16">9:16</option>
+              <option value="1:1">1:1</option>
+              <option value="4:3">4:3</option>
+              <option value="3:4">3:4</option>
+              <option value="21:9">21:9</option>
+            </select>
+          ) : isKlingV3Omni || isSeedance2 || isSeedance2Fast || isSeedance2Mini ? (
+            <select
+              className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+              value={['16:9', '9:16', '1:1'].includes(node.aspectRatio || '') ? node.aspectRatio : '16:9'}
+              onChange={(e) => onUpdateNode(node.id, { aspectRatio: e.target.value })}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <option value="16:9">16:9</option>
+              <option value="9:16">9:16</option>
+              <option value="1:1">1:1</option>
+            </select>
+          ) : isSeedance25 ? (
+            <select
+              className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+              value={['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'].includes(node.aspectRatio || '') ? node.aspectRatio : '16:9'}
               onChange={(e) => onUpdateNode(node.id, { aspectRatio: e.target.value })}
               onPointerDown={(e) => e.stopPropagation()}
             >
@@ -547,8 +650,38 @@ export function VideoNodeSettingsPanel({
               <option value="720p">720p (1元/秒)</option>
               <option value="1080p">1080p (2.5元/秒)</option>
             </select>
-          ) : isSeedance2Fast ? (
-            <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p (8毛/秒)</span>
+          ) : isSeedance2Fast || isSeedance2Mini ? (
+            <select
+              className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+              value={node.videoResolution === '480p' ? '480p' : '720p'}
+              onChange={(e) => onUpdateNode(node.id, { videoResolution: e.target.value as '480p' | '720p' })}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <option value="480p">480p</option>
+              <option value="720p">720p</option>
+            </select>
+          ) : isSeedance25 ? (
+            <select
+              className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+              value={node.videoResolution === '480p' ? '480p' : '720p'}
+              onChange={(e) => onUpdateNode(node.id, { videoResolution: e.target.value as '480p' | '720p' })}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <option value="480p">480p</option>
+              <option value="720p">720p（最高）</option>
+            </select>
+          ) : isKlingV3Omni ? (
+            <select
+              className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+              value={node.videoResolution === '1080p' ? '1080p' : '720p'}
+              onChange={(e) =>
+                onUpdateNode(node.id, { videoResolution: e.target.value as '720p' | '1080p' })
+              }
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <option value="720p">720p（std）</option>
+              <option value="1080p">1080p（pro，最高）</option>
+            </select>
           ) : isHfsySdSizeLarge ? (
             <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">size: large</span>
           ) : isGemini ? (

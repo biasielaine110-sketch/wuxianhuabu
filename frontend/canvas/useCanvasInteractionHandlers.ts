@@ -637,7 +637,7 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
           aspectRatio: '16:9',
           resolution: '2k',
           imageCount: 1,
-          model: 'veo3.1-fast',
+          model: 'grok-video-1.5',
           viewMode: 'single',
           currentImageIndex: 0,
           videos: urls,
@@ -720,7 +720,7 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
             currentVideoIndex: 0,
             videoDuration: 8,
             videoResolution: '720p' as const,
-            model: 'veo3.1-fast',
+            model: 'grok-video-1.5',
           }
         : {}),
     };

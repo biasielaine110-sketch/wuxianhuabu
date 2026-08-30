@@ -1648,13 +1648,19 @@ function toApisVeo31FastAspectRatio(aspectRatio: string): '16:9' | '9:16' {
 async function toApisUploadVideoReferenceImageUrls(
   refs: string[],
   filePrefix: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  maxCount = 3
 ): Promise<string[]> {
   const imageUrls: string[] = [];
-  const list = refs.filter(Boolean).slice(0, 3);
+  const list = refs.filter(Boolean).slice(0, maxCount);
   for (let i = 0; i < list.length; i++) {
     assertNotAborted(signal);
-    const { raw, mime } = parseBase64ImageInput(list[i]);
+    const trimmed = list[i].trim();
+    if (/^https?:\/\//i.test(trimmed)) {
+      imageUrls.push(trimmed);
+      continue;
+    }
+    const { raw, mime } = parseBase64ImageInput(trimmed);
     const blob = base64ToBlob(raw, mime);
     const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : mime.includes('gif') ? 'gif' : 'jpg';
     imageUrls.push(await toApisUploadImageBlob(blob, `${filePrefix}-${i}.${ext}`, signal));
@@ -1664,6 +1670,7 @@ async function toApisUploadVideoReferenceImageUrls(
 
 export type ToApisVideoModelId =
   | 'grok-video-3'
+  | 'grok-video-1.5'
   | 'grok-video-1.5-preview'
   | 'sora-2-vvip'
   | 'veo3.1-fast'
@@ -1673,6 +1680,9 @@ export type ToApisVideoModelId =
   | 'gemini-omni-flash'
   | 'seedance-2'
   | 'seedance-2-fast'
+  | 'seedance-2-mini'
+  | 'seedance-2-5'
+  | 'kling-v3-omni'
   | 'hfsy-sd-2'
   | 'hfsy-sd-2-fast'
   | 'hfsy-sd-2-vip'
@@ -2414,8 +2424,8 @@ export async function toApisGrokVideoGenerate(params: {
   durationSeconds: number;
   aspectRatio: string;
   resolution: '480p' | '720p';
-  /** 模型 id；默认 grok-video-3，可选 grok-video-1.5-preview（xAI 1.5 Preview） */
-  videoModel?: 'grok-video-3' | 'grok-video-1.5-preview';
+  /** 模型 id；默认 grok-video-3，可选 grok-video-1.5 / grok-video-1.5-preview */
+  videoModel?: 'grok-video-3' | 'grok-video-1.5' | 'grok-video-1.5-preview';
   /** 最多 3 张（ToAPIs 文档）；多张会先上传再传 URL */
   referenceImagesBase64?: string[];
   /** 语音参考：音频 base64 */
@@ -2694,6 +2704,178 @@ async function toApisGeminiOmniVideoGenerate(params: {
   return toApisPollVideoTaskToPlayableUrl(id, params.signal);
 }
 
+function toApisSeedanceImageWithRoles(imageUrls: string[]): { url: string; role: string }[] {
+  if (imageUrls.length === 1) return [{ url: imageUrls[0], role: 'first_frame' }];
+  if (imageUrls.length === 2) {
+    return [
+      { url: imageUrls[0], role: 'first_frame' },
+      { url: imageUrls[1], role: 'last_frame' },
+    ];
+  }
+  return imageUrls.map((url) => ({ url, role: 'reference_image' }));
+}
+
+/**
+ * ToAPIs：`grok-video-1.5` 仅图生视频，必须 1 张首图；时长 1–15 秒；480p / 720p。
+ * https://docs.toapis.com/docs/cn/api-reference/videos/grok-video-1.5/generation
+ */
+async function toApisGrokVideo15Generate(params: {
+  prompt: string;
+  durationSeconds: number;
+  aspectRatio: string;
+  resolution: '480p' | '720p';
+  referenceImagesBase64?: string[];
+  signal?: AbortSignal;
+}): Promise<string> {
+  if (getAiProvider() !== 'openai-compatible') {
+    throw new Error(
+      '视频生成需在「设置 → API」中选择「OpenAI 兼容」，并将 Base URL 设为 ToAPIs（https://toapis.com/v1）。'
+    );
+  }
+  const base = normalizeBaseUrl(getOpenAiBaseUrl());
+  if (!isToApisHost(base)) {
+    throw new Error('视频生成当前仅支持 ToAPIs：请将 Base URL 设为 https://toapis.com/v1');
+  }
+  const apiKey = getOpenAiSavedKey();
+  if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key。');
+  const imageUrls = await toApisUploadVideoReferenceImageUrls(
+    params.referenceImagesBase64 || [],
+    'grok-video-1.5-ref',
+    params.signal,
+    1
+  );
+  if (!imageUrls.length) {
+    throw new Error('ToAPIs grok-video-1.5 仅支持图生视频，请连接 1 张参考图。');
+  }
+  const duration = Math.min(15, Math.max(1, Math.round(params.durationSeconds || 8)));
+  const ar = (params.aspectRatio || '16:9').trim();
+  const aspect_ratio = ['1:1', '16:9', '9:16', '3:2', '2:3'].includes(ar) ? ar : '16:9';
+  const resolution = params.resolution === '480p' ? '480p' : '720p';
+  const body: Record<string, unknown> = {
+    model: 'grok-video-1.5',
+    prompt: params.prompt,
+    image: imageUrls[0],
+    duration,
+    aspect_ratio,
+    resolution,
+  };
+  const { id } = await toApisSubmitVideoGeneration(body, params.signal);
+  return toApisPollVideoTaskToPlayableUrl(id, params.signal);
+}
+
+/**
+ * ToAPIs Seedance 2 族：seedance-2 / seedance-2-fast / seedance-2-mini / seedance-2-5。
+ */
+async function toApisSeedance2VideoGenerate(params: {
+  prompt: string;
+  durationSeconds: number;
+  aspectRatio: string;
+  resolution: '480p' | '720p' | '1080p';
+  referenceImagesBase64?: string[];
+  referenceVideoUrls?: string[];
+  videoModel: 'seedance-2' | 'seedance-2-fast' | 'seedance-2-mini' | 'seedance-2-5';
+  signal?: AbortSignal;
+}): Promise<string> {
+  if (getAiProvider() !== 'openai-compatible') {
+    throw new Error(
+      '视频生成需在「设置 → API」中选择「OpenAI 兼容」，并将 Base URL 设为 ToAPIs（https://toapis.com/v1）。'
+    );
+  }
+  const base = normalizeBaseUrl(getOpenAiBaseUrl());
+  if (!isToApisHost(base)) {
+    throw new Error('视频生成当前仅支持 ToAPIs：请将 Base URL 设为 https://toapis.com/v1');
+  }
+  const apiKey = getOpenAiSavedKey();
+  if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key。');
+  const model = params.videoModel;
+  const duration = Math.min(15, Math.max(4, Math.round(params.durationSeconds || 8)));
+  let resolution: '480p' | '720p' | '1080p' = params.resolution;
+  if (model === 'seedance-2-5' || model === 'seedance-2-mini' || model === 'seedance-2-fast') {
+    if (resolution === '1080p') resolution = '720p';
+  }
+  const imageUrls = await toApisUploadVideoReferenceImageUrls(
+    params.referenceImagesBase64 || [],
+    `${model}-ref`,
+    params.signal,
+    9
+  );
+  const imageWithRoles = toApisSeedanceImageWithRoles(imageUrls);
+  const ar = (params.aspectRatio || '16:9').trim();
+  const aspect_ratio =
+    model === 'seedance-2-5'
+      ? (['21:9', '16:9', '4:3', '1:1', '3:4', '9:16', 'adaptive'].includes(ar) ? ar : '16:9')
+      : (['21:9', '16:9', '4:3', '1:1', '3:4', '9:16', 'adaptive'].includes(ar) ? ar : '16:9');
+  const body: Record<string, unknown> = {
+    model,
+    prompt: params.prompt,
+    duration,
+    aspect_ratio,
+    resolution,
+  };
+  if (imageWithRoles.length) body.image_with_roles = imageWithRoles;
+  const vids = (params.referenceVideoUrls || []).filter((u) => /^https?:\/\//i.test(u.trim())).slice(0, 3);
+  if (vids.length) {
+    body.video_with_roles = vids.map((url) => ({ url, role: 'reference_video' }));
+  }
+  const { id } = await toApisSubmitVideoGeneration(body, params.signal);
+  return toApisPollVideoTaskToPlayableUrl(id, params.signal);
+}
+
+/**
+ * ToAPIs：`kling-v3-omni`。mode=std→720P，mode=pro→1080P（最高 1080p）。
+ */
+async function toApisKlingV3OmniVideoGenerate(params: {
+  prompt: string;
+  durationSeconds: number;
+  aspectRatio: string;
+  resolution: '720p' | '1080p';
+  referenceImagesBase64?: string[];
+  referenceVideoUrls?: string[];
+  signal?: AbortSignal;
+}): Promise<string> {
+  if (getAiProvider() !== 'openai-compatible') {
+    throw new Error(
+      '视频生成需在「设置 → API」中选择「OpenAI 兼容」，并将 Base URL 设为 ToAPIs（https://toapis.com/v1）。'
+    );
+  }
+  const base = normalizeBaseUrl(getOpenAiBaseUrl());
+  if (!isToApisHost(base)) {
+    throw new Error('视频生成当前仅支持 ToAPIs：请将 Base URL 设为 https://toapis.com/v1');
+  }
+  const apiKey = getOpenAiSavedKey();
+  if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key。');
+  const imageUrls = await toApisUploadVideoReferenceImageUrls(
+    params.referenceImagesBase64 || [],
+    'kling-v3-omni-ref',
+    params.signal,
+    9
+  );
+  const duration = Math.min(15, Math.max(3, Math.round(params.durationSeconds || 5)));
+  const mode = params.resolution === '1080p' ? 'pro' : 'std';
+  const ar = (params.aspectRatio || '16:9').trim();
+  const aspect_ratio = ar === '9:16' || ar === '1:1' ? ar : '16:9';
+  let prompt = params.prompt || '';
+  const image_list = imageUrls.map((image_url) => ({ image_url }));
+  if (image_list.length && !/<<<image_\d+>>>/.test(prompt)) {
+    const tags = image_list.map((_, i) => `<<<image_${i + 1}>>>`).join('');
+    prompt = `${tags}${prompt}`;
+  }
+  const body: Record<string, unknown> = {
+    model: 'kling-v3-omni',
+    prompt,
+    mode,
+    duration,
+    aspect_ratio,
+  };
+  if (image_list.length) body.metadata = { image_list };
+  const vids = (params.referenceVideoUrls || []).filter((u) => /^https?:\/\//i.test(u.trim()));
+  if (vids.length) {
+    body.video_list = [{ video_url: vids[0], refer_type: 'base', keep_original_sound: 'no' }];
+  }
+  const { id } = await toApisSubmitVideoGeneration(body, params.signal);
+  return toApisPollVideoTaskToPlayableUrl(id, params.signal);
+}
+
 export async function toApisCanvasVideoGenerate(params: {
   prompt: string;
   videoModel: ToApisVideoModelId;
@@ -2757,18 +2939,49 @@ export async function toApisCanvasVideoGenerate(params: {
       signal: params.signal,
     });
   }
-  if (params.videoModel === 'seedance-2' || params.videoModel === 'seedance-2-fast') {
+  if (
+    params.videoModel === 'seedance-2' ||
+    params.videoModel === 'seedance-2-fast' ||
+    params.videoModel === 'seedance-2-mini' ||
+    params.videoModel === 'seedance-2-5'
+  ) {
     const res =
-      params.resolution === '1080p' || params.resolution === '480p'
-        ? params.resolution
-        : '720p';
+      params.videoModel === 'seedance-2'
+        ? params.resolution === '1080p' || params.resolution === '480p'
+          ? params.resolution
+          : '720p'
+        : params.resolution === '480p'
+          ? '480p'
+          : '720p';
     return toApisSeedance2VideoGenerate({
       prompt: params.prompt,
       durationSeconds: params.durationSeconds,
       aspectRatio: params.aspectRatio,
       resolution: res,
       referenceImagesBase64: params.referenceImagesBase64,
-      videoModel: params.videoModel as 'seedance-2' | 'seedance-2-fast',
+      referenceVideoUrls: params.referenceVideoUrls,
+      videoModel: params.videoModel,
+      signal: params.signal,
+    });
+  }
+  if (params.videoModel === 'kling-v3-omni') {
+    return toApisKlingV3OmniVideoGenerate({
+      prompt: params.prompt,
+      durationSeconds: params.durationSeconds,
+      aspectRatio: params.aspectRatio,
+      resolution: params.resolution === '1080p' ? '1080p' : '720p',
+      referenceImagesBase64: params.referenceImagesBase64,
+      referenceVideoUrls: params.referenceVideoUrls,
+      signal: params.signal,
+    });
+  }
+  if (params.videoModel === 'grok-video-1.5') {
+    return toApisGrokVideo15Generate({
+      prompt: params.prompt,
+      durationSeconds: params.durationSeconds,
+      aspectRatio: params.aspectRatio,
+      resolution: params.resolution === '480p' ? '480p' : '720p',
+      referenceImagesBase64: params.referenceImagesBase64,
       signal: params.signal,
     });
   }
@@ -2797,29 +3010,12 @@ export async function toApisCanvasVideoGenerate(params: {
   if (params.videoModel.startsWith('jimeng-')) {
     throw new Error('即梦模型请通过前端即梦客户端调用，不支持直接走 ToAPIs');
   }
-  // grok-video-1.5-preview 走同一异步视频生成函数，但 body.model 不同
-  // 用户反馈样例：curl POST /v1/videos/generations  {model: "grok-video-1.5-preview",
-  //   images: [url], seconds: "10", aspect_ratio: "16:9"}
-  if (params.videoModel === 'grok-video-1.5-preview') {
-    return toApisGrokVideoGenerate({
-      prompt: params.prompt,
-      durationSeconds: params.durationSeconds,
-      aspectRatio: params.aspectRatio,
-      resolution: params.resolution === '480p' ? '480p' : '720p',
-      videoModel: 'grok-video-1.5-preview',
-      referenceImagesBase64: params.referenceImagesBase64,
-      referenceAudioBase64: params.referenceAudioBase64,
-      signal: params.signal,
-    });
-  }
-  // 默认兜底（grok-video-3）
-  return toApisGrokVideoGenerate({
+  return toApisGrokVideo15Generate({
     prompt: params.prompt,
     durationSeconds: params.durationSeconds,
     aspectRatio: params.aspectRatio,
     resolution: params.resolution === '480p' ? '480p' : '720p',
     referenceImagesBase64: params.referenceImagesBase64,
-    referenceAudioBase64: params.referenceAudioBase64,
     signal: params.signal,
   });
 }

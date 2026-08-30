@@ -858,9 +858,15 @@ ${text}`,
                 ? (['480p', '1080p'].includes(node.videoResolution || '') ? (node.videoResolution as '480p' | '1080p') : '720p')
                 : videoModel === 'seedance-2'
                   ? (node.videoResolution === '1080p' ? '1080p' : '720p')
-                  : videoModel === 'seedance-2-fast'
-                    ? '720p'
-                    : videoModel === 'hfsy-grok-imagine-video-1.5'
+                  : videoModel === 'seedance-2-fast' || videoModel === 'seedance-2-mini'
+                    ? (node.videoResolution === '480p' ? '480p' : '720p')
+                    : videoModel === 'seedance-2-5'
+                      ? (node.videoResolution === '480p' ? '480p' : '720p')
+                      : videoModel === 'kling-v3-omni'
+                        ? (node.videoResolution === '1080p' ? '1080p' : '720p')
+                        : videoModel === 'grok-video-1.5'
+                          ? (node.videoResolution === '480p' ? '480p' : '720p')
+                        : videoModel === 'hfsy-grok-imagine-video-1.5'
                         ? (['480p', '1080p'].includes(node.videoResolution || '') ? (node.videoResolution as '480p' | '1080p') : '720p')
                         : videoModel === 'hfsy-sd-2.5-480'
                           ? '480p'
@@ -872,14 +878,35 @@ ${text}`,
                     ? '1080p'
                     : '720p';
 
+        const seedanceFamily =
+          videoModel === 'seedance-2' ||
+          videoModel === 'seedance-2-fast' ||
+          videoModel === 'seedance-2-mini' ||
+          videoModel === 'seedance-2-5' ||
+          videoModel === 'kling-v3-omni';
+        const refImageCount =
+          videoModel === 'grok-video-1.5'
+            ? 1
+            : seedanceFamily
+              ? 9
+              : videoModel === 'doubao-seedance-1-5-pro' || videoModel === 'gemini-omni-flash'
+                ? 2
+                : 3;
+
         videoUrl = await generateCanvasVideoViaToApis(combinedPrompt, {
           videoModel,
           durationSeconds:
             node.videoDuration ??
-            (videoModel === 'sora-2-vvip' || videoModel === 'veo3.1-fast' ? 8 : 10),
+            (videoModel === 'sora-2-vvip' || videoModel === 'veo3.1-fast'
+              ? 8
+              : videoModel === 'grok-video-1.5'
+                ? 8
+                : videoModel === 'kling-v3-omni'
+                  ? 5
+                  : 10),
           aspectRatio: node.aspectRatio || '16:9',
           resolution,
-          referenceImagesBase64: (videoModel === 'doubao-seedance-1-5-pro' || videoModel === 'gemini-omni-flash' || videoModel === 'seedance-2' || videoModel === 'seedance-2-fast') ? imageInputs.slice(0, 2) : imageInputs.slice(0, 3),
+          referenceImagesBase64: imageInputs.slice(0, refImageCount),
           referenceVideoUrls,
           referenceAudioBase64: audioBase64,
           signal: ac.signal,
