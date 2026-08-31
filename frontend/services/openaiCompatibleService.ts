@@ -1758,50 +1758,84 @@ function isHttpUrlString(v: unknown): v is string {
 }
 
 /**
- * ToAPIs 各模型完成态略有差异：标准形为 result.data[0].url；
- * 部分任务可能为 result.data.url、result.video.url、顶层 output 等。
+ * ToAPIs / hfsy / 满 e 各模型完成态略有差异：
+ * - 标准形 result.data[0].url、video_url
+ * - New API 统一形 data.output / data.outputs（字符串或数组）
+ * - Seedance 等 content.video_url、detail 嵌套
  */
 function extractVideoUrlFromPollPayload(data: unknown): string | null {
-  if (!data || typeof data !== 'object') return null;
+  if (!data || typeof data !== 'object') {
+    if (isHttpUrlString(data)) return String(data).trim();
+    return null;
+  }
   const o = data as Record<string, unknown>;
 
-  if (isHttpUrlString(o.url)) return o.url.trim();
-  for (const k of ['video_url', 'result_url', 'download_url', 'file_url'] as const) {
-    const v = o[k];
-    if (isHttpUrlString(v)) return v.trim();
-  }
-  for (const k of ['result_urls', 'resultUrls', 'video_urls'] as const) {
-    const arr = o[k];
-    if (Array.isArray(arr)) {
-      for (const item of arr) {
-        if (isHttpUrlString(item)) return item.trim();
+  const pickFromObject = (obj: Record<string, unknown>): string | null => {
+    if (isHttpUrlString(obj.url)) return obj.url.trim();
+    for (const k of ['video_url', 'result_url', 'download_url', 'file_url', 'output', 'video'] as const) {
+      const v = obj[k];
+      if (isHttpUrlString(v)) return String(v).trim();
+    }
+    for (const k of ['result_urls', 'resultUrls', 'video_urls', 'outputs', 'output'] as const) {
+      const arr = obj[k];
+      if (Array.isArray(arr)) {
+        for (const item of arr) {
+          if (isHttpUrlString(item)) return item.trim();
+          if (item && typeof item === 'object') {
+            const u = pickFromObject(item as Record<string, unknown>);
+            if (u) return u;
+          }
+        }
       }
     }
-  }
+    const vid = obj.video;
+    if (vid && typeof vid === 'object') {
+      const u = pickFromObject(vid as Record<string, unknown>);
+      if (u) return u;
+    }
+    const outObj = obj.output;
+    if (outObj && typeof outObj === 'object' && !Array.isArray(outObj)) {
+      const u = pickFromObject(outObj as Record<string, unknown>);
+      if (u) return u;
+    }
+    const content = obj.content;
+    if (content && typeof content === 'object') {
+      const u = pickFromObject(content as Record<string, unknown>);
+      if (u) return u;
+    }
+    return null;
+  };
 
-  // doubao-seedance-1-5-pro 等模型可能直接在顶层 data 数组返回
+  const direct = pickFromObject(o);
+  if (direct) return direct;
+
+  // doubao-seedance / New API：顶层 data 可能是 URL 字符串、对象或数组
   const topData = o.data;
+  if (isHttpUrlString(topData)) return topData.trim();
   if (Array.isArray(topData)) {
     for (const item of topData) {
+      if (isHttpUrlString(item)) return item.trim();
       if (item && typeof item === 'object') {
-        const u = (item as Record<string, unknown>).url;
-        if (isHttpUrlString(u)) return u.trim();
+        const u = pickFromObject(item as Record<string, unknown>);
+        if (u) return u;
       }
     }
   } else if (topData && typeof topData === 'object') {
     const td = topData as Record<string, unknown>;
-    if (isHttpUrlString(td.url)) return td.url.trim();
-    for (const k of ['video_url', 'result_url', 'download_url', 'file_url'] as const) {
-      if (isHttpUrlString(td[k])) return String(td[k]).trim();
-    }
-    const vid = td.video;
-    if (vid && typeof vid === 'object' && isHttpUrlString((vid as Record<string, unknown>).url)) {
-      return String((vid as Record<string, unknown>).url).trim();
+    const u = pickFromObject(td);
+    if (u) return u;
+    // New API 偶发再包一层 data
+    const nested = td.data;
+    if (isHttpUrlString(nested)) return nested.trim();
+    if (nested && typeof nested === 'object') {
+      const nu = pickFromObject(nested as Record<string, unknown>);
+      if (nu) return nu;
     }
   }
 
   let result: unknown = o.result;
   if (typeof result === 'string') {
+    if (isHttpUrlString(result)) return result.trim();
     try {
       result = JSON.parse(result) as unknown;
     } catch {
@@ -1810,65 +1844,57 @@ function extractVideoUrlFromPollPayload(data: unknown): string | null {
   }
   if (result && typeof result === 'object') {
     const r = result as Record<string, unknown>;
-    if (isHttpUrlString(r.url)) return r.url.trim();
-    for (const k of ['video_url', 'result_url', 'download_url', 'file_url'] as const) {
-      const v = r[k];
-      if (isHttpUrlString(v)) return v.trim();
-    }
-
+    const u = pickFromObject(r);
+    if (u) return u;
     const d = r.data;
+    if (isHttpUrlString(d)) return d.trim();
     if (Array.isArray(d)) {
       for (const item of d) {
+        if (isHttpUrlString(item)) return item.trim();
         if (item && typeof item === 'object') {
-          const u = (item as Record<string, unknown>).url;
-          if (isHttpUrlString(u)) return u.trim();
+          const iu = pickFromObject(item as Record<string, unknown>);
+          if (iu) return iu;
         }
       }
     } else if (d && typeof d === 'object') {
-      const rd = d as Record<string, unknown>;
-      if (isHttpUrlString(rd.url)) return rd.url.trim();
-      for (const k of ['video_url', 'result_url', 'download_url', 'file_url'] as const) {
-        if (isHttpUrlString(rd[k])) return String(rd[k]).trim();
-      }
-      const vid = rd.video;
-      if (vid && typeof vid === 'object' && isHttpUrlString((vid as Record<string, unknown>).url)) {
-        return String((vid as Record<string, unknown>).url).trim();
-      }
+      const du = pickFromObject(d as Record<string, unknown>);
+      if (du) return du;
     }
+  }
 
-    const video = r.video;
-    if (video && typeof video === 'object' && isHttpUrlString((video as Record<string, unknown>).url)) {
-      return String((video as Record<string, unknown>).url).trim();
-    }
-
-    const outputs = r.outputs;
-    if (Array.isArray(outputs)) {
-      for (const item of outputs) {
-        if (item && typeof item === 'object') {
-          const u = (item as Record<string, unknown>).url;
-          if (isHttpUrlString(u)) return u.trim();
-        }
-      }
-    }
+  const detail = o.detail;
+  if (detail && typeof detail === 'object') {
+    const u = pickFromObject(detail as Record<string, unknown>);
+    if (u) return u;
   }
 
   const output = o.output;
-  if (output && typeof output === 'object' && isHttpUrlString((output as Record<string, unknown>).url)) {
-    return String((output as Record<string, unknown>).url).trim();
+  if (isHttpUrlString(output)) return output.trim();
+  if (output && typeof output === 'object') {
+    const u = pickFromObject(output as Record<string, unknown>);
+    if (u) return u;
   }
 
-  // doubao-seedance-1-5-pro 等模型可能将 url 放在顶层 metadata.url 中
   const meta = o.metadata;
-  if (meta && typeof meta === 'object' && isHttpUrlString((meta as Record<string, unknown>).url)) {
-    return String((meta as Record<string, unknown>).url).trim();
+  if (meta && typeof meta === 'object') {
+    const u = pickFromObject(meta as Record<string, unknown>);
+    if (u) return u;
   }
 
   return null;
 }
 
 function isVideoTaskCompletedStatus(status: unknown): boolean {
-  const s = String(status || '').toLowerCase();
-  return s === 'completed' || s === 'succeeded' || s === 'success' || s === 'done' || s === 'finished';
+  const s = String(status || '').toLowerCase().trim();
+  return (
+    s === 'completed' ||
+    s === 'succeeded' ||
+    s === 'success' ||
+    s === 'done' ||
+    s === 'finished' ||
+    s === 'complete' ||
+    s === 'ok'
+  );
 }
 
 function normalizeHfsyVideoDuration(uiSeconds: number): number {
@@ -2002,7 +2028,9 @@ function extractTaskStatusFromPayload(data: unknown): string {
   if (!data || typeof data !== 'object') return '';
   const o = data as Record<string, unknown>;
   const direct = o.status || o.state || o.task_status;
-  if (direct !== undefined && direct !== null) return String(direct).toLowerCase();
+  if (direct !== undefined && direct !== null && String(direct).trim() !== '') {
+    return String(direct).toLowerCase();
+  }
   const d = o.data;
   if (d && typeof d === 'object' && !Array.isArray(d)) {
     const nested = extractTaskStatusFromPayload(d);
@@ -2013,11 +2041,16 @@ function extractTaskStatusFromPayload(data: unknown): string {
     const nested = extractTaskStatusFromPayload(result);
     if (nested) return nested;
   }
+  const detail = o.detail;
+  if (detail && typeof detail === 'object') {
+    const nested = extractTaskStatusFromPayload(detail);
+    if (nested) return nested;
+  }
   return '';
 }
 
 function isVideoTaskPendingStatus(status: string): boolean {
-  const s = status.toLowerCase();
+  const s = status.toLowerCase().replace(/-/g, '_');
   return (
     !s ||
     s === 'pending' ||
@@ -2025,6 +2058,7 @@ function isVideoTaskPendingStatus(status: string): boolean {
     s === 'queueing' ||
     s === 'created' ||
     s === 'submitted' ||
+    s === 'not_start' ||
     s === 'processing' ||
     s === 'running' ||
     s === 'in_progress' ||
@@ -2069,35 +2103,85 @@ async function hfsyPollVideoTaskToPlayableUrl(taskId: string, signal?: AbortSign
   const apiKey = getHfsySavedKey().trim();
   const base = hfsyFetchBase();
   const deadline = Date.now() + TOAPIS_VIDEO_TASK_MAX_WAIT_MS;
+  const enc = encodeURIComponent(taskId);
+  type PollAttempt = { method: 'GET' | 'POST'; url: string; body?: Record<string, string> };
+  const attempts: PollAttempt[] = [
+    { method: 'GET', url: `${base}/video/query?id=${enc}` },
+    { method: 'GET', url: `${base}/video/generations/${enc}` },
+    { method: 'GET', url: `${base}/videos/${enc}` },
+    { method: 'POST', url: `${base}/video/query`, body: { id: taskId, task_id: taskId } },
+  ];
+  let preferred: PollAttempt | null = null;
   await sleepInterruptible(5_000, signal);
+
+  const fetchAttempt = async (attempt: PollAttempt): Promise<{ parsed: unknown; rawText: string } | null> => {
+    const res = await fetch(attempt.url, {
+      method: attempt.method,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        ...(attempt.body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: attempt.body ? JSON.stringify(attempt.body) : undefined,
+      signal,
+    });
+    const rawText = await res.text();
+    if (!res.ok) return null;
+    try {
+      return { parsed: JSON.parse(rawText), rawText };
+    } catch {
+      return null;
+    }
+  };
 
   while (Date.now() < deadline) {
     assertNotAborted(signal);
-    const res = await fetch(`${base}/video/query?id=${encodeURIComponent(taskId)}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal,
-    });
-    const text = await res.text();
-    if (!res.ok) throw new Error(`hfsyapi.cn 查询视频任务失败 (${res.status}): ${text.slice(0, 500)}`);
-    let data: unknown;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      throw new Error(`hfsyapi.cn 查询响应不是 JSON: ${text.slice(0, 300)}`);
+    let data: unknown = null;
+    let text = '';
+    const order = preferred
+      ? [preferred, ...attempts.filter((a) => a.url !== preferred!.url || a.method !== preferred!.method)]
+      : attempts;
+    for (const attempt of order) {
+      const hit = await fetchAttempt(attempt);
+      if (!hit) continue;
+      data = hit.parsed;
+      text = hit.rawText;
+      preferred = attempt;
+      break;
+    }
+    if (!data) {
+      await sleepInterruptible(10_000, signal);
+      continue;
     }
 
     const status = extractTaskStatusFromPayload(data);
-    if (isVideoTaskCompletedStatus(status)) {
-      const rawUrl = extractVideoUrlFromPollPayload(data);
+    const rawUrlEarly = extractVideoUrlFromPollPayload(data);
+    const earlyUrlLooksReady =
+      !!rawUrlEarly &&
+      (!isVideoTaskPendingStatus(status) ||
+        /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(rawUrlEarly) ||
+        /\/(?:videos?|media|cdn)\//i.test(rawUrlEarly));
+    // New API 完成态常为 status=SUCCESS + data.output；有成片 URL 时不必死等状态字段
+    if (isVideoTaskCompletedStatus(status) || earlyUrlLooksReady) {
+      const rawUrl = rawUrlEarly || extractVideoUrlFromPollPayload(data);
       if (!rawUrl) throw new Error(`hfsyapi.cn 视频任务完成但未返回可播放 URL。完整响应：${text.slice(0, 2000)}`);
       const normalizedUrl = rawUrl.replace(/^(https?:\/)([^/])/i, '$1/$2');
       return rewriteKnownImageCdnToSameOrigin(normalizedUrl);
     }
-    if (status === 'failed' || status === 'error' || status === 'cancelled' || status === 'canceled') {
+    if (
+      status === 'failed' ||
+      status === 'failure' ||
+      status === 'error' ||
+      status === 'cancelled' ||
+      status === 'canceled'
+    ) {
       const o = data && typeof data === 'object' ? (data as Record<string, unknown>) : {};
+      const nestedData = o.data && typeof o.data === 'object' ? (o.data as Record<string, unknown>) : null;
       const message =
         (o.error && typeof o.error === 'object' ? (o.error as Record<string, unknown>).message : o.error) ||
         o.message ||
+        o.fail_reason ||
+        nestedData?.fail_reason ||
+        nestedData?.message ||
         text.slice(0, 400);
       throw new Error(`hfsyapi.cn 视频生成失败: ${String(message)}`);
     }
