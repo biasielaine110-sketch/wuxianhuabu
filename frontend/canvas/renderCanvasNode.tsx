@@ -96,6 +96,16 @@ export function renderCanvasNode(node: CanvasNode, s: CanvasNodeRenderState): Re
   const addNodes = s.appendNodesWithUndo;
   const canvasNodes = s.nodes;
   const canvasEdges = s.edges;
+  const linkedTextPlaceholder =
+    node.type === 't2i' || node.type === 'i2i'
+      ? canvasEdges.some((e) => {
+          if (e.targetId !== node.id) return false;
+          const src = canvasNodes.find((n) => n.id === e.sourceId);
+          return !!src && src.type === 'text' && !!(src.prompt || '').trim();
+        })
+        ? '已拾取文本节点，可直接生成；也可继续补充提示词'
+        : ''
+      : '';
   const hasInputPort = s.canReceiveConnection(node);
   const hasOutputPort = true;
   const openTextNodeBigEditor = () => {
@@ -669,7 +679,7 @@ return (
               className="w-full h-full bg-[#222222] text-gray-200 p-3 rounded-lg border border-[#444] focus:outline-none focus:border-blue-500 transition-colors resize-none leading-relaxed text-node-textarea" style={{ fontSize: textNodeFontSizeLocal + 'px', minHeight: node.type === 'i2i' ? '80px' : '120px' }}
               value={node.prompt}
               onChange={(e) => s.handleUpdateNode(node.id, { prompt: e.target.value })}
-              placeholder=""
+              placeholder={linkedTextPlaceholder}
               readOnly={node.type === 'text' && !(isSelected && editingTextNodeIds.has(node.id))}
               onPointerDown={(e) => {
                 // 吸管模式激活时，允许事件冒泡触发吸管连线

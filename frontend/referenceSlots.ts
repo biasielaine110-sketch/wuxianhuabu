@@ -424,6 +424,41 @@ export function stripRefMarkers(prompt: string): string {
   return prompt.replace(/@[RM]\d+/gi, '').replace(/\s+/g, ' ').trim();
 }
 
+/** 汇入目标节点的文本节点正文（非空） */
+export function collectIncomingTextContents(
+  targetNodeId: string,
+  edges: Edge[],
+  nodes: CanvasNode[]
+): string[] {
+  return edges
+    .filter((e) => e.targetId === targetNodeId)
+    .map((e) => nodes.find((n) => n.id === e.sourceId))
+    .filter((n): n is CanvasNode => !!n && n.type === 'text')
+    .map((n) => (n.prompt || '').trim())
+    .filter(Boolean);
+}
+
+/**
+ * 本地输入框为空（或仅有 @R/@M）时，用已拾取/连线的文本节点内容充当提示词。
+ * 有本地有效正文时仍以本地为准。
+ */
+export function resolvePromptWithLinkedText(
+  localPrompt: string | undefined | null,
+  linkedTexts: string[]
+): { prompt: string; usedLinkedAsPrimary: boolean } {
+  const localRaw = (localPrompt || '').trim();
+  const linked = linkedTexts.map((t) => t.trim()).filter(Boolean);
+  const linkedJoined = linked.join('\n').trim();
+  if (!localRaw) {
+    return { prompt: linkedJoined, usedLinkedAsPrimary: linkedJoined.length > 0 };
+  }
+  const stripped = stripRefMarkers(localRaw);
+  if (!stripped && linkedJoined) {
+    return { prompt: linkedJoined, usedLinkedAsPrimary: true };
+  }
+  return { prompt: localRaw, usedLinkedAsPrimary: false };
+}
+
 /** 从视频 URL（含 blob:）截取一帧为 JPEG base64（无 data: 前缀）；失败返回 null（常见于跨域外链） */
 export function videoUrlToJpegBase64(url: string): Promise<string | null> {
   return new Promise((resolve) => {

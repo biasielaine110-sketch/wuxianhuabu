@@ -23,6 +23,7 @@ import {
   parseRefPickIndices,
   parseMsgPickIndices,
   stripRefMarkers,
+  resolvePromptWithLinkedText,
   resolveSlotImagesForIndices,
   resolveSlotAudios,
 } from '../referenceSlots';
@@ -116,7 +117,10 @@ export function createCanvasGenerationApi(
         const inputNodes = incomingEdges.map(e => nodesRef.current.find(n => n.id === e.sourceId)).filter(Boolean) as CanvasNode[];
         const textInputs = inputNodes.filter(n => n.type === 'text').map(n => n.prompt).filter(Boolean);
         const presetPrompts = (node.activePresets ?? []).map(key => promptPresets[key] || '').filter(Boolean);
-        const combined = [...presetPrompts, node.prompt, ...textInputs].filter(Boolean).join('\n');
+        const resolvedLocal = resolvePromptWithLinkedText(node.prompt, textInputs as string[]);
+        const combined = resolvedLocal.usedLinkedAsPrimary
+          ? [...presetPrompts, resolvedLocal.prompt].filter(Boolean).join('\n')
+          : [...presetPrompts, resolvedLocal.prompt, ...textInputs].filter(Boolean).join('\n');
         const prompt = stripRefMarkers(combined) || combined;
 
         if (!prompt) throw new Error("请输入提示词或连接文本节点");
@@ -193,9 +197,12 @@ export function createCanvasGenerationApi(
 
       // 获取预设提示词（如果有激活的预设）
       const presetPrompts = (node.activePresets ?? []).map(key => promptPresets[key] || '').filter(Boolean);
-      
-      // 预设提示词在前，用户输入在后
-      const combinedPrompt = [...presetPrompts, node.prompt, ...textInputs].filter(Boolean).join('\n');
+
+      // 本地为空或仅有 @R 时，用连线文本节点充当提示词；本地有正文时仍一并拼接文本节点
+      const resolvedLocal = resolvePromptWithLinkedText(node.prompt, textInputs as string[]);
+      const combinedPrompt = resolvedLocal.usedLinkedAsPrimary
+        ? [...presetPrompts, resolvedLocal.prompt].filter(Boolean).join('\n')
+        : [...presetPrompts, resolvedLocal.prompt, ...textInputs].filter(Boolean).join('\n');
       
       // Do NOT append resolution/aspect ratio to the prompt text to avoid confusing the model's style adherence.
       const finalPrompt2 = combinedPrompt;
@@ -310,7 +317,15 @@ export function createCanvasGenerationApi(
     const node = nodesRef.current.find(n => n.id === nodeId) as (CanvasNode & ChatNode) | undefined;
     if (!node || node.type !== 'chat') return;
 
-    const inputText = (opts?.promptText ?? node.prompt)?.trim();
+    const incomingEdges = edgesRef.current.filter(e => e.targetId === nodeId);
+    const inputNodes = incomingEdges.map(e => nodesRef.current.find(n => n.id === e.sourceId)).filter(Boolean) as CanvasNode[];
+    const textInputs = inputNodes
+      .filter((n) => n.type === 'text')
+      .map((n) => (n.prompt || '').trim())
+      .filter(Boolean);
+
+    const resolved = resolvePromptWithLinkedText(opts?.promptText ?? node.prompt, textInputs);
+    const inputText = resolved.prompt;
     if (!inputText) return;
 
     // 设置取消控制器
@@ -321,10 +336,6 @@ export function createCanvasGenerationApi(
     // 检测是否为生图模式（以 [生图] 开头）
     const isImageGenMode = inputText.startsWith('[生图]');
     const imageGenPrompt = isImageGenMode ? inputText.replace(/^\[生图\]\s*/, '').trim() : '';
-
-    const incomingEdges = edgesRef.current.filter(e => e.targetId === nodeId);
-    const inputNodes = incomingEdges.map(e => nodesRef.current.find(n => n.id === e.sourceId)).filter(Boolean) as CanvasNode[];
-    const textInputs = inputNodes.filter(n => n.type === 'text').map(n => n.prompt).filter(Boolean);
 
     const slots = buildIncomingRefSlots(nodeId, edgesRef.current, nodesRef.current);
     const pickIndices = parseRefPickIndices(inputText);
@@ -373,7 +384,8 @@ export function createCanvasGenerationApi(
             fallbackVideos.map((s) => `@R${s.n} ${s.videoUrl}`).join('\n')
         );
       }
-      if (textInputs.length > 0) {
+      // 拾取的文本已作为主问题时不再重复塞进「背景信息」
+      if (textInputs.length > 0 && !resolved.usedLinkedAsPrimary) {
         contextParts.push('相关背景信息：' + textInputs.join('\n'));
       }
       contextParts.push('用户问题：' + strippedQuestion);

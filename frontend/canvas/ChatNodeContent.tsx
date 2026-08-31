@@ -264,6 +264,12 @@ export function ChatNodeContent({
   const chatPromptRef = useRef<HTMLTextAreaElement>(null);
   const bigInputLastClickTimeRef = useRef(0);
   const refSlots = useMemo(() => buildIncomingRefSlots(node.id, edges, nodes), [node.id, edges, nodes]);
+  const hasLinkedTextPrompt = useMemo(
+    () => refSlots.some((s) => s.kind === 'text' && !!(s.textContent || '').trim()),
+    [refSlots]
+  );
+  const canSendChat =
+    !node.isGenerating && (!!(node.prompt || '').trim() || hasLinkedTextPrompt);
   /** 消息列表容器（用于恢复/保存滚动位置） */
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   /** 标记本次挂载是否已应用过 chatScrollTop，避免用户已手动滚动时再被覆盖 */
@@ -461,7 +467,7 @@ export function ChatNodeContent({
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      onSendMessage();
+      if (canSendChat) onSendMessage();
     }
   };
 
@@ -1400,7 +1406,7 @@ export function ChatNodeContent({
             onKeyDown={handleKeyDown}
             onKeyUp={syncPromptCursor}
             onSelect={syncPromptCursor}
-            placeholder=""
+            placeholder={hasLinkedTextPrompt ? '已拾取文本节点，可直接发送；也可继续补充说明' : ''}
             onPointerDown={(e) => {
               e.stopPropagation();
               // 双击检测：基于时间戳（320ms 间隔内第二次点击即为双击）
@@ -1440,9 +1446,10 @@ export function ChatNodeContent({
               e.stopPropagation();
               onSendMessage();
             }}
-            disabled={node.isGenerating || !node.prompt?.trim()}
+            disabled={!canSendChat}
             className="rounded bg-rose-600 hover:bg-rose-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white flex items-center justify-center px-3"
             style={{ width: 200, height: 600 }}
+            title={canSendChat ? '发送' : '请输入内容，或用吸管拾取文本节点后直接发送'}
           >
             <SendIcon size={fs(14)} />
             <span className="ml-2">发送</span>
