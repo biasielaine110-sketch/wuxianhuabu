@@ -1019,7 +1019,8 @@ async function openAiCompatUploadImageBlob(
 
 /**
  * hfsy 视频参考图：上游明确「仅支持 URL，不支持 base64」。
- * 走 /api/hfsy-reference-image（服务端 ToAPIs/Telegraph/图床），不请求 hfsy /upload/image（404），也不回退 data URI。
+ * HFSY_REF_UPLOAD_V3：禁止走 hfsy /uploads（404），禁止 data URI 回退。
+ * 顺序：ToAPIs 客户端上传（若已配置）→ /api/hfsy-reference-image（Telegraph/图床）。
  */
 async function uploadHfsyVideoReferenceImage(
   blob: Blob,
@@ -1042,11 +1043,31 @@ async function uploadHfsyVideoReferenceImage(
     uploadBlob = blob;
   }
 
-  const headers: Record<string, string> = {
-    'Content-Type': uploadBlob.type || 'image/jpeg',
-  };
+  const isPublicHttpUrl = (u: string) =>
+    /^https?:\/\//i.test(u) && !u.startsWith('data:') && !u.includes('<');
+
+  // 仅当 OpenAI 兼容 Base 确为 ToAPIs 时才浏览器直传；绝不对 hfsy 调 /uploads（404）
   const toApisKey = getOpenAiSavedKey().trim();
   const toApisBase = normalizeBaseUrl(getOpenAiBaseUrl().trim() || 'https://toapis.com/v1');
+  if (toApisKey && isToApisHost(toApisBase)) {
+    try {
+      const url = await openAiCompatUploadImageBlob(
+        toApisBase,
+        toApisKey,
+        uploadBlob,
+        'hfsy-ref-v3.jpg',
+        signal
+      );
+      if (isPublicHttpUrl(url)) return url;
+    } catch {
+      /* 继续走服务端托管 */
+    }
+  }
+
+  const headers: Record<string, string> = {
+    'Content-Type': uploadBlob.type || 'image/jpeg',
+    'X-Hfsy-Ref-Upload': 'v3',
+  };
   if (toApisKey && isToApisHost(toApisBase)) {
     headers['X-Upload-Key'] = toApisKey;
     headers['X-Upload-Base'] = toApisBase;
@@ -1069,11 +1090,13 @@ async function uploadHfsyVideoReferenceImage(
   try {
     json = JSON.parse(text) as typeof json;
   } catch {
-    throw new Error(`HFSY 视频参考图上传响应无效 (${res.status})`);
-  }
-  if (!res.ok || !json.url || !/^https?:\/\//i.test(json.url) || json.url.startsWith('data:')) {
     throw new Error(
-      `HFSY 视频参考图需要公网 URL（上游不支持 base64）。上传失败 (${res.status}): ${
+      `HFSY 视频参考图托管接口异常 (${res.status})。请确认已部署 /api/hfsy-reference-image 并硬刷新。响应: ${text.slice(0, 200)}`
+    );
+  }
+  if (!res.ok || !json.url || !isPublicHttpUrl(json.url)) {
+    throw new Error(
+      `HFSY 视频参考图需要公网 URL（上游不支持 base64）。托管失败 (${res.status}): ${
         json.message || text.slice(0, 300)
       }`
     );
@@ -2141,6 +2164,18 @@ async function hfsySubmitVideoGeneration(body: Record<string, unknown>, signal?:
   if (!apiKey) {
     throw new Error('未配置 hfsyapi.cn API Key。请在「设置 → API」填写「hfsyapi.cn（GPT Image 2）」API Key。');
   }
+  // 硬拦截：上游拒绝 base64，避免旧缓存包把 data URI 送进 create
+  const imgs = body.images;
+  if (Array.isArray(imgs)) {
+    for (let i = 0; i < imgs.length; i++) {
+      const u = imgs[i];
+      if (typeof u !== 'string' || !/^https?:\/\//i.test(u) || u.startsWith('data:')) {
+        throw new Error(
+          `HFSY 视频参考图 ${i + 1} 不是公网 URL（检测到 base64 或无效地址）。请强制刷新页面后重试；若仍失败，请在设置中配置 ToAPIs Key 以便托管参考图。`
+        );
+      }
+    }
+  }
   const base = hfsyFetchBase();
   const res = await fetch(`${base}/video/create`, {
     method: 'POST',
@@ -2164,6 +2199,11 @@ async function hfsySubmitVideoGeneration(body: Record<string, unknown>, signal?:
   if (err) {
     const message = typeof err === 'object' && err ? (err as Record<string, unknown>).message : err;
     throw new Error(`hfsyapi.cn: ${String(message || '视频任务提交失败')}`);
+  }
+  // 部分网关把业务失败写在顶层 success:false（HTTP 仍 200）
+  if (json && typeof json === 'object' && (json as Record<string, unknown>).success === false) {
+    const message = (json as Record<string, unknown>).message;
+    throw new Error(`hfsyapi.cn: ${String(message || text.slice(0, 400))}`);
   }
   const id = extractVideoTaskIdFromPayload(json);
   if (!id) throw new Error(`hfsyapi.cn 未返回视频任务 ID: ${text.slice(0, 600)}`);

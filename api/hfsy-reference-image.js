@@ -60,9 +60,10 @@ async function tryCompatUpload(baseUrl, apiKey, body, mime, filename) {
 
 /**
  * hfsy 视频 create 仅接受公网 URL（明确拒绝 base64）。
- * 优先：客户端传入的 OpenAI 兼容上传（ToAPIs → files.toapis.com）→ Telegraph → 临时图床。
+ * HFSY_REF_UPLOAD_V3：ToAPIs（可选）→ Telegraph → 临时图床 → 本站短链兜底。
  */
 module.exports = async function handler(req, res) {
+  res.setHeader('X-Hfsy-Ref-Upload', 'v3');
   if (req.method !== 'POST') {
     res.statusCode = 405;
     res.setHeader('Allow', 'POST');
