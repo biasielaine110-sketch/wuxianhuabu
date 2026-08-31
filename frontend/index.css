@@ -424,19 +424,23 @@
   .canvas-node-font-195 select.nodemodel-select optgroup {
     font-weight: 600 !important;
   }
-  /** 绿色：codesonline / VIP / hfsy GPT Image 2、满 e GPT Image 2 4K、hfsy Nano-Banana 2/Pro */
+  /** 绿色：codesonline / VIP / Official / hfsy GPT Image 2、满 e GPT Image 2 4K / Gemini 3 Pro Preview、hfsy Nano-Banana 2/Pro */
   .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2-codesonline"],
   .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2-vip"],
+  .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2-official"],
   .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2-hfsy"],
   .canvas-node-font-195 select.nodemodel-select option[value="gpt-image-2-4k-manxue"],
+  .canvas-node-font-195 select.nodemodel-select option[value="gemini-3-pro-image-preview-manxue"],
   .canvas-node-font-195 select.nodemodel-select option[value="nano-banana-2-hfsy"],
   .canvas-node-font-195 select.nodemodel-select option[value="nano-banana-pro-hfsy"] {
     color: #4ade80 !important;
   }
   .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2-codesonline"]:checked),
   .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2-vip"]:checked),
+  .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2-official"]:checked),
   .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2-hfsy"]:checked),
   .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2-4k-manxue"]:checked),
+  .canvas-node-font-195 select.nodemodel-select:has(option[value="gemini-3-pro-image-preview-manxue"]:checked),
   .canvas-node-font-195 select.nodemodel-select:has(option[value="nano-banana-2-hfsy"]:checked),
   .canvas-node-font-195 select.nodemodel-select:has(option[value="nano-banana-pro-hfsy"]:checked) {
     color: #4ade80 !important;
@@ -483,7 +487,8 @@
   .canvas-node-root--chat select.nodemodel-select option[value="doubao-seed-2.1-turbo-ark"],
   .canvas-node-root--chat select.nodemodel-select option[value="qwen3.7-plus-aliyun"],
   .canvas-node-root--chat select.nodemodel-select option[value="kimi-k3-aliyun"],
-  .canvas-node-root--chat select.nodemodel-select option[value="glm-5.2-aliyun"] {
+  .canvas-node-root--chat select.nodemodel-select option[value="glm-5.2-aliyun"],
+  .canvas-node-root--chat select.nodemodel-select option[value="gpt-5.5-manxue"] {
     color: #c084fc !important;
   }
   .canvas-node-root--chat select.nodemodel-select:has(option[value="deepseek-v4-flash-vision-exp"]:checked),
@@ -493,7 +498,8 @@
   .canvas-node-root--chat select.nodemodel-select:has(option[value="doubao-seed-2.1-turbo-ark"]:checked),
   .canvas-node-root--chat select.nodemodel-select:has(option[value="qwen3.7-plus-aliyun"]:checked),
   .canvas-node-root--chat select.nodemodel-select:has(option[value="kimi-k3-aliyun"]:checked),
-  .canvas-node-root--chat select.nodemodel-select:has(option[value="glm-5.2-aliyun"]:checked) {
+  .canvas-node-root--chat select.nodemodel-select:has(option[value="glm-5.2-aliyun"]:checked),
+  .canvas-node-root--chat select.nodemodel-select:has(option[value="gpt-5.5-manxue"]:checked) {
     color: #c084fc !important;
   }
 
