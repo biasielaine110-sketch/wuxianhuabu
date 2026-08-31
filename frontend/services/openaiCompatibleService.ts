@@ -46,11 +46,8 @@ function codesonlineImageProxyPathPrefix(): '/api/codesonline-image-proxy' | '/c
   return '/codesonline-image-api';
 }
 
-/** 生产构建直接请求 /api/hfsy-image-proxy，与 yunzhi/codesonline 同理避免 rewrite 404 */
-function hfsyImageProxyPathPrefix(): '/api/hfsy-image-proxy' | '/hfsy-image-api' {
-  if (typeof import.meta !== 'undefined' && import.meta.env?.PROD) {
-    return '/api/hfsy-image-proxy';
-  }
+/** 使用专用 rewrite 入口，避免与 Vercel Serverless 函数路径冲突。 */
+function hfsyImageProxyPathPrefix(): '/hfsy-image-api' {
   return '/hfsy-image-api';
 }
 
