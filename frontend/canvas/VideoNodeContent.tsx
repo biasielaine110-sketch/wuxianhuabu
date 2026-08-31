@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import type { CanvasNode } from '../types';
 import {
   AudioIcon,
@@ -9,8 +9,10 @@ import {
   MaximizeIcon,
   VideoIcon,
 } from './canvasIcons';
+import { copyVideoSrcToClipboard, rewriteImageUrlForBrowserDisplay } from '../services/canvasAssetResolver';
 import { GenerationHoloOverlay } from './GenerationHoloOverlay';
 import { GenerationTimer } from './GenerationTimer';
+import { VideoContextMenu } from './VideoContextMenu';
 
 export interface VideoNodeContentProps {
   node: CanvasNode;
@@ -24,6 +26,7 @@ export interface VideoNodeContentProps {
   onUpdateNode: (nodeId: string, updates: Partial<CanvasNode>) => void;
   onCanvasEyedropper: (sourceId: string, targetId: string, opts?: { sourceImageIndex?: number }) => boolean;
   onDownloadVideo: (url: string) => void;
+  onOpenFullscreenVideo: (url: string) => void;
 }
 
 export function VideoNodeContent({
@@ -38,13 +41,34 @@ export function VideoNodeContent({
   onUpdateNode,
   onCanvasEyedropper,
   onDownloadVideo,
+  onOpenFullscreenVideo,
 }: VideoNodeContentProps) {
   const videoRootRef = useRef<HTMLDivElement>(null);
+  const [previewMenu, setPreviewMenu] = useState<{ x: number; y: number } | null>(null);
 
   const getVideoEl = () =>
     videoRootRef.current?.querySelector('video') as HTMLVideoElement | null;
 
   const currentUrl = videoUrls[currentVideoIdx];
+  const displayUrl = currentUrl ? rewriteImageUrlForBrowserDisplay(currentUrl) : currentUrl;
+
+  const openPreviewMenu = useCallback((e: React.MouseEvent) => {
+    if (!currentUrl) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setPreviewMenu({ x: e.clientX, y: e.clientY });
+  }, [currentUrl]);
+
+  const copyCurrentVideo = useCallback(() => {
+    if (!currentUrl) return;
+    void copyVideoSrcToClipboard(currentUrl).then((mode) => {
+      if (mode === 'link') {
+        window.alert('当前浏览器不支持复制视频文件，已复制视频链接。');
+      }
+    }).catch((err) => {
+      window.alert(err instanceof Error ? err.message : '复制视频失败');
+    });
+  }, [currentUrl]);
 
   return (
     <div
@@ -55,14 +79,20 @@ export function VideoNodeContent({
       {node.isGenerating ? <GenerationHoloOverlay /> : null}
       {videoUrls.length > 0 ? (
         <>
-          <div ref={videoRootRef} className="relative w-full h-full">
+          <div
+            ref={videoRootRef}
+            className="relative w-full h-full"
+            onContextMenu={openPreviewMenu}
+          >
             <video
-              key={currentUrl || 'v'}
-              src={currentUrl}
+              key={displayUrl || 'v'}
+              src={displayUrl}
               controls={false}
               autoPlay={false}
               preload="auto"
               playsInline
+              referrerPolicy="no-referrer"
+              onContextMenu={openPreviewMenu}
               onLoadedMetadata={(e) => {
                 const videoEl = e.currentTarget;
                 if (videoEl.currentTime === 0 && Number.isFinite(videoEl.duration) && videoEl.duration > 0.05) {
@@ -159,8 +189,7 @@ export function VideoNodeContent({
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
-                const videoEl = getVideoEl();
-                videoEl?.requestFullscreen?.();
+                if (currentUrl) onOpenFullscreenVideo(currentUrl);
               }}
               className="p-4 bg-black/70 hover:bg-black/90 rounded-xl text-white backdrop-blur-sm shadow-lg"
               title="最大化"
@@ -227,6 +256,21 @@ export function VideoNodeContent({
           )}
         </div>
       )}
+      {previewMenu && currentUrl ? (
+        <VideoContextMenu
+          x={previewMenu.x}
+          y={previewMenu.y}
+          onCopy={() => {
+            setPreviewMenu(null);
+            copyCurrentVideo();
+          }}
+          onDownload={() => {
+            setPreviewMenu(null);
+            onDownloadVideo(currentUrl);
+          }}
+          onClose={() => setPreviewMenu(null)}
+        />
+      ) : null}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import type { CanvasNode, ChatMessage, ChatNode, Edge } from '../types';
 import { DEFAULT_DEEPSEEK_CHAT_MODEL_ID, normalizeDeepSeekChatModelId, normalizeLegacyImageModelId } from '../services/aiSettings';
 import { buildIncomingRefSlots } from '../referenceSlots';
 import { OptimizedImage } from './OptimizedImage';
+import { rewriteImageUrlForBrowserDisplay } from '../services/canvasAssetResolver';
 import { RefPickBar } from './RefPickBar';
 import { GenerationTimer } from './GenerationTimer';
 import { CopyIcon, EyedropperIcon, ImageIcon, TrashIcon } from './canvasIcons';
@@ -737,11 +738,12 @@ export function ChatNodeContent({
                 />
               ) : slot.kind === 'video' && slot.videoUrl ? (
                 <video
-                  src={slot.videoUrl}
+                  src={rewriteImageUrlForBrowserDisplay(slot.videoUrl)}
                   className="w-[72px] h-[72px] rounded border border-[#444] object-cover"
                   muted
                   playsInline
                   preload="metadata"
+                  referrerPolicy="no-referrer"
                 />
               ) : slot.kind === 'text' && slot.textContent ? (
                 <div className="w-[72px] h-[72px] rounded border border-cyan-700/50 bg-[#1a1a2e] flex items-center justify-center text-cyan-300 text-[11px] leading-tight px-1 overflow-hidden text-center"

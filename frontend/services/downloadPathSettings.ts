@@ -3,6 +3,8 @@
  * 依赖 File System Access API（Chrome、Edge 等，HTTPS 或 localhost）。
  */
 
+import { fetchVideoBlobForBrowser, rewriteImageUrlForBrowserDisplay } from './canvasAssetResolver';
+
 const LS_KEY = 'ai-canvas-download-path-v1';
 const IDB_NAME = 'ai-canvas-download-handles';
 const IDB_STORE = 'directoryHandles';
@@ -399,11 +401,9 @@ export async function saveImageDownload(
   };
 }
 
-/** 从 URL 拉取视频 Blob 并保存 */
+/** 从 URL 拉取视频 Blob 并保存（优先项目草稿目录，与图片下载同一套路径） */
 export async function saveVideoDownloadFromUrl(url: string): Promise<{ ok: boolean; message?: string }> {
-  const res = await fetch(url, { mode: 'cors', credentials: 'omit' });
-  if (!res.ok) throw new Error(`下载失败 (${res.status})`);
-  const blob = await res.blob();
+  const blob = await fetchVideoBlobForBrowser(url);
   const filename = pickFilename('video', 'mp4');
 
   const draftDir = await ensureDraftDownloadDirectoryWritable();

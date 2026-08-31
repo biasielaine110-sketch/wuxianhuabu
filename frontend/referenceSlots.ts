@@ -1,5 +1,5 @@
 import type { CanvasNode, Edge, GridSplitNode } from './types';
-import { hasCanvasImagePayload, imageSrcToRawBase64, resolveCanvasImageSource } from './services/canvasAssetResolver';
+import { hasCanvasImagePayload, imageSrcToRawBase64, resolveCanvasImageSource, rewriteImageUrlForBrowserDisplay } from './services/canvasAssetResolver';
 
 export type ImageRefPayload = { base64?: string; assetId?: string };
 
@@ -467,6 +467,8 @@ export function videoUrlToJpegBase64(url: string): Promise<string | null> {
     v.muted = true;
     v.playsInline = true;
     v.preload = 'auto';
+    v.referrerPolicy = 'no-referrer';
+    const playSrc = rewriteImageUrlForBrowserDisplay(url);
     let settled = false;
     const done = (val: string | null) => {
       if (settled) return;
@@ -522,7 +524,7 @@ export function videoUrlToJpegBase64(url: string): Promise<string | null> {
         done(null);
       }
     };
-    v.src = url;
+    v.src = playSrc;
     try {
       v.load();
     } catch {

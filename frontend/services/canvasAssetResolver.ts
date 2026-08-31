@@ -36,6 +36,9 @@ export function rewriteImageUrlForBrowserDisplay(imageUrl: string): string {
     if (host === 'assets.token6688.com') {
       return `${origin}/cdn-files-token6688${u.pathname}${u.search}`;
     }
+    if (host === 'file.hfsyapi.cn') {
+      return `${origin}/cdn-files-hfsy${u.pathname}${u.search}`;
+    }
     if (host === 'manxueapi.com' || host.endsWith('.manxueapi.com')) {
       const prefix = import.meta.env.PROD ? '/api/manxue-proxy' : '/manxue-api';
       return `${origin}${prefix}${u.pathname}${u.search}`;
@@ -176,6 +179,36 @@ export async function copyImageSrcToClipboard(imageSrc: string): Promise<void> {
     img.src = dataUrl;
   });
   await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+}
+
+/** 拉取可播放/可保存的视频 Blob（同源 CDN 代理，避免 file.hfsyapi.cn CORS） */
+export async function fetchVideoBlobForBrowser(url: string): Promise<Blob> {
+  const t = (url || '').trim();
+  if (!t) throw new Error('视频地址为空');
+  if (t.startsWith('blob:') || t.startsWith('data:')) {
+    const res = await fetch(t);
+    if (!res.ok) throw new Error(`下载失败 (${res.status})`);
+    return res.blob();
+  }
+  const fetchUrl = rewriteImageUrlForBrowserDisplay(t);
+  const res = await fetch(fetchUrl, { mode: 'cors', credentials: 'omit' });
+  if (!res.ok) throw new Error(`下载失败 (${res.status})`);
+  return res.blob();
+}
+
+/** 复制视频到剪贴板；浏览器不支持视频文件时退化为复制链接 */
+export async function copyVideoSrcToClipboard(url: string): Promise<'file' | 'link'> {
+  const blob = await fetchVideoBlobForBrowser(url);
+  const type = blob.type && blob.type.startsWith('video/') ? blob.type : 'video/mp4';
+  const fileBlob = blob.type === type ? blob : blob.slice(0, blob.size, type);
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ [type]: fileBlob })]);
+    return 'file';
+  } catch {
+    const display = rewriteImageUrlForBrowserDisplay(url);
+    await navigator.clipboard.writeText(url.startsWith('blob:') ? url : display);
+    return 'link';
+  }
 }
 
 function mimeToProbeFormatLabel(mime: string): string {

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import type { CanvasNode, Edge } from '../types';
 import { buildIncomingRefSlots } from '../referenceSlots';
 import { OptimizedImage } from './OptimizedImage';
+import { rewriteImageUrlForBrowserDisplay } from '../services/canvasAssetResolver';
 import { EyedropperIcon } from './canvasIcons';
 import {
   getVideoModelSwitchUpdates,
@@ -136,11 +137,12 @@ export function VideoNodeSettingsPanel({
                 />
               ) : slot.kind === 'video' && slot.videoUrl ? (
                 <video
-                  src={slot.videoUrl}
+                  src={rewriteImageUrlForBrowserDisplay(slot.videoUrl)}
                   className="w-[72px] h-[72px] rounded border border-[#444] object-cover"
                   muted
                   playsInline
                   preload="metadata"
+                  referrerPolicy="no-referrer"
                 />
               ) : slot.kind === 'audio' ? (
                 <div className="w-[72px] h-[72px] rounded border border-[#444] bg-[#333] flex items-center justify-center" title={slot.label}>

@@ -220,6 +220,12 @@ const toapisFileCdnProxy = {
     secure: true,
     rewrite: (p: string) => p.replace(/^\/cdn-files-token6688/, ''),
   },
+  '/cdn-files-hfsy': {
+    target: 'https://file.hfsyapi.cn',
+    changeOrigin: true,
+    secure: true,
+    rewrite: (p: string) => p.replace(/^\/cdn-files-hfsy/, ''),
+  },
   /** 云智等自建 OpenAI 兼容站未配 CORS 时，前端经同源路径转发（与 openaiCompatibleService.rewriteRemoteOpenAiCompatBaseForBrowserCors 对齐） */
   '/yunzhi-openai': {
     target: 'https://yunzhi-ai.top',

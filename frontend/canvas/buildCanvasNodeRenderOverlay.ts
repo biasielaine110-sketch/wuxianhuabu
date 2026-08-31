@@ -35,6 +35,7 @@ export type BuildCanvasNodeRenderOverlayInput = {
   openBigEditor: (current: string, onSave: (v: string) => void) => void;
   openFullscreenImage: (nodeId: string, img: string, idx: number) => void;
   openFullscreenFromBase64: (base64: string) => void;
+  openFullscreenVideo: (url: string) => void;
   renderNodeErrorPanel: (node: CanvasNode) => ReactNode;
   setSelectedIds: Dispatch<SetStateAction<string[]>>;
   setNodes: Dispatch<SetStateAction<CanvasNode[]>>;

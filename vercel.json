@@ -71,6 +71,10 @@
       "destination": "https://assets.token6688.com/:path*"
     },
     {
+      "source": "/cdn-files-hfsy/:path*",
+      "destination": "https://file.hfsyapi.cn/:path*"
+    },
+    {
       "source": "/volcengine-ark-api/(.*)",
       "destination": "/api/volcengine-ark-proxy?path=$1"
     },

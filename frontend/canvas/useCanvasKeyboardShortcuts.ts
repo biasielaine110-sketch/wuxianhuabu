@@ -30,6 +30,7 @@ export type CanvasKeyboardShortcutDeps = {
   clipboard: CanvasNode | null;
   setActiveTool: Dispatch<SetStateAction<Tool>>;
   setFullscreenImage: Dispatch<SetStateAction<string | null>>;
+  closeFullscreen: () => void;
   setEyedropperTargetNodeId: Dispatch<SetStateAction<string | null>>;
   setShowShortcutsPanel: Dispatch<SetStateAction<boolean>>;
   setDraggingNodeId: Dispatch<SetStateAction<string | null>>;
@@ -259,7 +260,7 @@ export function attachCanvasKeyboardShortcuts(
         d.dragPreviewRef.current = null;
         d.resizePreviewRef.current = null;
         clearEdgeGeometryPreviews(d.edgesSvgRef.current);
-        d.setFullscreenImage(null);
+        d.closeFullscreen();
         d.setEyedropperTargetNodeId(null);
       } else if ((e.code === 'Backspace' || e.code === 'Delete') && !isInput && !d.fullscreenImage) {
         const selectedIds = d.selectedIdsRef.current;

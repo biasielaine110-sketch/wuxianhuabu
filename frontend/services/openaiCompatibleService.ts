@@ -670,6 +670,9 @@ function rewriteKnownImageCdnToSameOrigin(imageUrl: string): string {
     if (host === 'assets.token6688.com') {
       return `${origin}/cdn-files-token6688${u.pathname}${u.search}`;
     }
+    if (host === 'file.hfsyapi.cn') {
+      return `${origin}/cdn-files-hfsy${u.pathname}${u.search}`;
+    }
     if (host === 'manxueapi.com' || host.endsWith('.manxueapi.com')) {
       const prefix = import.meta.env.PROD ? '/api/manxue-proxy' : '/manxue-api';
       return `${origin}${prefix}${u.pathname}${u.search}`;
@@ -694,6 +697,11 @@ function rewriteKnownVideoCdnToSameOrigin(videoUrl: string): string {
   if (typeof window === 'undefined') return videoUrl;
   try {
     const host = new URL(videoUrl).hostname.toLowerCase();
+    // file.hfsyapi.cn 的 Range/HTTP3 在浏览器里常 ERR_FAILED 206；走同源 CDN 代理
+    if (host === 'file.hfsyapi.cn') {
+      const u = new URL(videoUrl);
+      return `${window.location.origin}/cdn-files-hfsy${u.pathname}${u.search}`;
+    }
     // 图像代理不适合 Range 流式播放；OSS 封面/视频也不要走 oss-fetch 图像通道
     if (host === 'www.hfsyapi.cn' || host === 'hfsyapi.cn') return videoUrl;
     if (host.includes('aliyuncs.com')) return videoUrl;
@@ -717,9 +725,12 @@ function rewriteYunzhiAssetUrlToSameOriginProxy(imageUrl: string): string {
 
 async function fetchUrlAsBase64(imageUrl: string, signal?: AbortSignal, bearerToken?: string): Promise<string> {
   if (/^https:\/\/file\.hfsyapi\.cn\//i.test(imageUrl)) {
-    // Use the current app origin so the generic external-image rewriter cannot
-    // redirect this request to an unrelated provider proxy.
-    imageUrl = `${window.location.origin}/api/hfsy-image-proxy?url=${encodeURIComponent(imageUrl)}`;
+    try {
+      const u = new URL(imageUrl);
+      imageUrl = `${window.location.origin}/cdn-files-hfsy${u.pathname}${u.search}`;
+    } catch {
+      /* keep original */
+    }
   }
   let absoluteUrl = imageUrl.trim();
   if (absoluteUrl.startsWith('/')) {

@@ -6,11 +6,13 @@ export function useCanvasFullscreenImage(nodesRef: RefObject<CanvasNode[]>) {
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
   const [fullscreenNodeId, setFullscreenNodeId] = useState<string | null>(null);
   const [fullscreenImageIdx, setFullscreenImageIdx] = useState(0);
+  const [fullscreenVideo, setFullscreenVideo] = useState<string | null>(null);
   const [fsTransform, setFsTransform] = useState({ scale: 1, x: 0, y: 0 });
   const [fsContextMenu, setFsContextMenu] = useState<{ x: number; y: number } | null>(null);
 
   const closeFullscreen = useCallback(() => {
     setFullscreenImage(null);
+    setFullscreenVideo(null);
     setFsContextMenu(null);
   }, []);
 
@@ -19,6 +21,7 @@ export function useCanvasFullscreenImage(nodesRef: RefObject<CanvasNode[]>) {
     const assetId = node?.imageAssetIds?.[idx];
     void resolveCanvasImageSource(img, assetId).then((src) => {
       if (!src) return;
+      setFullscreenVideo(null);
       setFullscreenNodeId(nodeId);
       setFullscreenImage(src);
       setFullscreenImageIdx(idx);
@@ -29,11 +32,20 @@ export function useCanvasFullscreenImage(nodesRef: RefObject<CanvasNode[]>) {
   const openFullscreenFromBase64 = useCallback((base64: string) => {
     void resolveCanvasImageSource(base64, undefined).then((src) => {
       if (!src) return;
+      setFullscreenVideo(null);
       setFullscreenNodeId(null);
       setFullscreenImage(src);
       setFullscreenImageIdx(0);
       setFsTransform({ scale: 1, x: 0, y: 0 });
     });
+  }, []);
+
+  const openFullscreenVideo = useCallback((url: string) => {
+    const t = (url || '').trim();
+    if (!t) return;
+    setFullscreenImage(null);
+    setFullscreenVideo(t);
+    setFsContextMenu(null);
   }, []);
 
   const fsNavigate = useCallback(
@@ -86,6 +98,7 @@ export function useCanvasFullscreenImage(nodesRef: RefObject<CanvasNode[]>) {
   return {
     fullscreenImage,
     setFullscreenImage,
+    fullscreenVideo,
     fullscreenNodeId,
     fullscreenImageIdx,
     fsTransform,
@@ -94,6 +107,7 @@ export function useCanvasFullscreenImage(nodesRef: RefObject<CanvasNode[]>) {
     setFsContextMenu,
     openFullscreenImage,
     openFullscreenFromBase64,
+    openFullscreenVideo,
     fsNavigate,
     closeFullscreen,
     handleFsWheel,

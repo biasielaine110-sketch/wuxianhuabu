@@ -51,6 +51,9 @@ import { useCanvasFullscreenImage } from './canvas/useCanvasFullscreenImage';
 const CanvasFullscreenImageModalLazy = lazy(() =>
   import('./canvas/CanvasFullscreenImageModal').then((m) => ({ default: m.CanvasFullscreenImageModal }))
 );
+const CanvasFullscreenVideoModalLazy = lazy(() =>
+  import('./canvas/CanvasFullscreenVideoModal').then((m) => ({ default: m.CanvasFullscreenVideoModal }))
+);
 import { useLazyCanvasGeneration } from './canvas/useLazyCanvasGeneration';
 import { useCanvasInteractionHandlers } from './canvas/useCanvasInteractionHandlers';
 import { useCanvasGlobalPointerEvents } from './canvas/useCanvasGlobalPointerEvents';
@@ -99,7 +102,7 @@ import {
 } from './canvas/canvasHistoryUtils';
 import { buildNodeMediaOffloadPatch, buildMediaOffloadScanKey, nodeNeedsMediaOffload } from './services/canvasAssetSync';
 import { revokeNodeCanvasAssets } from './services/canvasAssetCleanup';
-import { copyImageSrcToClipboard, imageSrcToRawBase64 } from './services/canvasAssetResolver';
+import { copyImageSrcToClipboard, copyVideoSrcToClipboard, imageSrcToRawBase64 } from './services/canvasAssetResolver';
 import { estimateCanvasAssetsBytes } from './services/canvasAssetStore';
 import {
   buildMoveNodesCommand,
@@ -301,6 +304,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
   const {
     fullscreenImage,
     setFullscreenImage,
+    fullscreenVideo,
     fullscreenNodeId,
     fullscreenImageIdx,
     fsTransform,
@@ -309,12 +313,14 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     setFsContextMenu,
     openFullscreenImage,
     openFullscreenFromBase64,
+    openFullscreenVideo,
     fsNavigate,
     closeFullscreen,
     handleFsWheel,
     handleFsPointerDown,
     imageTotal,
   } = fullscreen;
+  const fullscreenOverlayOpen = Boolean(fullscreenImage || fullscreenVideo);
 
   const edgesRef = useRef(useCanvasStore.getState().edges);
   const projectLibrary = useCanvasProjectLibrary({
@@ -1390,7 +1396,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     nodesRef,
     edgesRef,
     selectedIdsRef,
-    fullscreenImage,
+    fullscreenImage: fullscreenOverlayOpen ? '1' : null,
     canvasMode,
     activeTool,
     contextMenu,
@@ -1723,24 +1729,46 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
       const r = await saveVideoDownloadFromUrl(url);
       if (!r.ok && r.message) window.alert(r.message);
       if (r.ok) {
-        setCanvasNoticeTone('success');
-        setCanvasHistoryNotice('视频已保存完成');
-        if (canvasNoticeTimerRef.current) window.clearTimeout(canvasNoticeTimerRef.current);
-        canvasNoticeTimerRef.current = window.setTimeout(() => setCanvasHistoryNotice(null), 2600);
+        setSaveSuccessMsg(r.message || '下载视频成功');
+        if (downloadNoticeTimerRef.current) window.clearTimeout(downloadNoticeTimerRef.current);
+        downloadNoticeTimerRef.current = window.setTimeout(() => {
+          setSaveSuccessMsg(null);
+          downloadNoticeTimerRef.current = null;
+        }, 3000);
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '下载失败';
-      window.alert(`${msg}。可直接右键视频「另存为」或复制链接。`);
+      window.alert(`${msg}。可直接右键视频选择「下载视频」。`);
     }
+  }, []);
+
+  const copyVideoFromUrl = useCallback((url: string) => {
+    void copyVideoSrcToClipboard(url)
+      .then((mode) => {
+        if (mode === 'link') {
+          window.alert('当前浏览器不支持复制视频文件，已复制视频链接。');
+        } else {
+          setSaveSuccessMsg('已复制视频');
+          if (downloadNoticeTimerRef.current) window.clearTimeout(downloadNoticeTimerRef.current);
+          downloadNoticeTimerRef.current = window.setTimeout(() => {
+            setSaveSuccessMsg(null);
+            downloadNoticeTimerRef.current = null;
+          }, 2000);
+        }
+      })
+      .catch((err) => {
+        window.alert(err instanceof Error ? err.message : '复制视频失败');
+      });
   }, []);
 
   useLazyCanvasKeyboardShortcuts({
     canvasMode,
-    fullscreenImage,
+    fullscreenImage: fullscreenOverlayOpen ? '1' : null,
     showShortcutsPanel,
     clipboard,
     setActiveTool,
     setFullscreenImage,
+    closeFullscreen,
     setEyedropperTargetNodeId,
     setShowShortcutsPanel,
     setDraggingNodeId,
@@ -1817,6 +1845,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     openBigEditor,
     openFullscreenImage,
     openFullscreenFromBase64,
+    openFullscreenVideo,
     renderNodeErrorPanel,
     setSelectedIds,
     setNodes,
@@ -2595,6 +2624,19 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
         </Suspense>
       ) : null}
 
+      {fullscreenVideo && canvasMode !== 'audit' ? (
+        <Suspense fallback={null}>
+          <CanvasFullscreenVideoModalLazy
+            videoUrl={fullscreenVideo}
+            fsContextMenu={fsContextMenu}
+            setFsContextMenu={setFsContextMenu}
+            onClose={closeFullscreen}
+            onDownload={() => { void downloadVideoFromUrl(fullscreenVideo); }}
+            onCopyVideo={() => copyVideoFromUrl(fullscreenVideo)}
+          />
+        </Suspense>
+      ) : null}
+
       {/* 快捷节点面板（左侧） */}
       <div
         className={`absolute left-6 top-1/2 -translate-y-1/2 z-30 flex flex-col gap-1 canvas-chrome-150 ${canvasMode === 'audit' ? 'hidden' : ''}`}
@@ -2645,7 +2687,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
       <ThumbResolutionControl
         hidden={
           canvasMode === 'audit' ||
-          !!fullscreenImage ||
+          !!fullscreenOverlayOpen ||
           bigEditorOpen ||
           showSettingsModal ||
           showProjectModal

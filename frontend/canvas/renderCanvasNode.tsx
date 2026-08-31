@@ -192,6 +192,7 @@ return (
             onUpdateNode={s.handleUpdateNode}
             onCanvasEyedropper={s.handleCanvasEyedropper}
             onDownloadVideo={s.downloadVideoFromUrl}
+            onOpenFullscreenVideo={s.openFullscreenVideo}
           />
         </Suspense>
       )}
