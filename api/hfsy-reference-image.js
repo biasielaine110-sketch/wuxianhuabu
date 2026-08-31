@@ -12,6 +12,7 @@ async function readRequestBody(req) {
   return Buffer.concat(chunks);
 }
 
+/** 尽量选国内/上游可拉通的临时图床；catbox 常被 RST */
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
     res.statusCode = 405;
@@ -25,6 +26,30 @@ module.exports = async function handler(req, res) {
     if (!body.length) throw new Error('参考图内容为空');
     const mime = String(req.headers['content-type'] || 'image/jpeg').split(';')[0];
     const providers = [
+      // 0x0.st：简单 PUT，部分地区可达
+      async () => {
+        const form = new FormData();
+        form.append('file', new Blob([body], { type: mime }), 'hfsy-reference.jpg');
+        const response = await fetch('https://0x0.st', {
+          method: 'POST',
+          body: form,
+          signal: AbortSignal.timeout(30_000),
+        });
+        return { response, url: (await response.text()).trim(), name: '0x0' };
+      },
+      // litterbox：临时 24h，同 catbox 系但偶发更稳
+      async () => {
+        const form = new FormData();
+        form.append('reqtype', 'fileupload');
+        form.append('time', '24h');
+        form.append('fileToUpload', new Blob([body], { type: mime }), 'hfsy-reference.jpg');
+        const response = await fetch('https://litterbox.catbox.moe/resources/internals/api.php', {
+          method: 'POST',
+          body: form,
+          signal: AbortSignal.timeout(30_000),
+        });
+        return { response, url: (await response.text()).trim(), name: 'Litterbox' };
+      },
       async () => {
         const form = new FormData();
         form.append('reqtype', 'fileupload');
@@ -71,7 +96,12 @@ module.exports = async function handler(req, res) {
   } catch (error) {
     res.statusCode = 502;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.end(JSON.stringify({ error: 'reference_image_upload_failed', message: error instanceof Error ? error.message : String(error) }));
+    res.end(
+      JSON.stringify({
+        error: 'reference_image_upload_failed',
+        message: error instanceof Error ? error.message : String(error),
+      })
+    );
   }
 };
 

@@ -1000,10 +1000,52 @@ async function openAiCompatUploadImageBlob(
   throw new Error(`参考图上传失败 (404) ${lastFail}`);
 }
 
+/**
+ * hfsy / 满 e 视频参考图：
+ * 1) 优先走 hfsy 自有 uploads（国内节点可拉）
+ * 2) 失败则压缩为 data URI（New API video/create 的 images 支持 base64）
+ * 3) 再尝试临时图床（境外主机常被上游 RST，仅作兜底）
+ */
 async function uploadHfsyVideoReferenceImage(
   blob: Blob,
   signal?: AbortSignal
 ): Promise<string> {
+  const apiKey = getHfsySavedKey().trim();
+  if (apiKey) {
+    try {
+      const url = await openAiCompatUploadImageBlob(
+        normalizeBaseUrl(getHfsyBaseUrl()),
+        apiKey,
+        blob,
+        'hfsy-ref.jpg',
+        signal
+      );
+      if (/^https?:\/\//i.test(url)) return url;
+    } catch {
+      /* fall through：网关未必开放 uploads */
+    }
+  }
+
+  // data URI：避免上游去拉 catbox/tmpfiles 时 connection reset
+  const toDataUrl = async (b: Blob): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('读取参考图失败'));
+      reader.readAsDataURL(b);
+    });
+
+  try {
+    let dataUrl = await toDataUrl(blob);
+    // 控制体积，降低 video/create 经代理时的 413 风险
+    if (blob.size > 900_000 || dataUrl.length > 1_200_000) {
+      dataUrl = await shrinkBase64ImageToJpegDataUrl(dataUrl, 1280, 0.8);
+    }
+    if (dataUrl.startsWith('data:image/')) return dataUrl;
+  } catch {
+    /* fall through to temp host */
+  }
+
   const res = await fetch('/api/hfsy-reference-image', {
     method: 'POST',
     headers: { 'Content-Type': blob.type || 'image/jpeg' },
