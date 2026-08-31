@@ -2310,18 +2310,22 @@ const MANXUE_VIDEO_MAX_REFERENCE_IMAGES = 3;
  */
 async function manxueUploadReferenceImageUrls(
   refs: string[],
-  _signal?: AbortSignal
+  signal?: AbortSignal
 ): Promise<string[]> {
   if (!refs || refs.length === 0) return [];
-  const apiKey = getManxueSavedKey();
-  if (!apiKey) throw new Error('未配置满 e API Key。请在「设置 → API → 满 e」填写。');
   const list = refs.filter(Boolean).slice(0, MANXUE_VIDEO_MAX_REFERENCE_IMAGES);
   const out: string[] = [];
   for (let i = 0; i < list.length; i++) {
-    const { raw, mime } = parseBase64ImageInput(list[i]);
+    assertNotAborted(signal);
+    const input = list[i].trim();
+    if (/^https?:\/\//i.test(input)) {
+      out.push(input);
+      continue;
+    }
+    const { raw, mime } = parseBase64ImageInput(input);
     const cleanRaw = raw.replace(/\s/g, '');
-    const m = mime || sniffMimeFromBase64(cleanRaw) || 'image/jpeg';
-    out.push(`data:${m};base64,${cleanRaw}`);
+    const blob = base64ToBlob(cleanRaw, mime || sniffMimeFromBase64(cleanRaw) || 'image/jpeg');
+    out.push(await uploadHfsyVideoReferenceImage(blob, signal));
   }
   return out;
 }
