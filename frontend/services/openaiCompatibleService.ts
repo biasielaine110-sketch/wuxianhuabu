@@ -2238,6 +2238,7 @@ async function hfsyVideoGenerate(params: {
     assertNotAborted(params.signal);
     const img = refs[i];
     const { raw, mime } = parseBase64ImageInput(img);
+    const blob = base64ToBlob(raw, mime || 'image/jpeg');
     imageUrls.push(await uploadHfsyVideoReferenceImage(blob, params.signal));
   }
 
