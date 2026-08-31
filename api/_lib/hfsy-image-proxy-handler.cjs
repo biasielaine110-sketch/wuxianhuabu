@@ -87,13 +87,31 @@ async function handler(req, res) {
   res.statusCode = upstream.status;
   upstream.headers.forEach((value, key) => {
     if (isUnsafeForwardedResponseHeader(key)) return;
+    // 自行决定缓存策略，避免上游或本层把任务查询结果缓存成「永远进行中」
+    if (String(key).toLowerCase() === 'cache-control') return;
     try {
       res.setHeader(key, value);
     } catch {
       /* ignore */
     }
   });
-  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  // 仅长期缓存真实图片字节；JSON / 视频任务查询等 API 必须 no-store，否则轮询会被 CDN/浏览器钉死在首包状态
+  const contentType = (upstream.headers.get('content-type') || '').toLowerCase();
+  const subLower = String(sub || '').toLowerCase();
+  const isMutableApi =
+    method !== 'GET' ||
+    contentType.includes('json') ||
+    contentType.startsWith('text/') ||
+    /(?:^|\/)(?:video|videos)(?:\/|$)/.test(subLower) ||
+    /(?:^|\/)images\/(?:generations|edits)/.test(subLower);
+  if (isMutableApi) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+  } else if (contentType.startsWith('image/')) {
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  } else {
+    res.setHeader('Cache-Control', 'private, no-cache');
+  }
 
   if (!upstream.body) {
     res.end();

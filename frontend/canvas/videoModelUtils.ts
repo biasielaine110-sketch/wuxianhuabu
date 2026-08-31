@@ -165,7 +165,7 @@ export function getVideoModelSwitchUpdates(mRaw: string, node: CanvasNode): Part
     if (!['16:9', '9:16', '1:1'].includes(ar)) updates.aspectRatio = '16:9';
   } else if (isHfsyMinimaxH3VideoModel(m)) {
     const d = node.videoDuration ?? 5;
-    updates.videoDuration = [4, 5, 8, 10, 12, 15].includes(d) ? d : 5;
+    updates.videoDuration = [5, 8, 10, 12, 15].includes(d) ? d : 5;
     updates.videoResolution = '720p';
     const ar = node.aspectRatio || '16:9';
     if (ar !== '16:9' && ar !== '9:16') updates.aspectRatio = '16:9';

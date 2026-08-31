@@ -1798,8 +1798,8 @@ function extractVideoUrlFromPollPayload(data: unknown): string | null {
   const o = data as Record<string, unknown>;
 
   const pickFromObject = (obj: Record<string, unknown>): string | null => {
-    if (isHttpUrlString(obj.url)) return obj.url.trim();
-    for (const k of ['video_url', 'result_url', 'download_url', 'file_url', 'output', 'video'] as const) {
+    // hfsy 文档完成态字段为 result_url，优先读取
+    for (const k of ['result_url', 'video_url', 'url', 'download_url', 'file_url', 'output', 'video'] as const) {
       const v = obj[k];
       if (isHttpUrlString(v)) return String(v).trim();
     }
@@ -1929,10 +1929,10 @@ function normalizeHfsyVideoDuration(uiSeconds: number): number {
   return Math.min(15, Math.max(5, n));
 }
 
-/** MiniMax-H3：时长 4–15 秒 */
+/** MiniMax-H3（hfsy 文档）：时长 5–15 秒 */
 function normalizeHfsyMinimaxH3Duration(uiSeconds: number): number {
   const n = Math.round(Number(uiSeconds) || 5);
-  return Math.min(15, Math.max(4, n));
+  return Math.min(15, Math.max(5, n));
 }
 
 /** hfsy Grok Imagine Video 1.5：时长 1–15 秒 */
@@ -2037,16 +2037,20 @@ async function toApisPollVideoTaskToPlayableUrl(taskId: string, signal?: AbortSi
 
 /** 满 eAPI 视频任务超时：30 分钟 */
 function extractVideoTaskIdFromPayload(data: unknown): string | null {
+  if (typeof data === 'string' && data.trim()) return data.trim();
   if (!data || typeof data !== 'object') return null;
   const o = data as Record<string, unknown>;
-  for (const k of ['id', 'task_id', 'taskId', 'request_id'] as const) {
+  // hfsy / New API：查询必须用 task_id；同包里的 id 常为库内数字主键，优先 task_id 避免轮询错任务
+  for (const k of ['task_id', 'taskId', 'id', 'request_id'] as const) {
     const v = o[k];
     if (typeof v === 'string' && v.trim()) return v.trim();
     if (typeof v === 'number' && Number.isFinite(v)) return String(v);
   }
   const d = o.data;
+  if (typeof d === 'string' && d.trim()) return d.trim();
   if (d && typeof d === 'object' && !Array.isArray(d)) return extractVideoTaskIdFromPayload(d);
   const result = o.result;
+  if (typeof result === 'string' && result.trim()) return result.trim();
   if (result && typeof result === 'object') return extractVideoTaskIdFromPayload(result);
   return null;
 }
@@ -2107,6 +2111,7 @@ async function hfsySubmitVideoGeneration(body: Record<string, unknown>, signal?:
     },
     body: JSON.stringify(body),
     signal,
+    cache: 'no-store',
   });
   const text = await res.text();
   if (!res.ok) throw new Error(`hfsyapi.cn 视频任务提交失败 (${res.status}): ${text.slice(0, 800)}`);
@@ -2131,14 +2136,19 @@ async function hfsyPollVideoTaskToPlayableUrl(taskId: string, signal?: AbortSign
   const base = hfsyFetchBase();
   const deadline = Date.now() + TOAPIS_VIDEO_TASK_MAX_WAIT_MS;
   const enc = encodeURIComponent(taskId);
-  type PollAttempt = { method: 'GET' | 'POST'; url: string; body?: Record<string, string> };
-  const attempts: PollAttempt[] = [
-    { method: 'GET', url: `${base}/video/query?id=${enc}` },
-    { method: 'GET', url: `${base}/video/generations/${enc}` },
-    { method: 'GET', url: `${base}/videos/${enc}` },
-    { method: 'POST', url: `${base}/video/query`, body: { id: taskId, task_id: taskId } },
-  ];
-  let preferred: PollAttempt | null = null;
+  type PollAttempt = { method: 'GET' | 'POST'; url: string; body?: Record<string, string>; key: string };
+  // 文档：GET /v1/video/query?id=task_xxx → status SUCCESS + result_url
+  const buildAttempts = (): PollAttempt[] => {
+    const bust = `_t=${Date.now()}`;
+    return [
+      { method: 'GET', key: 'GET:/video/query?id', url: `${base}/video/query?id=${enc}&${bust}` },
+      { method: 'GET', key: 'GET:/video/query?task_id', url: `${base}/video/query?task_id=${enc}&${bust}` },
+      { method: 'GET', key: 'GET:/video/generations', url: `${base}/video/generations/${enc}?${bust}` },
+      { method: 'GET', key: 'GET:/videos', url: `${base}/videos/${enc}?${bust}` },
+      { method: 'POST', key: 'POST:/video/query', url: `${base}/video/query`, body: { id: taskId, task_id: taskId } },
+    ];
+  };
+  let preferredKey: string | null = null;
   await sleepInterruptible(5_000, signal);
 
   const fetchAttempt = async (attempt: PollAttempt): Promise<{ parsed: unknown; rawText: string } | null> => {
@@ -2150,6 +2160,7 @@ async function hfsyPollVideoTaskToPlayableUrl(taskId: string, signal?: AbortSign
       },
       body: attempt.body ? JSON.stringify(attempt.body) : undefined,
       signal,
+      cache: 'no-store',
     });
     const rawText = await res.text();
     if (!res.ok) return null;
@@ -2160,19 +2171,32 @@ async function hfsyPollVideoTaskToPlayableUrl(taskId: string, signal?: AbortSign
     }
   };
 
+  const readProgress = (payload: unknown): string => {
+    if (!payload || typeof payload !== 'object') return '';
+    const o = payload as Record<string, unknown>;
+    if (o.progress !== undefined && o.progress !== null) return String(o.progress).trim();
+    if (o.data && typeof o.data === 'object' && !Array.isArray(o.data)) {
+      const p = (o.data as Record<string, unknown>).progress;
+      if (p !== undefined && p !== null) return String(p).trim();
+    }
+    return '';
+  };
+
   while (Date.now() < deadline) {
     assertNotAborted(signal);
     let data: unknown = null;
     let text = '';
-    const order = preferred
-      ? [preferred, ...attempts.filter((a) => a.url !== preferred!.url || a.method !== preferred!.method)]
-      : attempts;
-    for (const attempt of order) {
+    const attempts = buildAttempts();
+    const ordered: PollAttempt[] =
+      preferredKey != null
+        ? [...attempts.filter((a) => a.key === preferredKey), ...attempts.filter((a) => a.key !== preferredKey)]
+        : attempts;
+    for (const attempt of ordered) {
       const hit = await fetchAttempt(attempt);
       if (!hit) continue;
       data = hit.parsed;
       text = hit.rawText;
-      preferred = attempt;
+      preferredKey = attempt.key;
       break;
     }
     if (!data) {
@@ -2181,16 +2205,25 @@ async function hfsyPollVideoTaskToPlayableUrl(taskId: string, signal?: AbortSign
     }
 
     const status = extractTaskStatusFromPayload(data);
+    const progress = readProgress(data);
+    const looksDoneByProgress = /^(100%?|100)$/i.test(progress);
     const rawUrlEarly = extractVideoUrlFromPollPayload(data);
     const earlyUrlLooksReady =
       !!rawUrlEarly &&
       (!isVideoTaskPendingStatus(status) ||
+        looksDoneByProgress ||
         /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(rawUrlEarly) ||
-        /\/(?:videos?|media|cdn)\//i.test(rawUrlEarly));
-    // New API 完成态常为 status=SUCCESS + data.output；有成片 URL 时不必死等状态字段
-    if (isVideoTaskCompletedStatus(status) || earlyUrlLooksReady) {
+        /\/(?:videos?|media|cdn|file)\//i.test(rawUrlEarly) ||
+        /^https?:\/\/file\.hfsyapi\.cn\//i.test(rawUrlEarly));
+    // 文档完成态：status=SUCCESS + result_url；有成片 URL / 进度 100% 时结束轮询
+    if (isVideoTaskCompletedStatus(status) || looksDoneByProgress || earlyUrlLooksReady) {
       const rawUrl = rawUrlEarly || extractVideoUrlFromPollPayload(data);
-      if (!rawUrl) throw new Error(`hfsyapi.cn 视频任务完成但未返回可播放 URL。完整响应：${text.slice(0, 2000)}`);
+      if (!rawUrl) {
+        // SUCCESS 但暂无 URL：换路径再查，避免过早抛错
+        preferredKey = null;
+        await sleepInterruptible(3_000, signal);
+        continue;
+      }
       const normalizedUrl = rawUrl.replace(/^(https?:\/)([^/])/i, '$1/$2');
       return rewriteKnownImageCdnToSameOrigin(normalizedUrl);
     }
@@ -2199,7 +2232,8 @@ async function hfsyPollVideoTaskToPlayableUrl(taskId: string, signal?: AbortSign
       status === 'failure' ||
       status === 'error' ||
       status === 'cancelled' ||
-      status === 'canceled'
+      status === 'canceled' ||
+      status === 'fail'
     ) {
       const o = data && typeof data === 'object' ? (data as Record<string, unknown>) : {};
       const nestedData = o.data && typeof o.data === 'object' ? (o.data as Record<string, unknown>) : null;
@@ -2251,15 +2285,14 @@ async function hfsyVideoGenerate(params: {
   let body: Record<string, unknown>;
 
   if (params.videoModel === 'hfsy-minimax-h3') {
+    // 文档 https://www.hfsyapi.cn/docs：orientation 必填；size=large/small；无 ratio/resolution 字段
     const ratio = normalizeHfsyMinimaxH3Ratio(params.aspectRatio);
     body = {
       model: upstreamModel,
       orientation: hfsyVideoOrientation(ratio),
-      ratio,
       prompt: params.prompt,
       duration: normalizeHfsyMinimaxH3Duration(params.durationSeconds),
-      // UI 默认 720p；上游 MiniMax-H3 常用 768P，同时传 720p 兼容网关映射
-      resolution: params.resolution === '1080p' || params.resolution === '2k' ? '2K' : '720p',
+      size: params.resolution === '480p' || params.resolution === 'small' ? 'small' : 'large',
       watermark: false,
     };
   } else if (params.videoModel === 'hfsy-grok-imagine-video-1.5') {

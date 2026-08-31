@@ -203,7 +203,7 @@ export function VideoNodeSettingsPanel({
                 : isManxueCDance
                   ? ' · 满 e C-Dance2 Pro 720：5–15 秒、720p；需满 e API Key'
                   : isHfsyMinimaxH3
-                    ? ' · MiniMax-H3（hfsy）：4–15 秒；画幅 16:9 / 9:16；默认 720p；需 hfsyapi.cn API Key'
+                    ? ' · MiniMax-H3（hfsy）：5–15 秒；画幅 16:9 / 9:16；默认 720p；需 hfsyapi.cn API Key'
                     : isHfsyGrokImagine
                       ? ' · Grok Imagine Video 1.5（hfsy）：1–15 秒；多画幅；480p/720p/1080p；需 hfsyapi.cn API Key'
                       : isHfsySd2
@@ -385,11 +385,10 @@ export function VideoNodeSettingsPanel({
           ) : isHfsyMinimaxH3 ? (
             <select
               className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-              value={[4, 5, 8, 10, 12, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 5}
+              value={[5, 8, 10, 12, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 5}
               onChange={(e) => onUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
               onPointerDown={(e) => e.stopPropagation()}
             >
-              <option value={4}>4 秒</option>
               <option value={5}>5 秒</option>
               <option value={8}>8 秒</option>
               <option value={10}>10 秒</option>
