@@ -1803,6 +1803,8 @@ function extractVideoUrlFromPollPayload(data: unknown): string | null {
       const v = obj[k];
       if (isHttpUrlString(v)) return String(v).trim();
     }
+    // New API / 部分网关兼容：SUCCESS 时把成片 URL 同步写进 fail_reason
+    if (isHttpUrlString(obj.fail_reason)) return String(obj.fail_reason).trim();
     for (const k of ['result_urls', 'resultUrls', 'video_urls', 'outputs', 'output'] as const) {
       const arr = obj[k];
       if (Array.isArray(arr)) {
@@ -2149,6 +2151,7 @@ async function hfsyPollVideoTaskToPlayableUrl(taskId: string, signal?: AbortSign
     ];
   };
   let preferredKey: string | null = null;
+  let emptyUrlRounds = 0;
   await sleepInterruptible(5_000, signal);
 
   const fetchAttempt = async (attempt: PollAttempt): Promise<{ parsed: unknown; rawText: string } | null> => {
@@ -2219,11 +2222,16 @@ async function hfsyPollVideoTaskToPlayableUrl(taskId: string, signal?: AbortSign
     if (isVideoTaskCompletedStatus(status) || looksDoneByProgress || earlyUrlLooksReady) {
       const rawUrl = rawUrlEarly || extractVideoUrlFromPollPayload(data);
       if (!rawUrl) {
-        // SUCCESS 但暂无 URL：换路径再查，避免过早抛错
+        // SUCCESS 但暂无 URL：换路径再查；连续多次仍无 URL 再报错，避免无限读秒
         preferredKey = null;
+        emptyUrlRounds += 1;
+        if (emptyUrlRounds >= 6) {
+          throw new Error(`hfsyapi.cn 视频任务完成但未返回可播放 URL。完整响应：${text.slice(0, 2000)}`);
+        }
         await sleepInterruptible(3_000, signal);
         continue;
       }
+      emptyUrlRounds = 0;
       const normalizedUrl = rawUrl.replace(/^(https?:\/)([^/])/i, '$1/$2');
       return rewriteKnownImageCdnToSameOrigin(normalizedUrl);
     }
@@ -2266,8 +2274,10 @@ async function hfsyVideoGenerate(params: {
   signal?: AbortSignal;
 }): Promise<string> {
   const imageUrls: string[] = [];
-  const refs = (params.referenceImagesBase64 || []).filter(Boolean).slice(0, 4);
-  const apiKey = getHfsySavedKey().trim();
+  // 文档：sd-2-vip 最多 9 张图；H3 等其余模型参考素材合计 ≤4
+  const maxImages =
+    params.videoModel === 'hfsy-sd-2-vip' || params.videoModel === 'hfsy-sd-2-vip-720' ? 9 : 4;
+  const refs = (params.referenceImagesBase64 || []).filter(Boolean).slice(0, maxImages);
   for (let i = 0; i < refs.length; i++) {
     assertNotAborted(params.signal);
     const img = refs[i];
@@ -2277,8 +2287,14 @@ async function hfsyVideoGenerate(params: {
   }
 
   const videoUrls = (params.referenceVideoUrls || []).filter((u) => /^https?:\/\//i.test(u.trim())).slice(0, 3);
-  if (imageUrls.length + videoUrls.length > 4) {
-    throw new Error('hfsyapi.cn 参考素材总数不能超过 4 个。');
+  const maxTotal =
+    params.videoModel === 'hfsy-sd-2-vip' ||
+    params.videoModel === 'hfsy-sd-2-vip-720' ||
+    isHfsySd2VideoModel(params.videoModel)
+      ? 12
+      : 4;
+  if (imageUrls.length + videoUrls.length > maxTotal) {
+    throw new Error(`hfsyapi.cn 参考素材总数不能超过 ${maxTotal} 个。`);
   }
 
   const upstreamModel = toHfsyVideoModel(params.videoModel);

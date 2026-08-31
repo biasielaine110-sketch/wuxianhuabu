@@ -103,8 +103,12 @@
       "destination": "/api/hfsy-image-proxy?path=$1"
     },
     {
-      "source": "/manxue-api/:path*",
-      "destination": "https://manxueapi.com/:path*"
+      "source": "/manxue-api/(.*)",
+      "destination": "/api/manxue-proxy?path=$1"
+    },
+    {
+      "source": "/api/manxue-proxy/(.*)",
+      "destination": "/api/manxue-proxy?path=$1"
     },
     {
       "source": "/((?!api/|assets/|manxue-api/).*)",

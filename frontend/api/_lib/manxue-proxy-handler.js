@@ -1,0 +1,163 @@
+/**
+ * manxueapi.com 同源代理。
+ * Vercel 边缘 rewrite 直连外站易失败（超时 / 403），改为 Serverless Function 转发。
+ */
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+
+const UPSTREAM_ORIGIN = 'https://manxueapi.com';
+
+function isHopByHopHeader(name) {
+  const n = String(name).toLowerCase();
+  return new Set([
+    'connection',
+    'keep-alive',
+    'proxy-authenticate',
+    'proxy-authorization',
+    'te',
+    'trailers',
+    'transfer-encoding',
+    'upgrade',
+    'host',
+  ]).has(n);
+}
+
+function isUnsafeForwardedResponseHeader(name) {
+  const n = String(name).toLowerCase();
+  return isHopByHopHeader(n) || n === 'content-encoding' || n === 'content-length';
+}
+
+/** 浏览器带过来的 Origin/Referer 来自 vercel.app，上游 WAF 可能直接 403 */
+function shouldDropRequestHeader(name) {
+  const n = String(name).toLowerCase();
+  return (
+    n === 'host' ||
+    n === 'accept-encoding' ||
+    n === 'origin' ||
+    n === 'referer' ||
+    n === 'cookie' ||
+    n.startsWith('x-vercel-') ||
+    n.startsWith('x-forwarded-')
+  );
+}
+
+async function handler(req, res) {
+  const host = req.headers.host || 'localhost';
+  const url = new URL(req.url || '/', `http://${host}`);
+  const pathFromQuery = url.searchParams.get('path')?.replace(/^\/+/, '') ?? '';
+  let sub = pathFromQuery;
+  if (!sub) {
+    sub = url.pathname.replace(/^\/api\/manxue-proxy\/?/, '').replace(/^\/+/, '');
+  }
+  if (!sub) {
+    res.statusCode = 400;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify({ error: 'missing path after /api/manxue-proxy' }));
+    return;
+  }
+  const upstreamSearch = new URLSearchParams(url.searchParams);
+  upstreamSearch.delete('path');
+  const qs = upstreamSearch.toString();
+  const targetUrl = `${UPSTREAM_ORIGIN}/${sub}${qs ? `?${qs}` : ''}`;
+
+  const headers = new Headers();
+  for (const [k, v] of Object.entries(req.headers)) {
+    if (!v || isHopByHopHeader(k) || shouldDropRequestHeader(k)) continue;
+    if (Array.isArray(v)) {
+      for (const item of v) headers.append(k, item);
+    } else {
+      headers.set(k, v);
+    }
+  }
+  headers.set('accept-encoding', 'identity');
+
+  const method = req.method || 'GET';
+  if (method === 'OPTIONS') {
+    res.statusCode = 204;
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Access-Control-Max-Age', '86400');
+    res.end();
+    return;
+  }
+
+  const hasBody = !['GET', 'HEAD'].includes(method);
+  const body = hasBody ? Readable.toWeb(Readable.from(req)) : undefined;
+
+  let upstream;
+  try {
+    upstream = await fetch(targetUrl, {
+      method,
+      headers,
+      body,
+      ...(hasBody ? { duplex: 'half' } : {}),
+    });
+  } catch (e) {
+    console.error('[api/manxue-proxy] upstream fetch failed', targetUrl, e);
+    res.statusCode = 502;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(
+      JSON.stringify({
+        error: 'manxue_upstream_unreachable',
+        message: e instanceof Error ? e.message : String(e),
+      })
+    );
+    return;
+  }
+
+  res.statusCode = upstream.status;
+  upstream.headers.forEach((value, key) => {
+    if (isUnsafeForwardedResponseHeader(key)) return;
+    if (String(key).toLowerCase() === 'cache-control') return;
+    try {
+      res.setHeader(key, value);
+    } catch {
+      /* ignore */
+    }
+  });
+
+  const contentType = (upstream.headers.get('content-type') || '').toLowerCase();
+  const subLower = String(sub || '').toLowerCase();
+  const isMutableApi =
+    method !== 'GET' ||
+    contentType.includes('json') ||
+    contentType.startsWith('text/') ||
+    /(?:^|\/)(?:video|videos|chat|completions|responses)(?:\/|$)/.test(subLower) ||
+    /(?:^|\/)images\/(?:generations|edits)/.test(subLower);
+  if (isMutableApi) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+  } else if (contentType.startsWith('image/') || contentType.startsWith('video/')) {
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+  } else {
+    res.setHeader('Cache-Control', 'private, no-cache');
+  }
+
+  if (!upstream.body) {
+    res.end();
+    return;
+  }
+
+  try {
+    const out = Readable.fromWeb(upstream.body);
+    await pipeline(out, res);
+  } catch (e) {
+    if (!res.writableEnded) {
+      try {
+        res.destroy(e);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
+export const config = {
+  maxDuration: 300,
+  api: {
+    bodyParser: false,
+  },
+};
+
+export default handler;

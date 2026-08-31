@@ -884,10 +884,17 @@ ${text}`,
           videoModel === 'seedance-2-mini' ||
           videoModel === 'seedance-2-5' ||
           videoModel === 'kling-v3-omni';
+        const isHfsySdVip =
+          videoModel === 'hfsy-sd-2-vip' ||
+          videoModel === 'hfsy-sd-2-vip-720' ||
+          videoModel === 'hfsy-sd-2' ||
+          videoModel === 'hfsy-sd-2-fast' ||
+          videoModel === 'hfsy-sd-2.5-480' ||
+          videoModel === 'hfsy-sd-2.5-720';
         const refImageCount =
           videoModel === 'grok-video-1.5'
             ? 1
-            : seedanceFamily
+            : seedanceFamily || isHfsySdVip
               ? 9
               : videoModel === 'doubao-seedance-1-5-pro' || videoModel === 'gemini-omni-flash'
                 ? 2
