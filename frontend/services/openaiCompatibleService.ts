@@ -710,7 +710,9 @@ function rewriteYunzhiAssetUrlToSameOriginProxy(imageUrl: string): string {
 
 async function fetchUrlAsBase64(imageUrl: string, signal?: AbortSignal, bearerToken?: string): Promise<string> {
   if (/^https:\/\/file\.hfsyapi\.cn\//i.test(imageUrl)) {
-    imageUrl = `/api/hfsy-fetch-image?url=${encodeURIComponent(imageUrl)}`;
+    // Use the current app origin so the generic external-image rewriter cannot
+    // redirect this request to an unrelated provider proxy.
+    imageUrl = `${window.location.origin}/api/hfsy-fetch-image?url=${encodeURIComponent(imageUrl)}`;
   }
   let absoluteUrl = imageUrl.trim();
   if (absoluteUrl.startsWith('/')) {
