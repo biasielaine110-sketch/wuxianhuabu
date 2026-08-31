@@ -484,6 +484,7 @@
   }
   .canvas-node-root--chat select.nodemodel-select option[value="deepseek-v4-flash-vision-exp"],
   .canvas-node-root--chat select.nodemodel-select option[value="gpt-5.4-mini-toapis"],
+  .canvas-node-root--chat select.nodemodel-select option[value="gpt-5.5-manxue"],
   .canvas-node-root--chat select.nodemodel-select option[value="gemini-3.6-flash-toapis"],
   .canvas-node-root--chat select.nodemodel-select option[value="qwen3.5-flash-toapis"],
   .canvas-node-root--chat select.nodemodel-select option[value="doubao-seed-2.1-turbo-ark"],
@@ -495,6 +496,7 @@
   }
   .canvas-node-root--chat select.nodemodel-select:has(option[value="deepseek-v4-flash-vision-exp"]:checked),
   .canvas-node-root--chat select.nodemodel-select:has(option[value="gpt-5.4-mini-toapis"]:checked),
+  .canvas-node-root--chat select.nodemodel-select:has(option[value="gpt-5.5-manxue"]:checked),
   .canvas-node-root--chat select.nodemodel-select:has(option[value="gemini-3.6-flash-toapis"]:checked),
   .canvas-node-root--chat select.nodemodel-select:has(option[value="qwen3.5-flash-toapis"]:checked),
   .canvas-node-root--chat select.nodemodel-select:has(option[value="doubao-seed-2.1-turbo-ark"]:checked),
