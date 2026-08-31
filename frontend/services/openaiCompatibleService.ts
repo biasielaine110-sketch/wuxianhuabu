@@ -3377,7 +3377,8 @@ async function manxueEditImage(
     });
     const form = new FormData();
     for (const { blob, filename } of imageBlobs) {
-      form.append('image[]', blob, filename);
+      // OpenAI-compatible image edits expects repeated `image` fields.
+      form.append('image', blob, filename);
     }
     form.append('model', model);
     form.append('prompt', `${prompt}\n\n（画幅比例 ${aspectRatio}）`);
@@ -3970,6 +3971,7 @@ function isManxueImageModel(modelName: string): boolean {
     m === 'gemini-3-pro-image-preview-manxue' ||
     m === 'gemini-3-pro-image-preview-2k-manxue' ||
     m === 'gemini-3-pro-image-preview-4k-manxue' ||
+    m === 'gemini-3.1-flash-image-preview-manxue' ||
     m === 'gemini-3.1-flash-image-preview-2k-manxue' ||
     m === 'gemini-3.1-flash-image-preview-4k-manxue'
   );
