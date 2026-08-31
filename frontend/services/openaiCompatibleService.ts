@@ -708,7 +708,7 @@ async function fetchUrlAsBase64(imageUrl: string, signal?: AbortSignal, bearerTo
   if (/^https:\/\/file\.hfsyapi\.cn\//i.test(imageUrl)) {
     // Use the current app origin so the generic external-image rewriter cannot
     // redirect this request to an unrelated provider proxy.
-    imageUrl = `${window.location.origin}/api/hfsy-fetch-image?url=${encodeURIComponent(imageUrl)}`;
+    imageUrl = `${window.location.origin}/api/hfsy-image-proxy?url=${encodeURIComponent(imageUrl)}`;
   }
   let absoluteUrl = imageUrl.trim();
   if (absoluteUrl.startsWith('/')) {
@@ -1019,7 +1019,7 @@ async function openAiCompatUploadImageBlob(
 
 /**
  * hfsy 视频参考图：上游明确「仅支持 URL，不支持 base64」。
- * HFSY_REF_UPLOAD_V3：禁止走 hfsy /uploads（404），禁止 data URI 回退。
+ * HFSY_REF_UPLOAD_V4：禁止走 hfsy /uploads（404），禁止 data URI 回退。
  * 顺序：ToAPIs 客户端上传（若已配置）→ /api/hfsy-reference-image（Telegraph/图床）。
  */
 async function uploadHfsyVideoReferenceImage(
@@ -1066,7 +1066,7 @@ async function uploadHfsyVideoReferenceImage(
 
   const headers: Record<string, string> = {
     'Content-Type': uploadBlob.type || 'image/jpeg',
-    'X-Hfsy-Ref-Upload': 'v3',
+    'X-Hfsy-Ref-Upload': 'v4',
   };
   if (toApisKey && isToApisHost(toApisBase)) {
     headers['X-Upload-Key'] = toApisKey;

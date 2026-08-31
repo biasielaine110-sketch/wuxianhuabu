@@ -1,4 +1,11 @@
 # 不上传本地/大目录，缩短 Vercel 构建上传（勿忽略 backend 目录本身，否则 workspace 的 package.json 解析可能异常）
 backend/.doubao-rpa-profile
 backend/node_modules
+server/node_modules
+server/.jimeng-profile
+server/outputs
+frontend/node_modules
+**/node_modules
 **/*.log
+# 根目录已有 api/；忽略 frontend/api 避免 Hobby 函数名额被重复统计
+frontend/api

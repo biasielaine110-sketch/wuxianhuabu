@@ -58,15 +58,61 @@ async function tryCompatUpload(baseUrl, apiKey, body, mime, filename) {
   return null;
 }
 
+async function serveLocalAsset(req, res) {
+  const id = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`).searchParams.get('id') || '';
+  if (!/^[a-z0-9]+$/i.test(id)) {
+    res.statusCode = 400;
+    res.end(JSON.stringify({ error: 'invalid_id' }));
+    return;
+  }
+
+  const g = globalThis;
+  const mem = g.__hfsyRefAssets?.get(id);
+  if (mem && mem.expires > Date.now()) {
+    res.statusCode = 200;
+    res.setHeader('Content-Type', mem.mime || 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=1800');
+    res.end(Buffer.from(mem.buf));
+    return;
+  }
+
+  try {
+    const fs = await import('node:fs/promises');
+    const buf = await fs.readFile(`/tmp/hfsy-ref-${id}`);
+    let mime = 'image/jpeg';
+    try {
+      mime = (await fs.readFile(`/tmp/hfsy-ref-${id}.mime`, 'utf8')).trim() || mime;
+    } catch {
+      /* ignore */
+    }
+    res.statusCode = 200;
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Cache-Control', 'public, max-age=1800');
+    res.end(buf);
+  } catch {
+    res.statusCode = 404;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify({ error: 'not_found' }));
+  }
+}
+
 /**
- * hfsy 视频 create 仅接受公网 URL（明确拒绝 base64）。
- * HFSY_REF_UPLOAD_V3：ToAPIs（可选）→ Telegraph → 临时图床 → 本站短链兜底。
+ * Hobby 计划合并为单函数：
+ * POST /api/hfsy-reference-image → 托管公网 URL
+ * GET  /api/hfsy-reference-image?id= → 本站短链取图
+ * HFSY_REF_UPLOAD_V4
  */
 module.exports = async function handler(req, res) {
-  res.setHeader('X-Hfsy-Ref-Upload', 'v3');
+  res.setHeader('X-Hfsy-Ref-Upload', 'v4');
+
+  if (req.method === 'GET') {
+    await serveLocalAsset(req, res);
+    return;
+  }
+
   if (req.method !== 'POST') {
     res.statusCode = 405;
-    res.setHeader('Allow', 'POST');
+    res.setHeader('Allow', 'GET, POST');
     res.end(JSON.stringify({ error: 'method_not_allowed' }));
     return;
   }
@@ -185,7 +231,6 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    // 本站短链兜底（同实例立刻拉取才可靠；仅作最后手段）
     if (!url) {
       const origin = publicOrigin(req);
       if (origin) {
@@ -200,7 +245,8 @@ module.exports = async function handler(req, res) {
         } catch {
           /* ignore */
         }
-        url = `${origin}/api/hfsy-ref-asset?id=${encodeURIComponent(id)}`;
+        // 同函数 GET ?id= 取图，避免再占一个 Serverless 名额
+        url = `${origin}/api/hfsy-reference-image?id=${encodeURIComponent(id)}`;
       }
     }
 

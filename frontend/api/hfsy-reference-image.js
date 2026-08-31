@@ -1,4 +1,4 @@
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+﻿const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 async function readRequestBody(req) {
   const chunks = [];
@@ -6,7 +6,7 @@ async function readRequestBody(req) {
   for await (const chunk of req) {
     const part = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += part.length;
-    if (size > MAX_IMAGE_BYTES) throw new Error('参考图不能超过 10 MB');
+    if (size > MAX_IMAGE_BYTES) throw new Error('鍙傝€冨浘涓嶈兘瓒呰繃 10 MB');
     chunks.push(part);
   }
   return Buffer.concat(chunks);
@@ -58,22 +58,67 @@ async function tryCompatUpload(baseUrl, apiKey, body, mime, filename) {
   return null;
 }
 
+async function serveLocalAsset(req, res) {
+  const id = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`).searchParams.get('id') || '';
+  if (!/^[a-z0-9]+$/i.test(id)) {
+    res.statusCode = 400;
+    res.end(JSON.stringify({ error: 'invalid_id' }));
+    return;
+  }
+
+  const g = globalThis;
+  const mem = g.__hfsyRefAssets?.get(id);
+  if (mem && mem.expires > Date.now()) {
+    res.statusCode = 200;
+    res.setHeader('Content-Type', mem.mime || 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=1800');
+    res.end(Buffer.from(mem.buf));
+    return;
+  }
+
+  try {
+    const fs = await import('node:fs/promises');
+    const buf = await fs.readFile(`/tmp/hfsy-ref-${id}`);
+    let mime = 'image/jpeg';
+    try {
+      mime = (await fs.readFile(`/tmp/hfsy-ref-${id}.mime`, 'utf8')).trim() || mime;
+    } catch {
+      /* ignore */
+    }
+    res.statusCode = 200;
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Cache-Control', 'public, max-age=1800');
+    res.end(buf);
+  } catch {
+    res.statusCode = 404;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify({ error: 'not_found' }));
+  }
+}
+
 /**
- * hfsy 视频 create 仅接受公网 URL（明确拒绝 base64）。
- * HFSY_REF_UPLOAD_V3：ToAPIs（可选）→ Telegraph → 临时图床 → 本站短链兜底。
+ * Hobby 璁″垝鍚堝苟涓哄崟鍑芥暟锛? * POST /api/hfsy-reference-image 鈫?鎵樼鍏綉 URL
+ * GET  /api/hfsy-reference-image?id= 鈫?鏈珯鐭摼鍙栧浘
+ * HFSY_REF_UPLOAD_V4
  */
 export default async function handler(req, res) {
-  res.setHeader('X-Hfsy-Ref-Upload', 'v3');
+  res.setHeader('X-Hfsy-Ref-Upload', 'v4');
+
+  if (req.method === 'GET') {
+    await serveLocalAsset(req, res);
+    return;
+  }
+
   if (req.method !== 'POST') {
     res.statusCode = 405;
-    res.setHeader('Allow', 'POST');
+    res.setHeader('Allow', 'GET, POST');
     res.end(JSON.stringify({ error: 'method_not_allowed' }));
     return;
   }
 
   try {
     const body = await readRequestBody(req);
-    if (!body.length) throw new Error('参考图内容为空');
+    if (!body.length) throw new Error('鍙傝€冨浘鍐呭涓虹┖');
     const mime = String(req.headers['content-type'] || 'image/jpeg').split(';')[0] || 'image/jpeg';
     const filename = mime.includes('png') ? 'hfsy-reference.png' : 'hfsy-reference.jpg';
 
@@ -199,13 +244,14 @@ export default async function handler(req, res) {
         } catch {
           /* ignore */
         }
-        url = `${origin}/api/hfsy-ref-asset?id=${encodeURIComponent(id)}`;
+        // 鍚屽嚱鏁?GET ?id= 鍙栧浘锛岄伩鍏嶅啀鍗犱竴涓?Serverless 鍚嶉
+        url = `${origin}/api/hfsy-reference-image?id=${encodeURIComponent(id)}`;
       }
     }
 
     if (!url) {
       throw new Error(
-        `临时图片托管失败（上游仅接受公网 URL，不支持 base64）: ${failures.join('; ') || '无可用图床'}`
+        `涓存椂鍥剧墖鎵樼澶辫触锛堜笂娓镐粎鎺ュ彈鍏綉 URL锛屼笉鏀寔 base64锛? ${failures.join('; ') || '鏃犲彲鐢ㄥ浘搴?}`
       );
     }
     res.statusCode = 200;
@@ -222,7 +268,7 @@ export default async function handler(req, res) {
       })
     );
   }
-}
+};
 
 export const config = {
   maxDuration: 60,

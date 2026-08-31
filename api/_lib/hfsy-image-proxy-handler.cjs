@@ -30,6 +30,44 @@ function isUnsafeForwardedResponseHeader(name) {
 async function handler(req, res) {
   const host = req.headers.host || 'localhost';
   const url = new URL(req.url || '/', `http://${host}`);
+
+  // 原 /api/hfsy-fetch-image：合并进本函数，避免 Hobby 超过 12 个 Serverless
+  const fetchImageUrl = url.searchParams.get('url');
+  if (req.method === 'GET' && fetchImageUrl && !url.searchParams.get('path')) {
+    const ALLOWED_HOSTS = new Set(['file.hfsyapi.cn', 'hfsyapi.cn', 'www.hfsyapi.cn']);
+    let target;
+    try {
+      target = new URL(fetchImageUrl);
+    } catch {
+      res.statusCode = 400;
+      res.end(JSON.stringify({ error: 'invalid_image_url' }));
+      return;
+    }
+    if (target.protocol !== 'https:' || !ALLOWED_HOSTS.has(target.hostname.toLowerCase())) {
+      res.statusCode = 400;
+      res.end(JSON.stringify({ error: 'unsupported_image_url' }));
+      return;
+    }
+    try {
+      const upstream = await fetch(target, { signal: AbortSignal.timeout(30_000) });
+      res.statusCode = upstream.status;
+      res.setHeader('Content-Type', upstream.headers.get('content-type') || 'image/png');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      if (!upstream.body) return res.end();
+      for await (const chunk of upstream.body) res.write(Buffer.from(chunk));
+      res.end();
+    } catch (error) {
+      res.statusCode = 502;
+      res.end(
+        JSON.stringify({
+          error: 'image_fetch_failed',
+          message: error instanceof Error ? error.message : String(error),
+        })
+      );
+    }
+    return;
+  }
+
   const pathFromQuery = url.searchParams.get('path')?.replace(/^\/+/, '') ?? '';
   let sub = pathFromQuery;
   if (!sub) {

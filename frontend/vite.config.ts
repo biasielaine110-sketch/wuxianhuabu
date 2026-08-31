@@ -58,7 +58,7 @@ function hfsyReferenceImageDevPlugin(): Plugin {
     next: () => void
   ) => {
     const raw = req.url || '';
-    if (raw.startsWith('/api/hfsy-ref-asset')) {
+    if (raw.startsWith('/api/hfsy-reference-image') && (req.method === 'GET' || raw.includes('?id='))) {
       try {
         const id = new URL(raw, 'http://localhost').searchParams.get('id') || '';
         const hit = mem.get(id);
@@ -101,7 +101,7 @@ function hfsyReferenceImageDevPlugin(): Plugin {
         const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
         mem.set(id, { buf: body, mime, expires: Date.now() + 30 * 60_000 });
         const host = String(req.headers.host || 'localhost:5173');
-        url = `http://${host}/api/hfsy-ref-asset?id=${id}`;
+        url = `http://${host}/api/hfsy-reference-image?id=${id}`;
       }
       res.statusCode = 200;
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
