@@ -2210,9 +2210,8 @@ async function hfsyVideoGenerate(params: {
     assertNotAborted(params.signal);
     const img = refs[i];
     const { raw, mime } = parseBase64ImageInput(img);
-    const blob = base64ToBlob(raw, mime || 'image/jpeg');
-    const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : mime.includes('gif') ? 'gif' : 'jpg';
-    imageUrls.push(await openAiCompatUploadImageBlob(hfsyFetchBase(), apiKey, blob, `hfsy-video-ref-${i}.${ext}`, params.signal));
+    // hfsyapi.cn does not expose /v1/upload/image; pass the reference as a data URI.
+    imageUrls.push(`data:${mime || 'image/jpeg'};base64,${raw}`);
   }
 
   const videoUrls = (params.referenceVideoUrls || []).filter((u) => /^https?:\/\//i.test(u.trim())).slice(0, 3);
@@ -3542,10 +3541,9 @@ function hfsyNormalizeReferenceImage(input: string): string {
  */
 async function buildHfsyReferenceImages(
   inputs: string[],
-  apiKey: string,
+  _apiKey: string,
   signal?: AbortSignal
 ): Promise<string[]> {
-  const base = hfsyFetchBase();
   const out: string[] = [];
   const maxSide = 1280;
   const jpegQ = 0.78;
@@ -3553,33 +3551,15 @@ async function buildHfsyReferenceImages(
     assertNotAborted(signal);
     const trimmed = (inputs[i] || '').trim();
     if (!trimmed) continue;
-    if (/^https?:\/\//i.test(trimmed)) {
-      out.push(trimmed);
-      continue;
-    }
-
-    let uploaded: string | null = null;
     try {
-      const parsed = parseBase64ImageInput(trimmed);
-      let blob = base64ToBlob(parsed.raw, parsed.mime || 'image/jpeg');
-      if (blob.size > 900_000) {
+      if (/^https?:\/\//i.test(trimmed)) {
+        const raw = await fetchUrlAsBase64(trimmed, signal, _apiKey);
+        const dataUrl = await shrinkBase64ImageToJpegDataUrl(`data:image/jpeg;base64,${raw}`, maxSide, jpegQ);
+        out.push(parseBase64ImageInput(dataUrl).raw);
+      } else {
         const dataUrl = await shrinkBase64ImageToJpegDataUrl(trimmed, maxSide, jpegQ);
-        const shrunk = parseBase64ImageInput(dataUrl);
-        blob = base64ToBlob(shrunk.raw, 'image/jpeg');
+        out.push(parseBase64ImageInput(dataUrl).raw);
       }
-      uploaded = await openAiCompatUploadImageBlob(base, apiKey, blob, `hfsy-i2i-ref-${i}.jpg`, signal);
-    } catch {
-      uploaded = null;
-    }
-    const u = uploaded?.trim() ?? '';
-    if (u && /^https?:\/\//i.test(u)) {
-      out.push(u);
-      continue;
-    }
-
-    try {
-      const dataUrl = await shrinkBase64ImageToJpegDataUrl(trimmed, maxSide, jpegQ);
-      out.push(parseBase64ImageInput(dataUrl).raw);
     } catch {
       out.push(hfsyNormalizeReferenceImage(trimmed));
     }
