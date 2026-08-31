@@ -720,8 +720,8 @@ ${text}`,
     if (!node || node.type !== 'video') return;
 
     // 日志：确认选择的模型值
-    console.log('[jimeng] handleGenerateVideo node.model =', node.model);
-    console.log('[jimeng] isJimengVideoModel(node.model) =', isJimengVideoModel(node.model));
+    console.log('[video] handleGenerateVideo node.model =', node.model);
+    console.log('[video] isJimengVideoModel(node.model) =', isJimengVideoModel(node.model));
 
     generationAbortControllersRef.current.get(nodeId)?.abort();
     const ac = new AbortController();
