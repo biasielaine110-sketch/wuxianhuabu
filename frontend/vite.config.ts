@@ -377,6 +377,29 @@ const toapisFileCdnProxy = {
       return stripped.length ? stripped : '/';
     },
   },
+  /** 与生产同路径：/api/manxue-proxy/* → manxueapi.com/* */
+  '/api/manxue-proxy': {
+    target: 'https://manxueapi.com',
+    changeOrigin: true,
+    secure: true,
+    timeout: 1_800_000,
+    proxyTimeout: 1_800_000,
+    configure(proxy) {
+      proxy.on('error', (err, _req, res) => {
+        console.error('[vite proxy /api/manxue-proxy]', err);
+        const r = res as { headersSent?: boolean; writeHead?: (c: number, h?: unknown) => void; end?: (s?: string) => void };
+        if (r && !r.headersSent && typeof r.writeHead === 'function') {
+          r.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
+          r.end?.(`满 e 代理错误: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      });
+    },
+    rewrite: (p: string) => {
+      const path = p.startsWith('/') ? p : `/${p}`;
+      const stripped = path.replace(/^\/api\/manxue-proxy(?=\/|$)/, '');
+      return stripped.length ? stripped : '/';
+    },
+  },
   '/api/jimeng': {
     target: 'http://localhost:3107',
     changeOrigin: true,

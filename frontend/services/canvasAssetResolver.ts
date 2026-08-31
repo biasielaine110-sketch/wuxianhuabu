@@ -37,7 +37,8 @@ export function rewriteImageUrlForBrowserDisplay(imageUrl: string): string {
       return `${origin}/cdn-files-token6688${u.pathname}${u.search}`;
     }
     if (host === 'manxueapi.com' || host.endsWith('.manxueapi.com')) {
-      return `${origin}/manxue-api${u.pathname}${u.search}`;
+      const prefix = import.meta.env.PROD ? '/api/manxue-proxy' : '/manxue-api';
+      return `${origin}${prefix}${u.pathname}${u.search}`;
     }
   } catch {
     /* ignore */

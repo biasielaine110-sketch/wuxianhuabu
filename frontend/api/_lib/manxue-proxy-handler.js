@@ -1,6 +1,6 @@
 /**
  * manxueapi.com 同源代理。
- * Vercel 边缘 rewrite 直连外站易失败（超时 / 403），改为 Serverless Function 转发。
+ * Vercel 边缘 rewrite 直连外站会超时/403；经 Serverless 转发，并剥离 Origin/Referer。
  */
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -27,7 +27,6 @@ function isUnsafeForwardedResponseHeader(name) {
   return isHopByHopHeader(n) || n === 'content-encoding' || n === 'content-length';
 }
 
-/** 浏览器带过来的 Origin/Referer 来自 vercel.app，上游 WAF 可能直接 403 */
 function shouldDropRequestHeader(name) {
   const n = String(name).toLowerCase();
   return (
@@ -41,23 +40,29 @@ function shouldDropRequestHeader(name) {
   );
 }
 
-async function handler(req, res) {
+function resolveSubPath(req) {
   const host = req.headers.host || 'localhost';
   const url = new URL(req.url || '/', `http://${host}`);
-  const pathFromQuery = url.searchParams.get('path')?.replace(/^\/+/, '') ?? '';
-  let sub = pathFromQuery;
-  if (!sub) {
-    sub = url.pathname.replace(/^\/api\/manxue-proxy\/?/, '').replace(/^\/+/, '');
+  const fromQuery = url.searchParams.get('path')?.replace(/^\/+/, '') ?? '';
+  if (fromQuery) {
+    const upstreamSearch = new URLSearchParams(url.searchParams);
+    upstreamSearch.delete('path');
+    const qs = upstreamSearch.toString();
+    return { sub: fromQuery, qs };
   }
+  const sub = url.pathname.replace(/^\/api\/manxue-proxy\/?/, '').replace(/^\/+/, '');
+  const qs = url.searchParams.toString();
+  return { sub, qs };
+}
+
+async function handler(req, res) {
+  const { sub, qs } = resolveSubPath(req);
   if (!sub) {
     res.statusCode = 400;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.end(JSON.stringify({ error: 'missing path after /api/manxue-proxy' }));
     return;
   }
-  const upstreamSearch = new URLSearchParams(url.searchParams);
-  upstreamSearch.delete('path');
-  const qs = upstreamSearch.toString();
   const targetUrl = `${UPSTREAM_ORIGIN}/${sub}${qs ? `?${qs}` : ''}`;
 
   const headers = new Headers();

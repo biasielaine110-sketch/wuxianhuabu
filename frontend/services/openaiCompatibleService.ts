@@ -51,13 +51,19 @@ function hfsyImageProxyPathPrefix(): '/hfsy-image-api' {
   return '/hfsy-image-api';
 }
 
-/** manxueapi.com 未开放 CORS；生产走 Vercel rewrite、开发走 Vite 同源代理 /manxue-api */
+/** manxueapi.com 未开放 CORS；生产直连 Serverless /api/manxue-proxy，开发走 Vite /manxue-api */
+function manxueSameOriginProxyPrefix(): string {
+  if (typeof window === 'undefined') return '/manxue-api';
+  // 生产避免依赖可能失效的外链 rewrite，直接打到函数代理
+  return import.meta.env.PROD ? '/api/manxue-proxy' : '/manxue-api';
+}
+
 function rewriteManxueBaseForBrowserCors(baseNormalized: string): string {
   if (typeof window === 'undefined') return baseNormalized;
   try {
     if (!isManxueHost(baseNormalized)) return baseNormalized;
     const pathname = new URL(baseNormalized).pathname.replace(/\/+$/, '') || '/v1';
-    return `${window.location.origin}/manxue-api${pathname}`;
+    return `${window.location.origin}${manxueSameOriginProxyPrefix()}${pathname}`;
   } catch {
     return baseNormalized;
   }
@@ -73,7 +79,7 @@ function codesonlineFetchBase(): string {
 
 function manxueGeminiModelsBase(): string {
   if (typeof window === 'undefined') return 'https://manxueapi.com/v1beta/models';
-  return `${window.location.origin}/manxue-api/v1beta/models`;
+  return `${window.location.origin}${manxueSameOriginProxyPrefix()}/v1beta/models`;
 }
 
 /** image.codesonline.dev 常未对浏览器开放 CORS；生产走 Vercel rewrite、开发走 Vite 同源代理 */
@@ -648,7 +654,8 @@ function rewriteKnownImageCdnToSameOrigin(imageUrl: string): string {
       return `${origin}/cdn-files-token6688${u.pathname}${u.search}`;
     }
     if (host === 'manxueapi.com' || host.endsWith('.manxueapi.com')) {
-      return `${origin}/manxue-api${u.pathname}${u.search}`;
+      const prefix = import.meta.env.PROD ? '/api/manxue-proxy' : '/manxue-api';
+      return `${origin}${prefix}${u.pathname}${u.search}`;
     }
     if (host === 'www.hfsyapi.cn' || host === 'hfsyapi.cn') {
       return `${origin}${hfsyImageProxyPathPrefix()}${u.pathname}${u.search}`;
