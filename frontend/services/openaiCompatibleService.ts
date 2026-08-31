@@ -407,39 +407,23 @@ async function manxueGeminiGenerateImage(
   const out: string[] = [];
   const count = Math.min(Math.max(numberOfImages, 1), 8);
 
-  // 将画幅比例转为实际像素尺寸（Gemini Vertex API 需要）
-  const aspectToSize: Record<string, { width: number; height: number }> = {
-    '1:1': { width: 1024, height: 1024 },
-    '16:9': { width: 1344, height: 768 },
-    '9:16': { width: 768, height: 1344 },
-    '4:3': { width: 1024, height: 768 },
-    '3:4': { width: 768, height: 1024 },
-    '2:1': { width: 1344, height: 768 },
-    '1:2': { width: 768, height: 1344 },
-    '21:9': { width: 1536, height: 640 },
-    '9:21': { width: 640, height: 1536 },
-    '3:2': { width: 1216, height: 832 },
-    '2:3': { width: 832, height: 1216 },
-  };
-  const size = aspectToSize[aspectRatio] || aspectToSize['16:9'];
-
   for (let i = 0; i < count; i++) {
     assertNotAborted(signal);
 
-    // 构建 Vertex AI 风格的请求体
-    // prompt 中明确包含画幅比例要求，确保模型生成正确比例的图片
     const body: Record<string, unknown> = {
       contents: [
         {
+          role: 'user',
           parts: [
             {
-              text: `[图片比例 ${aspectRatio}] ${prompt}`,
+              text: `[图片比例 ${aspectRatio}] ${prompt}\n请直接输出图片，不要只返回文字说明。`,
             },
           ],
         },
       ],
       generationConfig: {
-        responseModalities: ['IMAGE'],
+        // 多数 Gemini 图像模型不支持仅 IMAGE
+        responseModalities: ['TEXT', 'IMAGE'],
         imageConfig: {
           aspectRatio: aspectRatio,
           imageSize: manxueResolution(nodeResolution) === '4K' ? '4K' : '2K',
@@ -447,7 +431,7 @@ async function manxueGeminiGenerateImage(
       },
     };
 
-    const url = `${base}/${encodeURIComponent(model)}:generateContent?key=${key}`;
+    const url = `${base}/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
     const res = await manxueFetchWithRetry(
       url,
       {
@@ -461,37 +445,25 @@ async function manxueGeminiGenerateImage(
       signal
     );
 
-    const json = await res.json() as {
-      candidates?: Array<{
-        content?: {
-          parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }>;
-        };
-      }>;
-      error?: { message?: string };
-    };
-
-    if (json.error?.message) {
-      throw new Error(`满 eAPI Gemini: ${json.error.message}`);
+    const text = await res.text();
+    let json: unknown;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      throw new Error(`满 eAPI Gemini 响应不是 JSON: ${text.slice(0, 500)}`);
     }
 
-    const parts = json.candidates?.[0]?.content?.parts;
-    if (!parts || parts.length === 0) {
-      throw new Error('满 eAPI Gemini 响应中未找到图片数据');
-    }
+    const errMsg =
+      json && typeof json === 'object'
+        ? (json as { error?: { message?: string } }).error?.message
+        : undefined;
+    if (errMsg) throw new Error(`满 eAPI Gemini: ${errMsg}`);
 
-    for (const part of parts) {
-      if (part.inlineData?.data && part.inlineData.mimeType) {
-        const mime = part.inlineData.mimeType;
-        const raw = part.inlineData.data;
-        // 直接返回 base64 数据（不需要再转换）
-        out.push(raw);
-        break;
-      }
+    const b64 = await extractGeminiImageBase64FromResponse(json, signal, apiKey);
+    if (!b64) {
+      throw new Error(formatGeminiNoImageError(json, '满 eAPI Gemini'));
     }
-
-    if (out.length <= i) {
-      throw new Error('满 eAPI Gemini 响应中未找到图片数据');
-    }
+    out.push(b64);
   }
 
   return out;
@@ -3891,6 +3863,114 @@ async function fetchUrlAsBase64WithTimeout(
   }
 }
 
+/** 从 Gemini generateContent 响应中提取成图 base64（兼容 camelCase / snake_case / fileData / 文本里的 URL） */
+async function extractGeminiImageBase64FromResponse(
+  json: unknown,
+  signal?: AbortSignal,
+  bearerToken?: string
+): Promise<string | null> {
+  if (!json || typeof json !== 'object') return null;
+  const root = json as Record<string, unknown>;
+  const candidates = Array.isArray(root.candidates) ? root.candidates : [];
+
+  const pickFromPart = async (part: Record<string, unknown>): Promise<string | null> => {
+    const inline =
+      (part.inlineData && typeof part.inlineData === 'object'
+        ? (part.inlineData as Record<string, unknown>)
+        : null) ||
+      (part.inline_data && typeof part.inline_data === 'object'
+        ? (part.inline_data as Record<string, unknown>)
+        : null);
+    if (inline) {
+      const data = typeof inline.data === 'string' ? inline.data.trim() : '';
+      if (data && isPlausibleImageBase64(data)) {
+        return data.replace(/^data:[^;]+;base64,/, '').replace(/\s/g, '');
+      }
+    }
+    const file =
+      (part.fileData && typeof part.fileData === 'object'
+        ? (part.fileData as Record<string, unknown>)
+        : null) ||
+      (part.file_data && typeof part.file_data === 'object'
+        ? (part.file_data as Record<string, unknown>)
+        : null);
+    if (file) {
+      const uri =
+        (typeof file.fileUri === 'string' && file.fileUri.trim()) ||
+        (typeof file.file_uri === 'string' && file.file_uri.trim()) ||
+        '';
+      if (/^https?:\/\//i.test(uri)) {
+        return fetchUrlAsBase64(uri, signal, bearerToken);
+      }
+    }
+    if (typeof part.text === 'string' && part.text.trim()) {
+      const md = part.text.match(/!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/);
+      if (md?.[1]) return fetchUrlAsBase64(md[1], signal, bearerToken);
+      const bare = part.text.match(/(https?:\/\/[^\s"'<>]+\.(?:png|jpe?g|webp|gif)(?:\?[^\s"'<>]*)?)/i);
+      if (bare?.[1]) return fetchUrlAsBase64(bare[1], signal, bearerToken);
+    }
+    return null;
+  };
+
+  for (const cand of candidates) {
+    if (!cand || typeof cand !== 'object') continue;
+    const content = (cand as Record<string, unknown>).content;
+    if (!content || typeof content !== 'object') continue;
+    const parts = (content as Record<string, unknown>).parts;
+    if (!Array.isArray(parts)) continue;
+    for (const part of parts) {
+      if (!part || typeof part !== 'object') continue;
+      const hit = await pickFromPart(part as Record<string, unknown>);
+      if (hit) return hit;
+    }
+  }
+
+  const nestedUrl = extractFirstStringUrl(json);
+  if (nestedUrl && /\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(nestedUrl)) {
+    return fetchUrlAsBase64(nestedUrl, signal, bearerToken);
+  }
+  return null;
+}
+
+function formatGeminiNoImageError(json: unknown, label: string): string {
+  const root = json && typeof json === 'object' ? (json as Record<string, unknown>) : {};
+  const cand0 =
+    Array.isArray(root.candidates) && root.candidates[0] && typeof root.candidates[0] === 'object'
+      ? (root.candidates[0] as Record<string, unknown>)
+      : null;
+  const finish = cand0
+    ? String(cand0.finishReason || cand0.finish_reason || '').trim()
+    : '';
+  const block =
+    root.promptFeedback && typeof root.promptFeedback === 'object'
+      ? String((root.promptFeedback as Record<string, unknown>).blockReason || '')
+      : root.prompt_feedback && typeof root.prompt_feedback === 'object'
+        ? String((root.prompt_feedback as Record<string, unknown>).block_reason || '')
+        : '';
+  const textBits: string[] = [];
+  const parts =
+    cand0 && cand0.content && typeof cand0.content === 'object'
+      ? ((cand0.content as Record<string, unknown>).parts as unknown[])
+      : [];
+  if (Array.isArray(parts)) {
+    for (const p of parts) {
+      if (p && typeof p === 'object' && typeof (p as Record<string, unknown>).text === 'string') {
+        textBits.push(String((p as Record<string, unknown>).text).slice(0, 200));
+      }
+    }
+  }
+  const extras = [
+    finish ? `finishReason=${finish}` : '',
+    block ? `blockReason=${block}` : '',
+    textBits.length ? `text=${textBits.join(' ').slice(0, 240)}` : '',
+  ]
+    .filter(Boolean)
+    .join('; ');
+  return extras
+    ? `${label}响应中未找到图片数据（${extras}）`
+    : `${label}响应中未找到图片数据`;
+}
+
 /** 满 eAPI Gemini 图生图：使用 Vertex AI 风格的 generateContent 接口 */
 async function manxueGeminiEditImage(
   base64Images: string[],
@@ -3916,49 +3996,36 @@ async function manxueGeminiEditImage(
     let raw: string;
     let mime = 'image/jpeg';
     if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-      // 远程 URL：先下载
       raw = await fetchUrlAsBase64(trimmed, signal, apiKey);
+      mime = sniffMimeFromBase64(raw);
     } else {
       const parsed = parseBase64ImageInput(img);
-      raw = parsed.raw;
-      mime = parsed.mime || 'image/jpeg';
+      raw = parsed.raw.replace(/\s/g, '');
+      mime = parsed.mime || sniffMimeFromBase64(raw) || 'image/jpeg';
     }
+    if (!raw) continue;
     imageParts.push({ inlineData: { data: raw, mimeType: mime } });
   }
-
-  // 将画幅比例转为实际像素尺寸
-  const aspectToSize: Record<string, { width: number; height: number }> = {
-    '1:1': { width: 1024, height: 1024 },
-    '16:9': { width: 1344, height: 768 },
-    '9:16': { width: 768, height: 1344 },
-    '4:3': { width: 1024, height: 768 },
-    '3:4': { width: 768, height: 1024 },
-    '2:1': { width: 1344, height: 768 },
-    '1:2': { width: 768, height: 1344 },
-    '21:9': { width: 1536, height: 640 },
-    '9:21': { width: 640, height: 1536 },
-    '3:2': { width: 1216, height: 832 },
-    '2:3': { width: 832, height: 1216 },
-  };
-  const size = aspectToSize[aspectRatio] || aspectToSize['16:9'];
+  if (!imageParts.length) throw new Error('图生图需要至少一张有效参考图。');
 
   for (let i = 0; i < count; i++) {
     assertNotAborted(signal);
 
-    // 构建 Vertex AI 风格的请求体，包含参考图
+    // 多数 Gemini 图像模型不支持仅 IMAGE；需 TEXT+IMAGE
     const body: Record<string, unknown> = {
       contents: [
         {
+          role: 'user',
           parts: [
             ...imageParts,
             {
-              text: `[图片比例 ${aspectRatio}] ${prompt}`,
+              text: `[图片比例 ${aspectRatio}] ${prompt}\n请直接输出编辑后的图片，不要只返回文字说明。`,
             },
           ],
         },
       ],
       generationConfig: {
-        responseModalities: ['IMAGE'],
+        responseModalities: ['TEXT', 'IMAGE'],
         imageConfig: {
           aspectRatio: aspectRatio,
           imageSize: manxueResolution(nodeResolution) === '4K' ? '4K' : '2K',
@@ -3966,49 +4033,39 @@ async function manxueGeminiEditImage(
       },
     };
 
-    const url = `${base}/${encodeURIComponent(model)}:generateContent?key=${key}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+    const url = `${base}/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
+    const res = await manxueFetchWithRetry(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
       },
-      body: JSON.stringify(body),
-      signal,
-    });
+      '满 eAPI Gemini 图生图',
+      signal
+    );
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`满 eAPI Gemini 图生图失败 (${res.status}): ${text.slice(0, 800)}`);
+    const text = await res.text();
+    let json: unknown;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      throw new Error(`满 eAPI Gemini 图生图响应不是 JSON: ${text.slice(0, 500)}`);
     }
 
-    const json = await res.json() as {
-      candidates?: Array<{
-        content?: {
-          parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }>;
-        };
-      }>;
-      error?: { message?: string };
-    };
+    const errMsg =
+      json && typeof json === 'object'
+        ? (json as { error?: { message?: string } }).error?.message
+        : undefined;
+    if (errMsg) throw new Error(`满 eAPI Gemini: ${errMsg}`);
 
-    if (json.error?.message) {
-      throw new Error(`满 eAPI Gemini: ${json.error.message}`);
+    const b64 = await extractGeminiImageBase64FromResponse(json, signal, apiKey);
+    if (!b64) {
+      throw new Error(formatGeminiNoImageError(json, '满 eAPI Gemini 图生图'));
     }
-
-    const parts = json.candidates?.[0]?.content?.parts;
-    if (!parts || parts.length === 0) {
-      throw new Error('满 eAPI Gemini 图生图响应中未找到图片数据');
-    }
-
-    for (const part of parts) {
-      if (part.inlineData?.data && part.inlineData.mimeType) {
-        out.push(part.inlineData.data);
-        break;
-      }
-    }
-
-    if (out.length <= i) {
-      throw new Error('满 eAPI Gemini 图生图响应中未找到图片数据');
-    }
+    out.push(b64);
   }
 
   return out;
