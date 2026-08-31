@@ -60,9 +60,8 @@ async function tryCompatUpload(baseUrl, apiKey, body, mime, filename) {
 
 /**
  * hfsy 视频 create 仅接受公网 URL（明确拒绝 base64）。
- * 优先：客户端传入的 OpenAI 兼容上传（ToAPIs → files.toapis.com）→ Telegraph → 临时图床。
  */
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.statusCode = 405;
     res.setHeader('Allow', 'POST');
@@ -184,7 +183,6 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    // 本站短链兜底（同实例立刻拉取才可靠；仅作最后手段）
     if (!url) {
       const origin = publicOrigin(req);
       if (origin) {
@@ -222,9 +220,9 @@ module.exports = async function handler(req, res) {
       })
     );
   }
-};
+}
 
-module.exports.config = {
+export const config = {
   maxDuration: 60,
   api: { bodyParser: false },
 };

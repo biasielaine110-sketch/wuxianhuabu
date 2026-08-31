@@ -1018,55 +1018,50 @@ async function openAiCompatUploadImageBlob(
 }
 
 /**
- * hfsy / 满 e 视频参考图：
- * 1) 优先走 hfsy 自有 uploads（国内节点可拉）
- * 2) 失败则压缩为 data URI（New API video/create 的 images 支持 base64）
- * 3) 再尝试临时图床（境外主机常被上游 RST，仅作兜底）
+ * hfsy 视频参考图：上游明确「仅支持 URL，不支持 base64」。
+ * 走 /api/hfsy-reference-image（服务端 ToAPIs/Telegraph/图床），不请求 hfsy /upload/image（404），也不回退 data URI。
  */
 async function uploadHfsyVideoReferenceImage(
   blob: Blob,
   signal?: AbortSignal
 ): Promise<string> {
-  const apiKey = getHfsySavedKey().trim();
-  if (apiKey) {
-    try {
-      const url = await openAiCompatUploadImageBlob(
-        normalizeBaseUrl(getHfsyBaseUrl()),
-        apiKey,
-        blob,
-        'hfsy-ref.jpg',
-        signal
-      );
-      if (/^https?:\/\//i.test(url)) return url;
-    } catch {
-      /* fall through：网关未必开放 uploads */
+  let uploadBlob = blob;
+  try {
+    if (blob.size > 700_000) {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('读取参考图失败'));
+        reader.readAsDataURL(blob);
+      });
+      const shrunk = await shrinkBase64ImageToJpegDataUrl(dataUrl, 1280, 0.82);
+      const { raw, mime } = parseBase64ImageInput(shrunk);
+      uploadBlob = base64ToBlob(raw, mime || 'image/jpeg');
     }
+  } catch {
+    uploadBlob = blob;
   }
 
-  // data URI：避免上游去拉 catbox/tmpfiles 时 connection reset
-  const toDataUrl = async (b: Blob): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ''));
-      reader.onerror = () => reject(new Error('读取参考图失败'));
-      reader.readAsDataURL(b);
-    });
-
-  try {
-    let dataUrl = await toDataUrl(blob);
-    // 控制体积，降低 video/create 经代理时的 413 风险
-    if (blob.size > 900_000 || dataUrl.length > 1_200_000) {
-      dataUrl = await shrinkBase64ImageToJpegDataUrl(dataUrl, 1280, 0.8);
+  const headers: Record<string, string> = {
+    'Content-Type': uploadBlob.type || 'image/jpeg',
+  };
+  const toApisKey = getOpenAiSavedKey().trim();
+  const toApisBase = normalizeBaseUrl(getOpenAiBaseUrl().trim() || 'https://toapis.com/v1');
+  if (toApisKey && isToApisHost(toApisBase)) {
+    headers['X-Upload-Key'] = toApisKey;
+    headers['X-Upload-Base'] = toApisBase;
+  } else {
+    const manxueKey = getManxueSavedKey().trim();
+    if (manxueKey) {
+      headers['X-Upload-Key'] = manxueKey;
+      headers['X-Upload-Base'] = normalizeBaseUrl(getManxueBaseUrl() || DEFAULT_MANXUE_BASE_URL);
     }
-    if (dataUrl.startsWith('data:image/')) return dataUrl;
-  } catch {
-    /* fall through to temp host */
   }
 
   const res = await fetch('/api/hfsy-reference-image', {
     method: 'POST',
-    headers: { 'Content-Type': blob.type || 'image/jpeg' },
-    body: blob,
+    headers,
+    body: uploadBlob,
     signal,
   });
   const text = await res.text();
@@ -1076,8 +1071,12 @@ async function uploadHfsyVideoReferenceImage(
   } catch {
     throw new Error(`HFSY 视频参考图上传响应无效 (${res.status})`);
   }
-  if (!res.ok || !json.url || !/^https?:\/\//i.test(json.url)) {
-    throw new Error(`HFSY 视频参考图上传失败 (${res.status}): ${json.message || text.slice(0, 300)}`);
+  if (!res.ok || !json.url || !/^https?:\/\//i.test(json.url) || json.url.startsWith('data:')) {
+    throw new Error(
+      `HFSY 视频参考图需要公网 URL（上游不支持 base64）。上传失败 (${res.status}): ${
+        json.message || text.slice(0, 300)
+      }`
+    );
   }
   return json.url;
 }

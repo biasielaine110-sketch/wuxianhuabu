@@ -42,6 +42,87 @@ function faviconFallbackPlugin(): Plugin {
   };
 }
 
+/** 开发环境：本地模拟 /api/hfsy-reference-image（Telegraph 公网 URL，供 hfsy 视频参考图） */
+function hfsyReferenceImageDevPlugin(): Plugin {
+  const mem = new Map<string, { buf: Buffer; mime: string; expires: number }>();
+  const readBody = async (req: AsyncIterable<Uint8Array | Buffer | string>): Promise<Buffer> => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+  };
+  const middleware = async (
+    req: { method?: string; url?: string; headers: Record<string, unknown> },
+    res: { statusCode: number; setHeader: (k: string, v: string) => void; end: (b?: unknown) => void },
+    next: () => void
+  ) => {
+    const raw = req.url || '';
+    if (raw.startsWith('/api/hfsy-ref-asset')) {
+      try {
+        const id = new URL(raw, 'http://localhost').searchParams.get('id') || '';
+        const hit = mem.get(id);
+        if (!hit || hit.expires < Date.now()) {
+          res.statusCode = 404;
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.end(JSON.stringify({ error: 'not_found' }));
+          return;
+        }
+        res.statusCode = 200;
+        res.setHeader('Content-Type', hit.mime);
+        res.end(hit.buf);
+      } catch (e) {
+        res.statusCode = 500;
+        res.end(String(e));
+      }
+      return;
+    }
+    if (!(req.method === 'POST' && raw.startsWith('/api/hfsy-reference-image'))) {
+      next();
+      return;
+    }
+    try {
+      const body = await readBody(req as unknown as AsyncIterable<Uint8Array | Buffer | string>);
+      const mime = String(req.headers['content-type'] || 'image/jpeg').split(';')[0] || 'image/jpeg';
+      const filename = mime.includes('png') ? 'hfsy-reference.png' : 'hfsy-reference.jpg';
+      let url = '';
+      try {
+        const form = new FormData();
+        form.append('file', new Blob([body], { type: mime }), filename);
+        const up = await fetch('https://telegra.ph/upload', { method: 'POST', body: form });
+        const json = (await up.json().catch(() => null)) as Array<{ src?: string }> | { src?: string } | null;
+        const src = Array.isArray(json) ? json[0]?.src : json?.src;
+        if (typeof src === 'string' && src.startsWith('/')) url = `https://telegra.ph${src}`;
+        else if (typeof src === 'string' && /^https?:\/\//i.test(src)) url = src;
+      } catch {
+        /* fallthrough */
+      }
+      if (!url) {
+        const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+        mem.set(id, { buf: body, mime, expires: Date.now() + 30 * 60_000 });
+        const host = String(req.headers.host || 'localhost:5173');
+        url = `http://${host}/api/hfsy-ref-asset?id=${id}`;
+      }
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end(JSON.stringify({ url }));
+    } catch (e) {
+      res.statusCode = 502;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end(JSON.stringify({ message: e instanceof Error ? e.message : String(e) }));
+    }
+  };
+  return {
+    name: 'hfsy-reference-image-dev',
+    configureServer(server) {
+      server.middlewares.use(middleware);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(middleware);
+    },
+  };
+}
+
 /** 开发环境：把阿里云 OSS 临时图转到同源拉取，避免 CORS */
 function aliyunMaasOssFetchPlugin(): Plugin {
   const middleware = async (
@@ -505,7 +586,13 @@ export default defineConfig(({ mode }) => {
       preview: {
         proxy: { ...toapisFileCdnProxy },
       },
-      plugins: [react(), injectSitePasswordPlugin(sitePassword), faviconFallbackPlugin(), aliyunMaasOssFetchPlugin()],
+      plugins: [
+        react(),
+        injectSitePasswordPlugin(sitePassword),
+        faviconFallbackPlugin(),
+        aliyunMaasOssFetchPlugin(),
+        hfsyReferenceImageDevPlugin(),
+      ],
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),
