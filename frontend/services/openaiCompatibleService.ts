@@ -1016,6 +1016,29 @@ async function openAiCompatUploadImageBlob(
   throw new Error(`参考图上传失败 (404) ${lastFail}`);
 }
 
+async function uploadHfsyVideoReferenceImage(
+  blob: Blob,
+  signal?: AbortSignal
+): Promise<string> {
+  const res = await fetch('/api/hfsy-reference-image', {
+    method: 'POST',
+    headers: { 'Content-Type': blob.type || 'image/jpeg' },
+    body: blob,
+    signal,
+  });
+  const text = await res.text();
+  let json: { url?: string; message?: string } = {};
+  try {
+    json = JSON.parse(text) as typeof json;
+  } catch {
+    throw new Error(`HFSY 视频参考图上传响应无效 (${res.status})`);
+  }
+  if (!res.ok || !json.url || !/^https?:\/\//i.test(json.url)) {
+    throw new Error(`HFSY 视频参考图上传失败 (${res.status}): ${json.message || text.slice(0, 300)}`);
+  }
+  return json.url;
+}
+
 async function toApisUploadImageBlob(blob: Blob, filename: string, signal?: AbortSignal): Promise<string> {
   const apiKey = getOpenAiSavedKey();
   if (!apiKey) throw new Error('未配置 API Key。');
@@ -2210,8 +2233,7 @@ async function hfsyVideoGenerate(params: {
     assertNotAborted(params.signal);
     const img = refs[i];
     const { raw, mime } = parseBase64ImageInput(img);
-    // hfsyapi.cn does not expose /v1/upload/image; pass the reference as a data URI.
-    imageUrls.push(`data:${mime || 'image/jpeg'};base64,${raw}`);
+    imageUrls.push(await uploadHfsyVideoReferenceImage(blob, params.signal));
   }
 
   const videoUrls = (params.referenceVideoUrls || []).filter((u) => /^https?:\/\//i.test(u.trim())).slice(0, 3);
