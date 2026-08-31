@@ -3911,9 +3911,25 @@ async function extractGeminiImageBase64FromResponse(
       }
     }
     if (typeof part.text === 'string' && part.text.trim()) {
-      const md = part.text.match(/!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/);
+      const text = part.text.trim();
+      // 满 e / 部分网关：把成图写成 Markdown data URI，而非 inlineData
+      const mdData = text.match(/!\[[^\]]*\]\((data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+)\)/i);
+      if (mdData?.[1]) {
+        const { raw } = parseBase64ImageInput(mdData[1]);
+        if (raw && isPlausibleImageBase64(raw)) return raw;
+      }
+      const bareData = text.match(/(data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+)/i);
+      if (bareData?.[1]) {
+        const { raw } = parseBase64ImageInput(bareData[1]);
+        if (raw && isPlausibleImageBase64(raw)) return raw;
+      }
+      // 纯裸 base64（无 data: 前缀）夹在文本里时少见，但若整段几乎全是 base64 也试一下
+      const maybeB64 = text.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/i, '').replace(/\s/g, '');
+      if (maybeB64.length > 500 && isPlausibleImageBase64(maybeB64)) return maybeB64;
+
+      const md = text.match(/!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/);
       if (md?.[1]) return fetchUrlAsBase64(md[1], signal, bearerToken);
-      const bare = part.text.match(/(https?:\/\/[^\s"'<>]+\.(?:png|jpe?g|webp|gif)(?:\?[^\s"'<>]*)?)/i);
+      const bare = text.match(/(https?:\/\/[^\s"'<>]+\.(?:png|jpe?g|webp|gif)(?:\?[^\s"'<>]*)?)/i);
       if (bare?.[1]) return fetchUrlAsBase64(bare[1], signal, bearerToken);
     }
     return null;
