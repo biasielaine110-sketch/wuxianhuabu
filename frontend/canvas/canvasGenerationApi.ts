@@ -66,7 +66,7 @@ export function createCanvasGenerationApi(
   const imageModelBearerToken = (model: string): string | undefined => {
     const m = (model || '').trim();
     if (m === 'gpt-image-2-codesonline') return getCodesonlineSavedKey() || undefined;
-    if (m === 'gpt-image-2-hfsy' || m === 'gpt-image-2pro-hfsy' || m === 'gpt-image-2pro-4k-hfsy' || m === 'nano-banana-2-hfsy' || m === 'nano-banana-pro-hfsy') return getHfsySavedKey() || undefined;
+    if (m === 'gpt-image-2-hfsy' || m === 'gpt-image-2pro-hfsy' || m === 'gpt-image-2pro-4k-hfsy' || m === 'nano-banana-2-hfsy' || m === 'nano-banana-pro-hfsy' || m === 'gemini-3.1-flash-image-preview-hfsy' || m === 'gemini-3-pro-image-preview-hfsy') return getHfsySavedKey() || undefined;
     if (m === 'z-image-turbo-aliyun' || m === 'z-image-turbo' || m === 'qwen-image-3.0-pro-aliyun' || m === 'qwen-image-3.0-pro') return getAliyunMaasSavedKey() || undefined;
     if (m.endsWith('-manxue')) return getManxueSavedKey() || undefined;
     if (m.startsWith('gpt-image-')) return getOpenAiSavedKey() || undefined;
@@ -880,10 +880,12 @@ ${text}`,
                           ? (node.videoResolution === '480p' ? '480p' : '720p')
                         : videoModel === 'hfsy-grok-imagine-video-1.5'
                         ? (['480p', '1080p'].includes(node.videoResolution || '') ? (node.videoResolution as '480p' | '1080p') : '720p')
-                        : videoModel === 'hfsy-sd-2.5-480'
+                        : videoModel === 'hfsy-sd-2.5-480' || videoModel === 'hfsy-sd-2-mini-480'
                           ? '480p'
-                          : videoModel === 'hfsy-sd-2.5-720' || videoModel === 'hfsy-sd-2-vip-720'
+                          : videoModel === 'hfsy-sd-2.5-720' || videoModel === 'hfsy-sd-2-vip-720' || videoModel === 'hfsy-sd-2-mini-720'
                             ? '720p'
+                            : videoModel === 'hfsy-sd-2-1080-cheap'
+                              ? '1080p'
                       : node.videoResolution === '480p'
                   ? '480p'
                   : node.videoResolution === '1080p'
@@ -902,7 +904,10 @@ ${text}`,
           videoModel === 'hfsy-sd-2' ||
           videoModel === 'hfsy-sd-2-fast' ||
           videoModel === 'hfsy-sd-2.5-480' ||
-          videoModel === 'hfsy-sd-2.5-720';
+          videoModel === 'hfsy-sd-2.5-720' ||
+          videoModel === 'hfsy-sd-2-mini-480' ||
+          videoModel === 'hfsy-sd-2-mini-720' ||
+          videoModel === 'hfsy-sd-2-1080-cheap';
         const refImageCount =
           videoModel === 'grok-video-1.5'
             ? 1

@@ -433,7 +433,9 @@
   .canvas-node-font-195 select.nodemodel-select option[value="gemini-3-pro-image-preview-manxue"],
   .canvas-node-font-195 select.nodemodel-select option[value="gemini-3.1-flash-image-preview-manxue"],
   .canvas-node-font-195 select.nodemodel-select option[value="nano-banana-2-hfsy"],
-  .canvas-node-font-195 select.nodemodel-select option[value="nano-banana-pro-hfsy"] {
+  .canvas-node-font-195 select.nodemodel-select option[value="nano-banana-pro-hfsy"],
+  .canvas-node-font-195 select.nodemodel-select option[value="gemini-3.1-flash-image-preview-hfsy"],
+  .canvas-node-font-195 select.nodemodel-select option[value="gemini-3-pro-image-preview-hfsy"] {
     color: #4ade80 !important;
   }
   .canvas-node-font-195 select.nodemodel-select:has(option[value="gpt-image-2-codesonline"]:checked),
@@ -444,7 +446,9 @@
   .canvas-node-font-195 select.nodemodel-select:has(option[value="gemini-3-pro-image-preview-manxue"]:checked),
   .canvas-node-font-195 select.nodemodel-select:has(option[value="gemini-3.1-flash-image-preview-manxue"]:checked),
   .canvas-node-font-195 select.nodemodel-select:has(option[value="nano-banana-2-hfsy"]:checked),
-  .canvas-node-font-195 select.nodemodel-select:has(option[value="nano-banana-pro-hfsy"]:checked) {
+  .canvas-node-font-195 select.nodemodel-select:has(option[value="nano-banana-pro-hfsy"]:checked),
+  .canvas-node-font-195 select.nodemodel-select:has(option[value="gemini-3.1-flash-image-preview-hfsy"]:checked),
+  .canvas-node-font-195 select.nodemodel-select:has(option[value="gemini-3-pro-image-preview-hfsy"]:checked) {
     color: #4ade80 !important;
   }
   /** 紫色：ToAPIs GPT Image 2 / hfsy Pro、Pro 4K / 阿里云百炼 / ToAPIs Qwen-Image-3.0、Nano-Banana 2 */

@@ -110,7 +110,10 @@ export function isHfsySd2VideoModel(vm?: string): boolean {
     vm === 'hfsy-sd-2-vip' ||
     vm === 'hfsy-sd-2-vip-720' ||
     vm === 'hfsy-sd-2.5-480' ||
-    vm === 'hfsy-sd-2.5-720'
+    vm === 'hfsy-sd-2.5-720' ||
+    vm === 'hfsy-sd-2-mini-480' ||
+    vm === 'hfsy-sd-2-mini-720' ||
+    vm === 'hfsy-sd-2-1080-cheap'
   );
 }
 
@@ -176,16 +179,22 @@ export function getVideoModelSwitchUpdates(mRaw: string, node: CanvasNode): Part
       node.videoResolution === '480p' || node.videoResolution === '1080p' ? node.videoResolution : '720p';
     const ar = node.aspectRatio || '16:9';
     if (!['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'].includes(ar)) updates.aspectRatio = '16:9';
-  } else if (m === 'hfsy-sd-2.5-480') {
+  } else if (m === 'hfsy-sd-2.5-480' || m === 'hfsy-sd-2-mini-480') {
     const d = node.videoDuration ?? 8;
     updates.videoDuration = [5, 8, 10, 12, 15].includes(d) ? d : 8;
     updates.videoResolution = '480p';
     const ar = node.aspectRatio || '16:9';
     if (!['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'].includes(ar)) updates.aspectRatio = '16:9';
-  } else if (m === 'hfsy-sd-2.5-720' || m === 'hfsy-sd-2-vip-720') {
+  } else if (m === 'hfsy-sd-2.5-720' || m === 'hfsy-sd-2-vip-720' || m === 'hfsy-sd-2-mini-720') {
     const d = node.videoDuration ?? 8;
     updates.videoDuration = [5, 8, 10, 12, 15].includes(d) ? d : 8;
     updates.videoResolution = '720p';
+    const ar = node.aspectRatio || '16:9';
+    if (!['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'].includes(ar)) updates.aspectRatio = '16:9';
+  } else if (m === 'hfsy-sd-2-1080-cheap') {
+    const d = node.videoDuration ?? 8;
+    updates.videoDuration = [5, 8, 10, 12, 15].includes(d) ? d : 8;
+    updates.videoResolution = '1080p';
     const ar = node.aspectRatio || '16:9';
     if (!['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'].includes(ar)) updates.aspectRatio = '16:9';
   } else if (isHfsySd2VideoModel(m)) {

@@ -1787,6 +1787,9 @@ export type ToApisVideoModelId =
   | 'hfsy-sd-2-vip-720'
   | 'hfsy-sd-2.5-480'
   | 'hfsy-sd-2.5-720'
+  | 'hfsy-sd-2-mini-480'
+  | 'hfsy-sd-2-mini-720'
+  | 'hfsy-sd-2-1080-cheap'
   | 'hfsy-minimax-h3'
   | 'hfsy-grok-imagine-video-1.5'
   | 'grok-imagine-video-1.5-preview'
@@ -1799,6 +1802,9 @@ type HfsyVideoModelId =
   | 'hfsy-sd-2-vip-720'
   | 'hfsy-sd-2.5-480'
   | 'hfsy-sd-2.5-720'
+  | 'hfsy-sd-2-mini-480'
+  | 'hfsy-sd-2-mini-720'
+  | 'hfsy-sd-2-1080-cheap'
   | 'hfsy-minimax-h3'
   | 'hfsy-grok-imagine-video-1.5';
 
@@ -1809,19 +1815,34 @@ type HfsyUpstreamVideoModel =
   | 'sd-2-vip-720'
   | 'sd-2.5-480'
   | 'sd-2.5-720'
+  | 'sd-2-mini-480'
+  | 'sd-2-mini-720'
+  | 'sd-2-1080-cheap'
   | 'minimax-h3'
   | 'grok-imagine-video-1.5';
 
 function isHfsySd2VideoModel(
   model?: string
-): model is 'hfsy-sd-2' | 'hfsy-sd-2-fast' | 'hfsy-sd-2-vip' | 'hfsy-sd-2-vip-720' | 'hfsy-sd-2.5-480' | 'hfsy-sd-2.5-720' {
+): model is
+  | 'hfsy-sd-2'
+  | 'hfsy-sd-2-fast'
+  | 'hfsy-sd-2-vip'
+  | 'hfsy-sd-2-vip-720'
+  | 'hfsy-sd-2.5-480'
+  | 'hfsy-sd-2.5-720'
+  | 'hfsy-sd-2-mini-480'
+  | 'hfsy-sd-2-mini-720'
+  | 'hfsy-sd-2-1080-cheap' {
   return (
     model === 'hfsy-sd-2' ||
     model === 'hfsy-sd-2-fast' ||
     model === 'hfsy-sd-2-vip' ||
     model === 'hfsy-sd-2-vip-720' ||
     model === 'hfsy-sd-2.5-480' ||
-    model === 'hfsy-sd-2.5-720'
+    model === 'hfsy-sd-2.5-720' ||
+    model === 'hfsy-sd-2-mini-480' ||
+    model === 'hfsy-sd-2-mini-720' ||
+    model === 'hfsy-sd-2-1080-cheap'
   );
 }
 
@@ -1843,6 +1864,9 @@ function toHfsyVideoModel(model: HfsyVideoModelId): HfsyUpstreamVideoModel {
   if (model === 'hfsy-sd-2-vip-720') return 'sd-2-vip-720';
   if (model === 'hfsy-sd-2.5-480') return 'sd-2.5-480';
   if (model === 'hfsy-sd-2.5-720') return 'sd-2.5-720';
+  if (model === 'hfsy-sd-2-mini-480') return 'sd-2-mini-480';
+  if (model === 'hfsy-sd-2-mini-720') return 'sd-2-mini-720';
+  if (model === 'hfsy-sd-2-1080-cheap') return 'sd-2-1080-cheap';
   if (model === 'hfsy-minimax-h3') return 'minimax-h3';
   if (model === 'hfsy-grok-imagine-video-1.5') return 'grok-imagine-video-1.5';
   return 'sd-2';
@@ -2279,8 +2303,7 @@ async function hfsyVideoGenerate(params: {
 }): Promise<string> {
   const imageUrls: string[] = [];
   // 文档：sd-2-vip 最多 9 张图；H3 等其余模型参考素材合计 ≤4
-  const maxImages =
-    params.videoModel === 'hfsy-sd-2-vip' || params.videoModel === 'hfsy-sd-2-vip-720' ? 9 : 4;
+  const maxImages = isHfsySd2VideoModel(params.videoModel) ? 9 : 4;
   const refs = (params.referenceImagesBase64 || []).filter(Boolean).slice(0, maxImages);
   for (let i = 0; i < refs.length; i++) {
     assertNotAborted(params.signal);
@@ -2337,10 +2360,16 @@ async function hfsyVideoGenerate(params: {
       watermark: false,
     };
     // 分辨率写在模型名里的档位：显式传 resolution；其余 Seedance 系沿用 size: large
-    if (params.videoModel === 'hfsy-sd-2.5-480') {
+    if (params.videoModel === 'hfsy-sd-2.5-480' || params.videoModel === 'hfsy-sd-2-mini-480') {
       body.resolution = '480p';
-    } else if (params.videoModel === 'hfsy-sd-2.5-720' || params.videoModel === 'hfsy-sd-2-vip-720') {
+    } else if (
+      params.videoModel === 'hfsy-sd-2.5-720' ||
+      params.videoModel === 'hfsy-sd-2-vip-720' ||
+      params.videoModel === 'hfsy-sd-2-mini-720'
+    ) {
       body.resolution = '720p';
+    } else if (params.videoModel === 'hfsy-sd-2-1080-cheap') {
+      body.resolution = '1080p';
     } else {
       body.size = 'large';
     }
@@ -3265,7 +3294,9 @@ function isHfsyImageModel(modelName: string): boolean {
     m === 'gpt-image-2pro-hfsy' ||
     m === 'gpt-image-2pro-4k-hfsy' ||
     m === 'nano-banana-2-hfsy' ||
-    m === 'nano-banana-pro-hfsy'
+    m === 'nano-banana-pro-hfsy' ||
+    m === 'gemini-3.1-flash-image-preview-hfsy' ||
+    m === 'gemini-3-pro-image-preview-hfsy'
   );
 }
 
@@ -3273,6 +3304,8 @@ function toHfsyImageModel(modelName: string): string {
   const m = (modelName || '').trim();
   if (m === 'nano-banana-2-hfsy') return 'nano-banana-2';
   if (m === 'nano-banana-pro-hfsy') return 'nano-banana-pro';
+  if (m === 'gemini-3.1-flash-image-preview-hfsy') return 'gemini-3.1-flash-image-preview';
+  if (m === 'gemini-3-pro-image-preview-hfsy') return 'gemini-3-pro-image-preview';
   if (m === 'gpt-image-2pro-hfsy') return 'gpt-image-2pro';
   if (m === 'gpt-image-2pro-4k-hfsy') return 'gpt-image-2pro-4k';
   return 'gpt-image-2';
@@ -3583,6 +3616,15 @@ function isHfsyNanoBananaModel(modelName: string): boolean {
   return m === 'nano-banana-2-hfsy' || m === 'nano-banana-pro-hfsy';
 }
 
+function isHfsyGeminiPreviewImageModel(modelName: string): boolean {
+  const m = (modelName || '').trim();
+  return m === 'gemini-3.1-flash-image-preview-hfsy' || m === 'gemini-3-pro-image-preview-hfsy';
+}
+
+function isHfsyGeminiGenerateContentModel(modelName: string): boolean {
+  return isHfsyNanoBananaModel(modelName) || isHfsyGeminiPreviewImageModel(modelName);
+}
+
 /** hfsy Nano Banana 的 generateContent 路径含冒号；统一走 ?path=，避免路径冒号或重复拼接导致 502 */
 function hfsyGeminiGenerateContentUrl(model: string): string {
   const actionPath = `v1beta/models/${model}:generateContent`;
@@ -3755,7 +3797,7 @@ async function hfsyRequestOneImage(
   pixelSize?: string,
   nodeResolution?: string
 ): Promise<string> {
-  if (isHfsyNanoBananaModel(modelName)) {
+  if (isHfsyGeminiGenerateContentModel(modelName)) {
     return hfsyRequestOneNanoBananaImage(modelName, prompt, aspectRatio, apiKey, signal, referenceImages, nodeResolution);
   }
   const base = hfsyFetchBase();

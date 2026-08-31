@@ -1327,6 +1327,8 @@ export function ChatNodeContent({
               <option value="gpt-image-2pro-4k-hfsy">GPT Image 2 Pro 4K（hfsyapi.cn）</option>
               <option value="nano-banana-2-hfsy">Nano-Banana 2（hfsyapi.cn）</option>
               <option value="nano-banana-pro-hfsy">Nano-Banana Pro（hfsyapi.cn）</option>
+              <option value="gemini-3.1-flash-image-preview-hfsy">Gemini 3.1 Flash Image Preview（hfsyapi.cn）</option>
+              <option value="gemini-3-pro-image-preview-hfsy">Gemini 3 Pro Image Preview（hfsyapi.cn）</option>
             </optgroup>
             <option value="gpt-image-2-4k-manxue">GPT Image 2 4K（满 e）</option>
             <option value="gemini-3-pro-image-preview-manxue">Gemini 3 Pro Image Preview（满 e）</option>

@@ -56,9 +56,10 @@ export function VideoNodeSettingsPanel({
   const isHfsySd2 = isHfsySd2VideoModel(vm);
   const isHfsyMinimaxH3 = isHfsyMinimaxH3VideoModel(vm);
   const isHfsyGrokImagine = isHfsyGrokImagineVideoModel(vm);
-  const isHfsySdFixed480 = vm === 'hfsy-sd-2.5-480';
-  const isHfsySdFixed720 = vm === 'hfsy-sd-2.5-720' || vm === 'hfsy-sd-2-vip-720';
-  const isHfsySdSizeLarge = isHfsySd2 && !isHfsySdFixed480 && !isHfsySdFixed720;
+  const isHfsySdFixed480 = vm === 'hfsy-sd-2.5-480' || vm === 'hfsy-sd-2-mini-480';
+  const isHfsySdFixed720 = vm === 'hfsy-sd-2.5-720' || vm === 'hfsy-sd-2-vip-720' || vm === 'hfsy-sd-2-mini-720';
+  const isHfsySdFixed1080 = vm === 'hfsy-sd-2-1080-cheap';
+  const isHfsySdSizeLarge = isHfsySd2 && !isHfsySdFixed480 && !isHfsySdFixed720 && !isHfsySdFixed1080;
   const isGemini = vm === 'gemini-omni-flash';
   const isManxueCDance = isManxueCDance2Pro720VideoModel(vm);
   const isToApisGrokVideo15 = isToApisGrokVideo15Model(vm);
@@ -255,6 +256,9 @@ export function VideoNodeSettingsPanel({
             <option value="hfsy-sd-2.5-480">SD-2.5 480（hfsyapi.cn）</option>
             <option value="hfsy-sd-2-vip-720">SD-2 VIP 720（hfsyapi.cn）</option>
             <option value="hfsy-sd-2-vip">SD-2 VIP（hfsyapi.cn）</option>
+            <option value="hfsy-sd-2-mini-480">SD-2 Mini 480（hfsyapi.cn）</option>
+            <option value="hfsy-sd-2-mini-720">SD-2 Mini 720（hfsyapi.cn）</option>
+            <option value="hfsy-sd-2-1080-cheap">SD-2 1080 Cheap（hfsyapi.cn）</option>
           </optgroup>
           <optgroup label="满 e (manxueapi.com)">
             <option value={MANXUE_C_DANCE2_PRO_720_VIDEO_MODEL}>C-Dance2 Pro 720（满 e）</option>
@@ -589,6 +593,8 @@ export function VideoNodeSettingsPanel({
             <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">480p</span>
           ) : isHfsySdFixed720 ? (
             <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p</span>
+          ) : isHfsySdFixed1080 ? (
+            <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">1080p</span>
           ) : isHfsyGrokImagine ? (
             <select
               className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"

@@ -288,7 +288,7 @@ export const generateNewImage = async (
     if (model === 'gpt-image-2-codesonline') {
       return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
     }
-    if (model === 'gpt-image-2-hfsy' || model === 'gpt-image-2pro-hfsy' || model === 'gpt-image-2pro-4k-hfsy' || model === 'nano-banana-2-hfsy' || model === 'nano-banana-pro-hfsy') {
+    if (model === 'gpt-image-2-hfsy' || model === 'gpt-image-2pro-hfsy' || model === 'gpt-image-2pro-4k-hfsy' || model === 'nano-banana-2-hfsy' || model === 'nano-banana-pro-hfsy' || model === 'gemini-3.1-flash-image-preview-hfsy' || model === 'gemini-3-pro-image-preview-hfsy') {
       return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
     }
     if (isAliyunMaasImageModel(model)) {
@@ -388,7 +388,7 @@ export const editExistingImage = async (
     if (model === 'gpt-image-2-codesonline') {
       return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, pixelSize, signal);
     }
-    if (model === 'gpt-image-2-hfsy' || model === 'gpt-image-2pro-hfsy' || model === 'gpt-image-2pro-4k-hfsy' || model === 'nano-banana-2-hfsy' || model === 'nano-banana-pro-hfsy') {
+    if (model === 'gpt-image-2-hfsy' || model === 'gpt-image-2pro-hfsy' || model === 'gpt-image-2pro-4k-hfsy' || model === 'nano-banana-2-hfsy' || model === 'nano-banana-pro-hfsy' || model === 'gemini-3.1-flash-image-preview-hfsy' || model === 'gemini-3-pro-image-preview-hfsy') {
       return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, pixelSize, signal);
     }
     if (isAliyunMaasImageModel(model)) {
