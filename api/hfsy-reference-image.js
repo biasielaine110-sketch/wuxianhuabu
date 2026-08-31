@@ -24,17 +24,47 @@ module.exports = async function handler(req, res) {
     const body = await readRequestBody(req);
     if (!body.length) throw new Error('参考图内容为空');
     const mime = String(req.headers['content-type'] || 'image/jpeg').split(';')[0];
-    const form = new FormData();
-    form.append('file', new Blob([body], { type: mime }), 'hfsy-reference.jpg');
-    const upstream = await fetch('https://0x0.st', {
-      method: 'POST',
-      body: form,
-      signal: AbortSignal.timeout(30_000),
-    });
-    const url = (await upstream.text()).trim();
-    if (!upstream.ok || !/^https?:\/\//i.test(url)) {
-      throw new Error(`临时图片托管失败 (${upstream.status}): ${url.slice(0, 300)}`);
+    const providers = [
+      async () => {
+        const form = new FormData();
+        form.append('reqtype', 'fileupload');
+        form.append('fileToUpload', new Blob([body], { type: mime }), 'hfsy-reference.jpg');
+        const response = await fetch('https://catbox.moe/user/api.php', {
+          method: 'POST',
+          body: form,
+          signal: AbortSignal.timeout(30_000),
+        });
+        return { response, url: (await response.text()).trim(), name: 'Catbox' };
+      },
+      async () => {
+        const form = new FormData();
+        form.append('file', new Blob([body], { type: mime }), 'hfsy-reference.jpg');
+        const response = await fetch('https://tmpfiles.org/api/v1/upload', {
+          method: 'POST',
+          body: form,
+          signal: AbortSignal.timeout(30_000),
+        });
+        const result = await response.json().catch(() => null);
+        const pageUrl = result?.data?.url || '';
+        const url = pageUrl.replace('://tmpfiles.org/', '://tmpfiles.org/dl/');
+        return { response, url, name: 'TmpFiles' };
+      },
+    ];
+    const failures = [];
+    let url = '';
+    for (const upload of providers) {
+      try {
+        const result = await upload();
+        if (result.response.ok && /^https?:\/\//i.test(result.url)) {
+          url = result.url;
+          break;
+        }
+        failures.push(`${result.name} (${result.response.status})`);
+      } catch (error) {
+        failures.push(error instanceof Error ? error.message : String(error));
+      }
     }
+    if (!url) throw new Error(`临时图片托管失败: ${failures.join('; ')}`);
     res.statusCode = 200;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.end(JSON.stringify({ url }));
