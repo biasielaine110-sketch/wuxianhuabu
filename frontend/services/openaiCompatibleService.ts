@@ -709,6 +709,9 @@ function rewriteYunzhiAssetUrlToSameOriginProxy(imageUrl: string): string {
 }
 
 async function fetchUrlAsBase64(imageUrl: string, signal?: AbortSignal, bearerToken?: string): Promise<string> {
+  if (/^https:\/\/file\.hfsyapi\.cn\//i.test(imageUrl)) {
+    imageUrl = `/api/hfsy-fetch-image?url=${encodeURIComponent(imageUrl)}`;
+  }
   let absoluteUrl = imageUrl.trim();
   if (absoluteUrl.startsWith('/')) {
     try {
