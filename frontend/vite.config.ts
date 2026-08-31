@@ -85,8 +85,8 @@ function aliyunMaasOssFetchPlugin(): Plugin {
   };
 }
 
-/** hfsy 图像代理：支持 ?path=v1beta/models/...:generateContent，避免路径冒号被错误解析 */
-function configureHfsyImageProxyPathQuery(proxy: { on: (event: string, handler: (...args: unknown[]) => void) => void }) {
+/** 图像/视频代理：支持 ?path=v1beta/models/...:generateContent，避免路径冒号被错误解析 */
+function configurePathQueryProxy(proxy: { on: (event: string, handler: (...args: unknown[]) => void) => void }) {
   proxy.on('proxyReq', (proxyReq, req) => {
     try {
       const raw = (req as { url?: string }).url || '/';
@@ -100,6 +100,11 @@ function configureHfsyImageProxyPathQuery(proxy: { on: (event: string, handler: 
       /* ignore */
     }
   });
+}
+
+/** hfsy 图像代理：支持 ?path=v1beta/models/...:generateContent，避免路径冒号被错误解析 */
+function configureHfsyImageProxyPathQuery(proxy: { on: (event: string, handler: (...args: unknown[]) => void) => void }) {
+  configurePathQueryProxy(proxy);
 }
 
 /** ToAPIs 等返回的图片 CDN 常未对浏览器开放 CORS，经同源路径代理后可正常读图 */
@@ -362,6 +367,7 @@ const toapisFileCdnProxy = {
     timeout: 1_800_000,
     proxyTimeout: 1_800_000,
     configure(proxy) {
+      configurePathQueryProxy(proxy);
       proxy.on('error', (err, _req, res) => {
         console.error('[vite proxy /manxue-api]', err);
         const r = res as { headersSent?: boolean; writeHead?: (c: number, h?: unknown) => void; end?: (s?: string) => void };
@@ -385,6 +391,7 @@ const toapisFileCdnProxy = {
     timeout: 1_800_000,
     proxyTimeout: 1_800_000,
     configure(proxy) {
+      configurePathQueryProxy(proxy);
       proxy.on('error', (err, _req, res) => {
         console.error('[vite proxy /api/manxue-proxy]', err);
         const r = res as { headersSent?: boolean; writeHead?: (c: number, h?: unknown) => void; end?: (s?: string) => void };

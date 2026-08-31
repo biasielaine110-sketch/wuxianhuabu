@@ -77,9 +77,28 @@ function codesonlineFetchBase(): string {
   return rewriteRemoteOpenAiCompatBaseForBrowserCors(normalizeBaseUrl(getCodesonlineBaseUrl()));
 }
 
-function manxueGeminiModelsBase(): string {
-  if (typeof window === 'undefined') return 'https://manxueapi.com/v1beta/models';
-  return `${window.location.origin}${manxueSameOriginProxyPrefix()}/v1beta/models`;
+/**
+ * 满 e Gemini generateContent 路径含冒号（model:generateContent）。
+ * 浏览器会把 `gemini-xxx:generateContent` 当成 URI scheme，导致双重拼接成
+ * `/models/gemini-https://.../models/gemini-xxx:generateContent` → 404。
+ * 与 hfsy 一样统一走 ?path=。
+ */
+function manxueGeminiGenerateContentUrl(model: string, apiKey: string): string {
+  const cleanModel = String(model || '')
+    .trim()
+    .replace(/^https?:\/\/[^/]+\/(?:api\/manxue-proxy|manxue-api)\/v1beta\/models\//i, '')
+    .replace(/:generateContent$/i, '');
+  const actionPath = `v1beta/models/${cleanModel}:generateContent`;
+  const keyQ = `key=${encodeURIComponent(apiKey.trim())}`;
+  if (typeof window === 'undefined') {
+    return `https://manxueapi.com/${actionPath}?${keyQ}`;
+  }
+  const prefix = manxueSameOriginProxyPrefix();
+  const url = `${window.location.origin}${prefix}?path=${encodeURIComponent(actionPath)}&${keyQ}`;
+  if ((url.match(/https?:\/\//gi) || []).length > 1) {
+    throw new Error('满 eAPI Gemini 请求地址构造异常，请硬刷新页面后重试。');
+  }
+  return url;
 }
 
 /** image.codesonline.dev 常未对浏览器开放 CORS；生产走 Vercel rewrite、开发走 Vite 同源代理 */
@@ -409,7 +428,6 @@ async function manxueGeminiGenerateImage(
   const apiKey = getManxueSavedKey();
   if (!apiKey) throw new Error('未配置满 eAPI Key。');
   const key = apiKey.trim();
-  const base = manxueGeminiModelsBase();
   const out: string[] = [];
   const count = Math.min(Math.max(numberOfImages, 1), 8);
 
@@ -437,7 +455,7 @@ async function manxueGeminiGenerateImage(
       },
     };
 
-    const url = `${base}/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
+    const url = manxueGeminiGenerateContentUrl(model, key);
     const res = await manxueFetchWithRetry(
       url,
       {
@@ -489,8 +507,7 @@ export async function manxueGeminiChatGenerate(
   const key = apiKey.trim();
   if (!turns.length) throw new Error('对话内容为空。');
   const model = (modelName || '').trim() || 'gemini-3.1-flash';
-  const base = manxueGeminiModelsBase();
-  const url = `${base}/${encodeURIComponent(model)}:generateContent?key=${key}`;
+  const url = manxueGeminiGenerateContentUrl(model, key);
 
   // 把多轮对话转 Vertex 风格 contents
   const systemParts: string[] = [];
@@ -4050,7 +4067,6 @@ async function manxueGeminiEditImage(
   const apiKey = getManxueSavedKey();
   if (!apiKey) throw new Error('未配置满 eAPI Key。');
   const key = apiKey.trim();
-  const base = manxueGeminiModelsBase();
   const out: string[] = [];
   const count = Math.min(Math.max(numberOfImages, 1), 8);
 
@@ -4098,7 +4114,7 @@ async function manxueGeminiEditImage(
       },
     };
 
-    const url = `${base}/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
+    const url = manxueGeminiGenerateContentUrl(model, key);
     const res = await manxueFetchWithRetry(
       url,
       {
