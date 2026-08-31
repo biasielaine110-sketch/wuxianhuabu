@@ -52,6 +52,7 @@ export function isManxueGeminiImageModel(id: string): boolean {
     id === 'gemini-3-pro-image-preview-manxue' ||
     id === 'gemini-3-pro-image-preview-2k-manxue' ||
     id === 'gemini-3-pro-image-preview-4k-manxue' ||
+    id === 'gemini-3.1-flash-image-preview-manxue' ||
     id === 'gemini-3.1-flash-image-preview-2k-manxue' ||
     id === 'gemini-3.1-flash-image-preview-4k-manxue'
   );

@@ -368,6 +368,7 @@ function manxueT2iModel(modelName: string): string {
   if (m === 'gemini-3-pro-image-preview-manxue') return 'gemini-3-pro-image-preview';
   if (m === 'gemini-3-pro-image-preview-2k-manxue') return 'gemini-3-pro-image-preview-2k';
   if (m === 'gemini-3-pro-image-preview-4k-manxue') return 'gemini-3-pro-image-preview-4k';
+  if (m === 'gemini-3.1-flash-image-preview-manxue') return 'gemini-3.1-flash-image-preview';
   if (m === 'gemini-3.1-flash-image-preview-2k-manxue') return 'gemini-3.1-flash-image-preview-2k';
   if (m === 'gemini-3.1-flash-image-preview-4k-manxue') return 'gemini-3.1-flash-image-preview-4k';
   return m;
@@ -386,6 +387,7 @@ function isManxueGeminiModel(modelName: string): boolean {
     m === 'gemini-3-pro-image-preview-manxue' ||
     m === 'gemini-3-pro-image-preview-2k-manxue' ||
     m === 'gemini-3-pro-image-preview-4k-manxue' ||
+    m === 'gemini-3.1-flash-image-preview-manxue' ||
     m === 'gemini-3.1-flash-image-preview-2k-manxue' ||
     m === 'gemini-3.1-flash-image-preview-4k-manxue'
   );
