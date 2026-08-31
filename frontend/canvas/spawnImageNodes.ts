@@ -143,8 +143,7 @@ export function readFilesAsBase64(files: File[]): Promise<string[]> {
           const reader = new FileReader();
           reader.onload = (ev) => {
             const result = ev.target?.result as string | undefined;
-            const base64 = result?.split(',')[1];
-            if (base64) resolve(base64);
+            if (result?.startsWith('data:')) resolve(result);
             else reject(new Error('无法读取图片'));
           };
           reader.onerror = () => reject(reader.error ?? new Error('读取失败'));
@@ -163,8 +162,7 @@ export function readBlobsAsBase64(blobs: Blob[]): Promise<string[]> {
           const reader = new FileReader();
           reader.onload = (ev) => {
             const result = ev.target?.result as string | undefined;
-            const base64 = result?.split(',')[1];
-            if (base64) resolve(base64);
+            if (result?.startsWith('data:')) resolve(result);
             else reject(new Error('无法读取图片'));
           };
           reader.onerror = () => reject(reader.error ?? new Error('读取失败'));

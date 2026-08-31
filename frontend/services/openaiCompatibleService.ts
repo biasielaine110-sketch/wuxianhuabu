@@ -690,7 +690,18 @@ function rewriteKnownImageCdnToSameOrigin(imageUrl: string): string {
   return imageUrl;
 }
 
-/** 文生图同步接口若返回临时图片 URL，仍指向 yunzhi 时需经同源代理拉取，否则浏览器二次跨域失败 */
+function rewriteKnownVideoCdnToSameOrigin(videoUrl: string): string {
+  if (typeof window === 'undefined') return videoUrl;
+  try {
+    const host = new URL(videoUrl).hostname.toLowerCase();
+    // 图像代理不适合 Range 流式播放；OSS 封面/视频也不要走 oss-fetch 图像通道
+    if (host === 'www.hfsyapi.cn' || host === 'hfsyapi.cn') return videoUrl;
+    if (host.includes('aliyuncs.com')) return videoUrl;
+  } catch {
+    return videoUrl;
+  }
+  return rewriteKnownImageCdnToSameOrigin(videoUrl);
+}
 function rewriteYunzhiAssetUrlToSameOriginProxy(imageUrl: string): string {
   if (typeof window === 'undefined') return imageUrl;
   try {
@@ -1844,133 +1855,49 @@ function isHttpUrlString(v: unknown): v is string {
   return /^https?:\/[/]/i.test(t);
 }
 
+function looksLikeImageAssetUrl(u: string): boolean {
+  return /\.(jpe?g|png|gif|webp|bmp|svg)(\?|#|$)/i.test(u.split('?')[0].split('#')[0]);
+}
+
+function looksLikeVideoAssetUrl(u: string): boolean {
+  return /\.(mp4|webm|mov|m4v|mkv|m3u8)(\?|#|$)/i.test(u.split('?')[0].split('#')[0]);
+}
+
 /**
- * ToAPIs / hfsy / 满 e 各模型完成态略有差异：
- * - 标准形 result.data[0].url、video_url
- * - New API 统一形 data.output / data.outputs（字符串或数组）
- * - Seedance 等 content.video_url、detail 嵌套
+ * ToAPIs / hfsy / 满 e 完成态字段不一。遍历收集 URL 后优先真正的视频地址，
+ * 避免把封面图 url 当成 <video src>（会全黑）。
  */
 function extractVideoUrlFromPollPayload(data: unknown): string | null {
-  if (!data || typeof data !== 'object') {
-    if (isHttpUrlString(data)) return String(data).trim();
-    return null;
-  }
-  const o = data as Record<string, unknown>;
-
-  const pickFromObject = (obj: Record<string, unknown>): string | null => {
-    // hfsy 文档完成态字段为 result_url，优先读取
-    for (const k of ['result_url', 'video_url', 'url', 'download_url', 'file_url', 'output', 'video'] as const) {
-      const v = obj[k];
-      if (isHttpUrlString(v)) return String(v).trim();
+  const found: { key: string; url: string }[] = [];
+  const walk = (node: unknown, key: string, depth: number) => {
+    if (depth > 8 || node == null) return;
+    if (typeof node === 'string') {
+      if (isHttpUrlString(node)) found.push({ key, url: node.trim() });
+      return;
     }
-    // New API / 部分网关兼容：SUCCESS 时把成片 URL 同步写进 fail_reason
-    if (isHttpUrlString(obj.fail_reason)) return String(obj.fail_reason).trim();
-    for (const k of ['result_urls', 'resultUrls', 'video_urls', 'outputs', 'output'] as const) {
-      const arr = obj[k];
-      if (Array.isArray(arr)) {
-        for (const item of arr) {
-          if (isHttpUrlString(item)) return item.trim();
-          if (item && typeof item === 'object') {
-            const u = pickFromObject(item as Record<string, unknown>);
-            if (u) return u;
-          }
-        }
+    if (Array.isArray(node)) {
+      node.forEach((item, i) => walk(item, `${key}[${i}]`, depth + 1));
+      return;
+    }
+    if (typeof node === 'object') {
+      for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+        walk(v, k, depth + 1);
       }
     }
-    const vid = obj.video;
-    if (vid && typeof vid === 'object') {
-      const u = pickFromObject(vid as Record<string, unknown>);
-      if (u) return u;
-    }
-    const outObj = obj.output;
-    if (outObj && typeof outObj === 'object' && !Array.isArray(outObj)) {
-      const u = pickFromObject(outObj as Record<string, unknown>);
-      if (u) return u;
-    }
-    const content = obj.content;
-    if (content && typeof content === 'object') {
-      const u = pickFromObject(content as Record<string, unknown>);
-      if (u) return u;
-    }
-    return null;
   };
-
-  const direct = pickFromObject(o);
-  if (direct) return direct;
-
-  // doubao-seedance / New API：顶层 data 可能是 URL 字符串、对象或数组
-  const topData = o.data;
-  if (isHttpUrlString(topData)) return topData.trim();
-  if (Array.isArray(topData)) {
-    for (const item of topData) {
-      if (isHttpUrlString(item)) return item.trim();
-      if (item && typeof item === 'object') {
-        const u = pickFromObject(item as Record<string, unknown>);
-        if (u) return u;
-      }
-    }
-  } else if (topData && typeof topData === 'object') {
-    const td = topData as Record<string, unknown>;
-    const u = pickFromObject(td);
-    if (u) return u;
-    // New API 偶发再包一层 data
-    const nested = td.data;
-    if (isHttpUrlString(nested)) return nested.trim();
-    if (nested && typeof nested === 'object') {
-      const nu = pickFromObject(nested as Record<string, unknown>);
-      if (nu) return nu;
-    }
-  }
-
-  let result: unknown = o.result;
-  if (typeof result === 'string') {
-    if (isHttpUrlString(result)) return result.trim();
-    try {
-      result = JSON.parse(result) as unknown;
-    } catch {
-      /* ignore */
-    }
-  }
-  if (result && typeof result === 'object') {
-    const r = result as Record<string, unknown>;
-    const u = pickFromObject(r);
-    if (u) return u;
-    const d = r.data;
-    if (isHttpUrlString(d)) return d.trim();
-    if (Array.isArray(d)) {
-      for (const item of d) {
-        if (isHttpUrlString(item)) return item.trim();
-        if (item && typeof item === 'object') {
-          const iu = pickFromObject(item as Record<string, unknown>);
-          if (iu) return iu;
-        }
-      }
-    } else if (d && typeof d === 'object') {
-      const du = pickFromObject(d as Record<string, unknown>);
-      if (du) return du;
-    }
-  }
-
-  const detail = o.detail;
-  if (detail && typeof detail === 'object') {
-    const u = pickFromObject(detail as Record<string, unknown>);
-    if (u) return u;
-  }
-
-  const output = o.output;
-  if (isHttpUrlString(output)) return output.trim();
-  if (output && typeof output === 'object') {
-    const u = pickFromObject(output as Record<string, unknown>);
-    if (u) return u;
-  }
-
-  const meta = o.metadata;
-  if (meta && typeof meta === 'object') {
-    const u = pickFromObject(meta as Record<string, unknown>);
-    if (u) return u;
-  }
-
-  return null;
+  walk(data, 'root', 0);
+  if (found.length === 0) return null;
+  const scored = found.map(({ key, url }) => {
+    let score = 0;
+    if (looksLikeVideoAssetUrl(url)) score += 80;
+    if (/video/i.test(key) || /download/i.test(key) || key === 'file_url' || key === 'result_url' || key === 'fail_reason') score += 40;
+    if (looksLikeImageAssetUrl(url)) score -= 90;
+    if (/cover|thumb|poster|preview|image/i.test(key) || /cover|thumb|poster/i.test(url)) score -= 70;
+    return { url, score };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  const playable = scored.find((s) => s.score >= 0);
+  return playable?.url ?? null;
 }
 
 function isVideoTaskCompletedStatus(status: unknown): boolean {
@@ -2084,7 +2011,7 @@ async function toApisPollVideoTaskToPlayableUrl(taskId: string, signal?: AbortSi
       }
       // 规范化 URL：https:/xxx → https://xxx
       const normalizedUrl = rawUrl.replace(/^(https?:\/)([^/])/i, '$1/$2');
-      return rewriteKnownImageCdnToSameOrigin(normalizedUrl);
+      return rewriteKnownVideoCdnToSameOrigin(normalizedUrl);
     }
     const st = String(data.status || '').toLowerCase();
     if (st === 'failed') {
@@ -2310,7 +2237,7 @@ async function hfsyPollVideoTaskToPlayableUrl(taskId: string, signal?: AbortSign
       }
       emptyUrlRounds = 0;
       const normalizedUrl = rawUrl.replace(/^(https?:\/)([^/])/i, '$1/$2');
-      return rewriteKnownImageCdnToSameOrigin(normalizedUrl);
+      return rewriteKnownVideoCdnToSameOrigin(normalizedUrl);
     }
     if (
       status === 'failed' ||
@@ -2333,7 +2260,7 @@ async function hfsyPollVideoTaskToPlayableUrl(taskId: string, signal?: AbortSign
     }
     if (!isVideoTaskPendingStatus(status)) {
       const rawUrl = extractVideoUrlFromPollPayload(data);
-      if (rawUrl) return rewriteKnownImageCdnToSameOrigin(rawUrl.replace(/^(https?:\/)([^/])/i, '$1/$2'));
+      if (rawUrl) return rewriteKnownVideoCdnToSameOrigin(rawUrl.replace(/^(https?:\/)([^/])/i, '$1/$2'));
     }
     await sleepInterruptible(10_000, signal);
   }
@@ -2598,7 +2525,7 @@ async function manxuePollVideoTaskToPlayableUrl(
           throw new Error(`满 e 视频任务完成但未返回可播放 URL。完整响应：${rawText.slice(0, 2000)}`);
         }
         const normalizedUrl = rawUrl.replace(/^(https?:\/)([^/])/i, '$1/$2');
-        return rewriteKnownImageCdnToSameOrigin(normalizedUrl);
+        return rewriteKnownVideoCdnToSameOrigin(normalizedUrl);
       }
       const failed = String(st).toLowerCase();
       if (failed === 'failed' || failed === 'error' || failed === 'cancelled' || failed === 'canceled') {

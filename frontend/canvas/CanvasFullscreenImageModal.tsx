@@ -5,6 +5,7 @@ import {
   AnnotationIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  CopyIcon,
   DownloadIcon,
   XIcon,
 } from './canvasIcons';
@@ -124,6 +125,7 @@ export type CanvasFullscreenImageModalProps = {
   onImagePointerDown: (e: React.PointerEvent) => void;
   onNavigate: (dir: 1 | -1) => void;
   onDownload: () => void;
+  onCopyImage: () => void;
   onEditAsAnnotation: () => void;
 };
 
@@ -141,6 +143,7 @@ export const CanvasFullscreenImageModal = memo(function CanvasFullscreenImageMod
   onImagePointerDown,
   onNavigate,
   onDownload,
+  onCopyImage,
   onEditAsAnnotation,
 }: CanvasFullscreenImageModalProps) {
   return (
@@ -223,6 +226,16 @@ export const CanvasFullscreenImageModal = memo(function CanvasFullscreenImageMod
             }}
           >
             <AnnotationIcon size={16} /> 编辑图片
+          </button>
+          <button
+            className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-emerald-600 hover:text-white flex items-center gap-2"
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              setFsContextMenu(null);
+              onCopyImage();
+            }}
+          >
+            <CopyIcon size={16} /> 复制图片
           </button>
           <button
             className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-blue-600 hover:text-white flex items-center gap-2"

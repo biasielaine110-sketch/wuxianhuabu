@@ -99,7 +99,7 @@ import {
 } from './canvas/canvasHistoryUtils';
 import { buildNodeMediaOffloadPatch, buildMediaOffloadScanKey, nodeNeedsMediaOffload } from './services/canvasAssetSync';
 import { revokeNodeCanvasAssets } from './services/canvasAssetCleanup';
-import { imageSrcToRawBase64 } from './services/canvasAssetResolver';
+import { copyImageSrcToClipboard, imageSrcToRawBase64 } from './services/canvasAssetResolver';
 import { estimateCanvasAssetsBytes } from './services/canvasAssetStore';
 import {
   buildMoveNodesCommand,
@@ -2561,6 +2561,12 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
           onImagePointerDown={(e) => handleFsPointerDown(e, activePointerTypeRef, lastFsMousePosRef)}
           onNavigate={fsNavigate}
           onDownload={() => { void downloadImage(fullscreenImage); }}
+          onCopyImage={() => {
+            void copyImageSrcToClipboard(fullscreenImage).catch((err) => {
+              console.error(err);
+              alert(err instanceof Error ? err.message : '复制图片失败');
+            });
+          }}
           onEditAsAnnotation={() => {
             const rect = containerRef.current?.getBoundingClientRect();
             const cx = rect

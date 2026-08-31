@@ -61,8 +61,14 @@ export function VideoNodeContent({
               src={currentUrl}
               controls={false}
               autoPlay={false}
-              preload="metadata"
-              crossOrigin="anonymous"
+              preload="auto"
+              playsInline
+              onLoadedMetadata={(e) => {
+                const videoEl = e.currentTarget;
+                if (videoEl.currentTime === 0 && Number.isFinite(videoEl.duration) && videoEl.duration > 0.05) {
+                  videoEl.currentTime = 0.04;
+                }
+              }}
               onError={(e) => {
                 const videoEl = e.target as HTMLVideoElement;
                 const originalUrl = videoUrls[currentVideoIdx];

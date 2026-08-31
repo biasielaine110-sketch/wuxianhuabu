@@ -17,6 +17,7 @@ export const CANVAS_SHORTCUT_HELP_ROWS: readonly { combo: string; detail: string
   { combo: 'Ctrl + S / ⌘ + S', detail: '保存当前项目' },
   { combo: 'Ctrl + Alt + S / ⌘ + ⌥ + S', detail: '另存 JSON 草稿（不改变当前 Ctrl+S 绑定）' },
   { combo: 'Ctrl + Z / ⌘ + Z', detail: '撤销画布操作' },
+  { combo: 'A', detail: '新建「图片标注」节点' },
   { combo: 'Ctrl + A / ⌘ + A', detail: '输入框内全选文字；框外全选画布节点' },
   { combo: 'F', detail: '视口缩放并居中到当前选中节点（需先选中；非输入框）' },
 ];

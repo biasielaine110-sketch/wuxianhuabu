@@ -424,6 +424,9 @@ export function attachCanvasKeyboardShortcuts(
       } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.code === 'KeyZ' && !isInput && !d.fullscreenImage) {
         e.preventDefault();
         d.undoCanvasState();
+      } else if (e.code === 'KeyA' && shortcutCreatesNode) {
+        e.preventDefault();
+        placeNewNodeAtMouse('annotation');
       } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyA' && !isInput && !isContentEditable) {
         e.preventDefault();
         const all = d.nodesRef.current;

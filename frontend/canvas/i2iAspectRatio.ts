@@ -1,3 +1,5 @@
+import { sniffImageMimeFromBase64 } from '../services/canvasAssetResolver';
+
 /** 图生图「原图尺寸」：按第一张参考图宽高比与分辨率档位计算输出像素 */
 export const I2I_ASPECT_RATIO_ORIGINAL = 'original';
 
@@ -32,7 +34,7 @@ export function loadImageDimensionsFromBase64(base64: string): Promise<{ width: 
   return new Promise((resolve, reject) => {
     const trimmed = base64.trim();
     const raw = trimmed.includes(',') ? trimmed.split(',')[1] : trimmed;
-    const mime = trimmed.match(/^data:([^;]+);/)?.[1] || 'image/jpeg';
+    const mime = trimmed.match(/^data:([^;]+);/)?.[1] || sniffImageMimeFromBase64(raw);
     const img = new Image();
     img.onload = () => {
       const w = img.naturalWidth;

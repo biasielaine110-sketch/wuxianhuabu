@@ -116,6 +116,68 @@ export async function imageSrcToRawBase64(
   return { base64: src, mime: 'image/jpeg' };
 }
 
+/** 根据 magic bytes 识别剪贴板/节点里的裸 base64 图片类型（勿默认当成 JPEG，否则 PNG/WebP 无法读尺寸） */
+export function sniffImageMimeFromBase64(raw: string): string {
+  const cleaned = raw.replace(/^data:[^;]+;base64,/, '').replace(/\s/g, '');
+  if (!cleaned || cleaned.length < 8) return 'image/jpeg';
+  if (cleaned.startsWith('/9j/')) return 'image/jpeg';
+  if (cleaned.startsWith('iVBORw')) return 'image/png';
+  if (cleaned.startsWith('R0lGOD')) return 'image/gif';
+  if (cleaned.startsWith('UklGR')) return 'image/webp';
+  try {
+    const dec = atob(cleaned.slice(0, 48));
+    const a = dec.charCodeAt(0);
+    const b = dec.charCodeAt(1);
+    if (a === 0xff && b === 0xd8) return 'image/jpeg';
+    if (a === 0x89 && b === 0x50) return 'image/png';
+    if (a === 0x47 && b === 0x49) return 'image/gif';
+    if (a === 0x52 && b === 0x49) return 'image/webp';
+    if (a === 0x42 && b === 0x4d) return 'image/bmp';
+  } catch {
+    /* ignore */
+  }
+  return 'image/jpeg';
+}
+
+export function toDisplayableImageSrc(src: string): string {
+  const t = (src || '').trim();
+  if (!t) return '';
+  if (
+    t.startsWith('http://') ||
+    t.startsWith('https://') ||
+    t.startsWith('data:') ||
+    t.startsWith('blob:')
+  ) {
+    return t.startsWith('http') ? rewriteImageUrlForBrowserDisplay(t) : t;
+  }
+  const raw = t.includes(',') ? t.slice(t.indexOf(',') + 1) : t;
+  return `data:${sniffImageMimeFromBase64(raw)};base64,${raw.replace(/\s/g, '')}`;
+}
+
+export async function copyImageSrcToClipboard(imageSrc: string): Promise<void> {
+  const parsed = await imageSrcToRawBase64(toDisplayableImageSrc(imageSrc));
+  if (!parsed?.base64) throw new Error('无法读取图片数据');
+  const dataUrl = `data:${parsed.mime || 'image/png'};base64,${parsed.base64}`;
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || img.width;
+      canvas.height = img.naturalHeight || img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx || !canvas.width || !canvas.height) {
+        reject(new Error('图片尺寸无效'));
+        return;
+      }
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('复制失败'))), 'image/png');
+    };
+    img.onerror = () => reject(new Error('图片解码失败'));
+    img.src = dataUrl;
+  });
+  await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+}
+
 function mimeToProbeFormatLabel(mime: string): string {
   if (mime.includes('png')) return 'PNG';
   if (mime.includes('webp')) return 'WebP';
@@ -130,13 +192,7 @@ export async function probeImageDisplayMetadata(
 ): Promise<{ width: number; height: number; fileSize: number; formatLabel: string } | null> {
   if (!imageSrc) return null;
 
-  const displaySrc =
-    imageSrc.startsWith('http://') ||
-    imageSrc.startsWith('https://') ||
-    imageSrc.startsWith('data:') ||
-    imageSrc.startsWith('blob:')
-      ? imageSrc
-      : `data:image/jpeg;base64,${imageSrc.replace(/\s/g, '')}`;
+  const displaySrc = toDisplayableImageSrc(imageSrc);
 
   const fromBlob = async (blob: Blob, formatHint?: string) => {
     const bitmap = await createImageBitmap(blob);
@@ -264,8 +320,7 @@ export async function resolveCanvasImageSource(
     if (base64.startsWith('http')) {
       return rewriteImageUrlForBrowserDisplay(base64);
     }
-    const mime = base64.startsWith('/9j/') ? 'image/jpeg' : 'image/png';
-    return `data:${mime};base64,${base64}`;
+    return toDisplayableImageSrc(base64);
   }
   if (assetId) {
     const url = await getCanvasAssetUrl(assetId);
