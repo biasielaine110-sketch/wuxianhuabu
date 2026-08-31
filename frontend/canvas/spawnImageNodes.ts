@@ -173,3 +173,69 @@ export function readBlobsAsBase64(blobs: Blob[]): Promise<string[]> {
     )
   );
 }
+
+export const TEXT_FILE_EXT_RE = /\.(txt|md|markdown|mdx|csv|json|yaml|yml|xml|html?|js|jsx|ts|tsx|css|py|java|kt|swift|go|rs|c|cpp|h|hpp|sh|bat|ps1|sql|log|ini|toml)(\?.*)?$/i;
+export const DOCX_FILE_EXT_RE = /\.(docx)(\?.*)?$/i;
+
+export function isTextFile(file: File): boolean {
+  return (
+    file.type.startsWith('text/') ||
+    file.type === 'application/json' ||
+    file.type === 'application/javascript' ||
+    file.type === 'application/xml' ||
+    file.type === 'application/yaml' ||
+    TEXT_FILE_EXT_RE.test(file.name)
+  );
+}
+
+export function isDocxFile(file: File): boolean {
+  return (
+    file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+    DOCX_FILE_EXT_RE.test(file.name)
+  );
+}
+
+export async function readFileAsText(file: File | Blob): Promise<string> {
+  const name = file instanceof File ? file.name : '';
+  if (isDocxFile(file as File)) {
+    const { default: JSZip } = await import('jszip');
+    const zip = await JSZip.loadAsync(file);
+    const xml = await zip.file('word/document.xml')?.async('string');
+    if (!xml) throw new Error('无法读取 docx 正文');
+    const doc = new DOMParser().parseFromString(xml, 'application/xml');
+    const blocks = Array.from(doc.getElementsByTagName('w:p')).map((paragraph) =>
+      Array.from(paragraph.getElementsByTagName('w:t'))
+        .map((node) => node.textContent ?? '')
+        .join('')
+    );
+    return blocks.join('\n');
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const result = event.target?.result;
+      if (typeof result === 'string') resolve(result);
+      else reject(new Error('无法读取文本文件'));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('读取失败'));
+    reader.readAsText(file);
+  });
+}
+
+export function collectTextFilesFromDataTransfer(dt: DataTransfer): File[] {
+  const seen = new Set<string>();
+  const out: File[] = [];
+  const add = (file: File | null) => {
+    if (!file || (!isTextFile(file) && !isDocxFile(file))) return;
+    const key = `${file.name}-${file.size}-${file.lastModified}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(file);
+  };
+  Array.from(dt.files || []).forEach(add);
+  if (out.length > 0) return out;
+  Array.from(dt.items || []).forEach((item) => {
+    if (item.kind === 'file') add(item.getAsFile());
+  });
+  return out;
+}

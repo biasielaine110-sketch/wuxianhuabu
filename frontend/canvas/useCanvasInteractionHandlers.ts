@@ -8,7 +8,9 @@ import { sanitizeFilename } from '../services/projectPersistence';
 import {
   buildSpacedImageNodesFromLists,
   collectImageFilesFromDataTransfer,
+  collectTextFilesFromDataTransfer,
   readFilesAsBase64,
+  readFileAsText,
   SPAWNED_IMAGE_NODE_HEIGHT,
   SPAWNED_IMAGE_NODE_WIDTH,
 } from './spawnImageNodes';
@@ -597,6 +599,34 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
     const allFiles = Array.from(e.dataTransfer.files || []);
     const videoFiles = allFiles.filter(isVideoFile);
     const imageFiles = collectImageFilesFromDataTransfer(e.dataTransfer);
+    const textFiles = collectTextFilesFromDataTransfer(e.dataTransfer);
+
+    if (textFiles.length > 0) {
+      void Promise.all(textFiles.map(async (file) => ({
+        file,
+        content: await readFileAsText(file),
+      })))
+        .then((items) => {
+          const ts = Date.now();
+          const newNodes = items.map((item, index) => {
+            const name = item.file.name.replace(/\.[^.]+$/i, '').trim() || '文档';
+            return {
+              id: `text-${ts}-${index}`,
+              type: 'text' as NodeType,
+              x: mouseX + index * 120,
+              y: mouseY + index * 80,
+              width: 1000,
+              height: 2000,
+              prompt: item.content,
+            };
+          });
+          appendNodesWithUndo(newNodes, { selectIds: newNodes.map((node) => node.id) });
+        })
+        .catch((error) => {
+          console.error(error);
+          alert('无法读取拖入的文本文档。');
+        });
+    }
 
     if (imageFiles.length > 0) {
       void readFilesAsBase64(imageFiles)
@@ -869,4 +899,3 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
     handleDeleteEdge,
   };
 }
-
