@@ -1,6 +1,7 @@
 import FIRE_X20_STORYBOARD_PROMPT from './promptPresets/火_X20_分镜提示词.txt?raw';
 import FIRE_X20_SCENE_EXTRACT_PROMPT from './promptPresets/火_X20_场景提取.txt?raw';
 import FIRE_X20_PRE_GEN_PREFIX_PROMPT from './promptPresets/火_X20_生成前前缀添加.txt?raw';
+import FIRE_X21_ULTIMATE_STORYBOARD_PROMPT from './promptPresets/火_X21_究极分镜.txt?raw';
 
 /** 画布内置预设（图生图 / 文生图）；AI 对话模板通过 loadChatPromptPresets 异步合并 */
 export const INITIAL_I2I_PROMPT_PRESETS: Record<string, string> = {
@@ -4152,6 +4153,7 @@ export const INITIAL_PROMPT_PRESETS_BASE: Record<string, string> = {
   '火_X20_分镜提示词': FIRE_X20_STORYBOARD_PROMPT,
   '火_X20_场景提取': FIRE_X20_SCENE_EXTRACT_PROMPT,
   '火_X20_生成前前缀添加': FIRE_X20_PRE_GEN_PREFIX_PROMPT,
+  '火_X21_究极分镜': FIRE_X21_ULTIMATE_STORYBOARD_PROMPT,
   '故事板分镜图_黑白线稿': `图1是XXX，图2是XXX，图3是XXX，
 根据下面的剧情内容制作故事版分镜图，比例为16:9,采用XXX格电影风格面板布局。整体要为黑白铅笔草图分镜图风格，使用粗糙和手绘线条，利用最小细节，快速的手势绘图，简化解剖结构和强化轮廓可读性，呈现影视当中的导演手绘故事版效果，不要上色，不需要渲染。
 不要时间戳。每个面板必须编号。不带任何对话标注。
@@ -4236,6 +4238,7 @@ export const TEXT_WORD_LIBRARY_KEYS: readonly string[] = [
   '火_X20_分镜提示词',
   '火_X20_场景提取',
   '火_X20_生成前前缀添加',
+  '火_X21_究极分镜',
   '火_角色_故事板_视频（中文）',
   '火_池三月_提示词拆解',
   '火_涵一_分镜视频提示词15s',
