@@ -19,6 +19,7 @@ import {
   AudioIcon,
   BoxSelectIcon,
   CopyIcon,
+  PasteIcon,
   Director3DIcon,
   DownloadIcon,
   EyedropperIcon,
@@ -45,6 +46,8 @@ import { CanvasStage } from './canvas/CanvasStage';
 import { CanvasShortcutsPanel } from './canvas/CanvasShortcutsPanel';
 import { useCanvasSettingsPanelState } from './canvas/useCanvasSettingsPanelState';
 import { INITIAL_PROMPT_PRESETS_BASE } from './canvas/initialPromptPresets';
+import { pastePendingTextFromClipboard, setPendingTextPasteTarget } from './canvas/domTextSelection';
+import { useOverlayTextEditContextMenu } from './canvas/TextEditContextMenu';
 import { isStoryboardPreset } from './canvas/promptPresetCatalog';
 import { fullscreenImageDisplaySrc } from './canvas/fullscreenImageUtils';
 import { useCanvasFullscreenImage } from './canvas/useCanvasFullscreenImage';
@@ -253,13 +256,13 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
   const addNodeAtCanvasPositionRef = useRef<(type: NodeType, canvasX: number, canvasY: number) => void>(() => {});
 
   // Context Menu & Clipboard
-  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, canvasX: number, canvasY: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, canvasX: number, canvasY: number; selectedText?: string } | null>(null);
   /**
    * 节点内右键弹出的菜单：仅出现在某个节点上，包含「删除节点 / 复制 / 删除选中 (N)」等。
    * 选区快照 selectedIds 在弹出时一次性确定，避免菜单期间外部修改 selectedIds 导致误删。
    */
   const [nodeContextMenu, setNodeContextMenu] = useState<
-    { x: number; y: number; nodeId: string; selectedIds: string[] } | null
+    { x: number; y: number; nodeId: string; selectedIds: string[]; selectedText?: string; canPaste?: boolean } | null
   >(null);
   const [clipboard, setClipboard] = useState<CanvasNode | null>(null);
   const nodeContextMenuRef = useRef<HTMLDivElement | null>(null);
@@ -273,6 +276,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
       const el = nodeContextMenuRef.current;
       if (el && el.contains(e.target as Node)) return;
       setNodeContextMenu(null);
+      setPendingTextPasteTarget(null);
     };
     window.addEventListener('pointerdown', close, true);
     window.addEventListener('mousedown', close, true);
@@ -289,13 +293,19 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
   const bigEditorLastClickRef = useRef(0);
   const textNodeLastClickAtRef = useRef(0);
   const textNodeLastClickPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const {
+    onTextAreaContextMenu: onBigEditorContextMenu,
+    menuNode: bigEditorTextMenu,
+    closeMenu: closeBigEditorTextMenu,
+  } = useOverlayTextEditContextMenu();
 
   /** 双击 textarea 时调用：打开全局大编辑框 */
   const openBigEditor = useCallback((current: string, onSave: (v: string) => void) => {
     setBigEditorValue(current);
     bigEditorOnSaveRef.current = onSave;
+    closeBigEditorTextMenu();
     setBigEditorOpen(true);
-  }, []);
+  }, [closeBigEditorTextMenu]);
 
   const transformRef = useRef(useCanvasStore.getState().transform);
   const nodesRef = useRef(useCanvasStore.getState().nodes);
@@ -1965,10 +1975,17 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
   const bigEditorPortal = bigEditorOpen && createPortal(
     <div
       className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60"
+      data-text-edit-overlay="true"
       onPointerDown={(e) => {
         if (e.target === e.currentTarget) {
+          closeBigEditorTextMenu();
           setBigEditorOpen(false);
         }
+      }}
+      onContextMenu={(e) => {
+        // 遮罩/面板空白处右键：拦住画布新建菜单
+        e.preventDefault();
+        e.stopPropagation();
       }}
     >
       <div
@@ -1979,7 +1996,10 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
           <span className="text-gray-300 font-medium" style={{ fontSize: 16 }}>编辑文本</span>
           <button
             type="button"
-            onClick={() => setBigEditorOpen(false)}
+            onClick={() => {
+              closeBigEditorTextMenu();
+              setBigEditorOpen(false);
+            }}
             className="rounded p-1 text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
             onPointerDown={(e) => e.stopPropagation()}
           >
@@ -1995,11 +2015,15 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
           onChange={(e) => setBigEditorValue(e.target.value)}
           autoFocus
           onPointerDown={(e) => e.stopPropagation()}
+          onContextMenu={onBigEditorContextMenu}
         />
         <div className="flex justify-end gap-3 mt-3 shrink-0">
           <button
             type="button"
-            onClick={() => setBigEditorOpen(false)}
+            onClick={() => {
+              closeBigEditorTextMenu();
+              setBigEditorOpen(false);
+            }}
             className="rounded-lg border border-[#555] px-5 py-2 text-gray-300 hover:bg-white/10 transition-colors"
             style={{ fontSize: 14 }}
             onPointerDown={(e) => e.stopPropagation()}
@@ -2010,6 +2034,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
             type="button"
             onClick={() => {
               bigEditorOnSaveRef.current?.(bigEditorValue);
+              closeBigEditorTextMenu();
               setBigEditorOpen(false);
             }}
             className="rounded-lg bg-rose-600 px-5 py-2 text-white hover:bg-rose-500 transition-colors"
@@ -2020,6 +2045,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
           </button>
         </div>
       </div>
+      {bigEditorTextMenu}
     </div>,
     document.body
   );
@@ -2161,6 +2187,21 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
         style={{ left: contextMenu.x, top: contextMenu.y, transform: 'scale(0.73)', transformOrigin: 'top left' }}
         onPointerDown={e => e.stopPropagation()}
       >
+        {contextMenu.selectedText ? (
+          <>
+            <button
+              className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-emerald-600 hover:text-white flex items-center gap-2"
+              onPointerDown={() => {
+                const text = contextMenu.selectedText;
+                if (text) void navigator.clipboard.writeText(text);
+                setContextMenu(null);
+              }}
+            >
+              <CopyIcon size={14} /> 复制
+            </button>
+            <div className="h-px bg-[#444] my-1 mx-2" />
+          </>
+        ) : null}
         <button className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-rose-600 hover:text-white flex items-center gap-2" onPointerDown={() => handleAddNode('chat')}>
           <MessageIcon size={14} /> 新建对话节点
         </button>
@@ -2215,6 +2256,37 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
         onPointerDown={e => e.stopPropagation()}
         onContextMenu={e => e.preventDefault()}
       >
+        {nodeContextMenu.selectedText || nodeContextMenu.canPaste ? (
+          <>
+            {nodeContextMenu.selectedText ? (
+              <button
+                className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-emerald-600 hover:text-white flex items-center gap-2"
+                onPointerDown={() => {
+                  const text = nodeContextMenu.selectedText;
+                  if (text) void navigator.clipboard.writeText(text);
+                  setNodeContextMenu(null);
+                  setPendingTextPasteTarget(null);
+                }}
+              >
+                <CopyIcon size={14} /> 复制
+              </button>
+            ) : null}
+            {nodeContextMenu.canPaste ? (
+              <button
+                className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-emerald-600 hover:text-white flex items-center gap-2"
+                onPointerDown={() => {
+                  void pastePendingTextFromClipboard().finally(() => {
+                    setNodeContextMenu(null);
+                    setPendingTextPasteTarget(null);
+                  });
+                }}
+              >
+                <PasteIcon size={14} /> 粘贴
+              </button>
+            ) : null}
+            <div className="h-px bg-[#444] my-1 mx-2" />
+          </>
+        ) : null}
         {nodeContextMenu.selectedIds.length > 1 ? (
           <button
             className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-rose-600 hover:text-white flex items-center gap-2"

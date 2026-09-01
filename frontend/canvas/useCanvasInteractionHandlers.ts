@@ -18,24 +18,31 @@ import { clearNodeDragPreview, clearNodeGeometryPreview } from './canvasNodeDrag
 import { clearEdgeGeometryPreviews } from './canvasEdgeDragDom';
 import type { ResizePreview } from './canvasEdgeGeometry';
 import { revokeNodeCanvasAssets } from '../services/canvasAssetCleanup';
+import { getDomSelectedText, captureTextPasteTarget, setPendingTextPasteTarget } from './domTextSelection';
 
 export type CanvasContextMenu = {
   x: number;
   y: number;
   canvasX: number;
   canvasY: number;
+  /** 右键时已划选的文字；有值时菜单优先提供「复制」 */
+  selectedText?: string;
 } | null;
 
 /**
  * 节点级右键菜单：出现在某个节点内右键时。
  * - nodeId: 右键所在的节点 id（一定是 selectedIds 的子集——多选时取一次）
  * - selectedIds 快照：菜单渲染时一次性读取，避免渲染时 selectedIds 变化导致误删
+ * - selectedText: 右键时已划选的文字快照（打开菜单后选区可能丢失，故需提前记下）
+ * - canPaste: 右键落在可编辑输入框时，菜单提供「粘贴」
  */
 export type CanvasNodeContextMenu = {
   x: number;
   y: number;
   nodeId: string;
   selectedIds: string[];
+  selectedText?: string;
+  canPaste?: boolean;
 } | null;
 
 export type UseCanvasInteractionHandlersOptions = {
@@ -397,7 +404,18 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
     e.preventDefault();
     if (fullscreenImage || canvasMode === 'audit') return;
     const target = e.target as HTMLElement;
-    // 节点内右键 → 弹出节点级菜单（删除/复制等）
+    // 弹出文本编辑框等 overlay：交给局部菜单，不弹画布新建/删除菜单
+    if (target.closest('[data-text-edit-overlay="true"]')) {
+      setContextMenu(null);
+      setNodeContextMenu(null);
+      return;
+    }
+    // 划选文字后右键：提前记下选区文本（自定义菜单打开后选区常会丢失）
+    const selectedRaw = getDomSelectedText(target);
+    const selectedTextSnap = selectedRaw.length > 0 ? selectedRaw : undefined;
+    const pasteTarget = captureTextPasteTarget(target);
+    setPendingTextPasteTarget(pasteTarget);
+    // 节点内右键 → 弹出节点级菜单（删除/复制/粘贴等）
     const nodeRoot = target.closest('[data-node-root="true"]') as HTMLElement | null;
     if (nodeRoot) {
       const nodeId = nodeRoot.getAttribute('data-node-id');
@@ -408,16 +426,30 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
       const currentSelected = selectedIdsRef.current;
       const ids = currentSelected.includes(nodeId) ? currentSelected : [nodeId];
       setSelectedIds(ids);
-      setNodeContextMenu({ x: e.clientX, y: e.clientY, nodeId, selectedIds: ids });
+      setNodeContextMenu({
+        x: e.clientX,
+        y: e.clientY,
+        nodeId,
+        selectedIds: ids,
+        selectedText: selectedTextSnap,
+        canPaste: !!pasteTarget,
+      });
       return;
     }
-    // 画布空白右键 → 关闭节点菜单，弹出创建面板
+    // 画布空白右键 → 关闭节点菜单，弹出创建面板（若仍有划选文字则带上复制）
+    setPendingTextPasteTarget(null);
     setNodeContextMenu(null);
     const rect = containerRef.current!.getBoundingClientRect();
     const tf = transformRef.current;
     const canvasX = (e.clientX - rect.left - tf.x) / tf.scale;
     const canvasY = (e.clientY - rect.top - tf.y) / tf.scale;
-    setContextMenu({ x: e.clientX, y: e.clientY, canvasX, canvasY });
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      canvasX,
+      canvasY,
+      selectedText: selectedTextSnap,
+    });
   }, [fullscreenImage, canvasMode, setContextMenu, setNodeContextMenu, setSelectedIds]);
 
   const handleCanvasDoubleClick = useCallback((e: React.MouseEvent) => {
