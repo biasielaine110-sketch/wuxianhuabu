@@ -100,6 +100,18 @@ function arkAuthHeaders(contentType, arkKey) {
   return headers;
 }
 
+/** Seedream 等返回的 TOS 签名图链（无 CORS）；仅允许 volces.com TOS 域名 */
+function isAllowedVolcTosUrl(u) {
+  try {
+    const parsed = new URL(u);
+    if (parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname.toLowerCase();
+    return host.endsWith('.volces.com') && (host.includes('.tos-') || host.startsWith('tos-'));
+  } catch {
+    return false;
+  }
+}
+
 async function handler(req, res) {
   const host = req.headers.host || 'localhost';
   const url = new URL(req.url || '/', `http://${host}`);
@@ -114,8 +126,28 @@ async function handler(req, res) {
     res.statusCode = 204;
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-volcengine-ark-key');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.end();
+    return;
+  }
+
+  if (sub.split('?')[0] === 'tos-fetch' || sub === 'tos-fetch') {
+    const target = url.searchParams.get('u') || '';
+    if (!isAllowedVolcTosUrl(target)) {
+      res.statusCode = 400;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end(JSON.stringify({ error: 'invalid_tos_url' }));
+      return;
+    }
+    try {
+      const upstream = await fetch(target, { method: 'GET' });
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      await writeUpstreamResponse(res, upstream);
+    } catch (e) {
+      res.statusCode = 502;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end(JSON.stringify({ error: 'tos_fetch_failed', message: e instanceof Error ? e.message : String(e) }));
+    }
     return;
   }
 

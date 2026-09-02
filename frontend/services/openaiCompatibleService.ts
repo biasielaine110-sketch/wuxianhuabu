@@ -695,6 +695,14 @@ function rewriteKnownImageCdnToSameOrigin(imageUrl: string): string {
       }
       return `${origin}/aliyun-maas-api/oss-fetch?u=${encodeURIComponent(imageUrl)}`;
     }
+    // 火山方舟 Seedream：TOS 签名 URL 无 CORS，经同源 tos-fetch 拉取
+    if (host.endsWith('.volces.com') && (host.includes('.tos-') || host.startsWith('tos-'))) {
+      const q = `path=tos-fetch&u=${encodeURIComponent(imageUrl)}`;
+      if (import.meta.env.PROD) {
+        return `${origin}/api/volcengine-ark-proxy?${q}`;
+      }
+      return `${origin}/volcengine-ark-api/tos-fetch?u=${encodeURIComponent(imageUrl)}`;
+    }
   } catch {
     /* ignore */
   }
@@ -751,7 +759,10 @@ async function fetchUrlAsBase64(imageUrl: string, signal?: AbortSignal, bearerTo
   let fetchUrl = rewriteYunzhiAssetUrlToSameOriginProxy(absoluteUrl);
   fetchUrl = rewriteKnownImageCdnToSameOrigin(fetchUrl);
   const headers: Record<string, string> = {};
-  if (bearerToken?.trim()) {
+  // TOS 签名链经同源 tos-fetch；勿附带 Bearer，避免多余预检 / 干扰上游
+  const isTosFetch =
+    /[?&]path=tos-fetch(?:&|$)/.test(fetchUrl) || /\/tos-fetch(?:\?|$)/.test(fetchUrl);
+  if (bearerToken?.trim() && !isTosFetch) {
     headers.Authorization = `Bearer ${bearerToken.trim()}`;
   }
   const res = await fetch(fetchUrl, { mode: 'cors', credentials: 'omit', signal, headers });

@@ -166,6 +166,58 @@ function aliyunMaasOssFetchPlugin(): Plugin {
   };
 }
 
+/** 火山 Seedream TOS 签名图：开发环境同源拉取，避免 CORS */
+function volcengineArkTosFetchPlugin(): Plugin {
+  const middleware = async (
+    req: { url?: string },
+    res: { statusCode: number; setHeader: (k: string, v: string) => void; end: (b?: unknown) => void },
+    next: () => void
+  ) => {
+    const raw = req.url || '';
+    if (!raw.startsWith('/volcengine-ark-api/tos-fetch') && !raw.startsWith('/api/volcengine-ark-proxy')) {
+      next();
+      return;
+    }
+    try {
+      const parsed = new URL(raw, 'http://localhost');
+      const isTosPath =
+        raw.startsWith('/volcengine-ark-api/tos-fetch') ||
+        parsed.searchParams.get('path') === 'tos-fetch';
+      if (!isTosPath) {
+        next();
+        return;
+      }
+      const target = parsed.searchParams.get('u') || '';
+      const host = new URL(target).hostname.toLowerCase();
+      if (!(host.endsWith('.volces.com') && (host.includes('.tos-') || host.startsWith('tos-')))) {
+        res.statusCode = 400;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(JSON.stringify({ error: 'invalid_tos_url' }));
+        return;
+      }
+      const upstream = await fetch(target);
+      res.statusCode = upstream.status;
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      const ct = upstream.headers.get('content-type');
+      if (ct) res.setHeader('Content-Type', ct);
+      res.end(Buffer.from(await upstream.arrayBuffer()));
+    } catch (e) {
+      res.statusCode = 502;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end(JSON.stringify({ error: 'tos_fetch_failed', message: e instanceof Error ? e.message : String(e) }));
+    }
+  };
+  return {
+    name: 'volcengine-ark-tos-fetch',
+    configureServer(server) {
+      server.middlewares.use(middleware);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(middleware);
+    },
+  };
+}
+
 /** 图像/视频代理：支持 ?path=v1beta/models/...:generateContent，避免路径冒号被错误解析 */
 function configurePathQueryProxy(proxy: { on: (event: string, handler: (...args: unknown[]) => void) => void }) {
   proxy.on('proxyReq', (proxyReq, req) => {
@@ -317,6 +369,10 @@ const toapisFileCdnProxy = {
     secure: true,
     timeout: 1_800_000,
     proxyTimeout: 1_800_000,
+    bypass(req) {
+      const u = req.url || '';
+      if (u.includes('/tos-fetch') || u.includes('path=tos-fetch')) return u;
+    },
     configure(proxy) {
       proxy.on('proxyReq', (proxyReq, req) => {
         const raw = (req as { headers?: Record<string, unknown> }).headers?.['x-volcengine-ark-key'];
@@ -340,6 +396,10 @@ const toapisFileCdnProxy = {
     secure: true,
     timeout: 1_800_000,
     proxyTimeout: 1_800_000,
+    bypass(req) {
+      const u = req.url || '';
+      if (u.includes('/tos-fetch') || u.includes('path=tos-fetch')) return u;
+    },
     configure(proxy) {
       proxy.on('proxyReq', (proxyReq, req) => {
         const raw = (req as { headers?: Record<string, unknown> }).headers?.['x-volcengine-ark-key'];
@@ -597,6 +657,7 @@ export default defineConfig(({ mode }) => {
         injectSitePasswordPlugin(sitePassword),
         faviconFallbackPlugin(),
         aliyunMaasOssFetchPlugin(),
+        volcengineArkTosFetchPlugin(),
         hfsyReferenceImageDevPlugin(),
       ],
       resolve: {

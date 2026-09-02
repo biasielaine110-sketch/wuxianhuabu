@@ -43,6 +43,13 @@ export function rewriteImageUrlForBrowserDisplay(imageUrl: string): string {
       const prefix = import.meta.env.PROD ? '/api/manxue-proxy' : '/manxue-api';
       return `${origin}${prefix}${u.pathname}${u.search}`;
     }
+    if (host.endsWith('.volces.com') && (host.includes('.tos-') || host.startsWith('tos-'))) {
+      const q = `path=tos-fetch&u=${encodeURIComponent(imageUrl)}`;
+      if (import.meta.env.PROD) {
+        return `${origin}/api/volcengine-ark-proxy?${q}`;
+      }
+      return `${origin}/volcengine-ark-api/tos-fetch?u=${encodeURIComponent(imageUrl)}`;
+    }
   } catch {
     /* ignore */
   }
