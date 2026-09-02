@@ -15,8 +15,16 @@ import {
   getOpenAiBaseUrl,
   getOpenAiSavedKey,
   getAliyunMaasSavedKey,
+  getVolcengineArkSavedKey,
 } from './aiSettings';
 import { aliyunMaasMultimodalFetchUrl, aliyunZImageSize, isAliyunMaasImageModel, resolveAliyunMaasImageUpstreamModelId } from './aliyunMaas';
+import {
+  isVolcengineArkSeedreamImageModel,
+  resolveVolcengineArkSeedreamUpstreamModelId,
+  toVolcengineArkSeedreamImageInput,
+  volcengineArkSeedreamFetchBase,
+  volcengineArkSeedreamSize,
+} from './volcengineArkSeedream';
 
 function normalizeBaseUrl(url: string): string {
   let u = url.trim().replace(/\/+$/, '');
@@ -5047,6 +5055,54 @@ async function aliyunMaasImageGenerate(
   return out;
 }
 
+/**
+ * 火山方舟 Seedream 5.0 Lite：POST /images/generations
+ * 上游：https://ark.cn-beijing.volces.com/api/plan/v3/images/generations
+ * 文生图仅 prompt；图生图传 image（单张）或 image 数组（多参考）。
+ */
+async function volcengineArkSeedreamImageGenerate(
+  prompt: string,
+  aspectRatio: string,
+  numberOfImages: number,
+  nodeResolution: string | undefined,
+  refBase64s: string[] | undefined,
+  canvasModelId: string,
+  signal?: AbortSignal
+): Promise<string[]> {
+  const apiKey = getVolcengineArkSavedKey().trim();
+  if (!apiKey) {
+    throw new Error(
+      '未配置火山方舟 API Key。请在「设置 → API → 火山方舟」填写 Agent Plan Key 并保存（与对话共用）。'
+    );
+  }
+  const base = volcengineArkSeedreamFetchBase();
+  const upstream = resolveVolcengineArkSeedreamUpstreamModelId(canvasModelId);
+  const size = volcengineArkSeedreamSize(aspectRatio, nodeResolution);
+  const refs = (refBase64s || []).filter(Boolean).slice(0, 10).map(toVolcengineArkSeedreamImageInput);
+  const n = Math.max(1, Math.min(4, numberOfImages || 1));
+  const out: string[] = [];
+
+  for (let i = 0; i < n; i += 1) {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    const body: Record<string, unknown> = {
+      model: upstream,
+      prompt: (prompt || '').trim(),
+      size,
+      response_format: 'url',
+      watermark: false,
+      output_format: 'png',
+    };
+    if (refs.length === 1) body.image = refs[0];
+    else if (refs.length > 1) body.image = refs;
+
+    const json = await postJsonAtBase<Record<string, unknown>>(base, '/images/generations', body, apiKey);
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    const b64 = await openAiStyleGenerationJsonToBase64(json, signal, apiKey, base);
+    out.push(b64);
+  }
+  return out;
+}
+
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   const apiKey = getOpenAiSavedKey();
   if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key，请在设置中选择「OpenAI 兼容」并填写密钥。');
@@ -5100,6 +5156,18 @@ export async function openAiGenerateNewImage(
 
   if (isAliyunMaasImageModel(rawModel)) {
     return aliyunMaasImageGenerate(prompt, aspectRatio, numberOfImages, nodeResolution, undefined, rawModel, signal);
+  }
+
+  if (isVolcengineArkSeedreamImageModel(rawModel)) {
+    return volcengineArkSeedreamImageGenerate(
+      prompt,
+      aspectRatio,
+      numberOfImages,
+      nodeResolution,
+      undefined,
+      rawModel,
+      signal
+    );
   }
 
   // 满 eAPI 图像模型
@@ -5186,6 +5254,18 @@ export async function openAiEditImage(
 
   if (isAliyunMaasImageModel(rawModel)) {
     return aliyunMaasImageGenerate(prompt, aspectRatio, numberOfImages, nodeResolution, base64Images, rawModel, signal);
+  }
+
+  if (isVolcengineArkSeedreamImageModel(rawModel)) {
+    return volcengineArkSeedreamImageGenerate(
+      prompt,
+      aspectRatio,
+      numberOfImages,
+      nodeResolution,
+      base64Images,
+      rawModel,
+      signal
+    );
   }
 
   // 满 eAPI 图像模型图生图

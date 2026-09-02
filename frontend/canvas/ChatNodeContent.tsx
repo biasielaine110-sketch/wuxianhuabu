@@ -1340,6 +1340,9 @@ export function ChatNodeContent({
             
             <option value="gpt-image-2-vip">GPT Image 2 VIP（ToAPIs）</option>
             <option value="gpt-image-2-official">GPT Image 2 Official（ToAPIs）</option>
+            <optgroup label="火山方舟">
+              <option value="doubao-seedream-5.0-lite-ark">Doubao-Seedream-5.0-Lite（火山方舟）</option>
+            </optgroup>
             <optgroup label="阿里云百炼">
               <option value="z-image-turbo-aliyun">Z-Image-Turbo（阿里云百炼）</option>
               <option value="qwen-image-3.0-pro-aliyun">Qwen-Image-3.0-Pro（阿里云百炼）</option>

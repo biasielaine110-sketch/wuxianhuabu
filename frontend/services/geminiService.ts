@@ -33,6 +33,7 @@ import {
   isAliyunMaasImageModel,
   resolveAliyunMaasChatUpstreamModelId,
 } from './aliyunMaas';
+import { isVolcengineArkSeedreamImageModel } from './volcengineArkSeedream';
 import { normalizeGcpVertexModelWhenDisabled } from './vertexGeminiModelUtils';
 import type { ChatCompletionOptions, ChatCompletionResult, ChatCompletionTurn } from './chatCompletionTypes';
 
@@ -294,6 +295,9 @@ export const generateNewImage = async (
     if (isAliyunMaasImageModel(model)) {
       return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
     }
+    if (isVolcengineArkSeedreamImageModel(model)) {
+      return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
+    }
     if (model === 'qwen-image-3.0') {
       return openAiGenerateNewImage(prompt, aspectRatio, numberOfImages, model, outputResolution, quality, signal);
     }
@@ -392,6 +396,9 @@ export const editExistingImage = async (
       return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, pixelSize, signal);
     }
     if (isAliyunMaasImageModel(model)) {
+      return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, pixelSize, signal);
+    }
+    if (isVolcengineArkSeedreamImageModel(model)) {
       return openAiEditImage(base64Images, prompt, numberOfImages, model, aspectRatio, outputResolution, quality, pixelSize, signal);
     }
     if (model === 'qwen-image-3.0') {

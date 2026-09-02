@@ -367,10 +367,10 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
 
                   {/* 火山方舟 Agent Plan 对话 */}
                   <div className="mt-5 pt-4 border-t border-[#333]">
-                    <h3 className="text-sm font-semibold text-gray-200 mb-2">火山方舟 Agent Plan（对话）</h3>
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">火山方舟 Agent Plan（对话 / Seedream 生图）</h3>
                     <p className="text-xs text-gray-500 mb-2">
-                      填写方舟控制台生成的 API Key 并在本站保存。代理会先走 Agent Plan（/api/plan/v3），若 401 再试 Coding Plan 与按量 /api/v3。
-                      须在当前网站域名下保存；密钥不要提交到 Git，泄露后请在控制台作废并重新生成。
+                      填写方舟控制台生成的 API Key 并在本站保存。对话走 Agent Plan（/api/plan/v3）；文生图与图生图可选用 Doubao-Seedream-5.0-Lite（同 Key，请求 /api/plan/v3/images/generations）。
+                      代理对话若 401 会再试 Coding Plan 与按量 /api/v3。须在当前网站域名下保存；密钥不要提交到 Git，泄露后请在控制台作废并重新生成。
                     </p>
                     <div className="text-xs text-gray-500 mb-2">
                       文档：
