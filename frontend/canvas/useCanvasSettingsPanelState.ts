@@ -5,6 +5,7 @@ import {
   getAiSettingsSnapshot,
   getCodesonlineChatSavedKey,
   getVolcengineArkSavedKey,
+  getVolcengineArkCodingSavedKey,
   getAliyunMaasSavedKey,
   migrateAiSettingsIfLegacy,
   getHfsySavedKey,
@@ -103,6 +104,9 @@ export function useCanvasSettingsPanelState({
   const [codesonlineKeyInput, setCodesonlineKeyInput] = useState(() => getAiSettingsSnapshot().codesonlineKey);
   const [codesonlineChatKeyInput, setCodesonlineChatKeyInput] = useState(() => getCodesonlineChatSavedKey());
   const [volcengineArkKeyInput, setVolcengineArkKeyInput] = useState(() => getVolcengineArkSavedKey());
+  const [volcengineArkCodingKeyInput, setVolcengineArkCodingKeyInput] = useState(() =>
+    getVolcengineArkCodingSavedKey()
+  );
   const [aliyunMaasKeyInput, setAliyunMaasKeyInput] = useState(() => getAliyunMaasSavedKey());
   const [hfsyKeyInput, setHfsyKeyInput] = useState(() => getHfsySavedKey());
   const [manxueBaseInput, setManxueBaseInput] = useState(() => getAiSettingsSnapshot().manxueBaseUrl);
@@ -121,6 +125,7 @@ export function useCanvasSettingsPanelState({
     setCodesonlineKeyInput(s.codesonlineKey);
     setCodesonlineChatKeyInput(getCodesonlineChatSavedKey());
     setVolcengineArkKeyInput(getVolcengineArkSavedKey());
+    setVolcengineArkCodingKeyInput(getVolcengineArkCodingSavedKey());
     setAliyunMaasKeyInput(getAliyunMaasSavedKey());
     setHfsyKeyInput(getHfsySavedKey());
     setManxueBaseInput(s.manxueBaseUrl);
@@ -155,6 +160,7 @@ export function useCanvasSettingsPanelState({
     setCodesonlineKeyInput(s.codesonlineKey);
     setHfsyKeyInput(getHfsySavedKey());
     setVolcengineArkKeyInput(getVolcengineArkSavedKey());
+    setVolcengineArkCodingKeyInput(getVolcengineArkCodingSavedKey());
     setAliyunMaasKeyInput(getAliyunMaasSavedKey());
     setDownloadPathSettings(loadDownloadPathSettings());
     setCreditPricingRows(loadCreditPricingRows());
@@ -377,6 +383,8 @@ export function useCanvasSettingsPanelState({
       setCodesonlineChatKeyInput,
       volcengineArkKeyInput,
       setVolcengineArkKeyInput,
+      volcengineArkCodingKeyInput,
+      setVolcengineArkCodingKeyInput,
       aliyunMaasKeyInput,
       setAliyunMaasKeyInput,
       hfsyKeyInput,

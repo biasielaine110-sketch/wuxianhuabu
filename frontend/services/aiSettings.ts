@@ -21,8 +21,10 @@ const MANXUE_BASE_URL_STORAGE_KEY = 'manxue-openai-compatible-base-url-v1';
 /** MiniMax OpenAI 兼容网关：AI 对话「MiniMax M2.7」等 */
 const MINIMAX_API_KEY_STORAGE_KEY = 'minimax-openai-compatible-api-key-v1';
 const MINIMAX_BASE_URL_STORAGE_KEY = 'minimax-openai-compatible-base-url-v1';
-/** 火山方舟 Agent Plan（ark.cn-beijing.volces.com/api/plan/v3）对话 */
+/** 火山方舟 Agent Plan（ark.cn-beijing.volces.com/api/plan/v3）— Seedream 生图 */
 const VOLCENGINE_ARK_API_KEY_STORAGE_KEY = 'volcengine-ark-agent-plan-api-key-v1';
+/** 火山方舟 Coding Plan（ark.cn-beijing.volces.com/api/coding/v3）— 对话 */
+const VOLCENGINE_ARK_CODING_API_KEY_STORAGE_KEY = 'volcengine-ark-coding-plan-api-key-v1';
 /** 阿里云百炼（maas.aliyuncs.com compatible-mode）对话 / Z-Image-Turbo */
 const ALIYUN_MAAS_API_KEY_STORAGE_KEY = 'aliyun-maas-api-key-v1';
 
@@ -40,8 +42,10 @@ export const DEFAULT_MANXUE_BASE_URL = 'https://manxueapi.com/v1';
 /** MiniMax API MiniMax OpenAI 兼容入口（Base URL 须含 /v1） */
 export const DEFAULT_MINIMAX_BASE_URL = 'https://api.minimaxi.com/v1';
 
-/** 火山方舟 Agent Plan OpenAI 兼容入口（实际请求走同源代理，映射 /v1 → /api/plan/v3） */
+/** 火山方舟 Agent Plan（Seedream 生图；同源代理映射到 /api/plan/v3） */
 export const DEFAULT_VOLCENGINE_ARK_BASE_URL = 'https://ark.cn-beijing.volces.com/api/plan/v3';
+/** 火山方舟 Coding Plan（对话；同源代理映射到 /api/coding/v3） */
+export const DEFAULT_VOLCENGINE_ARK_CODING_BASE_URL = 'https://ark.cn-beijing.volces.com/api/coding/v3';
 export const DEFAULT_ALIYUN_MAAS_COMPAT_BASE_URL =
   'https://ws-qlxmp9rbllkaq6yy.cn-beijing.maas.aliyuncs.com/compatible-mode/v1';
 
@@ -404,6 +408,7 @@ export function normalizeVolcengineArkApiKey(apiKey: string): string {
   return k;
 }
 
+/** Agent Plan Key：仅用于 /api/plan/v3（如 Seedream 文生图/图生图） */
 export function getVolcengineArkSavedKey(): string {
   try {
     return normalizeVolcengineArkApiKey(localStorage.getItem(VOLCENGINE_ARK_API_KEY_STORAGE_KEY) || '');
@@ -417,6 +422,25 @@ export function setVolcengineArkKey(apiKey: string): void {
   try {
     if (normalized) localStorage.setItem(VOLCENGINE_ARK_API_KEY_STORAGE_KEY, normalized);
     else localStorage.removeItem(VOLCENGINE_ARK_API_KEY_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Coding Plan Key：仅用于 /api/coding/v3 对话 */
+export function getVolcengineArkCodingSavedKey(): string {
+  try {
+    return normalizeVolcengineArkApiKey(localStorage.getItem(VOLCENGINE_ARK_CODING_API_KEY_STORAGE_KEY) || '');
+  } catch {
+    return '';
+  }
+}
+
+export function setVolcengineArkCodingKey(apiKey: string): void {
+  const normalized = normalizeVolcengineArkApiKey(apiKey);
+  try {
+    if (normalized) localStorage.setItem(VOLCENGINE_ARK_CODING_API_KEY_STORAGE_KEY, normalized);
+    else localStorage.removeItem(VOLCENGINE_ARK_CODING_API_KEY_STORAGE_KEY);
   } catch {
     /* ignore */
   }

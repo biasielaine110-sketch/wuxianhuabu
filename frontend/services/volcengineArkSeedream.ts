@@ -17,10 +17,10 @@ export function resolveVolcengineArkSeedreamUpstreamModelId(modelName: string): 
   return (modelName || '').trim() || VOLCENGINE_ARK_SEEDREAM_LITE_UPSTREAM_ID;
 }
 
-/** 开发走 Vite 代理；生产走 Vercel Serverless 代理（均映射到 /api/plan/v3） */
+/** 开发走 Vite 代理；生产走 Vercel Serverless 代理（均映射到 /api/plan/v3，Agent Plan） */
 export function volcengineArkSeedreamFetchBase(): string {
   if (typeof import.meta !== 'undefined' && import.meta.env?.PROD) {
-    return '/api/volcengine-ark-proxy';
+    return '/api/volcengine-ark-proxy/plan';
   }
   return '/volcengine-ark-api';
 }

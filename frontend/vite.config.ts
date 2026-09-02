@@ -362,7 +362,31 @@ const toapisFileCdnProxy = {
     secure: true,
     rewrite: (p: string) => p.replace(/^\/codesonline-chat-api/, ''),
   },
-  /** 火山方舟 Agent Plan：文档 Base URL 为 /api/plan/v3，其后直接 /chat/completions */
+  /** 火山方舟 Coding Plan 对话：/api/coding/v3 */
+  '/volcengine-ark-coding-api': {
+    target: 'https://ark.cn-beijing.volces.com',
+    changeOrigin: true,
+    secure: true,
+    timeout: 1_800_000,
+    proxyTimeout: 1_800_000,
+    configure(proxy) {
+      proxy.on('proxyReq', (proxyReq, req) => {
+        const raw = (req as { headers?: Record<string, unknown> }).headers?.['x-volcengine-ark-key'];
+        const custom = String(Array.isArray(raw) ? raw[0] : raw || '').trim();
+        if (custom && !proxyReq.getHeader('Authorization')) {
+          proxyReq.setHeader('Authorization', `Bearer ${custom}`);
+        }
+      });
+    },
+    rewrite: (p: string) => {
+      const path = p.startsWith('/') ? p : `/${p}`;
+      const stripped = path.replace(/^\/volcengine-ark-coding-api(?=\/|$)/, '');
+      const rest = stripped.replace(/^\/v1(?=\/|$)/, '') || '/';
+      const suffix = rest === '/' ? '/chat/completions' : rest;
+      return `/api/coding/v3${suffix}`;
+    },
+  },
+  /** 火山方舟 Agent Plan 生图：/api/plan/v3 */
   '/volcengine-ark-api': {
     target: 'https://ark.cn-beijing.volces.com',
     changeOrigin: true,
@@ -385,8 +409,9 @@ const toapisFileCdnProxy = {
     rewrite: (p: string) => {
       const path = p.startsWith('/') ? p : `/${p}`;
       const stripped = path.replace(/^\/volcengine-ark-api(?=\/|$)/, '');
-      const rest = stripped.replace(/^\/v1(?=\/|$)/, '') || '/';
-      const suffix = rest === '/' ? '/chat/completions' : rest;
+      // 去掉误带的 plan/ 前缀（生产路径兼容）
+      const rest = stripped.replace(/^\/plan(?=\/|$)/, '').replace(/^\/v1(?=\/|$)/, '') || '/';
+      const suffix = rest === '/' ? '/images/generations' : rest;
       return `/api/plan/v3${suffix}`;
     },
   },
@@ -412,8 +437,14 @@ const toapisFileCdnProxy = {
     rewrite: (p: string) => {
       const path = p.startsWith('/') ? p : `/${p}`;
       const stripped = path.replace(/^\/api\/volcengine-ark-proxy(?=\/|$)/, '');
-      const rest = stripped.replace(/^\/v1(?=\/|$)/, '') || '/';
-      const suffix = rest === '/' ? '/chat/completions' : rest;
+      if (/^\/coding(?=\/|$)/.test(stripped)) {
+        const rest = stripped.replace(/^\/coding(?=\/|$)/, '').replace(/^\/v1(?=\/|$)/, '') || '/';
+        const suffix = rest === '/' ? '/chat/completions' : rest;
+        return `/api/coding/v3${suffix}`;
+      }
+      const withoutPlan = stripped.replace(/^\/plan(?=\/|$)/, '');
+      const rest = withoutPlan.replace(/^\/v1(?=\/|$)/, '') || '/';
+      const suffix = rest === '/' ? '/images/generations' : rest;
       return `/api/plan/v3${suffix}`;
     },
   },

@@ -14,7 +14,7 @@ import {
   getCodesonlineChatBaseUrl,
   getHfsySavedKey,
   getHfsyBaseUrl,
-  getVolcengineArkSavedKey,
+  getVolcengineArkCodingSavedKey,
   getAliyunMaasSavedKey,
   getManxueSavedKey,
 } from './aiSettings';
@@ -76,10 +76,11 @@ function resolveVolcengineArkChatUpstreamModelId(modelName: string): string {
 }
 
 function volcengineArkChatFetchBase(): string {
+  // Coding Plan：/api/coding/v3（与 Agent Plan 生图 Key/路径分离）
   if (typeof import.meta !== 'undefined' && import.meta.env?.PROD) {
-    return '/api/volcengine-ark-proxy';
+    return '/api/volcengine-ark-proxy/coding';
   }
-  return '/volcengine-ark-api';
+  return '/volcengine-ark-coding-api';
 }
 
 /** codesonline（ai.codesonline.dev）对话模型 id */
@@ -478,7 +479,12 @@ export const callGeminiChatWithHistory = async (
     modelName = normalizeGcpVertexModelWhenDisabled(modelName);
 
     if (isVolcengineArkChatModelId(modelName)) {
-      const arkKey = getVolcengineArkSavedKey().trim();
+      const arkKey = getVolcengineArkCodingSavedKey().trim();
+      if (!arkKey) {
+        throw new Error(
+          '未配置火山方舟 Coding Plan API Key。请在「设置 → API → 火山方舟」填写 Coding Plan Key（对话走 /api/coding/v3；与 Seedream 用的 Agent Plan Key 不同）。'
+        );
+      }
       return { text: await chatCompletionHistoryAtBase(
         volcengineArkChatFetchBase(),
         arkKey,

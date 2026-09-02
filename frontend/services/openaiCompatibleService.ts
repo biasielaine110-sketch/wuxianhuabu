@@ -177,7 +177,7 @@ function openAiCompatFailureHint(
 ): string {
   if (status === 401) {
     if (fetchBase && isVolcengineArkFetchBase(fetchBase)) {
-      return '（401：火山方舟鉴权失败。请在控制台重新生成 API Key，在本站「设置 → API → 火山方舟」保存后重试；曾提交到 Git 的密钥通常已失效。文档：https://console.volcengine.com/ark/region:cn-beijing/docs/82379/2373746 ）';
+      return '（401：火山方舟鉴权失败。对话请用 Coding Plan Key（/api/coding/v3），Seedream 生图请用 Agent Plan Key（/api/plan/v3）；两套 Key 不可混用。）';
     }
     if (fetchBase && isAliyunMaasFetchBase(fetchBase)) {
       return '（401：阿里云百炼鉴权失败。请在「设置 → API → 阿里云百炼」填写 API Key 并在当前域名下保存。）';
@@ -5083,7 +5083,7 @@ async function volcengineArkSeedreamImageGenerate(
   const apiKey = getVolcengineArkSavedKey().trim();
   if (!apiKey) {
     throw new Error(
-      '未配置火山方舟 API Key。请在「设置 → API → 火山方舟」填写 Agent Plan Key 并保存（与对话共用）。'
+      '未配置火山方舟 Agent Plan API Key。请在「设置 → API → 火山方舟」填写 Agent Plan Key 并保存（Seedream 生图走 /api/plan/v3/images/generations；与对话用的 Coding Plan Key 不同）。'
     );
   }
   const base = volcengineArkSeedreamFetchBase();

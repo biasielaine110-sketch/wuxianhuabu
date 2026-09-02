@@ -826,7 +826,7 @@ export function ChatNodeContent({
           onChange={(e) => onUpdate({ model: e.target.value })}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <optgroup label="火山方舟 Agent Plan">
+          <optgroup label="火山方舟 Coding Plan">
             <option value="deepseek-v4-flash-ark">DeepSeek-V4-Flash（火山方舟）</option>
             <option value="deepseek-v4-pro-ark">DeepSeek-V4-Pro（火山方舟）</option>
             <option value="doubao-seed-evolving-ark">Doubao-Seed-Evolving（火山方舟）</option>

@@ -1,6 +1,8 @@
 /**
- * 火山方舟同源代理。对话优先 Agent Plan，401 再试 Coding Plan / 按量 /api/v3。
- * 文档：https://console.volcengine.com/ark/region:cn-beijing/docs/82379/2373746
+ * 火山方舟同源代理。
+ * - Coding Plan 对话：/api/coding/v3（path 前缀 coding/ 或 ark_route=coding）
+ * - Agent Plan 生图：/api/plan/v3（path 前缀 plan/ 或默认）
+ * 两套入口使用不同 API Key，不再跨 Plan 回退。
  */
 function isUnsafeForwardedResponseHeader(name) {
   const n = String(name).toLowerCase();
@@ -28,9 +30,8 @@ async function writeUpstreamResponse(res, upstream) {
   res.end(buf);
 }
 
-const PLAN_CHAT = 'https://ark.cn-beijing.volces.com/api/plan/v3/chat/completions';
-const CODING_CHAT = 'https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions';
-const PAYGO_CHAT = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions';
+const CODING_ORIGIN = 'https://ark.cn-beijing.volces.com/api/coding/v3';
+const PLAN_ORIGIN = 'https://ark.cn-beijing.volces.com/api/plan/v3';
 
 function headerVal(v) {
   if (!v) return '';
@@ -64,19 +65,42 @@ function pickArkApiKey(req) {
       process.env.VOLCENGINE_ARK_PLAN_API_KEY ||
       process.env.VOLCENGINE_ARK_API_KEY ||
       process.env.ARK_API_KEY ||
+      process.env.ARK_CODING_PLAN_API_KEY ||
+      process.env.VOLCENGINE_ARK_CODING_API_KEY ||
       ''
   );
   if (env && !isLikelyNotArkKey(env)) return env;
   return '';
 }
 
-function isChatCompletionsPath(sub) {
-  const s = String(sub || '').replace(/^\/+/, '');
-  return /(^|\/)(v1\/)?chat\/completions\/?$/i.test(s) || s === '';
+function cleanArkSubPath(sub) {
+  return String(sub || '')
+    .replace(/^\/+/, '')
+    .replace(/^v1\//i, '');
 }
 
-function chatUpstreamUrls() {
-  return [PLAN_CHAT, CODING_CHAT, PAYGO_CHAT];
+/**
+ * @returns {{ origin: 'coding' | 'plan', rest: string }}
+ */
+function resolveArkRoute(sub, url, req) {
+  const routeHeader = headerVal(req.headers['x-volcengine-ark-route']).toLowerCase();
+  const routeQuery = (url.searchParams.get('ark_route') || '').toLowerCase();
+  let rest = cleanArkSubPath(sub);
+
+  if (rest.startsWith('coding/')) {
+    return { origin: 'coding', rest: rest.replace(/^coding\//, '') || 'chat/completions' };
+  }
+  if (rest.startsWith('plan/')) {
+    return { origin: 'plan', rest: rest.replace(/^plan\//, '') || 'images/generations' };
+  }
+  if (routeHeader === 'coding' || routeQuery === 'coding') {
+    return { origin: 'coding', rest: rest || 'chat/completions' };
+  }
+  if (routeHeader === 'plan' || routeQuery === 'plan') {
+    return { origin: 'plan', rest: rest || 'images/generations' };
+  }
+  // 默认 Agent Plan（生图等）；对话请走 coding/ 前缀
+  return { origin: 'plan', rest: rest || 'images/generations' };
 }
 
 async function readRawBody(req) {
@@ -125,7 +149,10 @@ async function handler(req, res) {
   if (method === 'OPTIONS') {
     res.statusCode = 204;
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-volcengine-ark-key');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, x-volcengine-ark-key, x-volcengine-ark-route'
+    );
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.end();
     return;
@@ -160,7 +187,7 @@ async function handler(req, res) {
         error: {
           code: 'AuthenticationError',
           message:
-            '未提供可用的方舟 API Key（已忽略 Vercel 部署保护 JWT）。请在本站「设置 → API → 火山方舟」填写并保存密钥，或配置 ARK_AGENT_PLAN_API_KEY / VOLCENGINE_ARK_API_KEY。',
+            '未提供可用的方舟 API Key（已忽略 Vercel 部署保护 JWT）。对话请填 Coding Plan Key，Seedream 生图请填 Agent Plan Key；或配置对应环境变量。',
           type: 'Unauthorized',
         },
       })
@@ -182,27 +209,16 @@ async function handler(req, res) {
   }
 
   const contentType = headerVal(req.headers['content-type']) || 'application/json';
-  const targets = isChatCompletionsPath(sub)
-    ? chatUpstreamUrls()
-    : [
-        `https://ark.cn-beijing.volces.com/api/plan/v3/${String(sub || '')
-          .replace(/^\/+/, '')
-          .replace(/^v1\//i, '')}`,
-      ];
+  const { origin, rest } = resolveArkRoute(sub, url, req);
+  const usedUrl = `${origin === 'coding' ? CODING_ORIGIN : PLAN_ORIGIN}/${rest.replace(/^\/+/, '')}`;
 
   let upstream;
-  let usedUrl = targets[0];
   try {
-    for (let i = 0; i < targets.length; i += 1) {
-      usedUrl = targets[i];
-      upstream = await fetch(usedUrl, {
-        method,
-        headers: arkAuthHeaders(contentType, arkKey),
-        body: hasBody ? rawBody : undefined,
-      });
-      if (upstream.status !== 401 || i === targets.length - 1) break;
-      await upstream.text().catch(() => '');
-    }
+    upstream = await fetch(usedUrl, {
+      method,
+      headers: arkAuthHeaders(contentType, arkKey),
+      body: hasBody ? rawBody : undefined,
+    });
   } catch (e) {
     console.error('[api/volcengine-ark-proxy] upstream fetch failed', usedUrl, e);
     res.statusCode = 502;
@@ -227,7 +243,11 @@ async function handler(req, res) {
       payload = { error: { message: text.slice(0, 800), type: 'Unauthorized' } };
     }
     const err = payload.error && typeof payload.error === 'object' ? payload.error : {};
-    err.message = `${err.message || 'AuthenticationError'}（已依次尝试 Agent Plan / Coding Plan / 按量 /api/v3 仍 401。请在方舟控制台重新生成 API Key 并在本站保存；曾泄露到 Git 的密钥通常会立即作废。）`;
+    const planHint =
+      origin === 'coding'
+        ? '（Coding Plan /api/coding/v3 鉴权失败。请确认使用的是 Coding Plan API Key，而非 Agent Plan Key。）'
+        : '（Agent Plan /api/plan/v3 鉴权失败。请确认使用的是 Agent Plan API Key，而非 Coding Plan Key。）';
+    err.message = `${err.message || 'AuthenticationError'}${planHint}`;
     payload.error = err;
     res.end(JSON.stringify(payload));
     return;

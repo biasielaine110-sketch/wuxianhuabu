@@ -12,6 +12,7 @@ import {
   persistAiSettings,
   setCodesonlineChatKey,
   setVolcengineArkKey,
+  setVolcengineArkCodingKey,
   setAliyunMaasKey,
   getAiSettingsSnapshot,
 } from '../services/aiSettings';
@@ -100,6 +101,8 @@ export type CanvasSettingsModalProps = {
   setCodesonlineChatKeyInput: Dispatch<SetStateAction<string>>;
   volcengineArkKeyInput: string;
   setVolcengineArkKeyInput: Dispatch<SetStateAction<string>>;
+  volcengineArkCodingKeyInput: string;
+  setVolcengineArkCodingKeyInput: Dispatch<SetStateAction<string>>;
   aliyunMaasKeyInput: string;
   setAliyunMaasKeyInput: Dispatch<SetStateAction<string>>;
   hfsyKeyInput: string;
@@ -177,6 +180,8 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
     setCodesonlineChatKeyInput,
     volcengineArkKeyInput,
     setVolcengineArkKeyInput,
+    volcengineArkCodingKeyInput,
+    setVolcengineArkCodingKeyInput,
     aliyunMaasKeyInput,
     setAliyunMaasKeyInput,
     hfsyKeyInput,
@@ -365,14 +370,17 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                     />
                   </div>
 
-                  {/* 火山方舟 Agent Plan 对话 */}
+                  {/* 火山方舟：Coding Plan 对话 + Agent Plan 生图（两套 Key） */}
                   <div className="mt-5 pt-4 border-t border-[#333]">
-                    <h3 className="text-sm font-semibold text-gray-200 mb-2">火山方舟 Agent Plan（对话 / Seedream 生图）</h3>
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">火山方舟（Coding / Agent Plan）</h3>
                     <p className="text-xs text-gray-500 mb-2">
-                      填写方舟控制台生成的 API Key 并在本站保存。对话走 Agent Plan（/api/plan/v3）；文生图与图生图可选用 Doubao-Seedream-5.0-Lite（同 Key，请求 /api/plan/v3/images/generations）。
-                      代理对话若 401 会再试 Coding Plan 与按量 /api/v3。须在当前网站域名下保存；密钥不要提交到 Git，泄露后请在控制台作废并重新生成。
+                      Coding Plan 与 Agent Plan 使用不同 API Key，请分别填写。对话走
+                      <code className="mx-1 text-gray-400">/api/coding/v3</code>
+                      ；Seedream 文生图/图生图走
+                      <code className="mx-1 text-gray-400">/api/plan/v3/images/generations</code>
+                      。须在当前网站域名下保存；密钥不要提交到 Git。
                     </p>
-                    <div className="text-xs text-gray-500 mb-2">
+                    <div className="text-xs text-gray-500 mb-3">
                       文档：
                       <a
                         href="https://console.volcengine.com/ark/region:cn-beijing/docs/82379/2373746?lang=zh"
@@ -380,15 +388,23 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                         rel="noreferrer"
                         className="text-sky-500 hover:text-sky-400"
                       >
-                        Agent Plan 调用说明
+                        方舟调用说明
                       </a>
                     </div>
-                    <label className="text-xs text-gray-500 block mb-1">Agent Plan API Key</label>
+                    <label className="text-xs text-gray-500 block mb-1">Coding Plan API Key（对话）</label>
+                    <input
+                      type="password"
+                      value={volcengineArkCodingKeyInput}
+                      onChange={(e) => setVolcengineArkCodingKeyInput(e.target.value)}
+                      placeholder="ark-...（Coding Plan）"
+                      className="w-full mb-3 bg-[#222222] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-orange-500 transition-colors text-sm"
+                    />
+                    <label className="text-xs text-gray-500 block mb-1">Agent Plan API Key（Seedream 生图）</label>
                     <input
                       type="password"
                       value={volcengineArkKeyInput}
                       onChange={(e) => setVolcengineArkKeyInput(e.target.value)}
-                      placeholder="ark-..."
+                      placeholder="ark-...（Agent Plan）"
                       className="w-full bg-[#222222] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-orange-500 transition-colors text-sm"
                     />
                   </div>
@@ -525,6 +541,7 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                                 minimaxBaseUrl: minimaxBaseInput.trim() || DEFAULT_MINIMAX_BASE_URL,
                               });
                               setCodesonlineChatKey(codesonlineChatKeyInput.trim());
+                              setVolcengineArkCodingKey(volcengineArkCodingKeyInput.trim());
                               setVolcengineArkKey(volcengineArkKeyInput.trim());
                               setAliyunMaasKey(aliyunMaasKeyInput.trim());
                               initGeminiClientFromStorage();
@@ -560,6 +577,7 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                                 minimaxBaseUrl: minimaxBaseInput.trim() || DEFAULT_MINIMAX_BASE_URL,
                               });
                               setCodesonlineChatKey(codesonlineChatKeyInput.trim());
+                              setVolcengineArkCodingKey(volcengineArkCodingKeyInput.trim());
                               setVolcengineArkKey(volcengineArkKeyInput.trim());
                               setAliyunMaasKey(aliyunMaasKeyInput.trim());
                               initGeminiClientFromStorage();
@@ -599,6 +617,7 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                           minimaxBaseUrl: minimaxBaseInput.trim() || DEFAULT_MINIMAX_BASE_URL,
                         });
                         setCodesonlineChatKey(codesonlineChatKeyInput.trim());
+                        setVolcengineArkCodingKey(volcengineArkCodingKeyInput.trim());
                         setVolcengineArkKey(volcengineArkKeyInput.trim());
                         setAliyunMaasKey(aliyunMaasKeyInput.trim());
                         initGeminiClientFromStorage();
