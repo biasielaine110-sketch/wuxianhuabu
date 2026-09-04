@@ -76,7 +76,10 @@ export function createCanvasGenerationApi(
       m === 'seedream-v5-pro-i2i' ||
       m === 'midjourney-imagine' ||
       m === 'deepwhiteai-image-nb-2' ||
-      m === 'deepwhiteai-image-nb-2-lite'
+      m === 'deepwhiteai-image-nb-2-lite' ||
+      m === 'deepwhiteai-image-g-v2-lowprice' ||
+      m === 'deepwhiteai-image-g2-i2i' ||
+      m === 'deepwhiteai-image-g2-t2i'
     ) {
       return getDeepWhiteSavedKey() || undefined;
     }

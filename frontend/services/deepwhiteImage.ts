@@ -2,6 +2,7 @@
  * DeepWhite 图像：
  * - seedream-v5-pro-t2i / seedream-v5-pro-i2i → POST /v1/image/generations
  * - deepwhiteai-image-nb-2 / deepwhiteai-image-nb-2-lite → 同上
+ * - deepwhiteai-image-g-v2-lowprice / deepwhiteai-image-g2-t2i|i2i → 同上
  * - midjourney-imagine → POST /v1/midjourney/generations + GET /v1/midjourney/tasks/{id}
  * 文档：https://api.deepwhiteai.com/docs
  */
@@ -11,17 +12,24 @@ export const DEEPWHITE_SEEDREAM_V5_PRO_UI_ID = 'seedream-v5-pro-t2i-deepwhite';
 export const DEEPWHITE_MIDJOURNEY_IMAGINE_UI_ID = 'midjourney-imagine-deepwhite';
 export const DEEPWHITE_NB2_LITE_UI_ID = 'deepwhiteai-image-nb-2-lite-deepwhite';
 export const DEEPWHITE_NB2_UI_ID = 'deepwhiteai-image-nb-2-deepwhite';
+export const DEEPWHITE_G_V2_LOWPRICE_UI_ID = 'deepwhiteai-image-g-v2-lowprice-deepwhite';
+export const DEEPWHITE_G2_I2I_UI_ID = 'deepwhiteai-image-g2-i2i-deepwhite';
 
 const DEEPWHITE_IMAGE_UI_IDS = new Set([
   DEEPWHITE_SEEDREAM_V5_PRO_UI_ID,
   DEEPWHITE_MIDJOURNEY_IMAGINE_UI_ID,
   DEEPWHITE_NB2_LITE_UI_ID,
   DEEPWHITE_NB2_UI_ID,
+  DEEPWHITE_G_V2_LOWPRICE_UI_ID,
+  DEEPWHITE_G2_I2I_UI_ID,
   'seedream-v5-pro-t2i',
   'seedream-v5-pro-i2i',
   'midjourney-imagine',
   'deepwhiteai-image-nb-2-lite',
   'deepwhiteai-image-nb-2',
+  'deepwhiteai-image-g-v2-lowprice',
+  'deepwhiteai-image-g2-i2i',
+  'deepwhiteai-image-g2-t2i',
 ]);
 
 export function isDeepWhiteImageModel(modelName: string): boolean {
@@ -52,10 +60,24 @@ export function isDeepWhiteMidjourneyImageModel(modelName: string): boolean {
   return m === DEEPWHITE_MIDJOURNEY_IMAGINE_UI_ID || m === 'midjourney-imagine';
 }
 
-/** 画布分辨率约束：Seedream 仅 1k/2k；NB Lite 仅 1k */
+export function isDeepWhiteGv2LowpriceImageModel(modelName: string): boolean {
+  const m = (modelName || '').trim();
+  return m === DEEPWHITE_G_V2_LOWPRICE_UI_ID || m === 'deepwhiteai-image-g-v2-lowprice';
+}
+
+export function isDeepWhiteG2ImageModel(modelName: string): boolean {
+  const m = (modelName || '').trim();
+  return (
+    m === DEEPWHITE_G2_I2I_UI_ID ||
+    m === 'deepwhiteai-image-g2-i2i' ||
+    m === 'deepwhiteai-image-g2-t2i'
+  );
+}
+
+/** 画布分辨率约束：Seedream 仅 1k/2k；NB Lite / G-2 仅 1k */
 export function clampDeepWhiteImageResolution(modelId: string, resolution?: string): string {
   const r = (resolution || '2k').toLowerCase().replace(/\s/g, '');
-  if (isDeepWhiteNb2LiteImageModel(modelId)) return '1k';
+  if (isDeepWhiteNb2LiteImageModel(modelId) || isDeepWhiteG2ImageModel(modelId)) return '1k';
   if (isDeepWhiteSeedreamImageModel(modelId) && r === '4k') return '2k';
   if (isDeepWhiteNb2ImageModel(modelId) && r === '0.5k') return '0.5k';
   return r || '2k';
@@ -351,11 +373,16 @@ function resolveNbUpstream(modelName: string): 'deepwhiteai-image-nb-2' | 'deepw
 
 function mapResolutionBand(modelName: string, nodeResolution?: string): string {
   const r = clampDeepWhiteImageResolution(modelName, nodeResolution);
-  if (isDeepWhiteNb2LiteImageModel(modelName)) return '1k';
+  if (isDeepWhiteNb2LiteImageModel(modelName) || isDeepWhiteG2ImageModel(modelName)) return '1k';
   if (isDeepWhiteSeedreamImageModel(modelName)) return r === '1k' ? '1k' : '2k';
   if (isDeepWhiteNb2ImageModel(modelName)) {
     if (r === '4k') return '4k';
     if (r === '1k' || r === '0.5k') return r === '0.5k' ? '0.5k' : '1k';
+    return '2k';
+  }
+  if (isDeepWhiteGv2LowpriceImageModel(modelName)) {
+    if (r === '4k') return '4k';
+    if (r === '1k') return '1k';
     return '2k';
   }
   return r;
@@ -364,6 +391,22 @@ function mapResolutionBand(modelName: string, nodeResolution?: string): string {
 function normalizeAspect(aspectRatio?: string): string {
   const a = (aspectRatio || '1:1').trim();
   return a || '1:1';
+}
+
+async function submitImageJobAndFetchBase64(
+  body: Record<string, unknown>,
+  apiKey: string,
+  signal?: AbortSignal,
+  take = 1
+): Promise<string[]> {
+  const submitted = await postJson('/image/generations', body, apiKey, signal);
+  const taskId = pickTaskId(submitted);
+  const urls = await pollImageGeneration(taskId, apiKey, signal);
+  const out: string[] = [];
+  for (const u of urls.slice(0, Math.max(1, take))) {
+    out.push(await fetchImageUrlAsBase64(u, signal));
+  }
+  return out;
 }
 
 export type DeepWhiteImageGenerateParams = {
@@ -404,14 +447,14 @@ export async function deepWhiteGenerateImage(params: DeepWhiteImageGenerateParam
     const taskId = pickTaskId(submitted);
     const urls = await pollMidjourneyTask(taskId, apiKey, signal);
     const want = Math.max(1, Math.min(4, params.numberOfImages || urls.length || 1));
-    const picked = urls.slice(0, want);
     const out: string[] = [];
-    for (const u of picked) out.push(await fetchImageUrlAsBase64(u, signal));
+    for (const u of urls.slice(0, want)) out.push(await fetchImageUrlAsBase64(u, signal));
     return out;
   }
 
+  const maxRefs = isDeepWhiteGv2LowpriceImageModel(params.model) ? 16 : 14;
   const refUrls: string[] = [];
-  for (const ref of refsRaw.slice(0, 14)) {
+  for (const ref of refsRaw.slice(0, maxRefs)) {
     refUrls.push(await toDeepWhitePublicImageUrl(ref, apiKey, signal));
   }
 
@@ -431,12 +474,45 @@ export async function deepWhiteGenerateImage(params: DeepWhiteImageGenerateParam
         metadata: { resolution, output_format: 'jpeg' },
       };
       if (refUrls.length) body.images = refUrls.slice(0, 10);
-      const submitted = await postJson('/image/generations', body, apiKey, signal);
-      const taskId = pickTaskId(submitted);
-      const urls = await pollImageGeneration(taskId, apiKey, signal);
-      out.push(await fetchImageUrlAsBase64(urls[0], signal));
+      out.push(...(await submitImageJobAndFetchBase64(body, apiKey, signal, 1)));
     }
     return out;
+  }
+
+  // Image G-2：有参考图 → g2-i2i；无参考图 → g2-t2i（resolution 仅 1k）
+  if (isDeepWhiteG2ImageModel(params.model)) {
+    const forceI2i =
+      params.model === DEEPWHITE_G2_I2I_UI_ID || params.model === 'deepwhiteai-image-g2-i2i';
+    if (forceI2i && !refUrls.length) {
+      throw new Error('Image G-2 图生图需要至少一张参考图，请连接图片节点。');
+    }
+    const upstream = refUrls.length > 0 ? 'deepwhiteai-image-g2-i2i' : 'deepwhiteai-image-g2-t2i';
+    const body: Record<string, unknown> = {
+      model: upstream,
+      prompt,
+      metadata: { resolution: '1k', ratio: aspect },
+    };
+    if (refUrls.length) body.images = refUrls.slice(0, 10);
+    return submitImageJobAndFetchBase64(body, apiKey, signal, 1);
+  }
+
+  // g-v2-lowprice：文生图/图生图；resolution 1k|2k|4k；n 1–10；images≤16
+  if (isDeepWhiteGv2LowpriceImageModel(params.model)) {
+    const resolution = mapResolutionBand(params.model, params.nodeResolution);
+    const n = Math.max(1, Math.min(10, params.numberOfImages || 1));
+    const body: Record<string, unknown> = {
+      model: 'deepwhiteai-image-g-v2-lowprice',
+      prompt,
+      n,
+      size: aspect,
+      metadata: { resolution, size: aspect, ratio: aspect },
+    };
+    if (refUrls.length) body.images = refUrls.slice(0, 16);
+    return submitImageJobAndFetchBase64(body, apiKey, signal, n);
+  }
+
+  if (!isDeepWhiteNb2LiteImageModel(params.model) && !isDeepWhiteNb2ImageModel(params.model)) {
+    throw new Error(`未支持的 DeepWhite 图像模型：${params.model}`);
   }
 
   const upstream = resolveNbUpstream(params.model);
@@ -451,14 +527,5 @@ export async function deepWhiteGenerateImage(params: DeepWhiteImageGenerateParam
     metadata: { resolution, ratio: aspect, size: aspect },
   };
   if (refUrls.length) body.images = refUrls.slice(0, 14);
-
-  const submitted = await postJson('/image/generations', body, apiKey, signal);
-  const taskId = pickTaskId(submitted);
-  const urls = await pollImageGeneration(taskId, apiKey, signal);
-  const want = Math.max(1, Math.min(n, urls.length));
-  const out: string[] = [];
-  for (const u of urls.slice(0, want)) {
-    out.push(await fetchImageUrlAsBase64(u, signal));
-  }
-  return out;
+  return submitImageJobAndFetchBase64(body, apiKey, signal, n);
 }

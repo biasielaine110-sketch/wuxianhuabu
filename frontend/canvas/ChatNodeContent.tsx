@@ -1351,6 +1351,8 @@ export function ChatNodeContent({
               <option value="midjourney-imagine-deepwhite">Midjourney Imagine（DeepWhite）</option>
               <option value="deepwhiteai-image-nb-2-lite-deepwhite">Nano Banana 2 Lite（DeepWhite）</option>
               <option value="deepwhiteai-image-nb-2-deepwhite">Nano Banana 2（DeepWhite）</option>
+              <option value="deepwhiteai-image-g-v2-lowprice-deepwhite">Image G-v2 Lowprice（DeepWhite）</option>
+              <option value="deepwhiteai-image-g2-i2i-deepwhite">Image G-2 图生图（DeepWhite）</option>
             </optgroup>
             <optgroup label="火山方舟">
               <option value="doubao-seedream-5.0-lite-ark">Doubao-Seedream-5.0-Lite（火山方舟）</option>
