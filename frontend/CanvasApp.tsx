@@ -719,7 +719,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     'gridSplit': { width: 1680, height: 1200 },
     'gridMerge': { width: 1680, height: 1200 },
     'video': { width: 1200, height: 1400 },
-    'audio': { width: 1600, height: 500 },
+    'audio': { width: 1600, height: 1000 },
   };
 
   // 节点最小尺寸限制（按类型；与默认倍率一致）

@@ -42,6 +42,7 @@ import {
   isToApisNanoBanana2Model,
 } from './canvasModelUtils';
 import {
+  isDeepWhiteG2ImageModel,
   isDeepWhiteNb2ImageModel,
   isDeepWhiteNb2LiteImageModel,
   isDeepWhiteSeedreamImageModel,
