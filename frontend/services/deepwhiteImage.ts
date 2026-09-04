@@ -6,7 +6,7 @@
  * - midjourney-imagine → POST /v1/midjourney/generations + GET /v1/midjourney/tasks/{id}
  * 文档：https://api.deepwhiteai.com/docs
  */
-import { getDeepWhiteSavedKey } from './aiSettings';
+import { deepWhiteAuthHeaders, getDeepWhiteSavedKey } from './aiSettings';
 
 export const DEEPWHITE_SEEDREAM_V5_PRO_UI_ID = 'seedream-v5-pro-t2i-deepwhite';
 export const DEEPWHITE_MIDJOURNEY_IMAGINE_UI_ID = 'midjourney-imagine-deepwhite';
@@ -137,7 +137,7 @@ async function postJson(path: string, body: unknown, apiKey: string, signal?: Ab
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
+      ...deepWhiteAuthHeaders(apiKey),
     },
     body: JSON.stringify(body),
     signal,
@@ -158,7 +158,7 @@ async function postJson(path: string, body: unknown, apiKey: string, signal?: Ab
 async function getJson(path: string, apiKey: string, signal?: AbortSignal): Promise<unknown> {
   const res = await fetch(`${deepWhiteApiBase()}${path}`, {
     method: 'GET',
-    headers: { Authorization: `Bearer ${apiKey}` },
+    headers: { ...deepWhiteAuthHeaders(apiKey) },
     signal,
     cache: 'no-store',
   });
@@ -345,7 +345,7 @@ async function toDeepWhitePublicImageUrl(
 
   const res = await fetch(`${deepWhiteApiBase()}/files/upload`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}` },
+    headers: { ...deepWhiteAuthHeaders(apiKey) },
     body: form,
     signal,
   });

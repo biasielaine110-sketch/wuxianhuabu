@@ -4,7 +4,7 @@
  * - hailuo-h3-max-turbo-i2v → 同上（需 images 首帧，可选尾帧）
  * 文档：https://api.deepwhiteai.com/docs
  */
-import { getDeepWhiteSavedKey } from './aiSettings';
+import { deepWhiteAuthHeaders, getDeepWhiteSavedKey } from './aiSettings';
 
 export const DEEPWHITE_HAILUO_H3_MAX_TURBO_T2V_UI_ID = 'hailuo-h3-max-turbo-t2v-deepwhite';
 export const DEEPWHITE_HAILUO_H3_MAX_TURBO_I2V_UI_ID = 'hailuo-h3-max-turbo-i2v-deepwhite';
@@ -125,7 +125,7 @@ async function postJson(
   const res = await fetch(`${deepWhiteApiBase()}${path}`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      ...deepWhiteAuthHeaders(apiKey),
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
@@ -147,7 +147,7 @@ async function postJson(
 async function getJson(path: string, apiKey: string, signal?: AbortSignal): Promise<unknown> {
   const res = await fetch(`${deepWhiteApiBase()}${path}`, {
     method: 'GET',
-    headers: { Authorization: `Bearer ${apiKey}` },
+    headers: { ...deepWhiteAuthHeaders(apiKey) },
     signal,
   });
   const text = await res.text();
@@ -187,7 +187,7 @@ async function toDeepWhitePublicImageUrl(
 
   const res = await fetch(`${deepWhiteApiBase()}/files/upload`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}` },
+    headers: { ...deepWhiteAuthHeaders(apiKey) },
     body: form,
     signal,
   });

@@ -175,6 +175,10 @@ function isAliyunMaasFetchBase(base: string): boolean {
   return /aliyun-maas/i.test(base);
 }
 
+function isDeepWhiteFetchBase(base: string): boolean {
+  return /deepwhite-api|deepwhiteai\.com/i.test(base);
+}
+
 function openAiCompatFailureHint(
   status: number,
   kind: 'generations-json' | 'image-edit',
@@ -4619,10 +4623,11 @@ async function postJsonAtBase<T>(base: string, path: string, body: unknown, apiK
   const fetchBase = rewriteRemoteOpenAiCompatBaseForBrowserCors(base);
   const ark = isVolcengineArkFetchBase(fetchBase) || isVolcengineArkFetchBase(base);
   const aliyun = isAliyunMaasFetchBase(fetchBase) || isAliyunMaasFetchBase(base);
-  const key = ark || aliyun
+  const deepwhite = isDeepWhiteFetchBase(fetchBase) || isDeepWhiteFetchBase(base);
+  const key = ark || aliyun || deepwhite
     ? apiKey.trim().replace(/^Bearer\s+/i, '').trim().replace(/^["'`]+|["'`]+$/g, '')
     : apiKey.trim();
-  if (!key && !ark && !aliyun) throw new Error('未配置 OpenAI 兼容 API Key，请在设置中选择「OpenAI 兼容」并填写密钥。');
+  if (!key && !ark && !aliyun && !deepwhite) throw new Error('未配置 OpenAI 兼容 API Key，请在设置中选择「OpenAI 兼容」并填写密钥。');
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (ark) {
     if (key) {
@@ -4632,6 +4637,11 @@ async function postJsonAtBase<T>(base: string, path: string, body: unknown, apiK
   } else if (aliyun) {
     if (key) {
       headers['x-aliyun-maas-key'] = key;
+      headers.Authorization = `Bearer ${key}`;
+    }
+  } else if (deepwhite) {
+    if (key) {
+      headers['x-deepwhite-key'] = key;
       headers.Authorization = `Bearer ${key}`;
     }
   } else {

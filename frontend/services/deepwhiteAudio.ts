@@ -4,7 +4,7 @@
  * - suno-generation → POST /v1/music/generations + GET /v1/music/tasks/{id}
  * 文档：https://api.deepwhiteai.com/docs
  */
-import { getDeepWhiteSavedKey } from './aiSettings';
+import { deepWhiteAuthHeaders, getDeepWhiteSavedKey } from './aiSettings';
 
 export const DEEPWHITE_AUDIO_TTS_UI_ID = 'qwen3-tts-instruct-flash-deepwhite';
 export const DEEPWHITE_AUDIO_SUNO_UI_ID = 'suno-generation-deepwhite';
@@ -102,7 +102,7 @@ async function postJson(path: string, body: unknown, apiKey: string, signal?: Ab
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
+      ...deepWhiteAuthHeaders(apiKey),
     },
     body: JSON.stringify(body),
     signal,
@@ -128,7 +128,7 @@ async function postJson(path: string, body: unknown, apiKey: string, signal?: Ab
 async function getJson(path: string, apiKey: string, signal?: AbortSignal): Promise<unknown> {
   const res = await fetch(`${deepWhiteApiBase()}${path}`, {
     method: 'GET',
-    headers: { Authorization: `Bearer ${apiKey}` },
+    headers: { ...deepWhiteAuthHeaders(apiKey) },
     signal,
     cache: 'no-store',
   });

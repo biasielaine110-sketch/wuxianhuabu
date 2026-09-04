@@ -414,6 +414,15 @@ export function getDeepWhiteSavedKey(): string {
   }
 }
 
+/** Vercel 部署保护常改写 Authorization；自定义头供 /api/deepwhite-proxy 读取 */
+export function deepWhiteAuthHeaders(apiKey: string): Record<string, string> {
+  const key = apiKey.trim().replace(/^Bearer\s+/i, '').trim().replace(/^["'`]+|["'`]+$/g, '');
+  return {
+    Authorization: `Bearer ${key}`,
+    'x-deepwhite-key': key,
+  };
+}
+
 export function setDeepWhiteKey(apiKey: string): void {
   const normalized = apiKey.trim();
   try {
