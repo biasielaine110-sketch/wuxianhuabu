@@ -53,6 +53,7 @@ export type UseCanvasGenerationOptions = {
 export type CanvasGenerationApi = {
   handleGenerate: (nodeId: string) => Promise<void>;
   handleGenerateVideo: (nodeId: string) => Promise<void>;
+  handleGenerateAudio: (nodeId: string) => Promise<void>;
   handleSendMessage: (nodeId: string, opts?: { baseMessages?: import('../types').ChatMessage[]; promptText?: string }) => Promise<void>;
   handleOptimizePrompt: (nodeId: string, text: string) => Promise<void>;
   handleCancelGeneration: (nodeId: string) => void;
@@ -969,11 +970,90 @@ ${text}`,
     }
   };
 
+  const handleGenerateAudio = async (nodeId: string) => {
+    const { setNodes, nodesRef, edgesRef } = getDeps();
+    const node = nodesRef.current.find((n) => n.id === nodeId);
+    if (!node || node.type !== 'audio') return;
 
+    generationAbortControllersRef.current.get(nodeId)?.abort();
+    const ac = new AbortController();
+    generationAbortControllersRef.current.set(nodeId, ac);
+    generationStartedAtRef.current.set(nodeId, Date.now());
+    setNodes((prev) => prev.map((n) => (n.id === nodeId ? { ...n, isGenerating: true, error: undefined } : n)));
+
+    try {
+      const { deepWhiteGenerateAudio, fetchAudioAsDataUrl, DEEPWHITE_AUDIO_TTS_UI_ID } = await import(
+        '../services/deepwhiteAudio'
+      );
+      const incomingEdges = edgesRef.current.filter((e) => e.targetId === nodeId);
+      const inputNodes = incomingEdges
+        .map((e) => nodesRef.current.find((n) => n.id === e.sourceId))
+        .filter(Boolean) as CanvasNode[];
+      const textInputs = inputNodes.filter((n) => n.type === 'text').map((n) => n.prompt).filter(Boolean);
+      const combinedPrompt = [node.prompt, ...textInputs].filter(Boolean).join('\n').trim();
+      if (!combinedPrompt) throw new Error('请输入提示词（或连接文本节点）');
+
+      const result = await deepWhiteGenerateAudio({
+        model: node.model || DEEPWHITE_AUDIO_TTS_UI_ID,
+        prompt: combinedPrompt,
+        voice: node.audioVoice,
+        instructions: node.audioInstructions,
+        sunoVersion: node.sunoVersion,
+        sunoCustom: node.sunoCustom,
+        sunoInstrumental: node.sunoInstrumental,
+        sunoTitle: node.sunoTitle,
+        sunoStyle: node.sunoStyle,
+        signal: ac.signal,
+      });
+
+      const dataUrl = await fetchAudioAsDataUrl(result.audioUrl, ac.signal);
+      let duration = result.duration;
+      if (duration == null || !(duration > 0)) {
+        duration = await new Promise<number | undefined>((resolve) => {
+          const a = new Audio();
+          a.onloadedmetadata = () => resolve(Number.isFinite(a.duration) ? a.duration : undefined);
+          a.onerror = () => resolve(undefined);
+          a.src = dataUrl;
+        });
+      }
+
+      setNodes((prev) =>
+        prev.map((n) =>
+          n.id === nodeId
+            ? {
+                ...n,
+                isGenerating: false,
+                audio: dataUrl,
+                audioUrl: result.audioUrl,
+                audioName: result.title || (node.model?.includes('suno') ? 'Suno 生成' : 'TTS 生成'),
+                audioDuration: duration,
+                error: undefined,
+              }
+            : n
+        )
+      );
+    } catch (err: unknown) {
+      const aborted =
+        (err as { name?: string })?.name === 'AbortError' ||
+        (err instanceof DOMException && err.name === 'AbortError');
+      if (aborted) {
+        setNodes((prev) =>
+          prev.map((n) => (n.id === nodeId ? { ...n, isGenerating: false, error: undefined } : n))
+        );
+      } else {
+        const message = err instanceof Error ? err.message : '音频生成失败';
+        setNodes((prev) => prev.map((n) => (n.id === nodeId ? { ...n, isGenerating: false, error: message } : n)));
+      }
+    } finally {
+      generationAbortControllersRef.current.delete(nodeId);
+      generationStartedAtRef.current.delete(nodeId);
+    }
+  };
 
   return {
     handleGenerate,
     handleGenerateVideo,
+    handleGenerateAudio,
     handleSendMessage,
     handleOptimizePrompt,
     handleCancelGeneration,

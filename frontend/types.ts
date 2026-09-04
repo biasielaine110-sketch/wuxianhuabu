@@ -371,10 +371,24 @@ export interface ChatMessage {
 // 语音/音频节点
 export interface AudioNode extends CanvasNode {
   type: 'audio';
-  /** 音频 base64 数据 */
+  /** 音频 base64 / data URL / 可播放 URL */
   audio?: string;
   /** 音频时长（秒） */
   audioDuration?: number;
   /** 音频名称（文件名） */
   audioName?: string;
+  /** DeepWhite 等：qwen3-tts-instruct-flash-deepwhite / suno-generation-deepwhite */
+  model?: string;
+  /** TTS 音色（Qwen） */
+  audioVoice?: string;
+  /** TTS instruct 风格说明 */
+  audioInstructions?: string;
+  /** Suno 版本：v3.5 / v4 / v4.5 / v5 等 */
+  sunoVersion?: string;
+  /** Suno custom=true 时 prompt 为歌词 */
+  sunoCustom?: boolean;
+  /** Suno 纯伴奏 */
+  sunoInstrumental?: boolean;
+  sunoTitle?: string;
+  sunoStyle?: string;
 }

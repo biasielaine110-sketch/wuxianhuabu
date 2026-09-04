@@ -53,6 +53,7 @@ export function useLazyCanvasGeneration(deps: UseCanvasGenerationOptions) {
 
   const handleGenerate = useCallback(call('handleGenerate'), []);
   const handleGenerateVideo = useCallback(call('handleGenerateVideo'), []);
+  const handleGenerateAudio = useCallback(call('handleGenerateAudio'), []);
   const handleSendMessage = useCallback(call('handleSendMessage'), []);
   const handleOptimizePrompt = useCallback(call('handleOptimizePrompt'), []);
   const handleCancelGeneration = useCallback(call('handleCancelGeneration'), []);
@@ -60,6 +61,7 @@ export function useLazyCanvasGeneration(deps: UseCanvasGenerationOptions) {
   return {
     handleGenerate,
     handleGenerateVideo,
+    handleGenerateAudio,
     handleSendMessage,
     handleOptimizePrompt,
     handleCancelGeneration,

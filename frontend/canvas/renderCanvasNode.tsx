@@ -199,12 +199,24 @@ return (
 
       {/* 语音节点内容 */}
       {node.type === 'audio' && (
-        <Suspense fallback={<HeavyNodeFallback label="加载语音节点…" />}>
-          <AudioNodeContent
-            node={node}
-            onUpdate={(updates) => s.handleUpdateNode(node.id, updates)}
-          />
-        </Suspense>
+        <div className="flex flex-col shrink-0">
+          <Suspense fallback={<HeavyNodeFallback label="加载语音节点…" />}>
+            <AudioNodeContent
+              node={node}
+              onUpdate={(updates) => s.handleUpdateNode(node.id, updates)}
+            />
+          </Suspense>
+          <div className="px-3 pb-3 bg-[#1a1a1a]">
+            <NodeGenerateBar
+              nodeId={node.id}
+              variant="audio"
+              isGenerating={!!node.isGenerating}
+              generationStartedAt={node.isGenerating ? genStart : undefined}
+              onGenerate={s.handleGenerateAudio}
+              onCancel={s.handleCancelGeneration}
+            />
+          </div>
+        </div>
       )}
 
       {/* 360° 全景图节点内容 */}

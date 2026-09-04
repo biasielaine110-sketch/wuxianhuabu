@@ -20,6 +20,7 @@ export type BuildCanvasNodeRenderOverlayInput = {
   handleDeleteEdge: (id: string) => void;
   handleGenerate: (nodeId: string) => void;
   handleGenerateVideo: (nodeId: string) => void;
+  handleGenerateAudio: (nodeId: string) => void;
   handleCancelGeneration: (nodeId: string) => void;
   handleSendMessage: (
     nodeId: string,

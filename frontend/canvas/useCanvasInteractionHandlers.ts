@@ -785,6 +785,16 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
             model: 'grok-video-1.5',
           }
         : {}),
+      ...(type === 'audio'
+        ? {
+            model: 'qwen3-tts-instruct-flash-deepwhite',
+            audioVoice: 'Cherry',
+            sunoVersion: 'v5',
+            sunoCustom: false,
+            sunoInstrumental: false,
+            isGenerating: false,
+          }
+        : {}),
     };
     const MAX_CANVAS_NODES = 150;
     if (nodesRef.current.length >= MAX_CANVAS_NODES) {

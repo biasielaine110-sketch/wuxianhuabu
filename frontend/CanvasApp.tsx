@@ -1008,6 +1008,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
   const {
     handleGenerate,
     handleGenerateVideo,
+    handleGenerateAudio,
     handleSendMessage,
     handleOptimizePrompt,
     handleCancelGeneration,
@@ -1843,6 +1844,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     handleDeleteEdge,
     handleGenerate,
     handleGenerateVideo,
+    handleGenerateAudio,
     handleCancelGeneration,
     handleSendMessage,
     handleOptimizePrompt,
