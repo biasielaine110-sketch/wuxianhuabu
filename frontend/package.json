@@ -3,6 +3,11 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "allowScripts": {
+    "protobufjs@7.5.5": true,
+    "protobufjs": true,
+    "fsevents": true
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
