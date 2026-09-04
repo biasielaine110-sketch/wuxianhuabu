@@ -3,7 +3,7 @@
  * - seedream-v5-pro-t2i / seedream-v5-pro-i2i → POST /v1/image/generations
  * - deepwhiteai-image-nb-2 / deepwhiteai-image-nb-2-lite → 同上
  * - deepwhiteai-image-g-v2-lowprice / deepwhiteai-image-g2-t2i|i2i → 同上
- * - midjourney-imagine → POST /v1/mj/submit/imagine + GET /v1/mj/task/{id}/fetch
+ * - midjourney-imagine → POST /v1/midjourney/generations + GET /v1/midjourney/tasks/{id}
  * 文档：https://api.deepwhiteai.com/docs
  */
 import { deepWhiteAuthHeaders, getDeepWhiteSavedKey } from './aiSettings';
@@ -100,6 +100,19 @@ function requireDeepWhiteKey(): string {
     );
   }
   return key;
+}
+
+const midjourneyTaskIdBySignal = new WeakMap<AbortSignal, string>();
+
+function rememberMidjourneyTaskId(signal: AbortSignal | undefined, taskId: string) {
+  if (signal && taskId) midjourneyTaskIdBySignal.set(signal, taskId);
+}
+
+export function takeMidjourneyTaskId(signal?: AbortSignal): string | undefined {
+  if (!signal) return undefined;
+  const id = midjourneyTaskIdBySignal.get(signal);
+  if (id) midjourneyTaskIdBySignal.delete(signal);
+  return id;
 }
 
 function formatUpstreamError(json: unknown, text: string, status: number): string {
@@ -222,8 +235,24 @@ function pickImageUrls(json: unknown): string[] {
   pushUrl(urls, root?.grid_image_url);
   if (Array.isArray(content?.image_urls)) content.image_urls.forEach((u) => pushUrl(urls, u));
   if (Array.isArray(data?.image_urls)) data.image_urls.forEach((u) => pushUrl(urls, u));
+  if (Array.isArray(root?.image_urls)) root.image_urls.forEach((u) => pushUrl(urls, u));
   if (Array.isArray(data?.imageUrls)) data.imageUrls.forEach((u) => pushUrl(urls, u));
   if (Array.isArray(root?.imageUrls)) root.imageUrls.forEach((u) => pushUrl(urls, u));
+
+  const output = (data?.output && typeof data.output === 'object' ? data.output : null) as Record<
+    string,
+    unknown
+  > | null;
+  const result = (data?.result && typeof data.result === 'object' ? data.result : null) as Record<
+    string,
+    unknown
+  > | null;
+  if (Array.isArray(output?.image_urls)) output.image_urls.forEach((u) => pushUrl(urls, u));
+  if (Array.isArray(result?.image_urls)) result.image_urls.forEach((u) => pushUrl(urls, u));
+  pushUrl(urls, output?.grid_image_url);
+  pushUrl(urls, result?.grid_image_url);
+  pushUrl(urls, output?.image_url);
+  pushUrl(urls, result?.image_url);
 
   if (Array.isArray(root?.data)) {
     for (const item of root.data) {
@@ -274,6 +303,25 @@ async function pollImageGeneration(
   throw new Error('DeepWhite 生图超时，请稍后在控制台查看任务状态。');
 }
 
+async function fetchMidjourneyTaskJson(
+  taskId: string,
+  apiKey: string,
+  signal?: AbortSignal
+): Promise<unknown> {
+  const enc = encodeURIComponent(taskId);
+  // 推荐 GET /v1/midjourney/tasks/{id}；兼容 /v1/midjourney/{id}；统一任务 GET /v1/tasks/{id}
+  const paths = [`/midjourney/tasks/${enc}`, `/midjourney/${enc}`, `/tasks/${enc}`];
+  let lastErr: unknown;
+  for (const path of paths) {
+    try {
+      return await getJson(path, apiKey, signal);
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('DeepWhite Midjourney 任务查询失败');
+}
+
 async function pollMidjourneyTask(
   taskId: string,
   apiKey: string,
@@ -282,16 +330,7 @@ async function pollMidjourneyTask(
   const maxAttempts = 120;
   for (let i = 0; i < maxAttempts; i += 1) {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-    let json: unknown;
-    try {
-      json = await getJson(`/mj/task/${encodeURIComponent(taskId)}/fetch`, apiKey, signal);
-    } catch {
-      try {
-        json = await getJson(`/midjourney/tasks/${encodeURIComponent(taskId)}`, apiKey, signal);
-      } catch {
-        json = await getJson(`/midjourney/${encodeURIComponent(taskId)}`, apiKey, signal);
-      }
-    }
+    const json = await fetchMidjourneyTaskJson(taskId, apiKey, signal);
     const root = json as Record<string, unknown>;
     const data = (root?.data && typeof root.data === 'object' && !Array.isArray(root.data)
       ? root.data
@@ -481,19 +520,20 @@ export async function deepWhiteGenerateImage(params: DeepWhiteImageGenerateParam
     }
     const mjSize = clampMidjourneySize(aspect);
     let mjPrompt = prompt;
-    if (imageUrls.length) mjPrompt = `${imageUrls.join(' ')} ${mjPrompt}`.trim();
     if (!/--ar\s/i.test(mjPrompt)) mjPrompt += ` --ar ${mjSize}`;
     if (!/--v\s/i.test(mjPrompt)) mjPrompt += ' --v 6.1';
-    if (!/--relax|--fast|--turbo/i.test(mjPrompt)) mjPrompt += ' --relax';
     mjPrompt = clampDeepWhiteImagePrompt(mjPrompt);
-    // DeepWhite 基于 New API：正式入口是 /mj/submit/imagine。
-    // /v1/midjourney/generations 会进通用 task relay → request not found in context
+    const speed = /--turbo\b/i.test(prompt) ? 'turbo' : /--fast\b/i.test(prompt) ? 'fast' : 'relax';
+    // 新版 /v1/midjourney/... 自动注入 model=midjourney，请求体不要传 model
     const body: Record<string, unknown> = {
       prompt: mjPrompt,
-      botType: 'MID_JOURNEY',
+      speed,
+      size: mjSize,
     };
-    const submitted = await postJson('/mj/submit/imagine', body, apiKey, signal);
+    if (imageUrls.length) body.image_urls = imageUrls;
+    const submitted = await postJson('/midjourney/generations', body, apiKey, signal);
     const taskId = pickTaskId(submitted);
+    rememberMidjourneyTaskId(signal, taskId);
     const urls = await pollMidjourneyTask(taskId, apiKey, signal);
     const want = Math.max(1, Math.min(4, params.numberOfImages || urls.length || 1));
     const out: string[] = [];
@@ -577,4 +617,30 @@ export async function deepWhiteGenerateImage(params: DeepWhiteImageGenerateParam
   };
   if (refUrls.length) body.images = refUrls.slice(0, 14);
   return submitImageJobAndFetchBase64(body, apiKey, signal, n);
+}
+
+/** Midjourney 二次操作：放大 Imagine 宫格中的第 index 张（1–4） */
+export async function deepWhiteMidjourneyUpscale(params: {
+  taskId: string;
+  index: number;
+  signal?: AbortSignal;
+}): Promise<string[]> {
+  const apiKey = requireDeepWhiteKey();
+  const taskId = (params.taskId || '').trim();
+  if (!taskId) throw new Error('缺少 Midjourney 任务 id，请先完成一次 Imagine。');
+  const index = Math.max(1, Math.min(4, Math.round(Number(params.index)) || 1));
+  const submitted = await postJson(
+    '/midjourney/generations/upscale',
+    { task_id: taskId, index },
+    apiKey,
+    params.signal
+  );
+  const upscaleTaskId = pickTaskId(submitted);
+  const urls = await pollMidjourneyTask(upscaleTaskId, apiKey, params.signal);
+  const out: string[] = [];
+  for (const u of urls.slice(0, 4)) {
+    out.push(await fetchImageUrlAsBase64(u, params.signal));
+  }
+  if (!out.length) throw new Error('Midjourney 放大成功但未返回图片。');
+  return out;
 }

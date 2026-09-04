@@ -54,6 +54,7 @@ export function useLazyCanvasGeneration(deps: UseCanvasGenerationOptions) {
   const handleGenerate = useCallback(call('handleGenerate'), []);
   const handleGenerateVideo = useCallback(call('handleGenerateVideo'), []);
   const handleGenerateAudio = useCallback(call('handleGenerateAudio'), []);
+  const handleMidjourneyUpscale = useCallback(call('handleMidjourneyUpscale'), []);
   const handleSendMessage = useCallback(call('handleSendMessage'), []);
   const handleOptimizePrompt = useCallback(call('handleOptimizePrompt'), []);
   const handleCancelGeneration = useCallback(call('handleCancelGeneration'), []);
@@ -62,6 +63,7 @@ export function useLazyCanvasGeneration(deps: UseCanvasGenerationOptions) {
     handleGenerate,
     handleGenerateVideo,
     handleGenerateAudio,
+    handleMidjourneyUpscale,
     handleSendMessage,
     handleOptimizePrompt,
     handleCancelGeneration,

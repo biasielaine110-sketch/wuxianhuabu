@@ -244,6 +244,10 @@ export interface CanvasNode {
   audioDuration?: number;
   /** 即梦视频模式: 'image2video'(图生视频), 'frames2video'(首尾帧), 'multiframe2video'(智能多帧), 'multimodal2video'(全能参考) */
   videoMode?: 'image2video' | 'frames2video' | 'multiframe2video' | 'multimodal2video';
+  /** DeepWhite Midjourney Imagine 任务 id，用于 U1–U4 放大 */
+  midjourneyTaskId?: string;
+  /** 已对本次 Imagine 执行过放大的宫格序号（1–4） */
+  midjourneyUpscaledIndexes?: number[];
 }
 
 export interface Edge {

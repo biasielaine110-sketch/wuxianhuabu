@@ -182,6 +182,7 @@ return (
               s.fileInputRef.current?.click();
             }}
             onDownloadImage={(src) => { void s.downloadImage(src); }}
+            onMidjourneyUpscale={s.handleMidjourneyUpscale}
           />
         </Suspense>
       )}

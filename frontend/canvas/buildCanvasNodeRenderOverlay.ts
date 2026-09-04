@@ -21,6 +21,7 @@ export type BuildCanvasNodeRenderOverlayInput = {
   handleGenerate: (nodeId: string) => void;
   handleGenerateVideo: (nodeId: string) => void;
   handleGenerateAudio: (nodeId: string) => void;
+  handleMidjourneyUpscale: (nodeId: string, index: number) => void;
   handleCancelGeneration: (nodeId: string) => void;
   handleSendMessage: (
     nodeId: string,

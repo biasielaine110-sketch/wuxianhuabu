@@ -13,6 +13,11 @@ import { DEFAULT_DEEPSEEK_CHAT_MODEL_ID, normalizeDeepSeekChatModelId, normalize
 import { normalizeCanvasGenerationImages } from '../services/openaiCompatibleService';
 import { hasCanvasImagePayload } from '../services/canvasAssetResolver';
 import {
+  deepWhiteMidjourneyUpscale,
+  isDeepWhiteMidjourneyImageModel,
+  takeMidjourneyTaskId,
+} from '../services/deepwhiteImage';
+import {
   callGeminiChatWithHistory,
   editExistingImage,
   generateCanvasVideoViaToApis,
@@ -54,6 +59,7 @@ export type CanvasGenerationApi = {
   handleGenerate: (nodeId: string) => Promise<void>;
   handleGenerateVideo: (nodeId: string) => Promise<void>;
   handleGenerateAudio: (nodeId: string) => Promise<void>;
+  handleMidjourneyUpscale: (nodeId: string, index: number) => Promise<void>;
   handleSendMessage: (nodeId: string, opts?: { baseMessages?: import('../types').ChatMessage[]; promptText?: string }) => Promise<void>;
   handleOptimizePrompt: (nodeId: string, text: string) => Promise<void>;
   handleCancelGeneration: (nodeId: string) => void;
@@ -268,14 +274,15 @@ export function createCanvasGenerationApi(
         );
       }
 
-        // Upscale images if 2k or 4k is selected
+        // Upscale images if 2k or 4k is selected（Midjourney 走官方 U1–U4，不做本地像素拉伸）
       const normalizedImages = await normalizeCanvasGenerationImages(base64DataArray, {
         signal: ac.signal,
         bearerToken: imageModelBearerToken(imageModel),
       });
-      const upscaledImages = await Promise.all(
-        normalizedImages.map((img) => upscaleImage(img, imageResolution))
-      );
+      const skipClientUpscale = isDeepWhiteMidjourneyImageModel(imageModel);
+      const upscaledImages = skipClientUpscale
+        ? normalizedImages
+        : await Promise.all(normalizedImages.map((img) => upscaleImage(img, imageResolution)));
 
       const validImages = upscaledImages.filter((im) => im && hasCanvasImagePayload(im.trim()));
       if (validImages.length === 0) {
@@ -286,6 +293,7 @@ export function createCanvasGenerationApi(
 
         // Append new images to existing ones
         const newImages = [...(node.images || []), ...validImages];
+        const mjTaskId = skipClientUpscale ? takeMidjourneyTaskId(ac.signal) : undefined;
 
         setNodes(prev => prev.map(n => n.id === nodeId ? {
           ...n,
@@ -293,6 +301,8 @@ export function createCanvasGenerationApi(
           images: newImages,
           currentImageIndex: (node.images || []).length,
           _thumbTick: ((node as CanvasNode & { _thumbTick?: number })._thumbTick ?? 0) + 1,
+          midjourneyTaskId: mjTaskId,
+          midjourneyUpscaledIndexes: mjTaskId ? [] : undefined,
         } : n));
 
     } catch (err: any) {
@@ -1094,6 +1104,73 @@ ${text}`,
     }
   };
 
+  const handleMidjourneyUpscale = async (nodeId: string, index: number) => {
+    const { setNodes, nodesRef } = getDeps();
+    const node = nodesRef.current.find((n) => n.id === nodeId);
+    if (!node) return;
+    const taskId = (node.midjourneyTaskId || '').trim();
+    if (!taskId) {
+      setNodes((prev) =>
+        prev.map((n) =>
+          n.id === nodeId ? { ...n, error: '请先用 Midjourney Imagine 生成宫格，再点 U1–U4 放大。' } : n
+        )
+      );
+      return;
+    }
+
+    generationAbortControllersRef.current.get(nodeId)?.abort();
+    const ac = new AbortController();
+    generationAbortControllersRef.current.set(nodeId, ac);
+    generationStartedAtRef.current.set(nodeId, Date.now());
+    setNodes((prev) => prev.map((n) => (n.id === nodeId ? { ...n, isGenerating: true, error: undefined } : n)));
+
+    try {
+      const base64s = await deepWhiteMidjourneyUpscale({
+        taskId,
+        index,
+        signal: ac.signal,
+      });
+      const validImages = base64s.filter((im) => im && hasCanvasImagePayload(im.trim()));
+      if (!validImages.length) throw new Error('Midjourney 放大未返回可用图片。');
+      const prevImages = node.images || [];
+      const done = [...(node.midjourneyUpscaledIndexes || []), index].filter(
+        (v, i, arr) => arr.indexOf(v) === i
+      );
+      setNodes((prev) =>
+        prev.map((n) =>
+          n.id === nodeId
+            ? {
+                ...n,
+                isGenerating: false,
+                images: [...prevImages, ...validImages],
+                currentImageIndex: prevImages.length,
+                midjourneyUpscaledIndexes: done,
+                _thumbTick: (n._thumbTick ?? 0) + 1,
+                error: undefined,
+              }
+            : n
+        )
+      );
+    } catch (err: unknown) {
+      const aborted =
+        (err as { name?: string })?.name === 'AbortError' ||
+        (err instanceof DOMException && err.name === 'AbortError');
+      if (aborted) {
+        setNodes((prev) =>
+          prev.map((n) => (n.id === nodeId ? { ...n, isGenerating: false, error: undefined } : n))
+        );
+      } else {
+        const message = err instanceof Error ? err.message : 'Midjourney 放大失败';
+        setNodes((prev) =>
+          prev.map((n) => (n.id === nodeId ? { ...n, isGenerating: false, error: message } : n))
+        );
+      }
+    } finally {
+      generationAbortControllersRef.current.delete(nodeId);
+      generationStartedAtRef.current.delete(nodeId);
+    }
+  };
+
   const handleGenerateAudio = async (nodeId: string) => {
     const { setNodes, nodesRef, edgesRef } = getDeps();
     const node = nodesRef.current.find((n) => n.id === nodeId);
@@ -1193,6 +1270,7 @@ ${text}`,
     handleGenerate,
     handleGenerateVideo,
     handleGenerateAudio,
+    handleMidjourneyUpscale,
     handleSendMessage,
     handleOptimizePrompt,
     handleCancelGeneration,

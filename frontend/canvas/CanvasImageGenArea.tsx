@@ -42,6 +42,7 @@ export interface CanvasImageGenAreaProps {
   onImportImage: (nodeId: string) => void;
   /** 与「最大化图片」下载走同一条 saveImageDownload 路径（含固定目录 / 草稿目录 / 另存为 流程） */
   onDownloadImage: (imageSrc: string) => void;
+  onMidjourneyUpscale?: (nodeId: string, index: number) => void;
 }
 
 export function CanvasImageGenArea({
@@ -63,8 +64,11 @@ export function CanvasImageGenArea({
   setEyedropperTargetNodeId,
   onImportImage,
   onDownloadImage,
+  onMidjourneyUpscale,
 }: CanvasImageGenAreaProps) {
   const isImageNode = node.type === 'image';
+  const mjTaskId = (node.midjourneyTaskId || '').trim();
+  const mjDone = new Set(node.midjourneyUpscaledIndexes || []);
 
   return (
     <div
@@ -73,6 +77,35 @@ export function CanvasImageGenArea({
       }`}
     >
       {node.isGenerating && <GenerationHoloOverlay />}
+      {mjTaskId ? (
+        <div className="absolute bottom-2 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-lg bg-black/75 p-1">
+          <span className="whitespace-nowrap px-1.5 text-[10px] text-amber-200/90">放大</span>
+          {[1, 2, 3, 4].map((i) => (
+            <button
+              key={i}
+              type="button"
+              disabled={!!node.isGenerating || !onMidjourneyUpscale}
+              title={
+                mjDone.has(i)
+                  ? `U${i} 已放大过，可再次提交`
+                  : `放大本次 Imagine 宫格第 ${i} 张（U${i}）`
+              }
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                if (node.isGenerating) return;
+                onMidjourneyUpscale?.(node.id, i);
+              }}
+              className={`min-w-[32px] rounded px-2 py-1 text-xs font-semibold disabled:opacity-40 ${
+                mjDone.has(i)
+                  ? 'bg-amber-900/90 text-amber-100'
+                  : 'bg-amber-600 text-white hover:bg-amber-500'
+              }`}
+            >
+              U{i}
+            </button>
+          ))}
+        </div>
+      ) : null}
       {hasDisplayableImages ? (
         <>
           <div
@@ -385,7 +418,7 @@ export function CanvasImageGenArea({
                   >
                     <ChevronRightIcon size={75} />
                   </button>
-                  <div className="absolute bottom-2 left-1/2 -translate-x-1/2 px-2 py-1 bg-black/60 rounded-full text-[10px] text-white backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className={`absolute left-1/2 -translate-x-1/2 px-2 py-1 bg-black/60 rounded-full text-[10px] text-white backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity ${mjTaskId ? 'bottom-12' : 'bottom-2'}`}>
                     {currentIndex + 1} / {images.length}
                   </div>
                 </>
