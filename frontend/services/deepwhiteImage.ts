@@ -7,6 +7,7 @@
  * 文档：https://api.deepwhiteai.com/docs
  */
 import { deepWhiteAuthHeaders, getDeepWhiteSavedKey } from './aiSettings';
+import { rewriteImageUrlForBrowserDisplay } from './canvasAssetResolver';
 
 export const DEEPWHITE_SEEDREAM_V5_PRO_UI_ID = 'seedream-v5-pro-t2i-deepwhite';
 export const DEEPWHITE_MIDJOURNEY_IMAGINE_UI_ID = 'midjourney-imagine-deepwhite';
@@ -306,7 +307,8 @@ async function pollMidjourneyTask(
 }
 
 async function fetchImageUrlAsBase64(imageUrl: string, signal?: AbortSignal): Promise<string> {
-  const res = await fetch(imageUrl, { mode: 'cors', credentials: 'omit', signal });
+  const fetchUrl = rewriteImageUrlForBrowserDisplay(imageUrl);
+  const res = await fetch(fetchUrl, { mode: 'cors', credentials: 'omit', signal });
   if (!res.ok) throw new Error(`无法下载 DeepWhite 生成图 (${res.status})`);
   const blob = await res.blob();
   return await new Promise<string>((resolve, reject) => {
@@ -444,10 +446,18 @@ export type DeepWhiteImageGenerateParams = {
 /**
  * DeepWhite 文生图 / 图生图，返回裸 base64 列表（与画布 generateNewImage 约定一致）。
  */
+function clampDeepWhiteImagePrompt(prompt: string): string {
+  const p = (prompt || '').trim();
+  if (p.length < 5) {
+    throw new Error('DeepWhite 提示词至少 5 个字符。');
+  }
+  if (p.length > 2000) return p.slice(0, 2000);
+  return p;
+}
+
 export async function deepWhiteGenerateImage(params: DeepWhiteImageGenerateParams): Promise<string[]> {
   const apiKey = requireDeepWhiteKey();
-  const prompt = (params.prompt || '').trim();
-  if (!prompt) throw new Error('请输入提示词。');
+  const prompt = clampDeepWhiteImagePrompt(params.prompt || '');
   const aspect = normalizeAspect(params.aspectRatio);
   const refsRaw = (params.refImages || []).filter(Boolean);
   const signal = params.signal;
@@ -458,15 +468,16 @@ export async function deepWhiteGenerateImage(params: DeepWhiteImageGenerateParam
       imageUrls.push(await toDeepWhitePublicImageUrl(ref, apiKey, signal));
     }
     const mjSize = clampMidjourneySize(aspect);
-    // 文档：可不传 model（路由自动注入）；imagine 显式入口更稳
+    // DeepWhite/NewAPI 只挂了 POST /v1/midjourney/generations；/imagine 会落到通用 task relay → request not found in context
     const body: Record<string, unknown> = {
+      model: 'midjourney-imagine',
       prompt,
       size: mjSize,
       version: '6.1',
       speed: 'relax',
     };
     if (imageUrls.length) body.image_urls = imageUrls;
-    const submitted = await postJson('/midjourney/generations/imagine', body, apiKey, signal);
+    const submitted = await postJson('/midjourney/generations', body, apiKey, signal);
     const taskId = pickTaskId(submitted);
     const urls = await pollMidjourneyTask(taskId, apiKey, signal);
     const want = Math.max(1, Math.min(4, params.numberOfImages || urls.length || 1));

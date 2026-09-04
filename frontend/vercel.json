@@ -74,6 +74,10 @@
       "destination": "https://file.hfsyapi.cn/:path*"
     },
     {
+      "source": "/cdn-files-getapib/:path*",
+      "destination": "https://getapib.org/:path*"
+    },
+    {
       "source": "/volcengine-ark-coding-api/(.*)",
       "destination": "/api/volcengine-ark-proxy?path=coding/$1"
     },

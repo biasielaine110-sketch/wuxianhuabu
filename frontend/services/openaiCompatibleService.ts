@@ -699,6 +699,9 @@ function rewriteKnownImageCdnToSameOrigin(imageUrl: string): string {
     if (host === 'file.hfsyapi.cn') {
       return `${origin}/cdn-files-hfsy${u.pathname}${u.search}`;
     }
+    if (host === 'getapib.org' || host === 'www.getapib.org') {
+      return `${origin}/cdn-files-getapib${u.pathname}${u.search}`;
+    }
     if (host === 'manxueapi.com' || host.endsWith('.manxueapi.com')) {
       const prefix = import.meta.env.PROD ? '/api/manxue-proxy' : '/manxue-api';
       return `${origin}${prefix}${u.pathname}${u.search}`;

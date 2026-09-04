@@ -284,6 +284,12 @@ const toapisFileCdnProxy = {
     secure: true,
     rewrite: (p: string) => p.replace(/^\/cdn-files-hfsy/, ''),
   },
+  '/cdn-files-getapib': {
+    target: 'https://getapib.org',
+    changeOrigin: true,
+    secure: true,
+    rewrite: (p: string) => p.replace(/^\/cdn-files-getapib/, ''),
+  },
   /** 云智等自建 OpenAI 兼容站未配 CORS 时，前端经同源路径转发（与 openaiCompatibleService.rewriteRemoteOpenAiCompatBaseForBrowserCors 对齐） */
   '/yunzhi-openai': {
     target: 'https://yunzhi-ai.top',
