@@ -186,11 +186,14 @@ function openAiCompatFailureHint(
     if (fetchBase && isAliyunMaasFetchBase(fetchBase)) {
       return '（401：阿里云百炼鉴权失败。请在「设置 → API → 阿里云百炼」填写 API Key 并在当前域名下保存。）';
     }
-    return '（401：鉴权失败。若使用 hfsyapi.cn 模型，请在「设置 → API」填写并保存 hfsyapi.cn API Key；确认不要误填 ToAPIs、满 e 或 OpenAI 兼容通道的 Key。）';
+    return '（401：鉴权失败。若使用 DeepWhite 模型，请在「设置 → API → DeepWhite」填写并保存 API Key；若使用 hfsyapi.cn，请填写 hfsyapi.cn Key；确认不要误填其它通道的 Key。）';
   }
   if (status === 404) {
     if (fetchBase && /manxue-api|manxueapi\.com/i.test(fetchBase)) {
       return '（404：满 e 当前 Key 所在分组未配置该模型，或该模型需走 /v1/responses 而非 /v1/chat/completions。请在 manxueapi.com 控制台核对模型 ID。）';
+    }
+    if (fetchBase && /deepwhite/i.test(fetchBase)) {
+      return '（404：请确认 DeepWhite 模型 ID 与路径为 POST /v1/chat/completions；文档：https://api.deepwhiteai.com/docs ）';
     }
     return kind === 'image-edit'
       ? '（404：请确认请求为 POST multipart；开发环境须在 frontend 目录启动 Vite；生产环境需已部署 /api/codesonline-image-proxy 单入口代理。若出现 NOT_FOUND，请重新部署并硬刷新。）'
@@ -200,6 +203,9 @@ function openAiCompatFailureHint(
     return '（502/504：多为上游 API 暂时失败、超时，或生图成功但图片回传失败；codesonline 已自动改用 URL 回传，若仍失败请稍后重试、检查密钥，图生图可缩小参考图。若出现 ROUTER_EXTERNAL_TARGET_ERROR，请重新部署以启用图像 API 函数代理。）';
   }
   if (status === 503) {
+    if (fetchBase && /deepwhite/i.test(fetchBase)) {
+      return '（503：DeepWhite 上游无可用渠道。请确认 model 为网关已开通的 ID（如 glm/glm-5.3-flash），且 Key 所属分组有该模型；勿使用 gpt-4o-mini。文档：https://api.deepwhiteai.com/docs ）';
+    }
     return kind === 'generations-json'
       ? '（503：上游不可用，或该网关不支持当前 OpenAI 同步文生图格式；若使用 ToAPIs，请把 Base URL 设为 https://toapis.com/v1 。云智长耗时流式接口若经 Vercel 部署，请使用含 api/yunzhi-proxy/ 路径代理的仓库版本，以免边缘 rewrite 超时。）'
       : '（503：上游不可用或暂时过载。）';
@@ -4238,6 +4244,11 @@ function resolveChatModelForBase(baseNormalized: string, modelName: string): str
   if (m === 'qwen3.8-flash-next-deepwhite') return 'qwen/qwen3.8-flash-next';
   if (m === 'deepseek-v4-flash-deepwhite') return 'deepseek/deepseek-v4-flash';
   if (m === 'deepseek-v4-pro-deepwhite') return 'deepseek/deepseek-v4-pro';
+  // DeepWhite / New API 风格：vendor/model 原样透传（勿落到默认 gpt-4o-mini）
+  if (m.includes('/')) return m;
+  if (/deepwhite-api|deepwhiteai\.com/i.test(baseNormalized)) {
+    return m || 'qwen/qwen3.8-max';
+  }
   if (m === 'glm-5.3-flash' || m === 'glm-5.3' || m.startsWith('glm-')) return m;
   if (m === 'kimi-k2.7-code' || m.startsWith('kimi-')) return m;
   if (m.startsWith('doubao-')) return m;
@@ -5516,18 +5527,21 @@ export async function chatCompletionHistoryAtBase(
   const base = normalizeBaseUrl(baseUrlRaw);
   const model = resolveChatModelForBase(base, modelName);
   const messages = turnsToOpenAiChatMessages(turns);
+  const isDeepWhite = /deepwhite-api|deepwhiteai\.com/i.test(baseUrlRaw) || /deepwhite-api|deepwhiteai\.com/i.test(base);
+
+  const body: Record<string, unknown> = {
+    model,
+    messages,
+  };
+  // DeepWhite 文档建议显式 stream，并给足 max_tokens（推理模型会额外消耗）
+  if (isDeepWhite) {
+    body.stream = false;
+    body.max_tokens = 8192;
+  }
 
   const json = await postJsonAtBase<{
     choices?: { message?: { content?: unknown; reasoning_content?: unknown } }[];
-  }>(
-    base,
-    '/chat/completions',
-    {
-      model,
-      messages,
-    },
-    key
-  );
+  }>(base, '/chat/completions', body, key);
   const out = extractTextFromOpenAiChatJson(json);
   if (!out) throw new Error('对话接口未返回文本内容。');
   return out;
