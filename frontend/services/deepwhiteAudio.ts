@@ -46,8 +46,8 @@ export type DeepWhiteAudioGenerateResult = {
 };
 
 function deepWhiteApiBase(): string {
-  // 生产直连单入口 Serverless（?path=），与火山/阿里云代理一致，避免 [...path] 未部署导致 404
-  if (import.meta.env.PROD) return '/api/deepwhite-proxy?path=v1';
+  // 生产走边缘 rewrite → api.deepwhiteai.com（勿用 /api/deepwhite-proxy/v1/... 路径，
+  // Vercel 无 catch-all 时会直接 404；单文件函数只匹配精确 /api/deepwhite-proxy）
   return '/deepwhite-api/v1';
 }
 
