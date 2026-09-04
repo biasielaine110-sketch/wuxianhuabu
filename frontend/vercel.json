@@ -39,7 +39,7 @@
     },
     {
       "source": "/deepwhite-api/(.*)",
-      "destination": "https://api.deepwhiteai.com/$1"
+      "destination": "/api/deepwhite-proxy/$1"
     },
     {
       "source": "/cdn-files-toapis/:path*",

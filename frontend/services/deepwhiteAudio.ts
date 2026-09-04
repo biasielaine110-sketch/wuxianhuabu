@@ -46,17 +46,45 @@ export type DeepWhiteAudioGenerateResult = {
 };
 
 function deepWhiteApiBase(): string {
+  // 生产直连 Serverless，避免边缘 rewrite 丢 POST body
+  if (import.meta.env.PROD) return '/api/deepwhite-proxy/v1';
   return '/deepwhite-api/v1';
 }
 
 function requireDeepWhiteKey(): string {
-  const key = getDeepWhiteSavedKey().trim();
+  let key = getDeepWhiteSavedKey().trim().replace(/^\uFEFF/, '');
+  key = key.replace(/^Bearer\s+/i, '').trim();
+  key = key.replace(/^["'`]+|["'`]+$/g, '');
   if (!key) {
     throw new Error(
       '未配置 DeepWhite API Key。请在「设置 → API → DeepWhite」填写并保存（与对话共用）。'
     );
   }
   return key;
+}
+
+function formatUpstreamError(json: unknown, text: string, status: number): string {
+  const root = (json && typeof json === 'object' ? json : null) as Record<string, unknown> | null;
+  const err = (root?.error && typeof root.error === 'object' ? root.error : null) as Record<
+    string,
+    unknown
+  > | null;
+  const msg = String(
+    err?.message || root?.message || root?.msg || text.slice(0, 500) || status
+  ).trim();
+  const code = String(err?.code ?? root?.code ?? '').trim();
+  return code && !msg.includes(String(code)) ? `${msg}（code=${code}）` : msg;
+}
+
+const SUNO_VERSIONS = ['v3.5', 'v4', 'v4.5', 'v4.5+', 'v4.5-all', 'v5', 'v5.5'] as const;
+
+function normalizeSunoVersion(raw?: string): (typeof SUNO_VERSIONS)[number] {
+  const v = (raw || '').trim();
+  if ((SUNO_VERSIONS as readonly string[]).includes(v)) return v as (typeof SUNO_VERSIONS)[number];
+  // 兼容常见别名
+  if (v === 'v4.5plus' || v === 'v4.5-plus') return 'v4.5+';
+  if (v === 'v4.5all' || v === 'v4.5_all') return 'v4.5-all';
+  return 'v3.5';
 }
 
 export function isDeepWhiteAudioModel(modelName: string): boolean {
@@ -88,12 +116,12 @@ async function postJson(path: string, body: unknown, apiKey: string, signal?: Ab
     /* ignore */
   }
   if (!res.ok) {
-    const msg =
-      (json as { error?: { message?: string }; message?: string })?.error?.message ||
-      (json as { message?: string })?.message ||
-      text.slice(0, 400) ||
-      res.statusText;
-    throw new Error(`DeepWhite 音频提交失败 (${res.status}): ${msg}`);
+    let detail = formatUpstreamError(json, text, res.status);
+    if (res.status === 400 && path.includes('/music/')) {
+      detail +=
+        '。Suno 提交体需含 version（如 v3.5）与 prompt；自定义模式还须 title、style。可先用灵感模式 + v3.5 试一次。';
+    }
+    throw new Error(`DeepWhite 音频提交失败 (${res.status}): ${detail}`);
   }
   return json;
 }
@@ -113,12 +141,7 @@ async function getJson(path: string, apiKey: string, signal?: AbortSignal): Prom
     /* ignore */
   }
   if (!res.ok) {
-    const msg =
-      (json as { error?: { message?: string }; message?: string })?.error?.message ||
-      (json as { message?: string })?.message ||
-      text.slice(0, 400) ||
-      res.statusText;
-    throw new Error(`DeepWhite 音频查询失败 (${res.status}): ${msg}`);
+    throw new Error(`DeepWhite 音频查询失败 (${res.status}): ${formatUpstreamError(json, text, res.status)}`);
   }
   return json;
 }
@@ -278,20 +301,34 @@ export async function deepWhiteGenerateAudio(
   const apiKey = requireDeepWhiteKey();
   const upstream = resolveDeepWhiteAudioUpstreamModelId(params.model);
   const prompt = (params.prompt || '').trim();
-  if (!prompt) throw new Error('请输入提示词或歌词。');
 
   if (upstream === 'suno-generation') {
+    const custom = params.sunoCustom === true;
+    const instrumental = params.sunoInstrumental === true;
+    const version = normalizeSunoVersion(params.sunoVersion);
+    const title = (params.sunoTitle || '').trim();
+    const style = (params.sunoStyle || '').trim();
+
+    // 文档：custom=false 时 prompt 必填；custom=true 且非纯伴奏时 prompt 必填；缺字段直接 400
+    if (!custom && !prompt) throw new Error('Suno 灵感模式请填写提示词（prompt）。');
+    if (custom && !instrumental && !prompt) throw new Error('Suno 自定义模式请填写歌词（prompt）。');
+    // 上游 Suno 自定义模式通常要求 title + style，缺了易 400
+    if (custom && !title) throw new Error('Suno 自定义模式请填写曲名（title）。');
+    if (custom && !style) throw new Error('Suno 自定义模式请填写风格（style）。');
+
+    // 灵感模式只传必要字段（多余字段有的上游会 400）；与官方示例对齐
     const body: Record<string, unknown> = {
       model: 'suno',
-      custom: Boolean(params.sunoCustom),
-      version: (params.sunoVersion || 'v5').trim() || 'v5',
-      prompt,
-      instrumental: Boolean(params.sunoInstrumental),
+      custom,
+      version,
     };
-    if (params.sunoCustom) {
-      if (params.sunoTitle?.trim()) body.title = params.sunoTitle.trim();
-      if (params.sunoStyle?.trim()) body.style = params.sunoStyle.trim();
+    if (prompt) body.prompt = prompt;
+    if (instrumental) body.instrumental = true;
+    if (custom) {
+      body.title = title;
+      body.style = style;
     }
+
     const submitted = await postJson('/music/generations', body, apiKey, params.signal);
     const taskId = pickTaskId(submitted);
     const result = await pollMusicTask(taskId, apiKey, params.signal);
@@ -302,6 +339,8 @@ export async function deepWhiteGenerateAudio(
       duration: result.duration,
     };
   }
+
+  if (!prompt) throw new Error('请输入要朗读的文本。');
 
   const voice = (params.voice || 'Cherry').trim() || 'Cherry';
   const metadata: Record<string, unknown> = { voice };

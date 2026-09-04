@@ -376,6 +376,15 @@ const toapisFileCdnProxy = {
     proxyTimeout: 1_800_000,
     rewrite: (p: string) => p.replace(/^\/deepwhite-api/, ''),
   },
+  /** 生产包预览：与 vercel rewrite /deepwhite-api → /api/deepwhite-proxy 对齐 */
+  '/api/deepwhite-proxy': {
+    target: 'https://api.deepwhiteai.com',
+    changeOrigin: true,
+    secure: true,
+    timeout: 1_800_000,
+    proxyTimeout: 1_800_000,
+    rewrite: (p: string) => p.replace(/^\/api\/deepwhite-proxy/, ''),
+  },
   /** 火山方舟 Coding Plan 对话：/api/coding/v3 */
   '/volcengine-ark-coding-api': {
     target: 'https://ark.cn-beijing.volces.com',

@@ -62,10 +62,10 @@ export function AudioNodeContent({ node, onUpdate }: AudioNodeContentProps) {
               版本
               <select
                 className="mt-0.5 w-full bg-[#222] border border-[#444] rounded px-2 py-1.5 text-xs text-gray-200 outline-none focus:border-blue-500"
-                value={node.sunoVersion || 'v5'}
+                value={node.sunoVersion || 'v3.5'}
                 onChange={(e) => onUpdate({ sunoVersion: e.target.value })}
               >
-                {['v3.5', 'v4', 'v4.5', 'v4.5+', 'v5', 'v5.5'].map((v) => (
+                {['v3.5', 'v4', 'v4.5', 'v4.5+', 'v4.5-all', 'v5', 'v5.5'].map((v) => (
                   <option key={v} value={v}>
                     {v}
                   </option>
@@ -95,14 +95,14 @@ export function AudioNodeContent({ node, onUpdate }: AudioNodeContentProps) {
                 type="text"
                 value={node.sunoTitle || ''}
                 onChange={(e) => onUpdate({ sunoTitle: e.target.value })}
-                placeholder="曲名 title（可选）"
+                placeholder="曲名 title（自定义模式必填）"
                 className="w-full bg-[#222] border border-[#444] rounded px-2 py-1.5 text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500"
               />
               <input
                 type="text"
                 value={node.sunoStyle || ''}
                 onChange={(e) => onUpdate({ sunoStyle: e.target.value })}
-                placeholder="风格 style，如 lo-fi, piano"
+                placeholder="风格 style（自定义模式必填），如 lo-fi, piano"
                 className="w-full bg-[#222] border border-[#444] rounded px-2 py-1.5 text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500"
               />
             </>

@@ -789,7 +789,7 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
         ? {
             model: 'qwen3-tts-instruct-flash-deepwhite',
             audioVoice: 'Cherry',
-            sunoVersion: 'v5',
+            sunoVersion: 'v3.5',
             sunoCustom: false,
             sunoInstrumental: false,
             isGenerating: false,

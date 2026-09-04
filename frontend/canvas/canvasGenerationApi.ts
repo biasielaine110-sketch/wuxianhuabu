@@ -991,7 +991,14 @@ ${text}`,
         .filter(Boolean) as CanvasNode[];
       const textInputs = inputNodes.filter((n) => n.type === 'text').map((n) => n.prompt).filter(Boolean);
       const combinedPrompt = [node.prompt, ...textInputs].filter(Boolean).join('\n').trim();
-      if (!combinedPrompt) throw new Error('请输入提示词（或连接文本节点）');
+      const isSuno =
+        (node.model || '').includes('suno') || (node.model || '') === 'suno-generation-deepwhite';
+      const sunoCustom = node.sunoCustom === true;
+      const sunoInstrumental = node.sunoInstrumental === true;
+      // Suno 自定义+纯伴奏允许无 prompt；其余情况必须有文案
+      if (!combinedPrompt && !(isSuno && sunoCustom && sunoInstrumental)) {
+        throw new Error('请输入提示词（或连接文本节点）');
+      }
 
       const result = await deepWhiteGenerateAudio({
         model: node.model || DEEPWHITE_AUDIO_TTS_UI_ID,
@@ -999,8 +1006,8 @@ ${text}`,
         voice: node.audioVoice,
         instructions: node.audioInstructions,
         sunoVersion: node.sunoVersion,
-        sunoCustom: node.sunoCustom,
-        sunoInstrumental: node.sunoInstrumental,
+        sunoCustom,
+        sunoInstrumental,
         sunoTitle: node.sunoTitle,
         sunoStyle: node.sunoStyle,
         signal: ac.signal,
