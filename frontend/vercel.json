@@ -58,6 +58,10 @@
       "destination": "https://assets.token6688.com/:path*"
     },
     {
+      "source": "/cdn-files-token6688-cdn/:path*",
+      "destination": "https://cdn.token6688.com/:path*"
+    },
+    {
       "source": "/cdn-files-hfsy/:path*",
       "destination": "https://file.hfsyapi.cn/:path*"
     },

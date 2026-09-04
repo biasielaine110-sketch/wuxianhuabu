@@ -678,6 +678,9 @@ function rewriteKnownImageCdnToSameOrigin(imageUrl: string): string {
     if (host === 'assets.token6688.com') {
       return `${origin}/cdn-files-token6688${u.pathname}${u.search}`;
     }
+    if (host === 'cdn.token6688.com') {
+      return `${origin}/cdn-files-token6688-cdn${u.pathname}${u.search}`;
+    }
     if (host === 'file.hfsyapi.cn') {
       return `${origin}/cdn-files-hfsy${u.pathname}${u.search}`;
     }

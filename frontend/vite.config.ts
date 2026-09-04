@@ -272,6 +272,12 @@ const toapisFileCdnProxy = {
     secure: true,
     rewrite: (p: string) => p.replace(/^\/cdn-files-token6688/, ''),
   },
+  '/cdn-files-token6688-cdn': {
+    target: 'https://cdn.token6688.com',
+    changeOrigin: true,
+    secure: true,
+    rewrite: (p: string) => p.replace(/^\/cdn-files-token6688-cdn/, ''),
+  },
   '/cdn-files-hfsy': {
     target: 'https://file.hfsyapi.cn',
     changeOrigin: true,
