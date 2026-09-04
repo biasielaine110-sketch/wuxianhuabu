@@ -11,8 +11,9 @@
   },
   "allowScripts": {
     "protobufjs": true,
-    "protobufjs@7.5.5": true
+    "fsevents": true
   },
+  "packageManager": "npm@11.16.2",
   "engines": {
     "node": "24.x"
   }
