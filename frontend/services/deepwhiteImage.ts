@@ -3,7 +3,7 @@
  * - seedream-v5-pro-t2i / seedream-v5-pro-i2i → POST /v1/image/generations
  * - deepwhiteai-image-nb-2 / deepwhiteai-image-nb-2-lite → 同上
  * - deepwhiteai-image-g-v2-lowprice / deepwhiteai-image-g2-t2i|i2i → 同上
- * - midjourney-imagine → POST /v1/mj/submit/imagine（New API MJ 代理；官方 /v1/midjourney/generations 在 DeepWhite 会 400 request not found in context）
+ * - midjourney-imagine → POST /mj/submit/imagine（无 /v1）；回退 POST /v1/image/generations model=midjourney-imagine
  * 文档：https://api.deepwhiteai.com/docs
  */
 import { deepWhiteAuthHeaders, getDeepWhiteSavedKey } from './aiSettings';
@@ -90,6 +90,14 @@ function deepWhiteApiBase(): string {
   return '/deepwhite-api/v1';
 }
 
+/** New API 的 MJ 代理在站点根路径 /mj/…，不在 /v1/mj/… */
+function deepWhiteUrl(path: string): string {
+  const p = path.startsWith('/') ? path : `/${path}`;
+  if (p.startsWith('/deepwhite-api/')) return p;
+  if (p.startsWith('/mj/') || p.startsWith('/v1/')) return `/deepwhite-api${p}`;
+  return `${deepWhiteApiBase()}${p}`;
+}
+
 function requireDeepWhiteKey(): string {
   let key = getDeepWhiteSavedKey().trim().replace(/^\uFEFF/, '');
   key = key.replace(/^Bearer\s+/i, '').trim();
@@ -147,7 +155,7 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 async function postJson(path: string, body: unknown, apiKey: string, signal?: AbortSignal): Promise<unknown> {
-  const res = await fetch(`${deepWhiteApiBase()}${path}`, {
+  const res = await fetch(deepWhiteUrl(path), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -177,7 +185,7 @@ async function postJsonRaw(
   apiKey: string,
   signal?: AbortSignal
 ): Promise<PostJsonRaw> {
-  const res = await fetch(`${deepWhiteApiBase()}${path}`, {
+  const res = await fetch(deepWhiteUrl(path), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -198,7 +206,7 @@ async function postJsonRaw(
 
 function isRetryableMjSubmitFailure(status: number, json: unknown, text: string): boolean {
   if (status === 401 || status === 403) return false;
-  if (status === 404 || status === 405) return true;
+  if (status === 404 || status === 405 || status === 502 || status === 503 || status === 429) return true;
   const msg = formatUpstreamError(json, text, status).toLowerCase();
   return (
     msg.includes('request not found in context') ||
@@ -233,7 +241,7 @@ async function postJsonFirstOk(
 }
 
 async function getJson(path: string, apiKey: string, signal?: AbortSignal): Promise<unknown> {
-  const res = await fetch(`${deepWhiteApiBase()}${path}`, {
+  const res = await fetch(deepWhiteUrl(path), {
     method: 'GET',
     headers: { ...deepWhiteAuthHeaders(apiKey) },
     signal,
@@ -381,6 +389,8 @@ async function fetchMidjourneyTaskJson(
   const enc = encodeURIComponent(taskId);
   const paths = [
     `/mj/task/${enc}/fetch`,
+    `/v1/mj/task/${enc}/fetch`,
+    `/image/generations/${enc}`,
     `/midjourney/tasks/${enc}`,
     `/midjourney/${enc}`,
     `/tasks/${enc}`,
@@ -470,7 +480,7 @@ async function toDeepWhitePublicImageUrl(
   const form = new FormData();
   form.append('file', new Blob([bin], { type: mime }), `ref.${ext}`);
 
-  const res = await fetch(`${deepWhiteApiBase()}/files/upload`, {
+  const res = await fetch(deepWhiteUrl('/files/upload'), {
     method: 'POST',
     headers: { ...deepWhiteAuthHeaders(apiKey) },
     body: form,
@@ -605,17 +615,21 @@ export async function deepWhiteGenerateImage(params: DeepWhiteImageGenerateParam
       size: mjSize,
     };
     if (imageUrls.length) officialBody.image_urls = imageUrls;
-    // DeepWhite 网关是 New API：/v1/midjourney/generations 未注入 task_request → 400 request not found in context。
-    // 先走 MJ 代理 imagine；官方路径带 model 仅作回退。
+    const proxyBody = { prompt: proxyPrompt, botType: 'MID_JOURNEY' };
+    const imageGenBody: Record<string, unknown> = {
+      model: 'midjourney-imagine',
+      prompt: mjPrompt,
+      metadata: { size: mjSize, speed, ratio: mjSize },
+    };
+    if (imageUrls.length) imageGenBody.images = imageUrls;
+    // MJ 代理在 /mj/submit/imagine（无 /v1）。打到 /v1/mj/... 会 503，官方 /v1/midjourney/generations 会 400。
     const submitted = await postJsonFirstOk(
       [
-        {
-          path: '/mj/submit/imagine',
-          body: { prompt: proxyPrompt, botType: 'MID_JOURNEY' },
-        },
-        { path: '/midjourney/generations', body: { ...officialBody, model: 'midjourney' } },
-        { path: '/midjourney/generations/imagine', body: { ...officialBody, model: 'midjourney' } },
-        { path: '/midjourney/generations', body: { ...officialBody, model: 'midjourney-imagine' } },
+        { path: '/mj/submit/imagine', body: proxyBody },
+        { path: '/v1/image/generations', body: imageGenBody },
+        { path: '/v1/images/generations', body: { model: 'midjourney-imagine', prompt: mjPrompt } },
+        { path: '/v1/mj/submit/imagine', body: proxyBody },
+        { path: '/v1/midjourney/generations', body: { ...officialBody, model: 'midjourney-imagine' } },
       ],
       apiKey,
       signal
@@ -721,7 +735,8 @@ export async function deepWhiteMidjourneyUpscale(params: {
     [
       { path: '/mj/submit/change', body: { taskId, action: 'UPSCALE', index } },
       { path: '/mj/submit/simple-change', body: { content: `${taskId} U${index}` } },
-      { path: '/midjourney/generations/upscale', body: { task_id: taskId, index, model: 'midjourney' } },
+      { path: '/v1/mj/submit/change', body: { taskId, action: 'UPSCALE', index } },
+      { path: '/v1/midjourney/generations/upscale', body: { task_id: taskId, index, model: 'midjourney-imagine' } },
     ],
     apiKey,
     params.signal
