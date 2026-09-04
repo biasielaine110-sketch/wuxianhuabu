@@ -1,19 +1,17 @@
 {
   "name": "ai",
-  "workspaces": [
-    "frontend"
-  ],
+  "private": true,
   "scripts": {
-    "build": "npm run build --workspace=ai-frontend",
-    "typecheck": "npm run typecheck --workspace=ai-frontend",
-    "dev-frontend": "npm run dev --prefix frontend",
-    "dev": "npm run dev-frontend"
+    "build": "npm --prefix frontend run build",
+    "typecheck": "npm --prefix frontend run typecheck",
+    "dev-frontend": "npm --prefix frontend run dev",
+    "dev": "npm run dev-frontend",
+    "install:frontend": "npm --prefix frontend install"
   },
   "allowScripts": {
     "protobufjs": true,
     "fsevents": true
   },
-  "packageManager": "npm@11.16.2",
   "engines": {
     "node": "24.x"
   }
