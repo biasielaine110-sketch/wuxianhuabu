@@ -3,7 +3,7 @@
  * - seedream-v5-pro-t2i / seedream-v5-pro-i2i → POST /v1/image/generations
  * - deepwhiteai-image-nb-2 / deepwhiteai-image-nb-2-lite → 同上
  * - deepwhiteai-image-g-v2-lowprice / deepwhiteai-image-g2-t2i|i2i → 同上
- * - midjourney-imagine → POST /v1/midjourney/generations + GET /v1/midjourney/tasks/{id}
+ * - midjourney-imagine → POST /v1/mj/submit/imagine（New API MJ 代理；官方 /v1/midjourney/generations 在 DeepWhite 会 400 request not found in context）
  * 文档：https://api.deepwhiteai.com/docs
  */
 import { deepWhiteAuthHeaders, getDeepWhiteSavedKey } from './aiSettings';
@@ -169,6 +169,69 @@ async function postJson(path: string, body: unknown, apiKey: string, signal?: Ab
   return json;
 }
 
+type PostJsonRaw = { ok: boolean; status: number; json: unknown; text: string };
+
+async function postJsonRaw(
+  path: string,
+  body: unknown,
+  apiKey: string,
+  signal?: AbortSignal
+): Promise<PostJsonRaw> {
+  const res = await fetch(`${deepWhiteApiBase()}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...deepWhiteAuthHeaders(apiKey),
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+  const text = await res.text();
+  let json: unknown = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    /* ignore */
+  }
+  return { ok: res.ok, status: res.status, json, text };
+}
+
+function isRetryableMjSubmitFailure(status: number, json: unknown, text: string): boolean {
+  if (status === 401 || status === 403) return false;
+  if (status === 404 || status === 405) return true;
+  const msg = formatUpstreamError(json, text, status).toLowerCase();
+  return (
+    msg.includes('request not found in context') ||
+    msg.includes('invalid_request') ||
+    msg.includes('not found') ||
+    msg.includes('unknown model') ||
+    msg.includes('no available channel') ||
+    msg.includes('no route')
+  );
+}
+
+async function postJsonFirstOk(
+  attempts: { path: string; body: unknown }[],
+  apiKey: string,
+  signal?: AbortSignal
+): Promise<unknown> {
+  let last: PostJsonRaw | null = null;
+  for (const { path, body } of attempts) {
+    const raw = await postJsonRaw(path, body, apiKey, signal);
+    last = raw;
+    if (raw.ok) return raw.json;
+    if (!isRetryableMjSubmitFailure(raw.status, raw.json, raw.text)) {
+      throw new Error(
+        `DeepWhite 生图提交失败 (${raw.status}): ${formatUpstreamError(raw.json, raw.text, raw.status)}`
+      );
+    }
+  }
+  const status = last?.status ?? 400;
+  throw new Error(
+    `DeepWhite 生图提交失败 (${status}): ${formatUpstreamError(last?.json, last?.text || '', status)}`
+  );
+}
+
 async function getJson(path: string, apiKey: string, signal?: AbortSignal): Promise<unknown> {
   const res = await fetch(`${deepWhiteApiBase()}${path}`, {
     method: 'GET',
@@ -231,6 +294,13 @@ function pickImageUrls(json: unknown): string[] {
   pushUrl(urls, data?.image_url);
   pushUrl(urls, data?.imageUrl);
   pushUrl(urls, root?.imageUrl);
+  const props = (data?.properties && typeof data.properties === 'object'
+    ? data.properties
+    : root?.properties && typeof root.properties === 'object'
+      ? root.properties
+      : null) as Record<string, unknown> | null;
+  pushUrl(urls, props?.imageUrl);
+  pushUrl(urls, props?.image_url);
   pushUrl(urls, data?.grid_image_url);
   pushUrl(urls, root?.grid_image_url);
   if (Array.isArray(content?.image_urls)) content.image_urls.forEach((u) => pushUrl(urls, u));
@@ -309,8 +379,12 @@ async function fetchMidjourneyTaskJson(
   signal?: AbortSignal
 ): Promise<unknown> {
   const enc = encodeURIComponent(taskId);
-  // 推荐 GET /v1/midjourney/tasks/{id}；兼容 /v1/midjourney/{id}；统一任务 GET /v1/tasks/{id}
-  const paths = [`/midjourney/tasks/${enc}`, `/midjourney/${enc}`, `/tasks/${enc}`];
+  const paths = [
+    `/mj/task/${enc}/fetch`,
+    `/midjourney/tasks/${enc}`,
+    `/midjourney/${enc}`,
+    `/tasks/${enc}`,
+  ];
   let lastErr: unknown;
   for (const path of paths) {
     try {
@@ -524,14 +598,28 @@ export async function deepWhiteGenerateImage(params: DeepWhiteImageGenerateParam
     if (!/--v\s/i.test(mjPrompt)) mjPrompt += ' --v 6.1';
     mjPrompt = clampDeepWhiteImagePrompt(mjPrompt);
     const speed = /--turbo\b/i.test(prompt) ? 'turbo' : /--fast\b/i.test(prompt) ? 'fast' : 'relax';
-    // 新版 /v1/midjourney/... 自动注入 model=midjourney，请求体不要传 model
-    const body: Record<string, unknown> = {
+    const proxyPrompt = imageUrls.length ? `${imageUrls.join(' ')} ${mjPrompt}`.trim() : mjPrompt;
+    const officialBody: Record<string, unknown> = {
       prompt: mjPrompt,
       speed,
       size: mjSize,
     };
-    if (imageUrls.length) body.image_urls = imageUrls;
-    const submitted = await postJson('/midjourney/generations', body, apiKey, signal);
+    if (imageUrls.length) officialBody.image_urls = imageUrls;
+    // DeepWhite 网关是 New API：/v1/midjourney/generations 未注入 task_request → 400 request not found in context。
+    // 先走 MJ 代理 imagine；官方路径带 model 仅作回退。
+    const submitted = await postJsonFirstOk(
+      [
+        {
+          path: '/mj/submit/imagine',
+          body: { prompt: proxyPrompt, botType: 'MID_JOURNEY' },
+        },
+        { path: '/midjourney/generations', body: { ...officialBody, model: 'midjourney' } },
+        { path: '/midjourney/generations/imagine', body: { ...officialBody, model: 'midjourney' } },
+        { path: '/midjourney/generations', body: { ...officialBody, model: 'midjourney-imagine' } },
+      ],
+      apiKey,
+      signal
+    );
     const taskId = pickTaskId(submitted);
     rememberMidjourneyTaskId(signal, taskId);
     const urls = await pollMidjourneyTask(taskId, apiKey, signal);
@@ -629,9 +717,12 @@ export async function deepWhiteMidjourneyUpscale(params: {
   const taskId = (params.taskId || '').trim();
   if (!taskId) throw new Error('缺少 Midjourney 任务 id，请先完成一次 Imagine。');
   const index = Math.max(1, Math.min(4, Math.round(Number(params.index)) || 1));
-  const submitted = await postJson(
-    '/midjourney/generations/upscale',
-    { task_id: taskId, index },
+  const submitted = await postJsonFirstOk(
+    [
+      { path: '/mj/submit/change', body: { taskId, action: 'UPSCALE', index } },
+      { path: '/mj/submit/simple-change', body: { content: `${taskId} U${index}` } },
+      { path: '/midjourney/generations/upscale', body: { task_id: taskId, index, model: 'midjourney' } },
+    ],
     apiKey,
     params.signal
   );
