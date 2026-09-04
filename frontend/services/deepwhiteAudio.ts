@@ -46,8 +46,8 @@ export type DeepWhiteAudioGenerateResult = {
 };
 
 function deepWhiteApiBase(): string {
-  // 生产直连 Serverless，避免边缘 rewrite 丢 POST body
-  if (import.meta.env.PROD) return '/api/deepwhite-proxy/v1';
+  // 生产直连单入口 Serverless（?path=），与火山/阿里云代理一致，避免 [...path] 未部署导致 404
+  if (import.meta.env.PROD) return '/api/deepwhite-proxy?path=v1';
   return '/deepwhite-api/v1';
 }
 

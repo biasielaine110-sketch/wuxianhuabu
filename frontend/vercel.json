@@ -39,7 +39,7 @@
     },
     {
       "source": "/deepwhite-api/(.*)",
-      "destination": "/api/deepwhite-proxy/$1"
+      "destination": "/api/deepwhite-proxy?path=$1"
     },
     {
       "source": "/cdn-files-toapis/:path*",
@@ -80,6 +80,10 @@
     {
       "source": "/api/volcengine-ark-proxy/(.*)",
       "destination": "/api/volcengine-ark-proxy?path=$1"
+    },
+    {
+      "source": "/api/deepwhite-proxy/(.*)",
+      "destination": "/api/deepwhite-proxy?path=$1"
     },
     {
       "source": "/aliyun-maas-api/(.*)",

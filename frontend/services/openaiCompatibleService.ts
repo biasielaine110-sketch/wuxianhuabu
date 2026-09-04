@@ -158,8 +158,11 @@ function rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNormalized: string): st
     }
     if (hostname === 'api.deepwhiteai.com') {
       const pathname = u.pathname.replace(/\/+$/, '') || '/v1';
-      const prefix = import.meta.env.PROD ? '/api/deepwhite-proxy' : '/deepwhite-api';
-      next = `${window.location.origin}${prefix}${pathname}`;
+      if (import.meta.env.PROD) {
+        next = `${window.location.origin}/api/deepwhite-proxy?path=${pathname.replace(/^\//, '')}`;
+      } else {
+        next = `${window.location.origin}/deepwhite-api${pathname}`;
+      }
     }
   } catch {
     /* keep next */

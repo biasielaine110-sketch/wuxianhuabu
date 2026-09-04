@@ -62,7 +62,7 @@ export function clampDeepWhiteImageResolution(modelId: string, resolution?: stri
 }
 
 function deepWhiteApiBase(): string {
-  if (import.meta.env.PROD) return '/api/deepwhite-proxy/v1';
+  if (import.meta.env.PROD) return '/api/deepwhite-proxy?path=v1';
   return '/deepwhite-api/v1';
 }
 
