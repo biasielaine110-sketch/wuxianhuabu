@@ -128,7 +128,11 @@
     },
     {
       "source": "/manxue-api/(.*)",
-      "destination": "/api/manxue-proxy/$1"
+      "destination": "/api/manxue-proxy?path=$1"
+    },
+    {
+      "source": "/api/manxue-proxy/(.*)",
+      "destination": "/api/manxue-proxy?path=$1"
     },
     {
       "source": "/((?!api/|assets/|manxue-api/).*)",
