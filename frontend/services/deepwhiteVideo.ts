@@ -2,22 +2,40 @@
  * DeepWhite 视频：
  * - hailuo-h3-max-turbo-t2v → POST /v1/videos + GET /v1/videos/{id}
  * - hailuo-h3-max-turbo-i2v → 同上（需 images 首帧，可选尾帧）
+ * - deepwhiteai-upscaler → 同上（必填输入视频，无需提示词；上游 rhart-video/video-upscaler）
  * 文档：https://api.deepwhiteai.com/docs
  */
 import { deepWhiteAuthHeaders, getDeepWhiteSavedKey } from './aiSettings';
 
 export const DEEPWHITE_HAILUO_H3_MAX_TURBO_T2V_UI_ID = 'hailuo-h3-max-turbo-t2v-deepwhite';
 export const DEEPWHITE_HAILUO_H3_MAX_TURBO_I2V_UI_ID = 'hailuo-h3-max-turbo-i2v-deepwhite';
+export const DEEPWHITE_UPSCALER_UI_ID = 'deepwhiteai-upscaler';
 
 const DEEPWHITE_VIDEO_UI_IDS = new Set([
   DEEPWHITE_HAILUO_H3_MAX_TURBO_T2V_UI_ID,
   DEEPWHITE_HAILUO_H3_MAX_TURBO_I2V_UI_ID,
+  DEEPWHITE_UPSCALER_UI_ID,
   'hailuo-h3-max-turbo-t2v',
   'hailuo-h3-max-turbo-i2v',
+  'rhart-video/video-upscaler',
+  'rhart-video-video-upscaler',
 ]);
 
 export function isDeepWhiteVideoModel(modelName: string): boolean {
   return DEEPWHITE_VIDEO_UI_IDS.has((modelName || '').trim());
+}
+
+export function isDeepWhiteUpscaler(modelName: string): boolean {
+  const m = (modelName || '').trim();
+  return (
+    m === DEEPWHITE_UPSCALER_UI_ID ||
+    m === 'rhart-video/video-upscaler' ||
+    m === 'rhart-video-video-upscaler'
+  );
+}
+
+export function isDeepWhiteHailuoVideoModel(modelName: string): boolean {
+  return isDeepWhiteHailuoH3MaxTurboT2v(modelName) || isDeepWhiteHailuoH3MaxTurboI2v(modelName);
 }
 
 export function isDeepWhiteHailuoH3MaxTurboT2v(modelName: string): boolean {
@@ -100,6 +118,16 @@ export function clampDeepWhiteHailuoResolution(resolution?: string): '768P' | '2
   const r = (resolution || '').trim().toLowerCase().replace(/\s/g, '');
   if (r === '2k' || r === '1080p' || r === '2K'.toLowerCase()) return '2K';
   return '768P';
+}
+
+export type DeepWhiteUpscalerResolution = '720p' | '1080p' | '2k' | '4k';
+
+export function clampDeepWhiteUpscalerResolution(resolution?: string): DeepWhiteUpscalerResolution {
+  const r = (resolution || '').trim().toLowerCase().replace(/\s/g, '');
+  if (r === '720p' || r === '720') return '720p';
+  if (r === '2k') return '2k';
+  if (r === '4k') return '4k';
+  return '1080p';
 }
 
 export function clampDeepWhiteHailuoDuration(seconds?: number): number {
@@ -237,13 +265,24 @@ function pickVideoResultUrl(json: unknown): string {
     unknown
   > | null;
 
+  const outputs = Array.isArray(data?.outputs)
+    ? data.outputs
+    : Array.isArray(root?.outputs)
+      ? root.outputs
+      : [];
   const candidates = [
     metadata?.url,
     nestedMeta?.url,
     root?.url,
     data?.url,
     data?.result_url,
+    data?.video_url,
+    data?.videoUrl,
     metadata?.video_url,
+    metadata?.videoUrl,
+    root?.video_url,
+    root?.videoUrl,
+    outputs[0],
   ];
   for (const c of candidates) {
     const s = typeof c === 'string' ? c.trim() : '';
@@ -314,6 +353,115 @@ export async function deepWhiteGenerateVideo(params: DeepWhiteVideoGenerateParam
   };
   if (prompt) body.prompt = prompt;
   if (isI2v) body.images = imageUrls;
+
+  const submitted = await postJson('/videos', body, apiKey, params.signal);
+  const taskId = pickTaskId(submitted);
+  return await pollVideoTask(taskId, apiKey, params.signal);
+}
+
+function unwrapSameOriginProxyToPublicUrl(raw: string): string {
+  const t = (raw || '').trim();
+  if (!t || typeof window === 'undefined') return t;
+  try {
+    const u = new URL(t, window.location.origin);
+    if (u.origin !== window.location.origin) return t;
+    const path = u.pathname;
+    const pairs: [string, string][] = [
+      ['/cdn-files-getapib', 'https://getapib.org'],
+      ['/cdn-files-toapis-xyz', 'https://files.toapis.xyz'],
+      ['/cdn-files-toapis', 'https://files.toapis.com'],
+      ['/cdn-files-qixinai', 'https://www.qixinai.net'],
+      ['/cdn-files-dashlyai', 'https://files.dashlyai.cc'],
+      ['/cdn-files-token6688-cdn', 'https://cdn.token6688.com'],
+      ['/cdn-files-token6688', 'https://assets.token6688.com'],
+      ['/cdn-files-hfsy', 'https://file.hfsyapi.cn'],
+    ];
+    for (const [prefix, origin] of pairs) {
+      if (path === prefix || path.startsWith(`${prefix}/`)) {
+        return `${origin}${path.slice(prefix.length)}${u.search}`;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return t;
+}
+
+async function toDeepWhitePublicVideoUrl(
+  raw: string,
+  apiKey: string,
+  signal?: AbortSignal
+): Promise<string> {
+  const t = unwrapSameOriginProxyToPublicUrl((raw || '').trim());
+  if (!t) throw new Error('输入视频为空');
+  const isHttp = /^https?:\/\//i.test(t);
+  const sameOrigin =
+    typeof window !== 'undefined' && isHttp && t.startsWith(window.location.origin);
+  if (isHttp && !sameOrigin && !/^blob:/i.test(t)) return t;
+
+  const fetchUrl = /^blob:|^data:/i.test(t) ? t : raw;
+  const resBlob = await fetch(fetchUrl, { signal });
+  if (!resBlob.ok) {
+    throw new Error(`读取输入视频失败 (${resBlob.status})，请改用可公网访问的成片链接。`);
+  }
+  const blob = await resBlob.blob();
+  const mime = blob.type && blob.type.startsWith('video/') ? blob.type : 'video/mp4';
+  const ext = mime.includes('webm') ? 'webm' : mime.includes('quicktime') ? 'mov' : 'mp4';
+  const form = new FormData();
+  form.append('file', blob, `input.${ext}`);
+
+  const res = await fetch(`${deepWhiteApiBase()}/files/upload`, {
+    method: 'POST',
+    headers: { ...deepWhiteAuthHeaders(apiKey) },
+    body: form,
+    signal,
+  });
+  const text = await res.text();
+  let json: unknown = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    /* ignore */
+  }
+  if (!res.ok) {
+    throw new Error(`DeepWhite 视频上传失败 (${res.status}): ${formatUpstreamError(json, text, res.status)}`);
+  }
+  const root = json as Record<string, unknown> | null;
+  const data = (root?.data && typeof root.data === 'object' ? root.data : root) as Record<
+    string,
+    unknown
+  > | null;
+  const url = String(root?.url || data?.url || '').trim();
+  if (!url) throw new Error('DeepWhite 视频上传未返回 url');
+  return url;
+}
+
+export type DeepWhiteUpscaleVideoParams = {
+  videoUrl: string;
+  resolution?: string;
+  signal?: AbortSignal;
+};
+
+/**
+ * DeepWhite 视频超分（deepwhiteai-upscaler）。
+ * 与文生/图生视频相同异步接口，但必填输入视频、不发送提示词。
+ */
+export async function deepWhiteUpscaleVideo(params: DeepWhiteUpscaleVideoParams): Promise<string> {
+  const apiKey = requireDeepWhiteKey();
+  const videoUrl = await toDeepWhitePublicVideoUrl(params.videoUrl, apiKey, params.signal);
+  const targetResolution = clampDeepWhiteUpscalerResolution(params.resolution);
+
+  const body: Record<string, unknown> = {
+    model: DEEPWHITE_UPSCALER_UI_ID,
+    video: videoUrl,
+    videoUrl,
+    video_url: videoUrl,
+    metadata: {
+      target_resolution: targetResolution,
+      targetResolution,
+      videoUrl,
+    },
+  };
 
   const submitted = await postJson('/videos', body, apiKey, params.signal);
   const taskId = pickTaskId(submitted);

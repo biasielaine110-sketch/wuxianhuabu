@@ -57,6 +57,7 @@ import {
 } from '../services/canvasAssetResolver';
 import type { CanvasNodeRenderState } from './canvasNodeRenderState';
 import { getNodeHeaderMeta } from './nodeHeaderMeta';
+import { isDeepWhiteUpscaler } from '../services/deepwhiteVideo';
 
 const PanoramaNodeContent = lazy(() =>
   import('./PanoramaNodeContent').then((m) => ({ default: m.PanoramaNodeContent }))
@@ -127,6 +128,7 @@ const viewMode = node.viewMode || 'single';
 const currentIndex = node.currentImageIndex || 0;
 const videoUrls = node.videos || [];
 const currentVideoIdx = node.currentVideoIndex ?? 0;
+const isDeepWhiteVideoUpscaler = node.type === 'video' && isDeepWhiteUpscaler(node.model || '');
 
 return (
   <CanvasNodeShell
@@ -584,6 +586,12 @@ return (
             />
           )}
           <div className="relative flex flex-col flex-1 min-h-0">
+            {isDeepWhiteVideoUpscaler ? (
+              <div className="text-xs text-gray-400 px-1 py-2 leading-relaxed">
+                将含成片的视频节点连到本节点后点击生成。无需提示词。
+              </div>
+            ) : (
+            <>
             {(node.type === 'i2i' || node.type === 'video') && (
               <RefPickBar
                 slots={buildIncomingRefSlots(node.id, canvasEdges, canvasNodes)}
@@ -729,6 +737,8 @@ return (
                 }
               }}
             />
+            )}
+            </>
             )}
           </div>
           {(node.type === 't2i' || node.type === 'i2i') && (

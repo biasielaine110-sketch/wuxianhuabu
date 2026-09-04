@@ -7,10 +7,12 @@ import { EyedropperIcon } from './canvasIcons';
 import {
   DEEPWHITE_HAILUO_H3_MAX_TURBO_I2V_UI_ID,
   DEEPWHITE_HAILUO_H3_MAX_TURBO_T2V_UI_ID,
+  DEEPWHITE_UPSCALER_UI_ID,
   getVideoModelSwitchUpdates,
   isDeepWhiteHailuoH3MaxTurboI2v,
   isDeepWhiteHailuoH3MaxTurboT2v,
-  isDeepWhiteVideoModel,
+  isDeepWhiteHailuoVideoModel,
+  isDeepWhiteUpscaler,
   isHfsyGrokImagineVideoModel,
   isHfsyMinimaxH3VideoModel,
   isHfsySd2VideoModel,
@@ -62,9 +64,10 @@ export function VideoNodeSettingsPanel({
   const isHfsySd2 = isHfsySd2VideoModel(vm);
   const isHfsyMinimaxH3 = isHfsyMinimaxH3VideoModel(vm);
   const isHfsyGrokImagine = isHfsyGrokImagineVideoModel(vm);
-  const isDeepWhiteHailuo = isDeepWhiteVideoModel(vm);
+  const isDeepWhiteHailuo = isDeepWhiteHailuoVideoModel(vm);
   const isDeepWhiteHailuoT2v = isDeepWhiteHailuoH3MaxTurboT2v(vm);
   const isDeepWhiteHailuoI2v = isDeepWhiteHailuoH3MaxTurboI2v(vm);
+  const isDeepWhiteUpscale = isDeepWhiteUpscaler(vm);
   const isHfsySdFixed480 = vm === 'hfsy-sd-2.5-480' || vm === 'hfsy-sd-2-mini-480';
   const isHfsySdFixed720 = vm === 'hfsy-sd-2.5-720' || vm === 'hfsy-sd-2-vip-720' || vm === 'hfsy-sd-2-mini-720';
   const isHfsySdFixed1080 = vm === 'hfsy-sd-2-1080-cheap';
@@ -194,6 +197,10 @@ export function VideoNodeSettingsPanel({
         </button>
       </div>
       <div className="text-xs text-gray-500 px-1 leading-relaxed">
+        {isDeepWhiteUpscale
+          ? '将含成片的视频节点连到本节点。DeepWhite 视频超分无需提示词；目标分辨率 720p / 1080p / 2k / 4k；源片最长约 10 分钟（MP4）；需 DeepWhite API Key。'
+          : (
+        <>
         需 OpenAI 兼容 + ToAPIs Base URL。最多 3 张参考图（视频将截取关键帧）{audioSlots.length > 0 && <span className="text-blue-400 font-medium">· 已连接语音参考</span>}。
         {isToApisGrokVideo15
           ? ' · grok-video-1.5：仅图生视频，必须连接 1 张参考图；1–15 秒；480p/720p'
@@ -224,6 +231,8 @@ export function VideoNodeSettingsPanel({
                       : isHfsySd2
                         ? ' · Seedance（hfsy）：5–15 秒；多画幅；需 hfsyapi.cn API Key'
                         : ''}
+        </>
+          )}
       </div>
       {!isSora && !isVeo && isGroDur && (
         <div className="text-[9px] text-amber-600/95 px-1 leading-snug">
@@ -284,6 +293,7 @@ export function VideoNodeSettingsPanel({
             <option value={DEEPWHITE_HAILUO_H3_MAX_TURBO_I2V_UI_ID}>
               Hailuo H3 Max Turbo 图生视频（DeepWhite）
             </option>
+            <option value={DEEPWHITE_UPSCALER_UI_ID}>视频超分 Deepwhiteai Upscaler</option>
           </optgroup>
           <optgroup label="即梦 (Dreamina)">
             <option value="jimeng-seedance2.0fast">即梦 Seedance 2.0 (Fast)</option>
@@ -408,7 +418,7 @@ export function VideoNodeSettingsPanel({
               <option value={12}>12 秒</option>
               <option value={15}>15 秒</option>
             </select>
-          ) : isHfsyMinimaxH3 || isDeepWhiteHailuo ? (
+          ) : isDeepWhiteUpscale ? null : isHfsyMinimaxH3 || isDeepWhiteHailuo ? (
             <select
               className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
               value={[5, 6, 8, 10, 12, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 5}
@@ -541,6 +551,10 @@ export function VideoNodeSettingsPanel({
               <option value="16:9">16:9</option>
               <option value="9:16">9:16</option>
             </select>
+          ) : isDeepWhiteUpscale ? (
+            <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222] text-xs">
+              画幅随源视频
+            </span>
           ) : isDeepWhiteHailuoT2v ? (
             <select
               className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
@@ -634,6 +648,29 @@ export function VideoNodeSettingsPanel({
           )}
           {isSora || isHfsyMinimaxH3 ? (
             <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p</span>
+          ) : isDeepWhiteUpscale ? (
+            <select
+              className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+              value={
+                node.videoResolution === '720p' ||
+                node.videoResolution === '1080p' ||
+                node.videoResolution === '2k' ||
+                node.videoResolution === '4k'
+                  ? node.videoResolution
+                  : '1080p'
+              }
+              onChange={(e) =>
+                onUpdateNode(node.id, {
+                  videoResolution: e.target.value as '720p' | '1080p' | '2k' | '4k',
+                })
+              }
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <option value="720p">720p</option>
+              <option value="1080p">1080p</option>
+              <option value="2k">2K</option>
+              <option value="4k">4K</option>
+            </select>
           ) : isDeepWhiteHailuo ? (
             <select
               className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"

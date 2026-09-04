@@ -757,11 +757,48 @@ ${text}`,
 
     setNodes(prev => prev.map(n => (n.id === nodeId ? { ...n, isGenerating: true, error: undefined } : n)));
 
-    // ---- DeepWhite 视频（Hailuo H3 Max Turbo）----
+    // ---- DeepWhite 视频（Hailuo / 超分）----
     {
-      const { isDeepWhiteVideoModel } = await import('../services/deepwhiteVideo');
+      const { isDeepWhiteVideoModel, isDeepWhiteUpscaler } = await import('../services/deepwhiteVideo');
       if (isDeepWhiteVideoModel(node.model || '')) {
         try {
+          const slots = buildIncomingRefSlots(nodeId, edgesRef.current, nodesRef.current);
+
+          if (isDeepWhiteUpscaler(node.model || '')) {
+            const { deepWhiteUpscaleVideo } = await import('../services/deepwhiteVideo');
+            const videoSlots = slots.filter((s) => s.kind === 'video' && s.videoUrl);
+            const picked = videoSlots[0];
+            if (!picked?.videoUrl) {
+              throw new Error('视频超分请连接一个含成片的视频节点（无需提示词）');
+            }
+            const srcNode = picked.sourceNodeId
+              ? nodesRef.current.find((n) => n.id === picked.sourceNodeId)
+              : undefined;
+            const inputUrl =
+              (srcNode as { originalVideoUrl?: string } | undefined)?.originalVideoUrl || picked.videoUrl;
+
+            const videoUrl = await deepWhiteUpscaleVideo({
+              videoUrl: inputUrl,
+              resolution: node.videoResolution || '1080p',
+              signal: ac.signal,
+            });
+
+            const prevVideos = node.videos || [];
+            const newVideos = [...prevVideos, videoUrl];
+            setNodes((prev) =>
+              prev.map((n) =>
+                n.id === nodeId
+                  ? {
+                      ...n,
+                      isGenerating: false,
+                      videos: newVideos,
+                      currentVideoIndex: prevVideos.length,
+                      error: undefined,
+                    }
+                  : n
+              )
+            );
+          } else {
           const incomingEdges = edgesRef.current.filter((e) => e.targetId === nodeId);
           const inputNodes = incomingEdges
             .map((e) => nodesRef.current.find((n) => n.id === e.sourceId))
@@ -769,7 +806,6 @@ ${text}`,
           const textInputs = inputNodes.filter((n) => n.type === 'text').map((n) => n.prompt).filter(Boolean);
           const combinedRaw = [node.prompt, ...textInputs].filter(Boolean).join('\n').trim();
 
-          const slots = buildIncomingRefSlots(nodeId, edgesRef.current, nodesRef.current);
           const pickIndices = parseRefPickIndices(combinedRaw);
           const combinedPrompt = stripRefMarkers(combinedRaw) || combinedRaw;
           const { base64s: imageInputs } = await resolveSlotImagesForIndices(slots, pickIndices);
@@ -809,6 +845,7 @@ ${text}`,
                 : n
             )
           );
+          }
         } catch (err: unknown) {
           const aborted =
             (err as { name?: string })?.name === 'AbortError' ||

@@ -3,7 +3,7 @@
  * - seedream-v5-pro-t2i / seedream-v5-pro-i2i → POST /v1/image/generations
  * - deepwhiteai-image-nb-2 / deepwhiteai-image-nb-2-lite → 同上
  * - deepwhiteai-image-g-v2-lowprice / deepwhiteai-image-g2-t2i|i2i → 同上
- * - midjourney-imagine → POST /v1/midjourney/generations + GET /v1/midjourney/tasks/{id}
+ * - midjourney-imagine → POST /v1/mj/submit/imagine + GET /v1/mj/task/{id}/fetch
  * 文档：https://api.deepwhiteai.com/docs
  */
 import { deepWhiteAuthHeaders, getDeepWhiteSavedKey } from './aiSettings';
@@ -178,18 +178,22 @@ async function getJson(path: string, apiKey: string, signal?: AbortSignal): Prom
 
 function pickTaskId(json: unknown): string {
   const root = json as Record<string, unknown>;
+  const code = root?.code;
+  if (typeof code === 'number' && code !== 1 && code !== 200) {
+    throw new Error(String(root.description || root.message || `code=${code}`));
+  }
   const data = root?.data;
   if (Array.isArray(data) && data[0] && typeof data[0] === 'object') {
     const row = data[0] as Record<string, unknown>;
-    const id = String(row.task_id || row.id || '').trim();
+    const id = String(row.task_id || row.id || row.result || '').trim();
     if (id) return id;
   }
   if (data && typeof data === 'object' && !Array.isArray(data)) {
     const d = data as Record<string, unknown>;
-    const id = String(d.task_id || d.id || '').trim();
+    const id = String(d.task_id || d.id || d.result || '').trim();
     if (id) return id;
   }
-  const id = String(root?.task_id || root?.id || '').trim();
+  const id = String(root?.result || root?.task_id || root?.id || '').trim();
   if (id) return id;
   throw new Error('DeepWhite 未返回 task_id。');
 }
@@ -212,11 +216,14 @@ function pickImageUrls(json: unknown): string[] {
   pushUrl(urls, data?.result_url);
   pushUrl(urls, content?.image_url);
   pushUrl(urls, data?.image_url);
+  pushUrl(urls, data?.imageUrl);
+  pushUrl(urls, root?.imageUrl);
   pushUrl(urls, data?.grid_image_url);
   pushUrl(urls, root?.grid_image_url);
   if (Array.isArray(content?.image_urls)) content.image_urls.forEach((u) => pushUrl(urls, u));
   if (Array.isArray(data?.image_urls)) data.image_urls.forEach((u) => pushUrl(urls, u));
-  if (Array.isArray(root?.image_urls)) root.image_urls.forEach((u) => pushUrl(urls, u));
+  if (Array.isArray(data?.imageUrls)) data.imageUrls.forEach((u) => pushUrl(urls, u));
+  if (Array.isArray(root?.imageUrls)) root.imageUrls.forEach((u) => pushUrl(urls, u));
 
   if (Array.isArray(root?.data)) {
     for (const item of root.data) {
@@ -277,9 +284,13 @@ async function pollMidjourneyTask(
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     let json: unknown;
     try {
-      json = await getJson(`/midjourney/tasks/${encodeURIComponent(taskId)}`, apiKey, signal);
+      json = await getJson(`/mj/task/${encodeURIComponent(taskId)}/fetch`, apiKey, signal);
     } catch {
-      json = await getJson(`/midjourney/${encodeURIComponent(taskId)}`, apiKey, signal);
+      try {
+        json = await getJson(`/midjourney/tasks/${encodeURIComponent(taskId)}`, apiKey, signal);
+      } catch {
+        json = await getJson(`/midjourney/${encodeURIComponent(taskId)}`, apiKey, signal);
+      }
     }
     const root = json as Record<string, unknown>;
     const data = (root?.data && typeof root.data === 'object' && !Array.isArray(root.data)
@@ -294,6 +305,7 @@ async function pollMidjourneyTask(
       const reason =
         String(
           data?.fail_reason ||
+            data?.failReason ||
             (data?.error as { message?: string })?.message ||
             root?.description ||
             root?.message ||
@@ -468,16 +480,19 @@ export async function deepWhiteGenerateImage(params: DeepWhiteImageGenerateParam
       imageUrls.push(await toDeepWhitePublicImageUrl(ref, apiKey, signal));
     }
     const mjSize = clampMidjourneySize(aspect);
-    // DeepWhite/NewAPI 只挂了 POST /v1/midjourney/generations；/imagine 会落到通用 task relay → request not found in context
+    let mjPrompt = prompt;
+    if (imageUrls.length) mjPrompt = `${imageUrls.join(' ')} ${mjPrompt}`.trim();
+    if (!/--ar\s/i.test(mjPrompt)) mjPrompt += ` --ar ${mjSize}`;
+    if (!/--v\s/i.test(mjPrompt)) mjPrompt += ' --v 6.1';
+    if (!/--relax|--fast|--turbo/i.test(mjPrompt)) mjPrompt += ' --relax';
+    mjPrompt = clampDeepWhiteImagePrompt(mjPrompt);
+    // DeepWhite 基于 New API：正式入口是 /mj/submit/imagine。
+    // /v1/midjourney/generations 会进通用 task relay → request not found in context
     const body: Record<string, unknown> = {
-      model: 'midjourney-imagine',
-      prompt,
-      size: mjSize,
-      version: '6.1',
-      speed: 'relax',
+      prompt: mjPrompt,
+      botType: 'MID_JOURNEY',
     };
-    if (imageUrls.length) body.image_urls = imageUrls;
-    const submitted = await postJson('/midjourney/generations', body, apiKey, signal);
+    const submitted = await postJson('/mj/submit/imagine', body, apiKey, signal);
     const taskId = pickTaskId(submitted);
     const urls = await pollMidjourneyTask(taskId, apiKey, signal);
     const want = Math.max(1, Math.min(4, params.numberOfImages || urls.length || 1));

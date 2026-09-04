@@ -235,7 +235,7 @@ export interface CanvasNode {
   currentVideoIndex?: number;
   /** 视频时长（秒）：grok-video-3 为 5–30 档；sora-2-vvip 仅 4 / 8 / 12；veo3.1-fast 在 ToAPIs 文档为固定 8 秒 */
   videoDuration?: number;
-  videoResolution?: '480p' | '720p' | '1080p' | '4k';
+  videoResolution?: '480p' | '720p' | '1080p' | '2k' | '4k';
   /** 语音参考：音频 base64 数据 */
   audio?: string;
   /** 语音参考：音频 URL（上传后获得） */

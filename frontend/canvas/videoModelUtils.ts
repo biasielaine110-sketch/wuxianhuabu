@@ -4,16 +4,22 @@ import { MANXUE_C_DANCE2_PRO_720_VIDEO_MODEL_ID } from '../services/openaiCompat
 import {
   DEEPWHITE_HAILUO_H3_MAX_TURBO_I2V_UI_ID,
   DEEPWHITE_HAILUO_H3_MAX_TURBO_T2V_UI_ID,
+  DEEPWHITE_UPSCALER_UI_ID,
   isDeepWhiteHailuoH3MaxTurboI2v,
   isDeepWhiteHailuoH3MaxTurboT2v,
+  isDeepWhiteHailuoVideoModel,
+  isDeepWhiteUpscaler,
   isDeepWhiteVideoModel,
 } from '../services/deepwhiteVideo';
 
 export {
   DEEPWHITE_HAILUO_H3_MAX_TURBO_I2V_UI_ID,
   DEEPWHITE_HAILUO_H3_MAX_TURBO_T2V_UI_ID,
+  DEEPWHITE_UPSCALER_UI_ID,
   isDeepWhiteHailuoH3MaxTurboI2v,
   isDeepWhiteHailuoH3MaxTurboT2v,
+  isDeepWhiteHailuoVideoModel,
+  isDeepWhiteUpscaler,
   isDeepWhiteVideoModel,
 };
 
@@ -115,6 +121,7 @@ export function normalizeLegacyVideoModelId(modelId: string): string {
     return 'grok-video-1.5';
   }
   if (m === 'hfsy-sd-2' || m === 'hfsy-sd-2-fast') return 'hfsy-sd-2.5-720';
+  if (m === 'rhart-video/video-upscaler' || m === 'rhart-video-video-upscaler') return DEEPWHITE_UPSCALER_UI_ID;
   return m;
 }
 
@@ -187,7 +194,10 @@ export function getVideoModelSwitchUpdates(mRaw: string, node: CanvasNode): Part
     updates.videoResolution = '720p';
     const ar = node.aspectRatio || '16:9';
     if (ar !== '16:9' && ar !== '9:16') updates.aspectRatio = '16:9';
-  } else if (isDeepWhiteVideoModel(m)) {
+  } else if (isDeepWhiteUpscaler(m)) {
+    const r = node.videoResolution || '1080p';
+    updates.videoResolution = r === '720p' || r === '1080p' || r === '2k' || r === '4k' ? r : '1080p';
+  } else if (isDeepWhiteHailuoVideoModel(m)) {
     const d = node.videoDuration ?? 5;
     updates.videoDuration = [5, 6, 8, 10, 12, 15].includes(d) ? d : 5;
     // UI 用 720p / 1080p；提交时映射为 768P / 2K
