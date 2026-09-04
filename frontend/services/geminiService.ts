@@ -44,7 +44,18 @@ const MAX_CHAT_HISTORY_TURNS = 48;
 
 function isDeepSeekChatModelId(modelName: string): boolean {
   const m = normalizeDeepSeekChatModelId(modelName).trim();
-  if (m.endsWith('-ark') || m.endsWith('-aliyun') || m.endsWith('-toapis') || m.endsWith('-manxue')) return false;
+  // 其它通道后缀必须排除，避免 deepseek-v4-*-deepwhite 等误走官方 DeepSeek
+  if (
+    m.endsWith('-ark') ||
+    m.endsWith('-aliyun') ||
+    m.endsWith('-toapis') ||
+    m.endsWith('-manxue') ||
+    m.endsWith('-deepwhite') ||
+    m.endsWith('-hfsy') ||
+    m.endsWith('-codesonline')
+  ) {
+    return false;
+  }
   return m === 'deepseek-v4-flash' || m === 'deepseek-v4-pro' || m.startsWith('deepseek-v4-');
 }
 
@@ -566,6 +577,29 @@ export const callGeminiChatWithHistory = async (
       return { text: await manxueGeminiChatGenerate(slice, resolveManxueChatUpstreamModelId(modelName)) };
     }
 
+    // DeepWhite 须在官方 DeepSeek 之前匹配（UI id 也以 deepseek-v4- 开头）
+    if (isDeepWhiteChatModelId(modelName)) {
+      const dwKey = getDeepWhiteSavedKey().trim();
+      if (!dwKey) {
+        throw new Error(
+          '使用 DeepWhite 对话模型：请在「设置 → API」中填写「DeepWhite API Key」（Base URL 为 https://api.deepwhiteai.com/v1）。'
+        );
+      }
+      return {
+        text: await chatCompletionHistoryAtBase(
+          deepWhiteChatFetchBase(),
+          dwKey,
+          resolveDeepWhiteChatUpstreamModelId(modelName),
+          slice.map((t) => ({
+            role: t.role,
+            content: t.content,
+            imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
+            imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
+          }))
+        ),
+      };
+    }
+
     if (isDeepSeekChatModelId(modelName)) {
       let key = getDeepSeekSavedKey();
       let base = getDeepSeekBaseUrl();
@@ -612,28 +646,6 @@ export const callGeminiChatWithHistory = async (
           imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
         }))
       ) };
-    }
-
-    if (isDeepWhiteChatModelId(modelName)) {
-      const dwKey = getDeepWhiteSavedKey().trim();
-      if (!dwKey) {
-        throw new Error(
-          '使用 DeepWhite 对话模型：请在「设置 → API」中填写「DeepWhite API Key」（Base URL 为 https://api.deepwhiteai.com/v1）。'
-        );
-      }
-      return {
-        text: await chatCompletionHistoryAtBase(
-          deepWhiteChatFetchBase(),
-          dwKey,
-          resolveDeepWhiteChatUpstreamModelId(modelName),
-          slice.map((t) => ({
-            role: t.role,
-            content: t.content,
-            imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
-            imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
-          }))
-        ),
-      };
     }
 
     // codesonline（ai.codesonline.dev）对话：GPT-5.5 / GPT-5.6 Sol / GPT-5.6 Terra / Claude Haiku 4.5

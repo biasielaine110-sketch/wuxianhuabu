@@ -4240,15 +4240,16 @@ function resolveChatModelForBase(baseNormalized: string, modelName: string): str
   if (m === 'gemini-3.6-flash-toapis') return 'gemini-3.6-flash';
   if (m === 'qwen3.5-plus-toapis') return 'qwen3.5-plus';
   if (m === 'deepseek-v4-flash-toapis') return 'deepseek-v4-flash';
-  if (m === 'glm-5.3-flash-deepwhite') return 'glm/glm-5.3-flash';
-  if (m === 'qwen3.8-flash-next-deepwhite') return 'qwen/qwen3.8-flash-next';
-  if (m === 'deepseek-v4-flash-deepwhite') return 'deepseek/deepseek-v4-flash';
-  if (m === 'deepseek-v4-pro-deepwhite') return 'deepseek/deepseek-v4-pro';
-  // DeepWhite / New API 风格：vendor/model 原样透传（勿落到默认 gpt-4o-mini）
-  if (m.includes('/')) return m;
-  if (/deepwhite-api|deepwhiteai\.com/i.test(baseNormalized)) {
-    return m || 'qwen/qwen3.8-max';
+  // DeepWhite UI id → 仅在 DeepWhite 通道展开为 vendor/model；其它通道勿带斜杠
+  if (/deepwhite-api|deepwhiteai\.com/i.test(baseNormalized) || m.endsWith('-deepwhite')) {
+    if (m === 'glm-5.3-flash-deepwhite') return 'glm/glm-5.3-flash';
+    if (m === 'qwen3.8-flash-next-deepwhite') return 'qwen/qwen3.8-flash-next';
+    if (m === 'deepseek-v4-flash-deepwhite') return 'deepseek/deepseek-v4-flash';
+    if (m === 'deepseek-v4-pro-deepwhite') return 'deepseek/deepseek-v4-pro';
+    if (m.includes('/')) return m;
+    if (/deepwhite-api|deepwhiteai\.com/i.test(baseNormalized)) return m || 'qwen/qwen3.8-max';
   }
+  if (m.includes('/') && /deepwhite-api|deepwhiteai\.com/i.test(baseNormalized)) return m;
   if (m === 'glm-5.3-flash' || m === 'glm-5.3' || m.startsWith('glm-')) return m;
   if (m === 'kimi-k2.7-code' || m.startsWith('kimi-')) return m;
   if (m.startsWith('doubao-')) return m;
@@ -4258,7 +4259,9 @@ function resolveChatModelForBase(baseNormalized: string, modelName: string): str
     return 'gemini-3-pro-preview';
   }
   if (isDeepSeekHost(baseNormalized)) {
-    const nm = normalizeDeepSeekChatModelId(m).trim();
+    // 官方 DeepSeek 只接受无前缀 id；误带 vendor/ 或 -deepwhite 时剥掉
+    let nm = normalizeDeepSeekChatModelId(m).trim().replace(/-deepwhite$/i, '');
+    if (nm.includes('/')) nm = nm.split('/').pop() || nm;
     if (nm === 'deepseek-v4-flash' || nm === 'deepseek-v4-pro') return nm;
     if (nm.startsWith('deepseek-v4-')) return nm;
     return DEFAULT_DEEPSEEK_CHAT_MODEL_ID;
@@ -4271,6 +4274,8 @@ function resolveChatModelForBase(baseNormalized: string, modelName: string): str
     // 满 eAPI 原样透传上游 model id（含 gemini-3.1-flash / gemini-3.1-flash-preview 等）
     return m || 'gemini-3.1-flash';
   }
+  // New API 风格 vendor/model（DeepWhite 等）原样透传
+  if (m.includes('/')) return m;
   if (m.startsWith('gpt-') || m.startsWith('o1') || m.startsWith('o3')) return m;
   if (m.startsWith('deepseek-')) return m;
   if (m.startsWith('minimax-')) return m;
