@@ -84,6 +84,8 @@ export function clampDeepWhiteImageResolution(modelId: string, resolution?: stri
 }
 
 function deepWhiteApiBase(): string {
+  // 生产：vercel.json 把 /deepwhite-api/* rewrite 到 /api/deepwhite-proxy?path=…
+  // （Serverless 缓冲转发，避免边缘直连外站时 POST body 丢失 → 上游 400）
   return '/deepwhite-api/v1';
 }
 
@@ -393,6 +395,25 @@ function normalizeAspect(aspectRatio?: string): string {
   return a || '1:1';
 }
 
+/** Midjourney size / --ar 常用比例 */
+function clampMidjourneySize(aspectRatio?: string): string {
+  const a = normalizeAspect(aspectRatio);
+  const allowed = new Set([
+    '1:1',
+    '16:9',
+    '9:16',
+    '4:3',
+    '3:4',
+    '3:2',
+    '2:3',
+    '5:4',
+    '4:5',
+    '21:9',
+    '9:21',
+  ]);
+  return allowed.has(a) ? a : '1:1';
+}
+
 async function submitImageJobAndFetchBase64(
   body: Record<string, unknown>,
   apiKey: string,
@@ -436,14 +457,16 @@ export async function deepWhiteGenerateImage(params: DeepWhiteImageGenerateParam
     for (const ref of refsRaw.slice(0, 4)) {
       imageUrls.push(await toDeepWhitePublicImageUrl(ref, apiKey, signal));
     }
+    const mjSize = clampMidjourneySize(aspect);
+    // 文档：可不传 model（路由自动注入）；imagine 显式入口更稳
     const body: Record<string, unknown> = {
       prompt,
-      size: aspect,
+      size: mjSize,
       version: '6.1',
       speed: 'relax',
     };
     if (imageUrls.length) body.image_urls = imageUrls;
-    const submitted = await postJson('/midjourney/generations', body, apiKey, signal);
+    const submitted = await postJson('/midjourney/generations/imagine', body, apiKey, signal);
     const taskId = pickTaskId(submitted);
     const urls = await pollMidjourneyTask(taskId, apiKey, signal);
     const want = Math.max(1, Math.min(4, params.numberOfImages || urls.length || 1));

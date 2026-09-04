@@ -9,6 +9,10 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit"
   },
+  "allowScripts": {
+    "protobufjs": true,
+    "protobufjs@7.5.5": true
+  },
   "dependencies": {
     "@google/genai": "^1.50.1",
     "@types/node": "latest",

@@ -1,6 +1,21 @@
 import type { CanvasNode } from '../types';
 import type { ToApisVideoModelId } from '../services/openaiCompatibleService';
 import { MANXUE_C_DANCE2_PRO_720_VIDEO_MODEL_ID } from '../services/openaiCompatibleService';
+import {
+  DEEPWHITE_HAILUO_H3_MAX_TURBO_I2V_UI_ID,
+  DEEPWHITE_HAILUO_H3_MAX_TURBO_T2V_UI_ID,
+  isDeepWhiteHailuoH3MaxTurboI2v,
+  isDeepWhiteHailuoH3MaxTurboT2v,
+  isDeepWhiteVideoModel,
+} from '../services/deepwhiteVideo';
+
+export {
+  DEEPWHITE_HAILUO_H3_MAX_TURBO_I2V_UI_ID,
+  DEEPWHITE_HAILUO_H3_MAX_TURBO_T2V_UI_ID,
+  isDeepWhiteHailuoH3MaxTurboI2v,
+  isDeepWhiteHailuoH3MaxTurboT2v,
+  isDeepWhiteVideoModel,
+};
 
 /** 视频节点 Veo：当前存 `veo3.1-fast`；旧工程可能仍为 `veo3.1-fast-official` */
 export function isVeo31FastVideoModel(m?: string): boolean {
@@ -172,6 +187,15 @@ export function getVideoModelSwitchUpdates(mRaw: string, node: CanvasNode): Part
     updates.videoResolution = '720p';
     const ar = node.aspectRatio || '16:9';
     if (ar !== '16:9' && ar !== '9:16') updates.aspectRatio = '16:9';
+  } else if (isDeepWhiteVideoModel(m)) {
+    const d = node.videoDuration ?? 5;
+    updates.videoDuration = [5, 6, 8, 10, 12, 15].includes(d) ? d : 5;
+    // UI 用 720p / 1080p；提交时映射为 768P / 2K
+    updates.videoResolution = node.videoResolution === '1080p' ? '1080p' : '720p';
+    if (isDeepWhiteHailuoH3MaxTurboT2v(m)) {
+      const ar = node.aspectRatio || '16:9';
+      if (!['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'].includes(ar)) updates.aspectRatio = '16:9';
+    }
   } else if (isHfsyGrokImagineVideoModel(m)) {
     const d = node.videoDuration ?? 10;
     updates.videoDuration = d >= 1 && d <= 15 ? d : 10;

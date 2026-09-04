@@ -12,14 +12,27 @@ export interface AudioNodeContentProps {
   onUpdate: (updates: Partial<CanvasNode>) => void;
 }
 
+/** 选出浏览器可播放的 src（纠正错误 MIME 的 data URL） */
+function resolvePlayableAudioSrc(node: CanvasNode): string {
+  const primary = (node.audio || '').trim();
+  const fallback = (node.audioUrl || '').trim();
+  if (/^data:audio\//i.test(primary) || /^blob:/i.test(primary)) return primary;
+  if (/^https?:\/\//i.test(fallback)) return fallback;
+  if (/^https?:\/\//i.test(primary)) return primary;
+  // data:application/octet-stream 等无法播放时回退 https
+  if (/^data:/i.test(primary) && /^https?:\/\//i.test(fallback)) return fallback;
+  return primary || fallback;
+}
+
 export function AudioNodeContent({ node, onUpdate }: AudioNodeContentProps) {
   const inputId = `audio-upload-${node.id}`;
   const model = (node.model || DEEPWHITE_AUDIO_TTS_UI_ID).trim();
   const isSuno = model === DEEPWHITE_AUDIO_SUNO_UI_ID || model === 'suno-generation';
   const isTts = !isSuno;
+  const playSrc = resolvePlayableAudioSrc(node);
 
   return (
-    <div className="flex flex-col gap-2 p-3 bg-[#1a1a1a] shrink-0" onPointerDown={(e) => e.stopPropagation()}>
+    <div className="flex flex-col gap-2 p-3 bg-[#1a1a1a] h-full min-h-0" onPointerDown={(e) => e.stopPropagation()}>
       <label className="text-[10px] text-gray-500">模型（DeepWhite）</label>
       <select
         className="w-full bg-[#222] border border-[#444] rounded px-2 py-1.5 text-xs text-gray-200 outline-none focus:border-blue-500"
@@ -123,15 +136,29 @@ export function AudioNodeContent({ node, onUpdate }: AudioNodeContentProps) {
               : '深夜城市 lo-fi 钢琴配雨声'
             : '请输入要合成的语音文案'
         }
-        rows={4}
-        className="w-full resize-y min-h-[72px] bg-[#222] border border-[#444] rounded px-2 py-1.5 text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500"
+        rows={6}
+        className="w-full flex-1 resize-y min-h-[96px] bg-[#222] border border-[#444] rounded px-2 py-1.5 text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500"
       />
 
       {node.error ? <div className="text-[10px] text-red-400 break-words">{node.error}</div> : null}
 
-      {node.audio ? (
-        <div className="flex flex-col gap-2">
-          <audio src={node.audio} controls className="w-full h-8" />
+      {playSrc ? (
+        <div className="flex flex-col gap-2 mt-auto">
+          <audio
+            key={playSrc.slice(0, 80)}
+            src={playSrc}
+            controls
+            preload="metadata"
+            className="w-full h-10"
+            onError={(e) => {
+              const el = e.currentTarget;
+              const fb = (node.audioUrl || '').trim();
+              if (fb && /^https?:\/\//i.test(fb) && el.src !== fb) {
+                el.src = fb;
+                el.load();
+              }
+            }}
+          />
           <div className="flex items-center justify-between text-[10px] text-gray-400">
             <span className="truncate">{node.audioName || '音频文件'}</span>
             {node.audioDuration != null && node.audioDuration > 0 && (

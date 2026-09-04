@@ -5,7 +5,12 @@ import { OptimizedImage } from './OptimizedImage';
 import { rewriteImageUrlForBrowserDisplay } from '../services/canvasAssetResolver';
 import { EyedropperIcon } from './canvasIcons';
 import {
+  DEEPWHITE_HAILUO_H3_MAX_TURBO_I2V_UI_ID,
+  DEEPWHITE_HAILUO_H3_MAX_TURBO_T2V_UI_ID,
   getVideoModelSwitchUpdates,
+  isDeepWhiteHailuoH3MaxTurboI2v,
+  isDeepWhiteHailuoH3MaxTurboT2v,
+  isDeepWhiteVideoModel,
   isHfsyGrokImagineVideoModel,
   isHfsyMinimaxH3VideoModel,
   isHfsySd2VideoModel,
@@ -57,6 +62,9 @@ export function VideoNodeSettingsPanel({
   const isHfsySd2 = isHfsySd2VideoModel(vm);
   const isHfsyMinimaxH3 = isHfsyMinimaxH3VideoModel(vm);
   const isHfsyGrokImagine = isHfsyGrokImagineVideoModel(vm);
+  const isDeepWhiteHailuo = isDeepWhiteVideoModel(vm);
+  const isDeepWhiteHailuoT2v = isDeepWhiteHailuoH3MaxTurboT2v(vm);
+  const isDeepWhiteHailuoI2v = isDeepWhiteHailuoH3MaxTurboI2v(vm);
   const isHfsySdFixed480 = vm === 'hfsy-sd-2.5-480' || vm === 'hfsy-sd-2-mini-480';
   const isHfsySdFixed720 = vm === 'hfsy-sd-2.5-720' || vm === 'hfsy-sd-2-vip-720' || vm === 'hfsy-sd-2-mini-720';
   const isHfsySdFixed1080 = vm === 'hfsy-sd-2-1080-cheap';
@@ -205,9 +213,13 @@ export function VideoNodeSettingsPanel({
                 ? ' · Seedance 2：5-10 秒；画幅 16:9/9:16/1:1'
                 : isManxueCDance
                   ? ' · 满 e C-Dance2 Pro 720：5–15 秒、720p；需满 e API Key'
-                  : isHfsyMinimaxH3
+                    : isHfsyMinimaxH3
                     ? ' · MiniMax-H3（hfsy）：5–15 秒；画幅 16:9 / 9:16；默认 720p；需 hfsyapi.cn API Key'
-                    : isHfsyGrokImagine
+                    : isDeepWhiteHailuo
+                      ? isDeepWhiteHailuoI2v
+                        ? ' · Hailuo H3 Max Turbo 图生视频（DeepWhite）：需首帧图；5–15 秒；768P/2K；需 DeepWhite API Key'
+                        : ' · Hailuo H3 Max Turbo 文生视频（DeepWhite）：5–15 秒；768P/2K；多画幅；需 DeepWhite API Key'
+                      : isHfsyGrokImagine
                       ? ' · Grok Imagine Video 1.5（hfsy）：1–15 秒；多画幅；480p/720p/1080p；需 hfsyapi.cn API Key'
                       : isHfsySd2
                         ? ' · Seedance（hfsy）：5–15 秒；多画幅；需 hfsyapi.cn API Key'
@@ -264,6 +276,14 @@ export function VideoNodeSettingsPanel({
           </optgroup>
           <optgroup label="满 e (manxueapi.com)">
             <option value={MANXUE_C_DANCE2_PRO_720_VIDEO_MODEL}>C-Dance2 Pro 720（满 e）</option>
+          </optgroup>
+          <optgroup label="DeepWhite">
+            <option value={DEEPWHITE_HAILUO_H3_MAX_TURBO_T2V_UI_ID}>
+              Hailuo H3 Max Turbo 文生视频（DeepWhite）
+            </option>
+            <option value={DEEPWHITE_HAILUO_H3_MAX_TURBO_I2V_UI_ID}>
+              Hailuo H3 Max Turbo 图生视频（DeepWhite）
+            </option>
           </optgroup>
           <optgroup label="即梦 (Dreamina)">
             <option value="jimeng-seedance2.0fast">即梦 Seedance 2.0 (Fast)</option>
@@ -388,14 +408,15 @@ export function VideoNodeSettingsPanel({
               <option value={12}>12 秒</option>
               <option value={15}>15 秒</option>
             </select>
-          ) : isHfsyMinimaxH3 ? (
+          ) : isHfsyMinimaxH3 || isDeepWhiteHailuo ? (
             <select
               className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
-              value={[5, 8, 10, 12, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 5}
+              value={[5, 6, 8, 10, 12, 15].includes(node.videoDuration ?? 0) ? (node.videoDuration as number) : 5}
               onChange={(e) => onUpdateNode(node.id, { videoDuration: parseInt(e.target.value, 10) })}
               onPointerDown={(e) => e.stopPropagation()}
             >
               <option value={5}>5 秒</option>
+              <option value={6}>6 秒</option>
               <option value={8}>8 秒</option>
               <option value={10}>10 秒</option>
               <option value={12}>12 秒</option>
@@ -520,6 +541,28 @@ export function VideoNodeSettingsPanel({
               <option value="16:9">16:9</option>
               <option value="9:16">9:16</option>
             </select>
+          ) : isDeepWhiteHailuoT2v ? (
+            <select
+              className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+              value={
+                ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'].includes(node.aspectRatio || '')
+                  ? node.aspectRatio
+                  : '16:9'
+              }
+              onChange={(e) => onUpdateNode(node.id, { aspectRatio: e.target.value })}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <option value="16:9">16:9</option>
+              <option value="9:16">9:16</option>
+              <option value="1:1">1:1</option>
+              <option value="4:3">4:3</option>
+              <option value="3:4">3:4</option>
+              <option value="21:9">21:9</option>
+            </select>
+          ) : isDeepWhiteHailuoI2v ? (
+            <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222] text-xs">
+              画幅随参考图
+            </span>
           ) : isDoubao ? (
             <select
               className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
@@ -591,6 +634,18 @@ export function VideoNodeSettingsPanel({
           )}
           {isSora || isHfsyMinimaxH3 ? (
             <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">720p</span>
+          ) : isDeepWhiteHailuo ? (
+            <select
+              className="bg-[#222222] border border-[#444] rounded px-1.5 py-1 text-gray-300 outline-none focus:border-amber-500"
+              value={node.videoResolution === '1080p' ? '1080p' : '720p'}
+              onChange={(e) =>
+                onUpdateNode(node.id, { videoResolution: e.target.value as '720p' | '1080p' })
+              }
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <option value="720p">768P</option>
+              <option value="1080p">2K</option>
+            </select>
           ) : isHfsySdFixed480 ? (
             <span className="text-gray-400 px-1.5 py-1 border border-[#444] rounded bg-[#222222]">480p</span>
           ) : isHfsySdFixed720 ? (

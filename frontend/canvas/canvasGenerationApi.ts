@@ -757,6 +757,80 @@ ${text}`,
 
     setNodes(prev => prev.map(n => (n.id === nodeId ? { ...n, isGenerating: true, error: undefined } : n)));
 
+    // ---- DeepWhite 视频（Hailuo H3 Max Turbo）----
+    {
+      const { isDeepWhiteVideoModel } = await import('../services/deepwhiteVideo');
+      if (isDeepWhiteVideoModel(node.model || '')) {
+        try {
+          const incomingEdges = edgesRef.current.filter((e) => e.targetId === nodeId);
+          const inputNodes = incomingEdges
+            .map((e) => nodesRef.current.find((n) => n.id === e.sourceId))
+            .filter(Boolean) as CanvasNode[];
+          const textInputs = inputNodes.filter((n) => n.type === 'text').map((n) => n.prompt).filter(Boolean);
+          const combinedRaw = [node.prompt, ...textInputs].filter(Boolean).join('\n').trim();
+
+          const slots = buildIncomingRefSlots(nodeId, edgesRef.current, nodesRef.current);
+          const pickIndices = parseRefPickIndices(combinedRaw);
+          const combinedPrompt = stripRefMarkers(combinedRaw) || combinedRaw;
+          const { base64s: imageInputs } = await resolveSlotImagesForIndices(slots, pickIndices);
+
+          const { deepWhiteGenerateVideo, isDeepWhiteHailuoH3MaxTurboI2v } = await import(
+            '../services/deepwhiteVideo'
+          );
+          if (isDeepWhiteHailuoH3MaxTurboI2v(node.model || '') && imageInputs.length < 1) {
+            throw new Error('图生视频请连接至少 1 张参考图（首帧；可选第 2 张为尾帧）');
+          }
+          if (!isDeepWhiteHailuoH3MaxTurboI2v(node.model || '') && !combinedPrompt) {
+            throw new Error('请输入提示词或连接文本节点');
+          }
+
+          const videoUrl = await deepWhiteGenerateVideo({
+            model: node.model || '',
+            prompt: combinedPrompt,
+            referenceImages: imageInputs.slice(0, 2),
+            durationSeconds: node.videoDuration ?? 5,
+            aspectRatio: node.aspectRatio || '16:9',
+            resolution: node.videoResolution || '720p',
+            signal: ac.signal,
+          });
+
+          const prevVideos = node.videos || [];
+          const newVideos = [...prevVideos, videoUrl];
+          setNodes((prev) =>
+            prev.map((n) =>
+              n.id === nodeId
+                ? {
+                    ...n,
+                    isGenerating: false,
+                    videos: newVideos,
+                    currentVideoIndex: prevVideos.length,
+                    error: undefined,
+                  }
+                : n
+            )
+          );
+        } catch (err: unknown) {
+          const aborted =
+            (err as { name?: string })?.name === 'AbortError' ||
+            (err instanceof DOMException && err.name === 'AbortError');
+          if (aborted) {
+            setNodes((prev) =>
+              prev.map((n) => (n.id === nodeId ? { ...n, isGenerating: false, error: undefined } : n))
+            );
+          } else {
+            const message = err instanceof Error ? err.message : 'DeepWhite 视频生成失败';
+            setNodes((prev) =>
+              prev.map((n) => (n.id === nodeId ? { ...n, isGenerating: false, error: message } : n))
+            );
+          }
+        } finally {
+          generationAbortControllersRef.current.delete(nodeId);
+          generationStartedAtRef.current.delete(nodeId);
+        }
+        return;
+      }
+    }
+
     // ---- 提前判断是否为即梦模型 ----
     const isJimeng = isJimengVideoModel(node.model);
 
@@ -1026,14 +1100,22 @@ ${text}`,
         signal: ac.signal,
       });
 
-      const dataUrl = await fetchAudioAsDataUrl(result.audioUrl, ac.signal);
+      const { getDeepWhiteSavedKey } = await import('../services/aiSettings');
+      const dataUrl = await fetchAudioAsDataUrl(result.audioUrl, ac.signal, getDeepWhiteSavedKey());
+      // 优先可播源：合法 data:audio；否则用 https 直链（避免错误 MIME 的 data URL 导致无法播放）
+      const playable =
+        /^data:audio\//i.test(dataUrl) || /^blob:/i.test(dataUrl)
+          ? dataUrl
+          : /^https?:\/\//i.test(result.audioUrl)
+            ? result.audioUrl
+            : dataUrl;
       let duration = result.duration;
       if (duration == null || !(duration > 0)) {
         duration = await new Promise<number | undefined>((resolve) => {
           const a = new Audio();
           a.onloadedmetadata = () => resolve(Number.isFinite(a.duration) ? a.duration : undefined);
           a.onerror = () => resolve(undefined);
-          a.src = dataUrl;
+          a.src = playable;
         });
       }
 
@@ -1043,7 +1125,7 @@ ${text}`,
             ? {
                 ...n,
                 isGenerating: false,
-                audio: dataUrl,
+                audio: playable,
                 audioUrl: result.audioUrl,
                 audioName: result.title || (node.model?.includes('suno') ? 'Suno 生成' : 'TTS 生成'),
                 audioDuration: duration,

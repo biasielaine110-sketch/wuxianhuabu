@@ -1,7 +1,7 @@
 /**
  * api.deepwhiteai.com 同源代理。
- * 边缘 rewrite 直连外站时，部分 POST（如 /v1/music/generations）易丢 body → 上游 400；
- * 改为 Serverless 转发，并剥离 Origin/Referer。
+ * 边缘 rewrite 直连外站时，部分 POST（如 Midjourney / music）易丢 body → 上游 400；
+ * 改为 Serverless 转发：缓冲 body 再发出，并剥离 Origin/Referer。
  */
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -33,6 +33,7 @@ function shouldDropRequestHeader(name) {
   return (
     n === 'host' ||
     n === 'accept-encoding' ||
+    n === 'content-length' ||
     n === 'origin' ||
     n === 'referer' ||
     n === 'cookie' ||
@@ -56,6 +57,15 @@ function resolveSubPath(req) {
   return { sub, qs };
 }
 
+async function readRequestBody(req) {
+  const chunks = [];
+  for await (const chunk of req) {
+    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : Buffer.from(chunk));
+  }
+  if (!chunks.length) return undefined;
+  return Buffer.concat(chunks);
+}
+
 async function handler(req, res) {
   const { sub, qs } = resolveSubPath(req);
   if (!sub) {
@@ -65,17 +75,6 @@ async function handler(req, res) {
     return;
   }
   const targetUrl = `${UPSTREAM_ORIGIN}/${sub}${qs ? `?${qs}` : ''}`;
-
-  const headers = new Headers();
-  for (const [k, v] of Object.entries(req.headers)) {
-    if (!v || isHopByHopHeader(k) || shouldDropRequestHeader(k)) continue;
-    if (Array.isArray(v)) {
-      for (const item of v) headers.append(k, item);
-    } else {
-      headers.set(k, v);
-    }
-  }
-  headers.set('accept-encoding', 'identity');
 
   const method = req.method || 'GET';
   if (method === 'OPTIONS') {
@@ -88,16 +87,32 @@ async function handler(req, res) {
     return;
   }
 
+  const headers = new Headers();
+  for (const [k, v] of Object.entries(req.headers)) {
+    if (!v || isHopByHopHeader(k) || shouldDropRequestHeader(k)) continue;
+    if (Array.isArray(v)) {
+      for (const item of v) headers.append(k, item);
+    } else {
+      headers.set(k, v);
+    }
+  }
+  headers.set('accept-encoding', 'identity');
+
   const hasBody = !['GET', 'HEAD'].includes(method);
-  const body = hasBody ? Readable.toWeb(Readable.from(req)) : undefined;
+  let body;
+  if (hasBody) {
+    body = await readRequestBody(req);
+    if (body && body.length) {
+      headers.set('content-length', String(body.length));
+    }
+  }
 
   let upstream;
   try {
     upstream = await fetch(targetUrl, {
       method,
       headers,
-      body,
-      ...(hasBody ? { duplex: 'half' } : {}),
+      body: hasBody ? body : undefined,
     });
   } catch (e) {
     console.error('[api/deepwhite-proxy] upstream fetch failed', targetUrl, e);
@@ -125,6 +140,7 @@ async function handler(req, res) {
 
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Access-Control-Allow-Origin', '*');
 
   if (!upstream.body) {
     res.end();

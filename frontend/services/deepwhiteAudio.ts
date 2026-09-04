@@ -46,8 +46,7 @@ export type DeepWhiteAudioGenerateResult = {
 };
 
 function deepWhiteApiBase(): string {
-  // 生产走边缘 rewrite → api.deepwhiteai.com（勿用 /api/deepwhite-proxy/v1/... 路径，
-  // Vercel 无 catch-all 时会直接 404；单文件函数只匹配精确 /api/deepwhite-proxy）
+  // 生产走 /deepwhite-api → Serverless /api/deepwhite-proxy（缓冲 POST body）
   return '/deepwhite-api/v1';
 }
 
@@ -195,12 +194,19 @@ function pickAudioResultUrl(json: unknown): { url: string; urls: string[]; title
   const urls: string[] = [];
   const push = (u: unknown) => {
     const s = typeof u === 'string' ? u.trim() : '';
-    if (s && /^https?:\/\//i.test(s) && !urls.includes(s)) urls.push(s);
+    if (!s || urls.includes(s)) return;
+    // 允许 https 直链；也允许 data:audio 内嵌
+    if (/^https?:\/\//i.test(s) || /^data:audio\//i.test(s)) urls.push(s);
   };
 
   push(data?.result_url);
+  push(nested?.result_url);
   push(content?.audio_url);
+  push(content?.url);
+  push(data?.audio_url);
+  push(data?.url);
   if (Array.isArray(content?.audio_urls)) content.audio_urls.forEach(push);
+  if (Array.isArray(data?.audio_urls)) data.audio_urls.forEach(push);
 
   const music = result?.music;
   let title: string | undefined;
@@ -278,20 +284,64 @@ async function pollMusicTask(
   throw new Error('DeepWhite Suno 生成超时，请稍后在控制台查看任务状态。');
 }
 
-/** 将结果音频拉成本地 data URL（失败则退回原 URL） */
-export async function fetchAudioAsDataUrl(audioUrl: string, signal?: AbortSignal): Promise<string> {
+/** 从 Content-Type / URL / 魔数推断浏览器可播的 audio MIME */
+function sniffAudioMime(blob: Blob, audioUrl: string): string {
+  const ct = (blob.type || '').split(';')[0].trim().toLowerCase();
+  if (ct.startsWith('audio/') && ct !== 'audio/octet-stream') return ct;
+  const u = audioUrl.toLowerCase();
+  if (u.includes('.mp3') || u.includes('mpeg')) return 'audio/mpeg';
+  if (u.includes('.wav')) return 'audio/wav';
+  if (u.includes('.ogg') || u.includes('opus')) return 'audio/ogg';
+  if (u.includes('.m4a') || u.includes('.mp4') || u.includes('aac')) return 'audio/mp4';
+  if (u.includes('.webm')) return 'audio/webm';
+  // 默认按 mp3（Qwen TTS 我们显式请求 mp3）
+  return 'audio/mpeg';
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('读取音频失败'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * 将结果音频拉成本地 data URL。
+ * - 带 Bearer 拉取（部分 CDN 需鉴权）
+ * - 纠正 MIME（octet-stream 会导致 audio 标签无法播放）
+ * - 失败时退回原 URL（https 直链通常可直接播）
+ */
+export async function fetchAudioAsDataUrl(
+  audioUrl: string,
+  signal?: AbortSignal,
+  apiKey?: string
+): Promise<string> {
+  const src = (audioUrl || '').trim();
+  if (!src) return src;
+  if (/^data:audio\//i.test(src)) return src;
+
   try {
-    const res = await fetch(audioUrl, { mode: 'cors', credentials: 'omit', signal });
-    if (!res.ok) return audioUrl;
-    const blob = await res.blob();
-    return await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || audioUrl));
-      reader.onerror = () => reject(new Error('读取音频失败'));
-      reader.readAsDataURL(blob);
-    });
+    const headers: Record<string, string> = {};
+    const key = (apiKey || getDeepWhiteSavedKey() || '').trim();
+    if (key && /^https?:\/\//i.test(src)) {
+      headers.Authorization = `Bearer ${key}`;
+    }
+    const res = await fetch(src, { mode: 'cors', credentials: 'omit', signal, headers });
+    if (!res.ok) return src;
+    const raw = await res.blob();
+    if (!raw.size) return src;
+    const mime = sniffAudioMime(raw, src);
+    const typed = raw.type === mime ? raw : new Blob([raw], { type: mime });
+    const dataUrl = await blobToDataUrl(typed);
+    // 若 FileReader 仍写成非 audio MIME，强制改写 data: 头
+    if (/^data:audio\//i.test(dataUrl)) return dataUrl;
+    const comma = dataUrl.indexOf(',');
+    if (comma > 0) return `data:${mime};base64,${dataUrl.slice(comma + 1)}`;
+    return src;
   } catch {
-    return audioUrl;
+    return src;
   }
 }
 
@@ -343,7 +393,11 @@ export async function deepWhiteGenerateAudio(
   if (!prompt) throw new Error('请输入要朗读的文本。');
 
   const voice = (params.voice || 'Cherry').trim() || 'Cherry';
-  const metadata: Record<string, unknown> = { voice };
+  const metadata: Record<string, unknown> = {
+    voice,
+    // 浏览器 <audio> 对 mp3 兼容最好；默认 wav 易因 MIME 问题无法播放
+    format: 'mp3',
+  };
   if (params.instructions?.trim()) metadata.instructions = params.instructions.trim();
 
   const submitted = await postJson(
