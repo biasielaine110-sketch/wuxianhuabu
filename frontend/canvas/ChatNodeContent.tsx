@@ -826,6 +826,12 @@ export function ChatNodeContent({
           onChange={(e) => onUpdate({ model: e.target.value })}
           onPointerDown={(e) => e.stopPropagation()}
         >
+          <optgroup label="DeepWhite">
+            <option value="glm-5.3-flash-deepwhite">GLM-5.3-Flash（DeepWhite）</option>
+            <option value="qwen3.8-flash-next-deepwhite">Qwen3.8-Flash-Next（DeepWhite）</option>
+            <option value="deepseek-v4-flash-deepwhite">DeepSeek-V4-Flash（DeepWhite）</option>
+            <option value="deepseek-v4-pro-deepwhite">DeepSeek-V4-Pro（DeepWhite）</option>
+          </optgroup>
           <optgroup label="火山方舟 Coding Plan">
             <option value="deepseek-v4-flash-ark">DeepSeek-V4-Flash（火山方舟）</option>
             <option value="deepseek-v4-pro-ark">DeepSeek-V4-Pro（火山方舟）</option>

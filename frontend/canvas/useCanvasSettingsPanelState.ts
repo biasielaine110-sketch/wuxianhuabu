@@ -7,6 +7,7 @@ import {
   getVolcengineArkSavedKey,
   getVolcengineArkCodingSavedKey,
   getAliyunMaasSavedKey,
+  getDeepWhiteSavedKey,
   migrateAiSettingsIfLegacy,
   getHfsySavedKey,
 } from '../services/aiSettings';
@@ -103,6 +104,7 @@ export function useCanvasSettingsPanelState({
   );
   const [codesonlineKeyInput, setCodesonlineKeyInput] = useState(() => getAiSettingsSnapshot().codesonlineKey);
   const [codesonlineChatKeyInput, setCodesonlineChatKeyInput] = useState(() => getCodesonlineChatSavedKey());
+  const [deepWhiteKeyInput, setDeepWhiteKeyInput] = useState(() => getDeepWhiteSavedKey());
   const [volcengineArkKeyInput, setVolcengineArkKeyInput] = useState(() => getVolcengineArkSavedKey());
   const [volcengineArkCodingKeyInput, setVolcengineArkCodingKeyInput] = useState(() =>
     getVolcengineArkCodingSavedKey()
@@ -124,6 +126,7 @@ export function useCanvasSettingsPanelState({
     setCodesonlineBaseInput(s.codesonlineBaseUrl);
     setCodesonlineKeyInput(s.codesonlineKey);
     setCodesonlineChatKeyInput(getCodesonlineChatSavedKey());
+    setDeepWhiteKeyInput(getDeepWhiteSavedKey());
     setVolcengineArkKeyInput(getVolcengineArkSavedKey());
     setVolcengineArkCodingKeyInput(getVolcengineArkCodingSavedKey());
     setAliyunMaasKeyInput(getAliyunMaasSavedKey());
@@ -159,6 +162,7 @@ export function useCanvasSettingsPanelState({
     setCodesonlineBaseInput(s.codesonlineBaseUrl);
     setCodesonlineKeyInput(s.codesonlineKey);
     setHfsyKeyInput(getHfsySavedKey());
+    setDeepWhiteKeyInput(getDeepWhiteSavedKey());
     setVolcengineArkKeyInput(getVolcengineArkSavedKey());
     setVolcengineArkCodingKeyInput(getVolcengineArkCodingSavedKey());
     setAliyunMaasKeyInput(getAliyunMaasSavedKey());
@@ -381,6 +385,8 @@ export function useCanvasSettingsPanelState({
       setCodesonlineKeyInput,
       codesonlineChatKeyInput,
       setCodesonlineChatKeyInput,
+      deepWhiteKeyInput,
+      setDeepWhiteKeyInput,
       volcengineArkKeyInput,
       setVolcengineArkKeyInput,
       volcengineArkCodingKeyInput,

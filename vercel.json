@@ -51,6 +51,10 @@
       "destination": "https://ai.codesonline.dev/$1"
     },
     {
+      "source": "/deepwhite-api/(.*)",
+      "destination": "https://api.deepwhiteai.com/$1"
+    },
+    {
       "source": "/cdn-files-toapis/:path*",
       "destination": "https://files.toapis.com/:path*"
     },

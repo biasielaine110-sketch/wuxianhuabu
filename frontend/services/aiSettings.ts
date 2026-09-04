@@ -21,6 +21,8 @@ const MANXUE_BASE_URL_STORAGE_KEY = 'manxue-openai-compatible-base-url-v1';
 /** MiniMax OpenAI 兼容网关：AI 对话「MiniMax M2.7」等 */
 const MINIMAX_API_KEY_STORAGE_KEY = 'minimax-openai-compatible-api-key-v1';
 const MINIMAX_BASE_URL_STORAGE_KEY = 'minimax-openai-compatible-base-url-v1';
+/** DeepWhite AI（api.deepwhiteai.com/v1）对话 */
+const DEEPWHITE_API_KEY_STORAGE_KEY = 'deepwhite-openai-compatible-api-key-v1';
 /** 火山方舟 Agent Plan（ark.cn-beijing.volces.com/api/plan/v3）— Seedream 生图 */
 const VOLCENGINE_ARK_API_KEY_STORAGE_KEY = 'volcengine-ark-agent-plan-api-key-v1';
 /** 火山方舟 Coding Plan（ark.cn-beijing.volces.com/api/coding/v3）— 对话 */
@@ -41,6 +43,8 @@ export const DEFAULT_CODESONLINE_CHAT_BASE_URL = 'https://ai.codesonline.dev/v1'
 export const DEFAULT_MANXUE_BASE_URL = 'https://manxueapi.com/v1';
 /** MiniMax API MiniMax OpenAI 兼容入口（Base URL 须含 /v1） */
 export const DEFAULT_MINIMAX_BASE_URL = 'https://api.minimaxi.com/v1';
+/** DeepWhite AI OpenAI 兼容入口（对话） */
+export const DEFAULT_DEEPWHITE_BASE_URL = 'https://api.deepwhiteai.com/v1';
 
 /** 火山方舟 Agent Plan（Seedream 生图；同源代理映射到 /api/plan/v3） */
 export const DEFAULT_VOLCENGINE_ARK_BASE_URL = 'https://ark.cn-beijing.volces.com/api/plan/v3';
@@ -399,6 +403,29 @@ export function setMiniMaxBaseUrl(url: string): void {
   } catch {
     /* ignore */
   }
+}
+
+/** DeepWhite AI 对话 API Key */
+export function getDeepWhiteSavedKey(): string {
+  try {
+    return localStorage.getItem(DEEPWHITE_API_KEY_STORAGE_KEY)?.trim() || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setDeepWhiteKey(apiKey: string): void {
+  const normalized = apiKey.trim();
+  try {
+    if (normalized) localStorage.setItem(DEEPWHITE_API_KEY_STORAGE_KEY, normalized);
+    else localStorage.removeItem(DEEPWHITE_API_KEY_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getDeepWhiteBaseUrl(): string {
+  return DEFAULT_DEEPWHITE_BASE_URL;
 }
 
 export function normalizeVolcengineArkApiKey(apiKey: string): string {

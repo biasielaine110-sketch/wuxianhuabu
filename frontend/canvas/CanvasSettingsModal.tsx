@@ -5,12 +5,14 @@ import {
   DEFAULT_CODESONLINE_CHAT_BASE_URL,
   DEFAULT_CODESONLINE_IMAGE_BASE_URL,
   DEFAULT_DEEPSEEK_BASE_URL,
+  DEFAULT_DEEPWHITE_BASE_URL,
   DEFAULT_HFSY_IMAGE_BASE_URL,
   DEFAULT_MANXUE_BASE_URL,
   DEFAULT_MINIMAX_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
   persistAiSettings,
   setCodesonlineChatKey,
+  setDeepWhiteKey,
   setVolcengineArkKey,
   setVolcengineArkCodingKey,
   setAliyunMaasKey,
@@ -99,6 +101,8 @@ export type CanvasSettingsModalProps = {
   setCodesonlineKeyInput: Dispatch<SetStateAction<string>>;
   codesonlineChatKeyInput: string;
   setCodesonlineChatKeyInput: Dispatch<SetStateAction<string>>;
+  deepWhiteKeyInput: string;
+  setDeepWhiteKeyInput: Dispatch<SetStateAction<string>>;
   volcengineArkKeyInput: string;
   setVolcengineArkKeyInput: Dispatch<SetStateAction<string>>;
   volcengineArkCodingKeyInput: string;
@@ -178,6 +182,8 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
     setCodesonlineKeyInput,
     codesonlineChatKeyInput,
     setCodesonlineChatKeyInput,
+    deepWhiteKeyInput,
+    setDeepWhiteKeyInput,
     volcengineArkKeyInput,
     setVolcengineArkKeyInput,
     volcengineArkCodingKeyInput,
@@ -370,6 +376,30 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                     />
                   </div>
 
+                  {/* DeepWhite AI 对话 */}
+                  <div className="mt-5 pt-4 border-t border-[#333]">
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">DeepWhite（对话）</h3>
+                    <p className="text-xs text-gray-500 mb-2">
+                      用于 GLM-5.3-Flash / Qwen3.8-Flash-Next / DeepSeek-V4-Flash / DeepSeek-V4-Pro（api.deepwhiteai.com）
+                    </p>
+                    <label className="text-xs text-gray-500 block mb-1">Base URL</label>
+                    <input
+                      type="text"
+                      readOnly
+                      value={DEFAULT_DEEPWHITE_BASE_URL}
+                      placeholder={DEFAULT_DEEPWHITE_BASE_URL}
+                      className="w-full mb-3 bg-[#252525] border border-[#333] rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
+                    />
+                    <label className="text-xs text-gray-500 block mb-1">DeepWhite API Key</label>
+                    <input
+                      type="password"
+                      value={deepWhiteKeyInput}
+                      onChange={(e) => setDeepWhiteKeyInput(e.target.value)}
+                      placeholder="sk-..."
+                      className="w-full bg-[#222222] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-sky-600 transition-colors text-sm"
+                    />
+                  </div>
+
                   {/* 火山方舟：Coding Plan 对话 + Agent Plan 生图（两套 Key） */}
                   <div className="mt-5 pt-4 border-t border-[#333]">
                     <h3 className="text-sm font-semibold text-gray-200 mb-2">火山方舟（Coding / Agent Plan）</h3>
@@ -541,6 +571,7 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                                 minimaxBaseUrl: minimaxBaseInput.trim() || DEFAULT_MINIMAX_BASE_URL,
                               });
                               setCodesonlineChatKey(codesonlineChatKeyInput.trim());
+                              setDeepWhiteKey(deepWhiteKeyInput.trim());
                               setVolcengineArkCodingKey(volcengineArkCodingKeyInput.trim());
                               setVolcengineArkKey(volcengineArkKeyInput.trim());
                               setAliyunMaasKey(aliyunMaasKeyInput.trim());
@@ -577,6 +608,7 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                                 minimaxBaseUrl: minimaxBaseInput.trim() || DEFAULT_MINIMAX_BASE_URL,
                               });
                               setCodesonlineChatKey(codesonlineChatKeyInput.trim());
+                              setDeepWhiteKey(deepWhiteKeyInput.trim());
                               setVolcengineArkCodingKey(volcengineArkCodingKeyInput.trim());
                               setVolcengineArkKey(volcengineArkKeyInput.trim());
                               setAliyunMaasKey(aliyunMaasKeyInput.trim());
@@ -617,6 +649,7 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                           minimaxBaseUrl: minimaxBaseInput.trim() || DEFAULT_MINIMAX_BASE_URL,
                         });
                         setCodesonlineChatKey(codesonlineChatKeyInput.trim());
+                        setDeepWhiteKey(deepWhiteKeyInput.trim());
                         setVolcengineArkCodingKey(volcengineArkCodingKeyInput.trim());
                         setVolcengineArkKey(volcengineArkKeyInput.trim());
                         setAliyunMaasKey(aliyunMaasKeyInput.trim());

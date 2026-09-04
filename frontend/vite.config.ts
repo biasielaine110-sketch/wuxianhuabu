@@ -368,6 +368,14 @@ const toapisFileCdnProxy = {
     secure: true,
     rewrite: (p: string) => p.replace(/^\/codesonline-chat-api/, ''),
   },
+  '/deepwhite-api': {
+    target: 'https://api.deepwhiteai.com',
+    changeOrigin: true,
+    secure: true,
+    timeout: 1_800_000,
+    proxyTimeout: 1_800_000,
+    rewrite: (p: string) => p.replace(/^\/deepwhite-api/, ''),
+  },
   /** 火山方舟 Coding Plan 对话：/api/coding/v3 */
   '/volcengine-ark-coding-api': {
     target: 'https://ark.cn-beijing.volces.com',

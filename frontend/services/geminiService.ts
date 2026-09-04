@@ -17,6 +17,7 @@ import {
   getVolcengineArkCodingSavedKey,
   getAliyunMaasSavedKey,
   getManxueSavedKey,
+  getDeepWhiteSavedKey,
 } from './aiSettings';
 import {
   chatCompletionHistoryAtBase,
@@ -45,6 +46,31 @@ function isDeepSeekChatModelId(modelName: string): boolean {
   const m = normalizeDeepSeekChatModelId(modelName).trim();
   if (m.endsWith('-ark') || m.endsWith('-aliyun') || m.endsWith('-toapis') || m.endsWith('-manxue')) return false;
   return m === 'deepseek-v4-flash' || m === 'deepseek-v4-pro' || m.startsWith('deepseek-v4-');
+}
+
+/** DeepWhite AI（api.deepwhiteai.com）对话模型 */
+function isDeepWhiteChatModelId(modelName: string): boolean {
+  const m = (modelName || '').trim();
+  return (
+    m === 'glm-5.3-flash-deepwhite' ||
+    m === 'qwen3.8-flash-next-deepwhite' ||
+    m === 'deepseek-v4-flash-deepwhite' ||
+    m === 'deepseek-v4-pro-deepwhite'
+  );
+}
+
+function resolveDeepWhiteChatUpstreamModelId(modelName: string): string {
+  const m = (modelName || '').trim();
+  if (m === 'glm-5.3-flash-deepwhite') return 'glm/glm-5.3-flash';
+  if (m === 'qwen3.8-flash-next-deepwhite') return 'qwen/qwen3.8-flash-next';
+  if (m === 'deepseek-v4-flash-deepwhite') return 'deepseek/deepseek-v4-flash';
+  if (m === 'deepseek-v4-pro-deepwhite') return 'deepseek/deepseek-v4-pro';
+  return m;
+}
+
+function deepWhiteChatFetchBase(): string {
+  // 开发 / 生产均走同源代理，避免 CORS
+  return '/deepwhite-api/v1';
 }
 
 /** MiniMax 对话模型 id（不含火山方舟 -ark 后缀） */
@@ -586,6 +612,28 @@ export const callGeminiChatWithHistory = async (
           imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
         }))
       ) };
+    }
+
+    if (isDeepWhiteChatModelId(modelName)) {
+      const dwKey = getDeepWhiteSavedKey().trim();
+      if (!dwKey) {
+        throw new Error(
+          '使用 DeepWhite 对话模型：请在「设置 → API」中填写「DeepWhite API Key」（Base URL 为 https://api.deepwhiteai.com/v1）。'
+        );
+      }
+      return {
+        text: await chatCompletionHistoryAtBase(
+          deepWhiteChatFetchBase(),
+          dwKey,
+          resolveDeepWhiteChatUpstreamModelId(modelName),
+          slice.map((t) => ({
+            role: t.role,
+            content: t.content,
+            imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
+            imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
+          }))
+        ),
+      };
     }
 
     // codesonline（ai.codesonline.dev）对话：GPT-5.5 / GPT-5.6 Sol / GPT-5.6 Terra / Claude Haiku 4.5
