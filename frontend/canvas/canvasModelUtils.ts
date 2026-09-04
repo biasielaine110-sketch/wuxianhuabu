@@ -1,3 +1,5 @@
+import { clampDeepWhiteImageResolution, isDeepWhiteImageModel } from '../services/deepwhiteImage';
+
 /** 画布节点默认图像模型 */
 export function defaultCanvasImageModel(): string {
   return 'gpt-image-2-codesonline';
@@ -73,9 +75,10 @@ export function isToApisNanoBanana2Model(id: string): boolean {
   return (id || '').trim() === 'nano-banana-2';
 }
 
-/** ToAPIs Nano-Banana 2 最高 2K；其它模型原样返回 */
+/** ToAPIs Nano-Banana 2 最高 2K；DeepWhite 按各自上限；其它模型原样返回 */
 export function clampCanvasImageResolution(modelId: string, resolution?: string): string {
   const r = (resolution || '2k').toLowerCase().replace(/\s/g, '');
   if (isToApisNanoBanana2Model(modelId) && r === '4k') return '2k';
+  if (isDeepWhiteImageModel(modelId)) return clampDeepWhiteImageResolution(modelId, r);
   return r || '2k';
 }

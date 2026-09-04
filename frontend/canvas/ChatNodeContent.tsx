@@ -1346,6 +1346,12 @@ export function ChatNodeContent({
             
             <option value="gpt-image-2-vip">GPT Image 2 VIP（ToAPIs）</option>
             <option value="gpt-image-2-official">GPT Image 2 Official（ToAPIs）</option>
+            <optgroup label="DeepWhite">
+              <option value="seedream-v5-pro-t2i-deepwhite">Seedream v5 Pro（DeepWhite）</option>
+              <option value="midjourney-imagine-deepwhite">Midjourney Imagine（DeepWhite）</option>
+              <option value="deepwhiteai-image-nb-2-lite-deepwhite">Nano Banana 2 Lite（DeepWhite）</option>
+              <option value="deepwhiteai-image-nb-2-deepwhite">Nano Banana 2（DeepWhite）</option>
+            </optgroup>
             <optgroup label="火山方舟">
               <option value="doubao-seedream-5.0-lite-ark">Doubao-Seedream-5.0-Lite（火山方舟）</option>
             </optgroup>

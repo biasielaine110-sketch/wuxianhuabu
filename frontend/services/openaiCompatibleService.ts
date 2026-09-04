@@ -25,6 +25,7 @@ import {
   volcengineArkSeedreamFetchBase,
   volcengineArkSeedreamSize,
 } from './volcengineArkSeedream';
+import { isDeepWhiteImageModel, deepWhiteGenerateImage } from './deepwhiteImage';
 
 function normalizeBaseUrl(url: string): string {
   let u = url.trim().replace(/\/+$/, '');
@@ -5209,6 +5210,17 @@ export async function openAiGenerateNewImage(
     );
   }
 
+  if (isDeepWhiteImageModel(rawModel)) {
+    return deepWhiteGenerateImage({
+      model: rawModel,
+      prompt,
+      aspectRatio,
+      numberOfImages,
+      nodeResolution,
+      signal,
+    });
+  }
+
   // 满 eAPI 图像模型
   if (isManxueImageModel(rawModel)) {
     const mxKey = getManxueSavedKey().trim();
@@ -5305,6 +5317,18 @@ export async function openAiEditImage(
       rawModel,
       signal
     );
+  }
+
+  if (isDeepWhiteImageModel(rawModel)) {
+    return deepWhiteGenerateImage({
+      model: rawModel,
+      prompt,
+      aspectRatio,
+      numberOfImages,
+      nodeResolution,
+      refImages: base64Images,
+      signal,
+    });
   }
 
   // 满 eAPI 图像模型图生图

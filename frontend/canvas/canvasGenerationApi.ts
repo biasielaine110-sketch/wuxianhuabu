@@ -9,7 +9,7 @@ import {
   isVeo31FastVideoModel,
   videoNodeModelToToApis,
 } from './videoModelUtils';
-import { DEFAULT_DEEPSEEK_CHAT_MODEL_ID, normalizeDeepSeekChatModelId, normalizeLegacyImageModelId, getCodesonlineSavedKey, getHfsySavedKey, getOpenAiSavedKey, getAliyunMaasSavedKey, getManxueSavedKey, getVolcengineArkSavedKey } from '../services/aiSettings';
+import { DEFAULT_DEEPSEEK_CHAT_MODEL_ID, normalizeDeepSeekChatModelId, normalizeLegacyImageModelId, getCodesonlineSavedKey, getHfsySavedKey, getOpenAiSavedKey, getAliyunMaasSavedKey, getManxueSavedKey, getVolcengineArkSavedKey, getDeepWhiteSavedKey } from '../services/aiSettings';
 import { normalizeCanvasGenerationImages } from '../services/openaiCompatibleService';
 import { hasCanvasImagePayload } from '../services/canvasAssetResolver';
 import {
@@ -70,6 +70,16 @@ export function createCanvasGenerationApi(
     if (m === 'gpt-image-2-hfsy' || m === 'gpt-image-2pro-hfsy' || m === 'gpt-image-2pro-4k-hfsy' || m === 'nano-banana-2-hfsy' || m === 'nano-banana-pro-hfsy' || m === 'gemini-3.1-flash-image-preview-hfsy' || m === 'gemini-3-pro-image-preview-hfsy') return getHfsySavedKey() || undefined;
     if (m === 'z-image-turbo-aliyun' || m === 'z-image-turbo' || m === 'qwen-image-3.0-pro-aliyun' || m === 'qwen-image-3.0-pro') return getAliyunMaasSavedKey() || undefined;
     if (m === 'doubao-seedream-5.0-lite-ark' || m === 'doubao-seedream-5.0-lite') return getVolcengineArkSavedKey() || undefined;
+    if (
+      m.includes('deepwhite') ||
+      m === 'seedream-v5-pro-t2i' ||
+      m === 'seedream-v5-pro-i2i' ||
+      m === 'midjourney-imagine' ||
+      m === 'deepwhiteai-image-nb-2' ||
+      m === 'deepwhiteai-image-nb-2-lite'
+    ) {
+      return getDeepWhiteSavedKey() || undefined;
+    }
     if (m.endsWith('-manxue')) return getManxueSavedKey() || undefined;
     if (m.startsWith('gpt-image-')) return getOpenAiSavedKey() || undefined;
     return undefined;

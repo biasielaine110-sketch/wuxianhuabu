@@ -380,7 +380,7 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                   <div className="mt-5 pt-4 border-t border-[#333]">
                     <h3 className="text-sm font-semibold text-gray-200 mb-2">DeepWhite（对话）</h3>
                     <p className="text-xs text-gray-500 mb-2">
-                      对话：GLM / Qwen / DeepSeek；语音节点：Qwen3-TTS-Instruct-Flash、Suno Generation（api.deepwhiteai.com）
+                      对话：GLM / Qwen / DeepSeek；语音：Qwen3-TTS / Suno；生图：Seedream v5 Pro、Midjourney、Nano Banana 2（api.deepwhiteai.com）
                     </p>
                     <label className="text-xs text-gray-500 block mb-1">Base URL</label>
                     <input
