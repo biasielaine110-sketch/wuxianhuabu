@@ -8,6 +8,7 @@ import {
   getVolcengineArkCodingSavedKey,
   getAliyunMaasSavedKey,
   getDeepWhiteSavedKey,
+  getErgouSavedKey,
   migrateAiSettingsIfLegacy,
   getHfsySavedKey,
 } from '../services/aiSettings';
@@ -105,6 +106,7 @@ export function useCanvasSettingsPanelState({
   const [codesonlineKeyInput, setCodesonlineKeyInput] = useState(() => getAiSettingsSnapshot().codesonlineKey);
   const [codesonlineChatKeyInput, setCodesonlineChatKeyInput] = useState(() => getCodesonlineChatSavedKey());
   const [deepWhiteKeyInput, setDeepWhiteKeyInput] = useState(() => getDeepWhiteSavedKey());
+  const [ergouKeyInput, setErgouKeyInput] = useState(() => getErgouSavedKey());
   const [volcengineArkKeyInput, setVolcengineArkKeyInput] = useState(() => getVolcengineArkSavedKey());
   const [volcengineArkCodingKeyInput, setVolcengineArkCodingKeyInput] = useState(() =>
     getVolcengineArkCodingSavedKey()
@@ -127,6 +129,7 @@ export function useCanvasSettingsPanelState({
     setCodesonlineKeyInput(s.codesonlineKey);
     setCodesonlineChatKeyInput(getCodesonlineChatSavedKey());
     setDeepWhiteKeyInput(getDeepWhiteSavedKey());
+    setErgouKeyInput(getErgouSavedKey());
     setVolcengineArkKeyInput(getVolcengineArkSavedKey());
     setVolcengineArkCodingKeyInput(getVolcengineArkCodingSavedKey());
     setAliyunMaasKeyInput(getAliyunMaasSavedKey());
@@ -163,6 +166,7 @@ export function useCanvasSettingsPanelState({
     setCodesonlineKeyInput(s.codesonlineKey);
     setHfsyKeyInput(getHfsySavedKey());
     setDeepWhiteKeyInput(getDeepWhiteSavedKey());
+    setErgouKeyInput(getErgouSavedKey());
     setVolcengineArkKeyInput(getVolcengineArkSavedKey());
     setVolcengineArkCodingKeyInput(getVolcengineArkCodingSavedKey());
     setAliyunMaasKeyInput(getAliyunMaasSavedKey());
@@ -387,6 +391,8 @@ export function useCanvasSettingsPanelState({
       setCodesonlineChatKeyInput,
       deepWhiteKeyInput,
       setDeepWhiteKeyInput,
+      ergouKeyInput,
+      setErgouKeyInput,
       volcengineArkKeyInput,
       setVolcengineArkKeyInput,
       volcengineArkCodingKeyInput,

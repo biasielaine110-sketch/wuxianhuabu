@@ -18,6 +18,7 @@ import {
   getAliyunMaasSavedKey,
   getManxueSavedKey,
   getDeepWhiteSavedKey,
+  getErgouSavedKey,
 } from './aiSettings';
 import {
   chatCompletionHistoryAtBase,
@@ -52,6 +53,7 @@ function isDeepSeekChatModelId(modelName: string): boolean {
     m.endsWith('-toapis') ||
     m.endsWith('-manxue') ||
     m.endsWith('-deepwhite') ||
+    m.endsWith('-ergou') ||
     m.endsWith('-hfsy') ||
     m.endsWith('-codesonline')
   ) {
@@ -83,6 +85,30 @@ function resolveDeepWhiteChatUpstreamModelId(modelName: string): string {
 function deepWhiteChatFetchBase(): string {
   // 开发 / 生产均走同源代理，避免 CORS
   return '/deepwhite-api/v1';
+}
+
+/** 二狗 / https://ergouapi.com/v1 对话模型 */
+function isErgouChatModelId(modelName: string): boolean {
+  const m = (modelName || '').trim();
+  return (
+    m === 'gpt-6-astra-ergou' ||
+    m === 'grok-4.6-ergou' ||
+    m === 'gpt-5.4-mini-ergou' ||
+    m === 'gpt-5.6-sol-ergou'
+  );
+}
+
+function resolveErgouChatUpstreamModelId(modelName: string): string {
+  const m = (modelName || '').trim();
+  if (m === 'gpt-6-astra-ergou') return 'gpt-6-astra';
+  if (m === 'grok-4.6-ergou') return 'grok-4.6';
+  if (m === 'gpt-5.4-mini-ergou') return 'gpt-5.4-mini';
+  if (m === 'gpt-5.6-sol-ergou') return 'gpt-5.6-sol';
+  return m.replace(/-ergou$/, '');
+}
+
+function ergouChatFetchBase(): string {
+  return '/ergou-api/v1';
 }
 
 /** MiniMax 对话模型 id（不含火山方舟 -ark 后缀） */
@@ -582,6 +608,28 @@ export const callGeminiChatWithHistory = async (
       // 满 e 对话走 Vertex AI 风格 /v1beta/models/{model}:generateContent（?key= 鉴权），
       // 不能用 OpenAI /chat/completions —— 上游 Gemini 网关不会识别 chat completions 格式
       return { text: await manxueGeminiChatGenerate(slice, resolveManxueChatUpstreamModelId(modelName)) };
+    }
+
+    if (isErgouChatModelId(modelName)) {
+      const egKey = getErgouSavedKey().trim();
+      if (!egKey) {
+        throw new Error(
+          '使用二狗对话模型：请在「设置 → API」中填写「二狗 / ergouapi API Key」（Base URL 为 https://ergouapi.com/v1）。'
+        );
+      }
+      return {
+        text: await chatCompletionHistoryAtBase(
+          ergouChatFetchBase(),
+          egKey,
+          resolveErgouChatUpstreamModelId(modelName),
+          slice.map((t) => ({
+            role: t.role,
+            content: t.content,
+            imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
+            imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
+          }))
+        ),
+      };
     }
 
     // DeepWhite 须在官方 DeepSeek 之前匹配（UI id 也以 deepseek-v4- 开头）

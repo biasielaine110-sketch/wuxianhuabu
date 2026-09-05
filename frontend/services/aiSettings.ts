@@ -23,6 +23,8 @@ const MINIMAX_API_KEY_STORAGE_KEY = 'minimax-openai-compatible-api-key-v1';
 const MINIMAX_BASE_URL_STORAGE_KEY = 'minimax-openai-compatible-base-url-v1';
 /** DeepWhite AI（api.deepwhiteai.com/v1）对话 */
 const DEEPWHITE_API_KEY_STORAGE_KEY = 'deepwhite-openai-compatible-api-key-v1';
+/** 二狗 / ergouapi.com OpenAI 兼容对话 */
+const ERGOU_API_KEY_STORAGE_KEY = 'ergou-openai-compatible-api-key-v1';
 /** 火山方舟 Agent Plan（ark.cn-beijing.volces.com/api/plan/v3）— Seedream 生图 */
 const VOLCENGINE_ARK_API_KEY_STORAGE_KEY = 'volcengine-ark-agent-plan-api-key-v1';
 /** 火山方舟 Coding Plan（ark.cn-beijing.volces.com/api/coding/v3）— 对话 */
@@ -45,6 +47,8 @@ export const DEFAULT_MANXUE_BASE_URL = 'https://manxueapi.com/v1';
 export const DEFAULT_MINIMAX_BASE_URL = 'https://api.minimaxi.com/v1';
 /** DeepWhite AI OpenAI 兼容入口（对话） */
 export const DEFAULT_DEEPWHITE_BASE_URL = 'https://api.deepwhiteai.com/v1';
+/** 二狗 / ergouapi.com OpenAI 兼容入口（对话） */
+export const DEFAULT_ERGOU_BASE_URL = 'https://ergouapi.com/v1';
 
 /** 火山方舟 Agent Plan（Seedream 生图；同源代理映射到 /api/plan/v3） */
 export const DEFAULT_VOLCENGINE_ARK_BASE_URL = 'https://ark.cn-beijing.volces.com/api/plan/v3';
@@ -435,6 +439,38 @@ export function setDeepWhiteKey(apiKey: string): void {
 
 export function getDeepWhiteBaseUrl(): string {
   return DEFAULT_DEEPWHITE_BASE_URL;
+}
+
+/** 二狗 / ergouapi.com 对话 API Key */
+export function getErgouSavedKey(): string {
+  try {
+    return localStorage.getItem(ERGOU_API_KEY_STORAGE_KEY)?.trim() || '';
+  } catch {
+    return '';
+  }
+}
+
+/** Vercel 部署保护常改写 Authorization；自定义头供 /api/ergou-proxy 读取 */
+export function ergouAuthHeaders(apiKey: string): Record<string, string> {
+  const key = apiKey.trim().replace(/^Bearer\s+/i, '').trim().replace(/^["'`]+|["'`]+$/g, '');
+  return {
+    Authorization: `Bearer ${key}`,
+    'x-ergou-key': key,
+  };
+}
+
+export function setErgouKey(apiKey: string): void {
+  const normalized = apiKey.trim();
+  try {
+    if (normalized) localStorage.setItem(ERGOU_API_KEY_STORAGE_KEY, normalized);
+    else localStorage.removeItem(ERGOU_API_KEY_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getErgouBaseUrl(): string {
+  return DEFAULT_ERGOU_BASE_URL;
 }
 
 export function normalizeVolcengineArkApiKey(apiKey: string): string {

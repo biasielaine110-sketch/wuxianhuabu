@@ -826,6 +826,12 @@ export function ChatNodeContent({
           onChange={(e) => onUpdate({ model: e.target.value })}
           onPointerDown={(e) => e.stopPropagation()}
         >
+          <optgroup label="二狗 / ergouapi">
+            <option value="gpt-6-astra-ergou">GPT-6 Astra（二狗）</option>
+            <option value="grok-4.6-ergou">Grok 4.6（二狗）</option>
+            <option value="gpt-5.4-mini-ergou">GPT-5.4 Mini（二狗）</option>
+            <option value="gpt-5.6-sol-ergou">GPT-5.6 Sol（二狗）</option>
+          </optgroup>
           <optgroup label="DeepWhite">
             <option value="glm-5.3-flash-deepwhite">GLM-5.3-Flash（DeepWhite）</option>
             <option value="qwen3.8-flash-next-deepwhite">Qwen3.8-Flash-Next（DeepWhite）</option>

@@ -382,6 +382,31 @@ const toapisFileCdnProxy = {
     proxyTimeout: 1_800_000,
     rewrite: (p: string) => p.replace(/^\/deepwhite-api/, ''),
   },
+  '/ergou-api': {
+    target: 'https://ergouapi.com',
+    changeOrigin: true,
+    secure: true,
+    timeout: 1_800_000,
+    proxyTimeout: 1_800_000,
+    rewrite: (p: string) => p.replace(/^\/ergou-api/, ''),
+    configure(proxy) {
+      proxy.on('proxyReq', (proxyReq, req) => {
+        const raw = (req as { headers?: Record<string, unknown> }).headers?.['x-ergou-key'];
+        const custom = String(Array.isArray(raw) ? raw[0] : raw || '').trim();
+        if (custom && !proxyReq.getHeader('Authorization')) {
+          proxyReq.setHeader('Authorization', `Bearer ${custom}`);
+        }
+      });
+    },
+  },
+  '/api/ergou-proxy': {
+    target: 'https://ergouapi.com',
+    changeOrigin: true,
+    secure: true,
+    timeout: 1_800_000,
+    proxyTimeout: 1_800_000,
+    configure: configurePathQueryProxy,
+  },
   /** 生产包预览：/api/deepwhite-proxy?path=v1/... */
   '/api/deepwhite-proxy': {
     target: 'https://api.deepwhiteai.com',

@@ -6,6 +6,7 @@ import {
   DEFAULT_CODESONLINE_IMAGE_BASE_URL,
   DEFAULT_DEEPSEEK_BASE_URL,
   DEFAULT_DEEPWHITE_BASE_URL,
+  DEFAULT_ERGOU_BASE_URL,
   DEFAULT_HFSY_IMAGE_BASE_URL,
   DEFAULT_MANXUE_BASE_URL,
   DEFAULT_MINIMAX_BASE_URL,
@@ -13,6 +14,7 @@ import {
   persistAiSettings,
   setCodesonlineChatKey,
   setDeepWhiteKey,
+  setErgouKey,
   setVolcengineArkKey,
   setVolcengineArkCodingKey,
   setAliyunMaasKey,
@@ -103,6 +105,8 @@ export type CanvasSettingsModalProps = {
   setCodesonlineChatKeyInput: Dispatch<SetStateAction<string>>;
   deepWhiteKeyInput: string;
   setDeepWhiteKeyInput: Dispatch<SetStateAction<string>>;
+  ergouKeyInput: string;
+  setErgouKeyInput: Dispatch<SetStateAction<string>>;
   volcengineArkKeyInput: string;
   setVolcengineArkKeyInput: Dispatch<SetStateAction<string>>;
   volcengineArkCodingKeyInput: string;
@@ -184,6 +188,8 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
     setCodesonlineChatKeyInput,
     deepWhiteKeyInput,
     setDeepWhiteKeyInput,
+    ergouKeyInput,
+    setErgouKeyInput,
     volcengineArkKeyInput,
     setVolcengineArkKeyInput,
     volcengineArkCodingKeyInput,
@@ -400,6 +406,30 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                     />
                   </div>
 
+                  {/* 二狗 / ergouapi.com 对话 */}
+                  <div className="mt-5 pt-4 border-t border-[#333]">
+                    <h3 className="text-sm font-semibold text-gray-200 mb-2">二狗 / ergouapi（对话）</h3>
+                    <p className="text-xs text-gray-500 mb-2">
+                      GPT-6 Astra / Grok 4.6 / GPT-5.4 Mini / GPT-5.6 Sol（https://ergouapi.com/v1）
+                    </p>
+                    <label className="text-xs text-gray-500 block mb-1">Base URL</label>
+                    <input
+                      type="text"
+                      readOnly
+                      value={DEFAULT_ERGOU_BASE_URL}
+                      placeholder={DEFAULT_ERGOU_BASE_URL}
+                      className="w-full mb-3 bg-[#252525] border border-[#333] rounded-lg px-4 py-2.5 text-gray-400 text-sm cursor-not-allowed"
+                    />
+                    <label className="text-xs text-gray-500 block mb-1">二狗 / ergouapi API Key</label>
+                    <input
+                      type="password"
+                      value={ergouKeyInput}
+                      onChange={(e) => setErgouKeyInput(e.target.value)}
+                      placeholder="sk-..."
+                      className="w-full bg-[#222222] border border-[#444] rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-sky-600 transition-colors text-sm"
+                    />
+                  </div>
+
                   {/* 火山方舟：Coding Plan 对话 + Agent Plan 生图（两套 Key） */}
                   <div className="mt-5 pt-4 border-t border-[#333]">
                     <h3 className="text-sm font-semibold text-gray-200 mb-2">火山方舟（Coding / Agent Plan）</h3>
@@ -572,6 +602,7 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                               });
                               setCodesonlineChatKey(codesonlineChatKeyInput.trim());
                               setDeepWhiteKey(deepWhiteKeyInput.trim());
+                              setErgouKey(ergouKeyInput.trim());
                               setVolcengineArkCodingKey(volcengineArkCodingKeyInput.trim());
                               setVolcengineArkKey(volcengineArkKeyInput.trim());
                               setAliyunMaasKey(aliyunMaasKeyInput.trim());
@@ -609,6 +640,7 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                               });
                               setCodesonlineChatKey(codesonlineChatKeyInput.trim());
                               setDeepWhiteKey(deepWhiteKeyInput.trim());
+                              setErgouKey(ergouKeyInput.trim());
                               setVolcengineArkCodingKey(volcengineArkCodingKeyInput.trim());
                               setVolcengineArkKey(volcengineArkKeyInput.trim());
                               setAliyunMaasKey(aliyunMaasKeyInput.trim());
@@ -650,6 +682,7 @@ export const CanvasSettingsModal = memo(function CanvasSettingsModal(p: CanvasSe
                         });
                         setCodesonlineChatKey(codesonlineChatKeyInput.trim());
                         setDeepWhiteKey(deepWhiteKeyInput.trim());
+                        setErgouKey(ergouKeyInput.trim());
                         setVolcengineArkCodingKey(volcengineArkCodingKeyInput.trim());
                         setVolcengineArkKey(volcengineArkKeyInput.trim());
                         setAliyunMaasKey(aliyunMaasKeyInput.trim());

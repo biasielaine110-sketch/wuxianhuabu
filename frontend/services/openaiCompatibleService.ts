@@ -160,6 +160,10 @@ function rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNormalized: string): st
       const pathname = u.pathname.replace(/\/+$/, '') || '/v1';
       next = `${window.location.origin}/deepwhite-api${pathname}`;
     }
+    if (hostname === 'ergouapi.com' || hostname === 'www.ergouapi.com') {
+      const pathname = u.pathname.replace(/\/+$/, '') || '/v1';
+      next = `${window.location.origin}/ergou-api${pathname}`;
+    }
   } catch {
     /* keep next */
   }
@@ -179,6 +183,10 @@ function isDeepWhiteFetchBase(base: string): boolean {
   return /deepwhite-api|deepwhiteai\.com/i.test(base);
 }
 
+function isErgouFetchBase(base: string): boolean {
+  return /ergou-api|ergouapi\.com/i.test(base);
+}
+
 function openAiCompatFailureHint(
   status: number,
   kind: 'generations-json' | 'image-edit',
@@ -190,6 +198,9 @@ function openAiCompatFailureHint(
     }
     if (fetchBase && isAliyunMaasFetchBase(fetchBase)) {
       return '（401：阿里云百炼鉴权失败。请在「设置 → API → 阿里云百炼」填写 API Key 并在当前域名下保存。）';
+    }
+    if (fetchBase && isErgouFetchBase(fetchBase)) {
+      return '（401：二狗 / ergouapi 鉴权失败。请在「设置 → API → 二狗 / ergouapi」填写并保存 API Key。）';
     }
     return '（401：鉴权失败。若使用 DeepWhite 模型，请在「设置 → API → DeepWhite」填写并保存 API Key；若使用 hfsyapi.cn，请填写 hfsyapi.cn Key；确认不要误填其它通道的 Key。）';
   }
@@ -4248,6 +4259,10 @@ function resolveChatModelForBase(baseNormalized: string, modelName: string): str
   if (m === 'gemini-3.6-flash-toapis') return 'gemini-3.6-flash';
   if (m === 'qwen3.5-plus-toapis') return 'qwen3.5-plus';
   if (m === 'deepseek-v4-flash-toapis') return 'deepseek-v4-flash';
+  if (m === 'gpt-6-astra-ergou') return 'gpt-6-astra';
+  if (m === 'grok-4.6-ergou') return 'grok-4.6';
+  if (m === 'gpt-5.4-mini-ergou') return 'gpt-5.4-mini';
+  if (m === 'gpt-5.6-sol-ergou') return 'gpt-5.6-sol';
   // DeepWhite UI id → 仅在 DeepWhite 通道展开为 vendor/model；其它通道勿带斜杠
   if (/deepwhite-api|deepwhiteai\.com/i.test(baseNormalized) || m.endsWith('-deepwhite')) {
     if (m === 'glm-5.3-flash-deepwhite') return 'glm/glm-5.3-flash';
@@ -4627,10 +4642,11 @@ async function postJsonAtBase<T>(base: string, path: string, body: unknown, apiK
   const ark = isVolcengineArkFetchBase(fetchBase) || isVolcengineArkFetchBase(base);
   const aliyun = isAliyunMaasFetchBase(fetchBase) || isAliyunMaasFetchBase(base);
   const deepwhite = isDeepWhiteFetchBase(fetchBase) || isDeepWhiteFetchBase(base);
-  const key = ark || aliyun || deepwhite
+  const ergou = isErgouFetchBase(fetchBase) || isErgouFetchBase(base);
+  const key = ark || aliyun || deepwhite || ergou
     ? apiKey.trim().replace(/^Bearer\s+/i, '').trim().replace(/^["'`]+|["'`]+$/g, '')
     : apiKey.trim();
-  if (!key && !ark && !aliyun && !deepwhite) throw new Error('未配置 OpenAI 兼容 API Key，请在设置中选择「OpenAI 兼容」并填写密钥。');
+  if (!key && !ark && !aliyun && !deepwhite && !ergou) throw new Error('未配置 OpenAI 兼容 API Key，请在设置中选择「OpenAI 兼容」并填写密钥。');
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (ark) {
     if (key) {
@@ -4645,6 +4661,11 @@ async function postJsonAtBase<T>(base: string, path: string, body: unknown, apiK
   } else if (deepwhite) {
     if (key) {
       headers['x-deepwhite-key'] = key;
+      headers.Authorization = `Bearer ${key}`;
+    }
+  } else if (ergou) {
+    if (key) {
+      headers['x-ergou-key'] = key;
       headers.Authorization = `Bearer ${key}`;
     }
   } else {
@@ -5570,6 +5591,7 @@ export async function chatCompletionHistoryAtBase(
   const model = resolveChatModelForBase(base, modelName);
   const messages = turnsToOpenAiChatMessages(turns);
   const isDeepWhite = /deepwhite-api|deepwhiteai\.com/i.test(baseUrlRaw) || /deepwhite-api|deepwhiteai\.com/i.test(base);
+  const isErgou = /ergou-api|ergouapi\.com/i.test(baseUrlRaw) || /ergou-api|ergouapi\.com/i.test(base);
 
   const body: Record<string, unknown> = {
     model,
@@ -5577,6 +5599,10 @@ export async function chatCompletionHistoryAtBase(
   };
   // DeepWhite 文档建议显式 stream，并给足 max_tokens（推理模型会额外消耗）
   if (isDeepWhite) {
+    body.stream = false;
+    body.max_tokens = 8192;
+  }
+  if (isErgou) {
     body.stream = false;
     body.max_tokens = 8192;
   }

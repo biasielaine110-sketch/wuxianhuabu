@@ -55,6 +55,14 @@
       "destination": "/api/deepwhite-proxy?path=$1"
     },
     {
+      "source": "/ergou-api/(.*)",
+      "destination": "/api/ergou-proxy?path=$1"
+    },
+    {
+      "source": "/api/ergou-proxy/(.*)",
+      "destination": "/api/ergou-proxy?path=$1"
+    },
+    {
       "source": "/api/deepwhite-proxy/(.*)",
       "destination": "/api/deepwhite-proxy?path=$1"
     },
