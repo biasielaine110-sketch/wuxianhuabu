@@ -1,6 +1,7 @@
 import FIRE_X20_STORYBOARD_PROMPT from './promptPresets/火_X20_分镜提示词.txt?raw';
 import FIRE_X20_SCENE_EXTRACT_PROMPT from './promptPresets/火_X20_场景提取.txt?raw';
 import FIRE_X20_PRE_GEN_PREFIX_PROMPT from './promptPresets/火_X20_生成前前缀添加.txt?raw';
+import FIRE_X20_HERO_STORYBOARD_PROMPT from './promptPresets/火_X20_主图分镜图.txt?raw';
 import FIRE_X21_ULTIMATE_STORYBOARD_PROMPT from './promptPresets/火_X21_究极分镜.txt?raw';
 
 /** 画布内置预设（图生图 / 文生图）；AI 对话模板通过 loadChatPromptPresets 异步合并 */
@@ -4151,6 +4152,7 @@ export const INITIAL_PROMPT_PRESETS_BASE: Record<string, string> = {
   ...INITIAL_T2I_PROMPT_PRESETS,
   ...INITIAL_I2I_PROMPT_PRESETS,
   '火_X20_分镜提示词': FIRE_X20_STORYBOARD_PROMPT,
+  '火_X20_主图分镜图': FIRE_X20_HERO_STORYBOARD_PROMPT,
   '火_X20_场景提取': FIRE_X20_SCENE_EXTRACT_PROMPT,
   '火_X20_生成前前缀添加': FIRE_X20_PRE_GEN_PREFIX_PROMPT,
   '火_X21_究极分镜': FIRE_X21_ULTIMATE_STORYBOARD_PROMPT,
@@ -4236,6 +4238,7 @@ export const TEXT_WORD_LIBRARY_KEYS: readonly string[] = [
   '故事板分镜图_黑白线稿',
   '火_角色_故事板_视频提示词',
   '火_X20_分镜提示词',
+  '火_X20_主图分镜图',
   '火_X20_场景提取',
   '火_X20_生成前前缀添加',
   '火_X21_究极分镜',
