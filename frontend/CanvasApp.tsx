@@ -1777,6 +1777,8 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
   useLazyCanvasKeyboardShortcuts({
     canvasMode,
     fullscreenImage: fullscreenOverlayOpen ? '1' : null,
+    fullscreenVideo,
+    copyVideoUrl: copyVideoFromUrl,
     showShortcutsPanel,
     clipboard,
     setActiveTool,

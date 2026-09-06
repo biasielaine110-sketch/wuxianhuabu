@@ -4,6 +4,7 @@ import {
   AudioIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  CopyIcon,
   DownloadIcon,
   LoaderIcon,
   MaximizeIcon,
@@ -157,6 +158,18 @@ export function VideoNodeContent({
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
+                copyCurrentVideo();
+              }}
+              className="p-2 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
+              title="复制当前视频到剪贴板"
+            >
+              <CopyIcon size={20} />
+            </button>
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
                 if (currentUrl) onDownloadVideo(currentUrl);
               }}
               className="p-2 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
@@ -208,6 +221,18 @@ export function VideoNodeContent({
               title="静音/取消静音"
             >
               <AudioIcon size={40} />
+            </button>
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                copyCurrentVideo();
+              }}
+              className="p-4 bg-black/70 hover:bg-black/90 rounded-xl text-white backdrop-blur-sm shadow-lg"
+              title="复制当前视频到剪贴板"
+            >
+              <CopyIcon size={40} />
             </button>
             <button
               type="button"

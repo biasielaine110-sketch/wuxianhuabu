@@ -26,6 +26,9 @@ import { hideDraftEdgePath } from './canvasDraftEdgeDom';
 export type CanvasKeyboardShortcutDeps = {
   canvasMode: CanvasMode;
   fullscreenImage: string | null;
+  /** 全屏视频预览地址；有值时 C 在鼠标处粘贴为新视频节点，Ctrl+C 写入剪贴板 */
+  fullscreenVideo?: string | null;
+  copyVideoUrl?: (url: string) => void;
   showShortcutsPanel: boolean;
   clipboard: CanvasNode | null;
   setActiveTool: Dispatch<SetStateAction<Tool>>;
@@ -78,6 +81,48 @@ export type CanvasKeyboardShortcutDeps = {
   handleSaveDraftJsonSaveAs: () => void;
   fitViewportToSelectedNodes: () => void;
 };
+
+function currentPreviewVideoUrl(node: CanvasNode): string {
+  const urls = node.videos || [];
+  if (urls.length === 0) return '';
+  const idx = Math.min(Math.max(0, node.currentVideoIndex ?? 0), urls.length - 1);
+  return (urls[idx] || '').trim();
+}
+
+/** C：把当前预览视频粘贴成新视频节点，落在画布鼠标位置 */
+function pasteVideoNodeAtCanvasMouse(
+  d: CanvasKeyboardShortcutDeps,
+  url: string,
+  source?: CanvasNode
+): void {
+  const t = url.trim();
+  if (!t) return;
+  const mp = d.canvasMouseRef.current;
+  const def = d.DEFAULT_NODE_SIZES.video || { width: 1200, height: 1400 };
+  const newNode: CanvasNode = {
+    id: `video-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    type: 'video',
+    x: mp.x - def.width / 2,
+    y: mp.y - def.height / 2,
+    width: def.width,
+    height: def.height,
+    prompt: source?.prompt || '',
+    images: [],
+    aspectRatio: source?.aspectRatio || '16:9',
+    resolution: source?.resolution || '2k',
+    imageCount: 1,
+    model: source?.model || 'grok-video-1.5',
+    viewMode: 'single',
+    currentImageIndex: 0,
+    videos: [t],
+    currentVideoIndex: 0,
+    videoDuration: source?.videoDuration ?? 8,
+    videoResolution: source?.videoResolution || '720p',
+    isGenerating: false,
+  };
+  d.appendNodesWithUndo([newNode], { selectIds: [newNode.id] });
+  if (d.fullscreenVideo) d.closeFullscreen();
+}
 
 export function attachCanvasKeyboardShortcuts(
   getDeps: () => CanvasKeyboardShortcutDeps
@@ -170,14 +215,27 @@ export function attachCanvasKeyboardShortcuts(
         !e.ctrlKey &&
         !e.metaKey &&
         !e.altKey &&
-        !e.shiftKey &&
-        !d.fullscreenImage
+        !e.shiftKey
       ) {
+        const fsVideo = (d.fullscreenVideo || '').trim();
+        if (fsVideo) {
+          e.preventDefault();
+          const sid = d.selectedIdsRef.current[0];
+          const src = sid ? d.nodesRef.current.find((n) => n.id === sid) : undefined;
+          pasteVideoNodeAtCanvasMouse(d, fsVideo, src?.type === 'video' ? src : undefined);
+          return;
+        }
+        if (d.fullscreenImage) return;
         e.preventDefault();
         const sid = d.selectedIdsRef.current[0];
         if (!sid) return;
         const node = d.nodesRef.current.find(n => n.id === sid);
         if (!node) return;
+        if (node.type === 'video') {
+          const url = currentPreviewVideoUrl(node);
+          if (url) pasteVideoNodeAtCanvasMouse(d, url, node);
+          return;
+        }
         const mp = d.canvasMouseRef.current;
         const allRefs = collectCopyableImageRefsFromNode(node);
         if (allRefs.length === 0) return;
@@ -294,12 +352,22 @@ export function attachCanvasKeyboardShortcuts(
         if (selectedText.length > 0) return;
         // 阻止浏览器默认复制行为（如复制选中文本）
         e.preventDefault();
+        const fsVideo = (d.fullscreenVideo || '').trim();
+        if (fsVideo && d.copyVideoUrl) {
+          d.copyVideoUrl(fsVideo);
+          return;
+        }
         // 画布模式下复制选中节点
         if (d.selectedIdsRef.current.length > 0) {
           const nodesList = d.selectedIdsRef.current.map(id => d.nodesRef.current.find(n => n.id === id)).filter(Boolean) as CanvasNode[];
           if (nodesList.length > 0) {
             // 只取第一个作为内部 d.clipboard（节点复制）
             d.setClipboard(nodesList[0]);
+            const videoNode = nodesList.find((n) => n.type === 'video' && (n.videos?.length ?? 0) > 0);
+            if (videoNode && d.copyVideoUrl) {
+              const url = currentPreviewVideoUrl(videoNode);
+              if (url) d.copyVideoUrl(url);
+            }
             // 如果有图片节点，写入图片到系统剪贴板 + 共享剪贴板
             const imgNode = nodesList.find((n) => {
               const i = n.currentImageIndex ?? 0;

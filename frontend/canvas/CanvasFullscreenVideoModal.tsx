@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { DownloadIcon, XIcon } from './canvasIcons';
+import { CopyIcon, DownloadIcon, XIcon } from './canvasIcons';
 import { rewriteImageUrlForBrowserDisplay } from '../services/canvasAssetResolver';
 import { VideoContextMenu } from './VideoContextMenu';
 
@@ -63,7 +63,19 @@ export const CanvasFullscreenVideoModal = memo(function CanvasFullscreenVideoMod
       </button>
       <button
         type="button"
-        className="absolute top-4 right-28 z-[101] rounded-lg bg-white/10 p-2 text-white hover:bg-white/20"
+        className="absolute top-4 right-28 z-[101] flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/20"
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          onCopyVideo();
+        }}
+        title="复制视频到剪贴板"
+      >
+        <CopyIcon size={16} />
+        复制
+      </button>
+      <button
+        type="button"
+        className="absolute top-4 right-52 z-[101] rounded-lg bg-white/10 p-2 text-white hover:bg-white/20"
         onPointerDown={(e) => {
           e.stopPropagation();
           onClose();
