@@ -1,5 +1,11 @@
 import type { CanvasNode, Edge, GridSplitNode } from './types';
-import { hasCanvasImagePayload, imageSrcToRawBase64, resolveCanvasImageSource, rewriteImageUrlForBrowserDisplay } from './services/canvasAssetResolver';
+import {
+  fetchVideoBlobForBrowser,
+  hasCanvasImagePayload,
+  imageSrcToRawBase64,
+  resolveCanvasImageSource,
+  rewriteImageUrlForBrowserDisplay,
+} from './services/canvasAssetResolver';
 
 export type ImageRefPayload = { base64?: string; assetId?: string };
 
@@ -459,18 +465,41 @@ export function resolvePromptWithLinkedText(
   return { prompt: localRaw, usedLinkedAsPrimary: false };
 }
 
-/** 从视频 URL（含 blob:）截取一帧为 JPEG base64（无 data: 前缀）；失败返回 null（常见于跨域外链） */
-export function videoUrlToJpegBase64(url: string): Promise<string | null> {
+const CHAT_VIDEO_FRAME_RATIOS = [0.08, 0.28, 0.5, 0.72, 0.92];
+
+function captureVideoJpegBase64(v: HTMLVideoElement, maxEdge = 768, quality = 0.74): string | null {
+  const w = v.videoWidth;
+  const h = v.videoHeight;
+  if (!w || !h) return null;
+  const scale = Math.min(1, maxEdge / Math.max(w, h));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(w * scale));
+  c.height = Math.max(1, Math.round(h * scale));
+  const ctx = c.getContext('2d');
+  if (!ctx) return null;
+  ctx.drawImage(v, 0, 0, c.width, c.height);
+  const data = c.toDataURL('image/jpeg', quality);
+  const i = data.indexOf(',');
+  return i >= 0 ? data.slice(i + 1) : null;
+}
+
+function extractJpegFramesFromPlayableSrc(
+  playSrc: string,
+  frameCount: number,
+  useCors: boolean
+): Promise<string[]> {
+  const count = Math.max(1, Math.min(frameCount, CHAT_VIDEO_FRAME_RATIOS.length));
   return new Promise((resolve) => {
     const v = document.createElement('video');
-    v.crossOrigin = 'anonymous';
+    if (useCors) v.crossOrigin = 'anonymous';
     v.muted = true;
     v.playsInline = true;
     v.preload = 'auto';
     v.referrerPolicy = 'no-referrer';
-    const playSrc = rewriteImageUrlForBrowserDisplay(url);
+    const frames: string[] = [];
     let settled = false;
-    const done = (val: string | null) => {
+    let seekIndex = 0;
+    const done = (val: string[]) => {
       if (settled) return;
       settled = true;
       try {
@@ -482,56 +511,90 @@ export function videoUrlToJpegBase64(url: string): Promise<string | null> {
       }
       resolve(val);
     };
-    const t = window.setTimeout(() => done(null), 12000);
+    const t = window.setTimeout(() => done(frames), 18000);
+    const seekNext = () => {
+      if (settled) return;
+      const dur = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 1;
+      const ratios = count === 1 ? [Math.min(0.2, dur > 0 ? 0.05 : 0.05)] : CHAT_VIDEO_FRAME_RATIOS.slice(0, count);
+      if (seekIndex >= ratios.length) {
+        window.clearTimeout(t);
+        done(frames);
+        return;
+      }
+      try {
+        v.currentTime = Math.min(Math.max(0, dur * ratios[seekIndex]), Math.max(0, dur - 0.05));
+      } catch {
+        window.clearTimeout(t);
+        done(frames);
+      }
+    };
     v.onerror = () => {
       window.clearTimeout(t);
-      done(null);
-    };
-    v.onloadeddata = () => {
-      try {
-        const dur = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 1;
-        v.currentTime = Math.min(0.2, dur * 0.05);
-      } catch {
-        window.clearTimeout(t);
-        done(null);
-      }
+      done(frames);
     };
     v.onseeked = () => {
-      try {
-        const w = v.videoWidth;
-        const h = v.videoHeight;
-        if (!w || !h) {
-          window.clearTimeout(t);
-          done(null);
-          return;
-        }
-        const c = document.createElement('canvas');
-        c.width = w;
-        c.height = h;
-        const ctx = c.getContext('2d');
-        if (!ctx) {
-          window.clearTimeout(t);
-          done(null);
-          return;
-        }
-        ctx.drawImage(v, 0, 0);
-        const data = c.toDataURL('image/jpeg', 0.82);
-        const i = data.indexOf(',');
-        window.clearTimeout(t);
-        done(i >= 0 ? data.slice(i + 1) : null);
-      } catch {
-        window.clearTimeout(t);
-        done(null);
-      }
+      const shot = captureVideoJpegBase64(v);
+      if (shot) frames.push(shot);
+      seekIndex += 1;
+      seekNext();
+    };
+    v.onloadeddata = () => {
+      seekNext();
     };
     v.src = playSrc;
     try {
       v.load();
     } catch {
       window.clearTimeout(t);
-      done(null);
+      done(frames);
     }
   });
+}
+
+/** 从视频 URL（含 blob:）截取多帧 JPEG base64（无 data: 前缀）；跨域失败时先拉 Blob 再截帧 */
+export async function videoUrlToJpegFrames(url: string, frameCount = 5): Promise<string[]> {
+  const t = (url || '').trim();
+  if (!t) return [];
+  const count = Math.max(1, Math.min(8, frameCount));
+  if (t.startsWith('blob:') || t.startsWith('data:')) {
+    return extractJpegFramesFromPlayableSrc(t, count, false);
+  }
+  const rewritten = rewriteImageUrlForBrowserDisplay(t);
+  let frames = await extractJpegFramesFromPlayableSrc(rewritten, count, true);
+  if (frames.length > 0) return frames;
+  try {
+    const blob = await fetchVideoBlobForBrowser(t);
+    const blobUrl = URL.createObjectURL(blob);
+    try {
+      frames = await extractJpegFramesFromPlayableSrc(blobUrl, count, false);
+    } finally {
+      URL.revokeObjectURL(blobUrl);
+    }
+  } catch {
+    /* 外链不可读时由调用方退回文字链接 */
+  }
+  return frames;
+}
+
+/** 从视频 URL 截取一帧为 JPEG base64（无 data: 前缀）；失败返回 null */
+export async function videoUrlToJpegBase64(url: string): Promise<string | null> {
+  const frames = await videoUrlToJpegFrames(url, 1);
+  return frames[0] ?? null;
+}
+
+/** 可供远程对话接口直接拉取的 http(s) 视频地址（不含 blob / localhost） */
+export function publicHttpVideoUrlForChat(url: string): string | null {
+  const t = (url || '').trim();
+  if (!t) return null;
+  try {
+    const u = new URL(t);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    const host = u.hostname.toLowerCase();
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.endsWith('.local')) return null;
+    return t;
+  } catch {
+    return null;
+  }
 }
 
 export async function resolveSlotImagesForIndices(
@@ -565,8 +628,8 @@ export async function resolveSlotImagesForIndices(
       continue;
     }
     if (s.kind === 'video' && s.videoUrl) {
-      const b = await videoUrlToJpegBase64(s.videoUrl);
-      if (b) base64s.push(b);
+      const frames = await videoUrlToJpegFrames(s.videoUrl, 5);
+      if (frames.length > 0) base64s.push(...frames);
       else missing.push(num);
       continue;
     }
@@ -609,10 +672,11 @@ export async function resolveSlotImagesForIndicesWithCompression(
       continue;
     }
     if (s.kind === 'video' && s.videoUrl) {
-      const b = await videoUrlToJpegBase64(s.videoUrl);
-      if (b) {
-        const compressed = await compressImageBase64(b, maxSize);
-        base64s.push(compressed);
+      const frames = await videoUrlToJpegFrames(s.videoUrl, 5);
+      if (frames.length > 0) {
+        for (const b of frames) {
+          base64s.push(await compressImageBase64(b, maxSize));
+        }
       } else missing.push(num);
       continue;
     }

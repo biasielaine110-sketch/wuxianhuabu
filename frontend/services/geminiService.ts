@@ -44,6 +44,16 @@ export type { ChatCompletionOptions, ChatCompletionResult, ChatCompletionTurn } 
 
 const MAX_CHAT_HISTORY_TURNS = 48;
 
+function toCompatHistoryTurn(t: ChatCompletionTurn) {
+  return {
+    role: t.role,
+    content: t.content,
+    imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
+    imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
+    videoUrls: t.role === 'user' ? t.videoUrls : undefined,
+  };
+}
+
 function isDeepSeekChatModelId(modelName: string): boolean {
   const m = normalizeDeepSeekChatModelId(modelName).trim();
   // 其它通道后缀必须排除，避免 deepseek-v4-*-deepwhite 等误走官方 DeepSeek
@@ -559,12 +569,7 @@ export const callGeminiChatWithHistory = async (
         volcengineArkChatFetchBase(),
         arkKey,
         resolveVolcengineArkChatUpstreamModelId(modelName),
-        slice.map((t) => ({
-          role: t.role,
-          content: t.content,
-          imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
-          imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
-        }))
+        slice.map(toCompatHistoryTurn)
       ) };
     }
 
@@ -577,12 +582,7 @@ export const callGeminiChatWithHistory = async (
         aliyunMaasChatFetchBase(),
         aliyunKey,
         resolveAliyunMaasChatUpstreamModelId(modelName),
-        slice.map((t) => ({
-          role: t.role,
-          content: t.content,
-          imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
-          imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
-        }))
+        slice.map(toCompatHistoryTurn)
       ) };
     }
 
@@ -593,12 +593,7 @@ export const callGeminiChatWithHistory = async (
       }
       return {
         text: await manxueOpenAiCompatibleChatHistory(
-          slice.map((t) => ({
-            role: t.role,
-            content: t.content,
-            imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
-            imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
-          })),
+          slice.map(toCompatHistoryTurn),
           resolveManxueOpenAiChatUpstreamModelId(modelName)
         ),
       };
@@ -622,12 +617,7 @@ export const callGeminiChatWithHistory = async (
           ergouChatFetchBase(),
           egKey,
           resolveErgouChatUpstreamModelId(modelName),
-          slice.map((t) => ({
-            role: t.role,
-            content: t.content,
-            imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
-            imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
-          }))
+          slice.map(toCompatHistoryTurn)
         ),
       };
     }
@@ -645,12 +635,7 @@ export const callGeminiChatWithHistory = async (
           deepWhiteChatFetchBase(),
           dwKey,
           resolveDeepWhiteChatUpstreamModelId(modelName),
-          slice.map((t) => ({
-            role: t.role,
-            content: t.content,
-            imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
-            imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
-          }))
+          slice.map(toCompatHistoryTurn)
         ),
       };
     }
@@ -674,12 +659,7 @@ export const callGeminiChatWithHistory = async (
         base,
         key,
         normalizeDeepSeekChatModelId(modelName).trim(),
-        slice.map((t) => ({
-          role: t.role,
-          content: t.content,
-          imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
-          imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
-        }))
+        slice.map(toCompatHistoryTurn)
       ) };
     }
 
@@ -694,12 +674,7 @@ export const callGeminiChatWithHistory = async (
         getMiniMaxBaseUrl(),
         mxKey,
         modelName,
-        slice.map((t) => ({
-          role: t.role,
-          content: t.content,
-          imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
-          imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
-        }))
+        slice.map(toCompatHistoryTurn)
       ) };
     }
 
@@ -716,12 +691,7 @@ export const callGeminiChatWithHistory = async (
         '/codesonline-chat-api',
         coKey,
         resolveCodesonlineChatUpstreamModelId(modelName),
-        slice.map((t) => ({
-          role: t.role,
-          content: t.content,
-          imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
-          imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
-        }))
+        slice.map(toCompatHistoryTurn)
       ) };
     }
 
@@ -737,12 +707,7 @@ export const callGeminiChatWithHistory = async (
         getHfsyBaseUrl(),
         hfsyKey,
         resolveHfsyChatUpstreamModelId(modelName),
-        slice.map((t) => ({
-          role: t.role,
-          content: t.content,
-          imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
-          imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
-        }))
+        slice.map(toCompatHistoryTurn)
       ) };
     }
 
@@ -757,24 +722,14 @@ export const callGeminiChatWithHistory = async (
         getOpenAiBaseUrl(),
         apiKey,
         resolveToApisChatUpstreamModelId(modelName),
-        slice.map((t) => ({
-          role: t.role,
-          content: t.content,
-          imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
-          imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
-        }))
+        slice.map(toCompatHistoryTurn)
       ) };
     }
 
     if (getAiProvider() === 'openai-compatible') {
       const apiKey = getOpenAiSavedKey();
       if (!apiKey) throw new Error('未配置 OpenAI 兼容 API Key，请在设置中选择「OpenAI 兼容」并填写密钥。');
-      return { text: await chatCompletionHistoryAtBase(getOpenAiBaseUrl(), apiKey, modelName, slice.map((t) => ({
-        role: t.role,
-        content: t.content,
-        imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
-        imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
-      }))) };
+      return { text: await chatCompletionHistoryAtBase(getOpenAiBaseUrl(), apiKey, modelName, slice.map(toCompatHistoryTurn)) };
     }
 
     const contents = slice.map((t) => {

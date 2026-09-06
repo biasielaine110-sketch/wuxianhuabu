@@ -959,7 +959,7 @@ export function ChatNodeContent({
           <div className="text-center text-gray-500 py-8" style={{ fontSize: chatFontScaled }}>
             {refSlots.length > 0 && (
               <div className="mt-2 text-cyan-400" style={{ fontSize: fs(Math.max(11, chatFontPx - 1)) }}>
-                已连接 {refSlots.length} 条参考（含图/视频），可用下方按钮插入 @R 引用
+                已连接 {refSlots.length} 条参考（含图/视频）。连入视频后直接提问即可识别画面，也可用 @R 指定某一段
               </div>
             )}
           </div>

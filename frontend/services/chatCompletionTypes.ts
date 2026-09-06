@@ -4,6 +4,8 @@ export type ChatCompletionTurn = {
   content: string;
   imageBase64?: string;
   imageBase64s?: string[];
+  /** 仅 user：公开 http(s) 视频地址，供支持 video_url 的对话接口 */
+  videoUrls?: string[];
 };
 
 export type ChatCompletionResult = {

@@ -5406,13 +5406,19 @@ export type ChatCompletionHistoryTurn = {
   imageBase64?: string;
   /** 仅 user：多张参考图（Vision） */
   imageBase64s?: string[];
+  /** 仅 user：公开视频 URL（OpenAI 兼容 video_url） */
+  videoUrls?: string[];
 };
 
 type OpenAiChatMessage = {
   role: 'assistant' | 'system' | 'user';
   content:
     | string
-    | Array<{ type: 'image_url'; image_url: { url: string } } | { type: 'text'; text: string }>;
+    | Array<
+        | { type: 'image_url'; image_url: { url: string } }
+        | { type: 'video_url'; video_url: { url: string } }
+        | { type: 'text'; text: string }
+      >;
 };
 
 function turnsToOpenAiChatMessages(turns: ChatCompletionHistoryTurn[]): OpenAiChatMessage[] {
@@ -5426,8 +5432,16 @@ function turnsToOpenAiChatMessages(turns: ChatCompletionHistoryTurn[]): OpenAiCh
     const imgs: string[] = [];
     if (turn.imageBase64s?.length) imgs.push(...turn.imageBase64s);
     if (turn.imageBase64) imgs.push(turn.imageBase64);
-    if (imgs.length > 0) {
-      const parts: Array<{ type: 'image_url'; image_url: { url: string } } | { type: 'text'; text: string }> = [];
+    const videos = (turn.videoUrls || []).filter((u) => /^https?:\/\//i.test((u || '').trim()));
+    if (imgs.length > 0 || videos.length > 0) {
+      const parts: Array<
+        | { type: 'image_url'; image_url: { url: string } }
+        | { type: 'video_url'; video_url: { url: string } }
+        | { type: 'text'; text: string }
+      > = [];
+      for (const vu of videos) {
+        parts.push({ type: 'video_url', video_url: { url: vu.trim() } });
+      }
       for (const b64 of imgs) {
         parts.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } });
       }
@@ -5494,6 +5508,7 @@ function chatMessagesToResponsesInput(messages: OpenAiChatMessage[]): unknown {
     if (typeof m.content === 'string') return { role: m.role, content: m.content };
     const content = m.content.map((p) => {
       if (p.type === 'text') return { type: 'input_text', text: p.text };
+      if (p.type === 'video_url') return { type: 'input_video', video_url: p.video_url.url };
       return { type: 'input_image', image_url: p.image_url.url };
     });
     return { role: m.role, content };
