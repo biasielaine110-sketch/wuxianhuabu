@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import { ImageIcon, VideoIcon, XIcon } from './canvasIcons';
 import { rewriteImageUrlForBrowserDisplay } from '../services/canvasAssetResolver';
 import {
-  captureVideoClipAsBlob,
   captureVideoFrameAsPng,
   formatVideoClock,
   prepareVideoSrcForEdit,
@@ -13,12 +12,21 @@ import {
 const MIN_CLIP_SEC = 0.1;
 const LOAD_TIMEOUT_MS = 120_000;
 
+export type VideoClipJob = {
+  sourceBlob: Blob;
+  startSec: number;
+  endSec: number;
+  videoWidth: number;
+  videoHeight: number;
+  duration: number;
+};
+
 export type VideoEditModalProps = {
   videoUrl: string;
   busy?: boolean;
   onClose: () => void;
   onCaptureFrame: (pngDataUrl: string, timeSec: number) => void;
-  onCaptureClip: (blob: Blob, startSec: number, endSec: number) => void;
+  onCaptureClip: (job: VideoClipJob) => void;
 };
 
 type DragKind = 'start' | 'end' | 'play' | 'range';
@@ -348,7 +356,8 @@ export const VideoEditModal = memo(function VideoEditModal({
 
   const handleCaptureClip = useCallback(async () => {
     const video = videoRef.current;
-    if (!video || !canCapture) return;
+    const src = (playbackSrc || video?.currentSrc || video?.src || '').trim();
+    if (!video || !src || !canCapture) return;
     if (end - start < MIN_CLIP_SEC) {
       setError('请选择至少 0.1 秒的片段');
       return;
@@ -359,30 +368,36 @@ export const VideoEditModal = memo(function VideoEditModal({
     abortRef.current?.abort();
     const ac = new AbortController();
     abortRef.current = ac;
-    let copied = false;
+    let handedOff = false;
     try {
-      const blob = await captureVideoClipAsBlob(video, start, end, {
-        signal: ac.signal,
-        onProgress: setProgress,
+      const res = await fetch(src, { signal: ac.signal });
+      if (!res.ok) throw new Error(`读取视频失败 (${res.status})`);
+      const sourceBlob = await res.blob();
+      if (!sourceBlob.size) throw new Error('视频数据为空，无法截取');
+      handedOff = true;
+      onCaptureClip({
+        sourceBlob,
+        startSec: start,
+        endSec: end,
+        videoWidth: video.videoWidth || 1280,
+        videoHeight: video.videoHeight || 720,
+        duration: durationRef.current || video.duration || 0,
       });
-      const mime = (blob.type || 'video/webm').split(';')[0].trim() || 'video/webm';
-      const typed = blob.type === mime ? blob : new Blob([blob], { type: mime });
-      onCaptureClip(typed, start, end);
-      copied = true;
     } catch (err) {
+      if (handedOff) return;
       if (err instanceof DOMException && err.name === 'AbortError') {
         setError('已取消截取');
       } else {
         setError(err instanceof Error ? err.message : '截取片段失败');
       }
     } finally {
+      if (handedOff) return;
       setExporting(null);
       setProgress(0);
       setPlaying(false);
       setPlaySelection(false);
     }
-    if (copied) onClose();
-  }, [canCapture, end, onCaptureClip, onClose, start]);
+  }, [canCapture, end, onCaptureClip, playbackSrc, start]);
 
   const beginDrag = (kind: DragKind, e: React.PointerEvent) => {
     e.preventDefault();
@@ -426,7 +441,7 @@ export const VideoEditModal = memo(function VideoEditModal({
         <div className="flex items-center justify-between border-b border-[#2e2e2e] px-5 py-3">
           <div>
             <h2 className="text-base font-semibold text-white">视频编辑</h2>
-            <p className="mt-0.5 text-xs text-gray-400">拖动时间轴选取片段，截取后会在画布复制出一个视频预览节点</p>
+            <p className="mt-0.5 text-xs text-gray-400">点「截取片段」会立刻在画布创建预览窗口，再把选中片段加载进去</p>
           </div>
           <button
             type="button"
@@ -667,6 +682,10 @@ export const VideoEditModal = memo(function VideoEditModal({
                 disabled={!canCapture}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-40"
                 onPointerDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
                   void handleCaptureClip();

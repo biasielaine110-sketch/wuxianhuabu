@@ -17,6 +17,7 @@ export type BuildVideoPreviewNodeInput = {
   videoResolution?: CanvasNode['videoResolution'];
   videoDuration?: number;
   currentVideoIndex?: number;
+  isGenerating?: boolean;
 };
 
 export function isVideoPreviewNode(node: Pick<CanvasNode, 'type' | 'videoPreviewOnly'>): boolean {
@@ -48,7 +49,7 @@ export function buildVideoPreviewNode(input: BuildVideoPreviewNodeInput): Canvas
     ),
     videoDuration: input.videoDuration ?? 8,
     videoResolution: input.videoResolution || '720p',
-    isGenerating: false,
+    isGenerating: input.isGenerating ?? false,
     videoPreviewOnly: true,
   };
 }

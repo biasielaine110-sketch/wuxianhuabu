@@ -60,6 +60,7 @@ const CanvasFullscreenVideoModalLazy = lazy(() =>
 const VideoEditModalLazy = lazy(() =>
   import('./canvas/VideoEditModal').then((m) => ({ default: m.VideoEditModal }))
 );
+import type { VideoClipJob } from './canvas/VideoEditModal';
 import { useLazyCanvasGeneration } from './canvas/useLazyCanvasGeneration';
 import { useCanvasInteractionHandlers } from './canvas/useCanvasInteractionHandlers';
 import { useCanvasGlobalPointerEvents } from './canvas/useCanvasGlobalPointerEvents';
@@ -70,7 +71,7 @@ import { INPUT_NODE_TYPES, CANVAS_HISTORY_SKIP_PAYLOAD_CHARS } from './canvas/ca
 import { computeNodeResizeFromPointer } from './canvas/canvasNodeResizeUtils';
 import { estimateCanvasBase64PayloadChars, canvasHistoryMaxSteps } from './canvas/canvasHistoryPayloadUtils';
 import { registerNodeBlobUrl, revokeNodeBlobUrls } from './canvas/canvasBlobUrlRegistry';
-import { formatVideoClock } from './services/videoEditExport';
+import { captureVideoClipFromSrc, formatVideoClock } from './services/videoEditExport';
 import { createVideoObjectUrl } from './services/videoFileUtils';
 import {
   buildVideoPreviewNode,
@@ -1867,7 +1868,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     notifyVideoEditResult('已截取当前帧到图片节点');
   }, [appendNodesWithUndo, notifyVideoEditResult, placeNodeBesideVideoSource, videoEdit]);
 
-  const handleVideoEditClip = useCallback((blob: Blob, startSec: number, endSec: number) => {
+  const handleVideoEditClip = useCallback((job: VideoClipJob) => {
     const source = videoEdit?.sourceNodeId
       ? nodesRef.current.find((n) => n.id === videoEdit.sourceNodeId)
       : undefined;
@@ -1884,27 +1885,20 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
         }
       : placeNodeBesideVideoSource('videoPreview', videoEdit?.sourceNodeId);
     const newId = `video-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    const mime = (blob.type || 'video/webm').split(';')[0].trim() || 'video/webm';
-    const ext = mime.includes('mp4') ? 'mp4' : 'webm';
-    const file = new File(
-      [blob],
-      `clip-${formatVideoClock(startSec)}-${formatVideoClock(endSec)}.${ext}`.replace(/:/g, '-'),
-      { type: mime },
-    );
-    const clipUrl = createVideoObjectUrl(file);
-    registerNodeBlobUrl(newId, clipUrl);
-    const clipDuration = Math.max(0.1, Math.round((endSec - startSec) * 10) / 10);
+    const clipDuration = Math.max(0.1, Math.round((job.endSec - job.startSec) * 10) / 10);
+    const label = `截取 ${formatVideoClock(job.startSec)}–${formatVideoClock(job.endSec)}`;
     const newNode = buildVideoPreviewNode({
       id: newId,
-      videos: [clipUrl],
+      videos: [],
       x: geom.x,
       y: geom.y,
       width: geom.width,
       height: geom.height,
-      prompt: `截取 ${formatVideoClock(startSec)}–${formatVideoClock(endSec)}`,
+      prompt: `正在${label}…`,
       aspectRatio: source?.aspectRatio,
       videoResolution: source?.videoResolution,
       videoDuration: clipDuration,
+      isGenerating: true,
     });
     const edges: Edge[] = source
       ? [{ id: `edge-${Date.now()}-${Math.floor(Math.random() * 1000)}`, sourceId: source.id, targetId: newId }]
@@ -1921,8 +1915,52 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
         scale,
       });
     }
-    notifyVideoEditResult('已在画布复制截取片段');
-  }, [appendNodesWithUndo, notifyVideoEditResult, placeNodeBesideVideoSource, setTransform, videoEdit]);
+    setVideoEdit(null);
+    notifyVideoEditResult('已创建视频预览节点，正在载入截取片段…');
+
+    const sourceUrl = URL.createObjectURL(job.sourceBlob);
+    void (async () => {
+      try {
+        const blob = await captureVideoClipFromSrc(sourceUrl, job.startSec, job.endSec, {
+          videoWidth: job.videoWidth,
+          videoHeight: job.videoHeight,
+          duration: job.duration,
+        });
+        const mime = (blob.type || 'video/webm').split(';')[0].trim() || 'video/webm';
+        const ext = mime.includes('mp4') ? 'mp4' : 'webm';
+        const file = new File(
+          [blob],
+          `clip-${formatVideoClock(job.startSec)}-${formatVideoClock(job.endSec)}.${ext}`.replace(/:/g, '-'),
+          { type: mime },
+        );
+        const clipUrl = createVideoObjectUrl(file);
+        registerNodeBlobUrl(newId, clipUrl);
+        handleUpdateNode(newId, {
+          videos: [clipUrl],
+          isGenerating: false,
+          prompt: label,
+          videoDuration: clipDuration,
+        });
+        notifyVideoEditResult('截取片段已加载到预览节点');
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : '截取片段失败';
+        handleUpdateNode(newId, {
+          isGenerating: false,
+          prompt: `截取失败：${msg}`,
+        });
+        window.alert(msg);
+      } finally {
+        URL.revokeObjectURL(sourceUrl);
+      }
+    })();
+  }, [
+    appendNodesWithUndo,
+    handleUpdateNode,
+    notifyVideoEditResult,
+    placeNodeBesideVideoSource,
+    setTransform,
+    videoEdit,
+  ]);
 
   useLazyCanvasKeyboardShortcuts({
     canvasMode,
