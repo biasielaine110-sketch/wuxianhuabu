@@ -1871,13 +1871,26 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     const source = videoEdit?.sourceNodeId
       ? nodesRef.current.find((n) => n.id === videoEdit.sourceNodeId)
       : undefined;
-    const geom = placeNodeBesideVideoSource('videoPreview', videoEdit?.sourceNodeId);
+    const rect = containerRef.current?.getBoundingClientRect();
+    const tf = transformRef.current;
+    const w = VIDEO_PREVIEW_NODE_WIDTH;
+    const h = VIDEO_PREVIEW_NODE_HEIGHT;
+    const geom = rect
+      ? {
+          x: (rect.width / 2 - tf.x) / tf.scale - w / 2,
+          y: (rect.height / 2 - tf.y) / tf.scale - h / 2,
+          width: w,
+          height: h,
+        }
+      : placeNodeBesideVideoSource('videoPreview', videoEdit?.sourceNodeId);
     const newId = `video-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const mime = (blob.type || 'video/webm').split(';')[0].trim() || 'video/webm';
     const ext = mime.includes('mp4') ? 'mp4' : 'webm';
-    const file = new File([blob], `clip-${formatVideoClock(startSec)}-${formatVideoClock(endSec)}.${ext}`.replace(/:/g, '-'), {
-      type: mime,
-    });
+    const file = new File(
+      [blob],
+      `clip-${formatVideoClock(startSec)}-${formatVideoClock(endSec)}.${ext}`.replace(/:/g, '-'),
+      { type: mime },
+    );
     const clipUrl = createVideoObjectUrl(file);
     registerNodeBlobUrl(newId, clipUrl);
     const clipDuration = Math.max(0.1, Math.round((endSec - startSec) * 10) / 10);
@@ -1897,8 +1910,19 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
       ? [{ id: `edge-${Date.now()}-${Math.floor(Math.random() * 1000)}`, sourceId: source.id, targetId: newId }]
       : [];
     appendNodesWithUndo([newNode], { edges, selectIds: [newId] });
+    selectedIdsRef.current = [newId];
+    if (rect && rect.width >= 8 && rect.height >= 8) {
+      const scale = 0.5;
+      const cx = newNode.x + newNode.width / 2;
+      const cy = newNode.y + newNode.height / 2;
+      setTransform({
+        x: rect.width / 2 - cx * scale,
+        y: rect.height / 2 - cy * scale,
+        scale,
+      });
+    }
     notifyVideoEditResult('已在画布复制截取片段');
-  }, [appendNodesWithUndo, notifyVideoEditResult, placeNodeBesideVideoSource, videoEdit]);
+  }, [appendNodesWithUndo, notifyVideoEditResult, placeNodeBesideVideoSource, setTransform, videoEdit]);
 
   useLazyCanvasKeyboardShortcuts({
     canvasMode,

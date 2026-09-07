@@ -138,15 +138,46 @@ function pickRecorderMime(hasAudio: boolean): string {
   return candidates.find((mime) => MediaRecorder.isTypeSupported(mime)) || '';
 }
 
+function waitForVideoMetadata(video: HTMLVideoElement, signal?: AbortSignal): Promise<void> {
+  if (video.readyState >= 1 && Number.isFinite(video.duration) && video.duration > 0) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    const onReady = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error('无法加载用于截取的视频'));
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    const cleanup = () => {
+      video.removeEventListener('loadedmetadata', onReady);
+      video.removeEventListener('error', onError);
+      signal?.removeEventListener('abort', onAbort);
+    };
+    video.addEventListener('loadedmetadata', onReady);
+    video.addEventListener('error', onError);
+    signal?.addEventListener('abort', onAbort);
+  });
+}
+
 export async function captureVideoClipAsBlob(
   video: HTMLVideoElement,
   startSec: number,
   endSec: number,
   options?: { signal?: AbortSignal; onProgress?: (ratio: number) => void },
 ): Promise<Blob> {
-  const duration = Number.isFinite(video.duration) ? video.duration : 0;
-  const start = Math.min(Math.max(0, startSec), Math.max(0, duration));
-  const end = Math.min(Math.max(start + MIN_CLIP_SEC, endSec), duration || start + MIN_CLIP_SEC);
+  const src = (video.currentSrc || video.src || '').trim();
+  if (!src) throw new Error('视频地址为空，无法截取片段');
+
+  const durationHint = Number.isFinite(video.duration) ? video.duration : 0;
+  const start = Math.min(Math.max(0, startSec), Math.max(0, durationHint || startSec));
+  const end = Math.max(start + MIN_CLIP_SEC, endSec);
   if (end - start < MIN_CLIP_SEC) {
     throw new Error('请选择至少 0.1 秒的片段');
   }
@@ -154,62 +185,82 @@ export async function captureVideoClipAsBlob(
     throw new Error('当前浏览器不支持截取片段，请使用 Chrome 或 Edge');
   }
 
-  const prevTime = video.currentTime;
-  const prevPaused = video.paused;
-  const prevRate = video.playbackRate;
   const signal = options?.signal;
-
   const throwIfAborted = () => {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
   };
 
-  await seekVideoElement(video, start);
-  throwIfAborted();
+  const rec = document.createElement('video');
+  rec.muted = true;
+  rec.defaultMuted = true;
+  rec.playsInline = true;
+  rec.preload = 'auto';
+  rec.controls = false;
+  rec.setAttribute('playsinline', 'true');
+  rec.width = Math.max(16, video.videoWidth || 1280);
+  rec.height = Math.max(16, video.videoHeight || 720);
+  rec.style.cssText =
+    'position:fixed;left:0;top:0;width:4px;height:4px;opacity:0;pointer-events:none;z-index:-1;';
+  rec.src = src;
+  document.body.appendChild(rec);
+  rec.load();
 
-  const stream = getCaptureStream(video);
-  if (!stream) {
-    throw new Error('当前浏览器不支持截取片段，请使用 Chrome 或 Edge');
-  }
-
-  const hasAudio = stream.getAudioTracks().some((track) => track.enabled && track.readyState === 'live');
-  const mime = pickRecorderMime(hasAudio);
-  const chunks: BlobPart[] = [];
-  const recorder = mime
-    ? new MediaRecorder(stream, { mimeType: mime })
-    : new MediaRecorder(stream);
-
-  const recorded = new Promise<Blob>((resolve, reject) => {
-    recorder.ondataavailable = (event) => {
-      if (event.data && event.data.size > 0) chunks.push(event.data);
-    };
-    recorder.onerror = () => reject(new Error('片段录制失败'));
-    recorder.onstop = () => {
-      resolve(new Blob(chunks, { type: recorder.mimeType || 'video/webm' }));
-    };
-  });
-
-  video.playbackRate = 1;
-  recorder.start(120);
   try {
+    await waitForVideoMetadata(rec, signal);
+    throwIfAborted();
+    const duration = Number.isFinite(rec.duration) && rec.duration > 0 ? rec.duration : durationHint;
+    const clipEnd = Math.min(end, duration || end);
+    if (clipEnd - start < MIN_CLIP_SEC) {
+      throw new Error('请选择至少 0.1 秒的片段');
+    }
+
+    rec.playbackRate = 1;
+    await seekVideoElement(rec, start);
+    throwIfAborted();
+
     try {
-      await video.play();
+      await rec.play();
     } catch {
-      if (recorder.state === 'recording') recorder.stop();
       throw new Error('无法播放视频，截取片段失败');
     }
+    throwIfAborted();
+
+    const stream = getCaptureStream(rec);
+    if (!stream) {
+      throw new Error('当前浏览器不支持截取片段，请使用 Chrome 或 Edge');
+    }
+
+    const hasAudio = stream.getAudioTracks().some((track) => track.enabled && track.readyState === 'live');
+    const mime = pickRecorderMime(hasAudio);
+    const chunks: BlobPart[] = [];
+    const recorder = mime
+      ? new MediaRecorder(stream, { mimeType: mime })
+      : new MediaRecorder(stream);
+
+    const recorded = new Promise<Blob>((resolve, reject) => {
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) chunks.push(event.data);
+      };
+      recorder.onerror = () => reject(new Error('片段录制失败'));
+      recorder.onstop = () => {
+        resolve(new Blob(chunks, { type: recorder.mimeType || 'video/webm' }));
+      };
+    });
+
+    recorder.start(120);
 
     await new Promise<void>((resolve, reject) => {
       let raf = 0;
       const finish = (err?: Error) => {
         cancelAnimationFrame(raf);
-        video.removeEventListener('ended', onEnded);
+        rec.removeEventListener('ended', onEnded);
         signal?.removeEventListener('abort', onAbort);
         if (err) reject(err);
         else resolve();
       };
       const onAbort = () => finish(new DOMException('Aborted', 'AbortError'));
       const onEnded = () => {
-        video.pause();
+        rec.pause();
         finish();
       };
       const tick = () => {
@@ -217,17 +268,17 @@ export async function captureVideoClipAsBlob(
           finish(new DOMException('Aborted', 'AbortError'));
           return;
         }
-        const t = video.currentTime;
-        const span = end - start;
+        const t = rec.currentTime;
+        const span = clipEnd - start;
         options?.onProgress?.(span > 0 ? Math.min(1, Math.max(0, (t - start) / span)) : 1);
-        if (t >= end - 0.03 || video.ended) {
-          video.pause();
+        if (t >= clipEnd - 0.03 || rec.ended) {
+          rec.pause();
           finish();
           return;
         }
         raf = requestAnimationFrame(tick);
       };
-      video.addEventListener('ended', onEnded);
+      rec.addEventListener('ended', onEnded);
       signal?.addEventListener('abort', onAbort);
       raf = requestAnimationFrame(tick);
     }).catch((err) => {
@@ -244,15 +295,20 @@ export async function captureVideoClipAsBlob(
       recorder.stop();
     }
     const blob = await recorded;
+    stream.getTracks().forEach((track) => {
+      try {
+        track.stop();
+      } catch {
+        /* ignore */
+      }
+    });
     if (!blob.size) throw new Error('截取结果为空，请换一段时间再试');
-    return blob;
+    const mimeOut = (blob.type || 'video/webm').split(';')[0].trim() || 'video/webm';
+    return blob.type === mimeOut ? blob : new Blob([blob], { type: mimeOut });
   } finally {
-    video.playbackRate = prevRate;
-    try {
-      await seekVideoElement(video, prevTime);
-    } catch {
-      video.currentTime = prevTime;
-    }
-    if (prevPaused && !video.paused) video.pause();
+    rec.pause();
+    rec.removeAttribute('src');
+    rec.load();
+    rec.remove();
   }
 }
