@@ -8,6 +8,7 @@ import {
   DownloadIcon,
   LoaderIcon,
   MaximizeIcon,
+  ScissorsIcon,
   VideoIcon,
 } from './canvasIcons';
 import { copyVideoSrcToClipboard, rewriteImageUrlForBrowserDisplay } from '../services/canvasAssetResolver';
@@ -27,7 +28,8 @@ export interface VideoNodeContentProps {
   onUpdateNode: (nodeId: string, updates: Partial<CanvasNode>) => void;
   onCanvasEyedropper: (sourceId: string, targetId: string, opts?: { sourceImageIndex?: number }) => boolean;
   onDownloadVideo: (url: string) => void;
-  onOpenFullscreenVideo: (url: string) => void;
+  onOpenFullscreenVideo: (url: string, sourceNodeId?: string) => void;
+  onOpenVideoEdit: (url: string, sourceNodeId?: string) => void;
 }
 
 export function VideoNodeContent({
@@ -43,6 +45,7 @@ export function VideoNodeContent({
   onCanvasEyedropper,
   onDownloadVideo,
   onOpenFullscreenVideo,
+  onOpenVideoEdit,
 }: VideoNodeContentProps) {
   const videoRootRef = useRef<HTMLDivElement>(null);
   const [previewMenu, setPreviewMenu] = useState<{ x: number; y: number } | null>(null);
@@ -177,6 +180,18 @@ export function VideoNodeContent({
             >
               <DownloadIcon size={20} />
             </button>
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (currentUrl) onOpenVideoEdit(currentUrl, node.id);
+              }}
+              className="p-2 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
+              title="编辑视频：截取片段或单帧"
+            >
+              <ScissorsIcon size={20} />
+            </button>
           </div>
           <div className="absolute bottom-2 left-2 text-[10px] text-gray-400 bg-black/50 px-2 py-0.5 rounded">
             {currentVideoIdx + 1} / {videoUrls.length}
@@ -202,7 +217,19 @@ export function VideoNodeContent({
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
-                if (currentUrl) onOpenFullscreenVideo(currentUrl);
+                if (currentUrl) onOpenVideoEdit(currentUrl, node.id);
+              }}
+              className="p-4 bg-black/70 hover:bg-black/90 rounded-xl text-white backdrop-blur-sm shadow-lg"
+              title="编辑视频：截取片段或单帧"
+            >
+              <ScissorsIcon size={40} />
+            </button>
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (currentUrl) onOpenFullscreenVideo(currentUrl, node.id);
               }}
               className="p-4 bg-black/70 hover:bg-black/90 rounded-xl text-white backdrop-blur-sm shadow-lg"
               title="最大化"
@@ -292,6 +319,10 @@ export function VideoNodeContent({
           onDownload={() => {
             setPreviewMenu(null);
             onDownloadVideo(currentUrl);
+          }}
+          onEdit={() => {
+            setPreviewMenu(null);
+            onOpenVideoEdit(currentUrl, node.id);
           }}
           onClose={() => setPreviewMenu(null)}
         />

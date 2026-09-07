@@ -202,6 +202,7 @@ return (
             onCanvasEyedropper={s.handleCanvasEyedropper}
             onDownloadVideo={s.downloadVideoFromUrl}
             onOpenFullscreenVideo={s.openFullscreenVideo}
+            onOpenVideoEdit={s.openVideoEdit}
           />
         </Suspense>
       )}

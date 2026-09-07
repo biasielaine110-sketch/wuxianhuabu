@@ -1,12 +1,13 @@
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { CopyIcon, DownloadIcon, XIcon } from './canvasIcons';
+import { CopyIcon, DownloadIcon, ScissorsIcon, XIcon } from './canvasIcons';
 
 export function VideoContextMenu({
   x,
   y,
   onCopy,
   onDownload,
+  onEdit,
   onClose,
   onDismiss,
 }: {
@@ -14,6 +15,7 @@ export function VideoContextMenu({
   y: number;
   onCopy: () => void;
   onDownload: () => void;
+  onEdit?: () => void;
   onClose: () => void;
   /** 点击菜单外：默认与 onClose 相同；全屏时只关菜单不关全屏 */
   onDismiss?: () => void;
@@ -52,6 +54,18 @@ export function VideoContextMenu({
       >
         <DownloadIcon size={16} /> 下载视频
       </button>
+      {onEdit ? (
+        <button
+          type="button"
+          className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-amber-600 hover:text-white flex items-center gap-2"
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            onEdit();
+          }}
+        >
+          <ScissorsIcon size={16} /> 编辑视频
+        </button>
+      ) : null}
       <button
         type="button"
         className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-red-600 hover:text-white flex items-center gap-2"

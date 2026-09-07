@@ -19,6 +19,8 @@ import { clearEdgeGeometryPreviews } from './canvasEdgeDragDom';
 import type { ResizePreview } from './canvasEdgeGeometry';
 import { revokeNodeCanvasAssets } from '../services/canvasAssetCleanup';
 import { getDomSelectedText, captureTextPasteTarget, setPendingTextPasteTarget } from './domTextSelection';
+import { createVideoObjectUrl, isVideoFile } from '../services/videoFileUtils';
+import { registerNodeBlobUrl } from './canvasBlobUrlRegistry';
 
 export type CanvasContextMenu = {
   x: number;
@@ -405,7 +407,7 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
     if (fullscreenImage || canvasMode === 'audit') return;
     const target = e.target as HTMLElement;
     // 弹出文本编辑框等 overlay：交给局部菜单，不弹画布新建/删除菜单
-    if (target.closest('[data-text-edit-overlay="true"]')) {
+    if (target.closest('[data-text-edit-overlay="true"]') || target.closest('[data-video-edit-modal="true"]')) {
       setContextMenu(null);
       setNodeContextMenu(null);
       return;
@@ -624,10 +626,6 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
     const mouseX = (e.clientX - rect.left - tf.x) / tf.scale;
     const mouseY = (e.clientY - rect.top - tf.y) / tf.scale;
 
-    const isVideoFile = (f: File) =>
-      f.type.startsWith('video/') ||
-      /\.(mp4|webm|mov|mkv|avi|m4v|ogv|mpeg|mpg)(\?.*)?$/i.test(f.name);
-
     const allFiles = Array.from(e.dataTransfer.files || []);
     const videoFiles = allFiles.filter(isVideoFile);
     const imageFiles = collectImageFilesFromDataTransfer(e.dataTransfer);
@@ -680,7 +678,12 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
     if (videoFiles.length > 0) {
       const def = DEFAULT_NODE_SIZES.video || { width: 720, height: 840 };
       try {
-        const urls = videoFiles.map((f) => URL.createObjectURL(f));
+        const newId = `video-${Date.now()}`;
+        const urls = videoFiles.map((f) => {
+          const url = createVideoObjectUrl(f);
+          registerNodeBlobUrl(newId, url);
+          return url;
+        });
         const stripName = (name: string) =>
           sanitizeFilename(name.replace(/\.[^.]+$/i, '').trim() || '本地视频');
         const promptLabel =
@@ -688,7 +691,7 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
             ? stripName(videoFiles[0].name)
             : `已拖入 ${videoFiles.length} 个本地视频`;
         const newNode: CanvasNode = {
-          id: `video-${Date.now()}`,
+          id: newId,
           type: 'video',
           x: mouseX - def.width / 2,
           y: mouseY - def.height / 2,

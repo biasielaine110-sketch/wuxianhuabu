@@ -1,5 +1,14 @@
 const blobUrlRegistry = new Map<string, Set<string>>();
 
+export function registerNodeBlobUrl(nodeId: string, url: string): void {
+  let urls = blobUrlRegistry.get(nodeId);
+  if (!urls) {
+    urls = new Set();
+    blobUrlRegistry.set(nodeId, urls);
+  }
+  urls.add(url);
+}
+
 /** 节点删除时调用，回收该节点所有 blob URL */
 export function revokeNodeBlobUrls(nodeId: string): void {
   const urls = blobUrlRegistry.get(nodeId);

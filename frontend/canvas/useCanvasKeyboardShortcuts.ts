@@ -9,6 +9,8 @@ import {
   SPAWNED_IMAGE_NODE_WIDTH,
 } from './spawnImageNodes';
 import { collectImageFilesFromClipboardData } from './spawnImageNodes';
+import { createVideoObjectUrl, isVideoFile } from '../services/videoFileUtils';
+import { registerNodeBlobUrl } from './canvasBlobUrlRegistry';
 import {
   cloneImageSlotForNewNode,
   hasCanvasImagePayload,
@@ -634,6 +636,46 @@ export function attachCanvasKeyboardShortcuts(
             console.error(err);
             alert('无法读取剪贴板中的图片。');
           });
+        return;
+      }
+
+      const pastedFiles = Array.from(e.clipboardData?.files || []);
+      const videoFiles = pastedFiles.filter(isVideoFile);
+      if (videoFiles.length > 0) {
+        e.preventDefault();
+        d.lastPasteTimeRef.current = Date.now();
+        const mp = d.canvasMouseRef.current;
+        const def = d.DEFAULT_NODE_SIZES.video || { width: 1200, height: 1400 };
+        const newId = `video-${Date.now()}`;
+        const urls = videoFiles.map((f) => {
+          const url = createVideoObjectUrl(f);
+          registerNodeBlobUrl(newId, url);
+          return url;
+        });
+        const newNode: CanvasNode = {
+          id: newId,
+          type: 'video',
+          x: mp.x - def.width / 2,
+          y: mp.y - def.height / 2,
+          width: def.width,
+          height: def.height,
+          prompt: videoFiles.length === 1
+            ? (videoFiles[0].name.replace(/\.[^.]+$/i, '').trim() || '本地视频')
+            : `已粘贴 ${videoFiles.length} 个本地视频`,
+          images: [],
+          aspectRatio: '16:9',
+          resolution: '2k',
+          imageCount: 1,
+          model: 'grok-video-1.5',
+          viewMode: 'single',
+          currentImageIndex: 0,
+          videos: urls,
+          currentVideoIndex: 0,
+          videoDuration: 8,
+          videoResolution: '720p',
+          isGenerating: false,
+        };
+        d.appendNodesWithUndo([newNode], { selectIds: [newNode.id] });
         return;
       }
 

@@ -404,12 +404,18 @@ export async function saveImageDownload(
 /** 从 URL 拉取视频 Blob 并保存（优先项目草稿目录，与图片下载同一套路径） */
 export async function saveVideoDownloadFromUrl(url: string): Promise<{ ok: boolean; message?: string }> {
   const blob = await fetchVideoBlobForBrowser(url);
-  const filename = pickFilename('video', 'mp4');
+  const { guessVideoExtFromMimeOrUrl } = await import('./videoFileUtils');
+  const ext = guessVideoExtFromMimeOrUrl(blob.type || '', url);
+  const typed =
+    blob.type && blob.type.startsWith('video/')
+      ? blob
+      : new Blob([blob], { type: ext === 'mov' ? 'video/quicktime' : `video/${ext === 'mp4' ? 'mp4' : ext}` });
+  const filename = pickFilename('video', ext);
 
   const draftDir = await ensureDraftDownloadDirectoryWritable();
   if (draftDir) {
     try {
-      await writeBlobToDirectory(draftDir, filename, blob);
+      await writeBlobToDirectory(draftDir, filename, typed);
       const label = draftDir.name?.trim() || '草稿文件夹';
       return { ok: true, message: `已保存至草稿目录：${label}` };
     } catch (e) {
@@ -422,7 +428,7 @@ export async function saveVideoDownloadFromUrl(url: string): Promise<{ ok: boole
     const dir = settings.separateImageVideo ? cachedVideo : cachedCombined;
     if (dir && (await verifyDirWritable(dir))) {
       try {
-        await writeBlobToDirectory(dir, filename, blob);
+        await writeBlobToDirectory(dir, filename, typed);
         return { ok: true };
       } catch (e) {
         console.warn('写入固定目录失败，尝试另存为', e);
@@ -430,10 +436,10 @@ export async function saveVideoDownloadFromUrl(url: string): Promise<{ ok: boole
     }
   }
 
-  if (await saveBlobWithPicker(blob, filename)) {
+  if (await saveBlobWithPicker(typed, filename)) {
     return { ok: true };
   }
-  if (fallbackAnchorDownload(blob, filename)) {
+  if (fallbackAnchorDownload(typed, filename)) {
     return {
       ok: true,
       message: '已触发浏览器下载，如未看到文件请检查浏览器默认下载目录',

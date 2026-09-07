@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { CopyIcon, DownloadIcon, XIcon } from './canvasIcons';
+import { CopyIcon, DownloadIcon, ScissorsIcon, XIcon } from './canvasIcons';
 import { rewriteImageUrlForBrowserDisplay } from '../services/canvasAssetResolver';
 import { VideoContextMenu } from './VideoContextMenu';
 
@@ -10,6 +10,7 @@ export type CanvasFullscreenVideoModalProps = {
   onClose: () => void;
   onDownload: () => void;
   onCopyVideo: () => void;
+  onEdit?: () => void;
 };
 
 export const CanvasFullscreenVideoModal = memo(function CanvasFullscreenVideoModal({
@@ -19,6 +20,7 @@ export const CanvasFullscreenVideoModal = memo(function CanvasFullscreenVideoMod
   onClose,
   onDownload,
   onCopyVideo,
+  onEdit,
 }: CanvasFullscreenVideoModalProps) {
   const displayUrl = rewriteImageUrlForBrowserDisplay(videoUrl);
 
@@ -73,9 +75,23 @@ export const CanvasFullscreenVideoModal = memo(function CanvasFullscreenVideoMod
         <CopyIcon size={16} />
         复制
       </button>
+      {onEdit ? (
+        <button
+          type="button"
+          className="absolute top-4 right-[13.5rem] z-[101] flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-500"
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            onEdit();
+          }}
+          title="编辑视频：截取片段或单帧"
+        >
+          <ScissorsIcon size={16} />
+          编辑
+        </button>
+      ) : null}
       <button
         type="button"
-        className="absolute top-4 right-52 z-[101] rounded-lg bg-white/10 p-2 text-white hover:bg-white/20"
+        className={`absolute top-4 z-[101] rounded-lg bg-white/10 p-2 text-white hover:bg-white/20 ${onEdit ? 'right-[20.5rem]' : 'right-52'}`}
         onPointerDown={(e) => {
           e.stopPropagation();
           onClose();
@@ -96,6 +112,10 @@ export const CanvasFullscreenVideoModal = memo(function CanvasFullscreenVideoMod
             setFsContextMenu(null);
             onDownload();
           }}
+          onEdit={onEdit ? () => {
+            setFsContextMenu(null);
+            onEdit();
+          } : undefined}
           onClose={onClose}
           onDismiss={() => setFsContextMenu(null)}
         />

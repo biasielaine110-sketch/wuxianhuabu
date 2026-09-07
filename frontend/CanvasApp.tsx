@@ -57,6 +57,9 @@ const CanvasFullscreenImageModalLazy = lazy(() =>
 const CanvasFullscreenVideoModalLazy = lazy(() =>
   import('./canvas/CanvasFullscreenVideoModal').then((m) => ({ default: m.CanvasFullscreenVideoModal }))
 );
+const VideoEditModalLazy = lazy(() =>
+  import('./canvas/VideoEditModal').then((m) => ({ default: m.VideoEditModal }))
+);
 import { useLazyCanvasGeneration } from './canvas/useLazyCanvasGeneration';
 import { useCanvasInteractionHandlers } from './canvas/useCanvasInteractionHandlers';
 import { useCanvasGlobalPointerEvents } from './canvas/useCanvasGlobalPointerEvents';
@@ -66,7 +69,8 @@ import { CanvasDraftDiskModal } from './canvas/CanvasDraftDiskModal';
 import { INPUT_NODE_TYPES, CANVAS_HISTORY_SKIP_PAYLOAD_CHARS } from './canvas/canvasConstants';
 import { computeNodeResizeFromPointer } from './canvas/canvasNodeResizeUtils';
 import { estimateCanvasBase64PayloadChars, canvasHistoryMaxSteps } from './canvas/canvasHistoryPayloadUtils';
-import { revokeNodeBlobUrls } from './canvas/canvasBlobUrlRegistry';
+import { registerNodeBlobUrl, revokeNodeBlobUrls } from './canvas/canvasBlobUrlRegistry';
+import { formatVideoClock } from './services/videoEditExport';
 import { buildCanvasNodeRenderOverlay } from './canvas/buildCanvasNodeRenderOverlay';
 import { useLazyRenderCanvasNode } from './canvas/useLazyRenderCanvasNode';
 import {
@@ -315,6 +319,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     fullscreenImage,
     setFullscreenImage,
     fullscreenVideo,
+    fullscreenVideoNodeId,
     fullscreenNodeId,
     fullscreenImageIdx,
     fsTransform,
@@ -330,7 +335,18 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     handleFsPointerDown,
     imageTotal,
   } = fullscreen;
-  const fullscreenOverlayOpen = Boolean(fullscreenImage || fullscreenVideo);
+  const [videoEdit, setVideoEdit] = useState<{ url: string; sourceNodeId?: string } | null>(null);
+  const fullscreenOverlayOpen = Boolean(fullscreenImage || fullscreenVideo || videoEdit);
+  const openVideoEdit = useCallback((url: string, sourceNodeId?: string) => {
+    const t = (url || '').trim();
+    if (!t) return;
+    closeFullscreen();
+    // 延后到当前 pointer 手势结束后再挂载，避免右键菜单/全屏按钮的 pointerdown
+    // 落在新遮罩上，或被画布根节点事件吞掉导致弹窗内按钮点不动。
+    window.setTimeout(() => {
+      setVideoEdit({ url: t, sourceNodeId });
+    }, 0);
+  }, [closeFullscreen]);
 
   const edgesRef = useRef(useCanvasStore.getState().edges);
   const projectLibrary = useCanvasProjectLibrary({
@@ -1774,6 +1790,94 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
       });
   }, []);
 
+  const placeNodeBesideVideoSource = useCallback((type: 'image' | 'video', sourceNodeId?: string) => {
+    const def = DEFAULT_NODE_SIZES[type] || { width: 960, height: 1056 };
+    const source = sourceNodeId ? nodesRef.current.find((n) => n.id === sourceNodeId) : undefined;
+    if (!source) {
+      const rect = containerRef.current?.getBoundingClientRect();
+      const tf = transformRef.current;
+      const cx = rect ? (window.innerWidth / 2 - rect.left - tf.x) / tf.scale : 0;
+      const cy = rect ? (window.innerHeight / 2 - rect.top - tf.y) / tf.scale : 0;
+      return { x: cx - def.width / 2, y: cy - def.height / 2, width: def.width, height: def.height };
+    }
+    const x = source.x + source.width + 48;
+    let y = source.y;
+    const nearby = nodesRef.current.filter((n) => Math.abs(n.x - x) < 80);
+    while (nearby.some((n) => Math.abs(n.y - y) < 60)) y += 80;
+    return { x, y, width: def.width, height: def.height };
+  }, [DEFAULT_NODE_SIZES]);
+
+  const notifyVideoEditResult = useCallback((message: string) => {
+    setSaveSuccessMsg(message);
+    if (downloadNoticeTimerRef.current) window.clearTimeout(downloadNoticeTimerRef.current);
+    downloadNoticeTimerRef.current = window.setTimeout(() => {
+      setSaveSuccessMsg(null);
+      downloadNoticeTimerRef.current = null;
+    }, 2200);
+  }, [setSaveSuccessMsg]);
+
+  const handleVideoEditFrame = useCallback((pngDataUrl: string, timeSec: number) => {
+    const source = videoEdit?.sourceNodeId
+      ? nodesRef.current.find((n) => n.id === videoEdit.sourceNodeId)
+      : undefined;
+    const geom = placeNodeBesideVideoSource('image', videoEdit?.sourceNodeId);
+    const newId = `image-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const newNode: CanvasNode = {
+      id: newId,
+      type: 'image',
+      x: geom.x,
+      y: geom.y,
+      width: geom.width,
+      height: geom.height,
+      prompt: `截帧 ${formatVideoClock(timeSec)}`,
+      images: [pngDataUrl],
+      viewMode: 'single',
+      currentImageIndex: 0,
+    };
+    const edges: Edge[] = source
+      ? [{ id: `edge-${Date.now()}-${Math.floor(Math.random() * 1000)}`, sourceId: source.id, targetId: newId }]
+      : [];
+    appendNodesWithUndo([newNode], { edges, selectIds: [newId] });
+    notifyVideoEditResult('已截取当前帧到图片节点');
+  }, [appendNodesWithUndo, notifyVideoEditResult, placeNodeBesideVideoSource, videoEdit]);
+
+  const handleVideoEditClip = useCallback((blob: Blob, startSec: number, endSec: number) => {
+    const source = videoEdit?.sourceNodeId
+      ? nodesRef.current.find((n) => n.id === videoEdit.sourceNodeId)
+      : undefined;
+    const geom = placeNodeBesideVideoSource('video', videoEdit?.sourceNodeId);
+    const newId = `video-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const clipUrl = URL.createObjectURL(blob);
+    registerNodeBlobUrl(newId, clipUrl);
+    const clipDuration = Math.max(1, Math.round((endSec - startSec) * 10) / 10);
+    const newNode: CanvasNode = {
+      id: newId,
+      type: 'video',
+      x: geom.x,
+      y: geom.y,
+      width: geom.width,
+      height: geom.height,
+      prompt: `截取 ${formatVideoClock(startSec)}–${formatVideoClock(endSec)}`,
+      images: [],
+      aspectRatio: source?.aspectRatio || '16:9',
+      resolution: source?.resolution || '2k',
+      imageCount: 1,
+      model: source?.model || 'grok-video-1.5',
+      viewMode: 'single',
+      currentImageIndex: 0,
+      videos: [clipUrl],
+      currentVideoIndex: 0,
+      videoDuration: clipDuration,
+      videoResolution: source?.videoResolution || '720p',
+      isGenerating: false,
+    };
+    const edges: Edge[] = source
+      ? [{ id: `edge-${Date.now()}-${Math.floor(Math.random() * 1000)}`, sourceId: source.id, targetId: newId }]
+      : [];
+    appendNodesWithUndo([newNode], { edges, selectIds: [newId] });
+    notifyVideoEditResult('已截取片段到视频节点');
+  }, [appendNodesWithUndo, notifyVideoEditResult, placeNodeBesideVideoSource, videoEdit]);
+
   useLazyCanvasKeyboardShortcuts({
     canvasMode,
     fullscreenImage: fullscreenOverlayOpen ? '1' : null,
@@ -1863,6 +1967,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     openFullscreenImage,
     openFullscreenFromBase64,
     openFullscreenVideo,
+    openVideoEdit,
     renderNodeErrorPanel,
     setSelectedIds,
     setNodes,
@@ -2712,6 +2817,18 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
             onClose={closeFullscreen}
             onDownload={() => { void downloadVideoFromUrl(fullscreenVideo); }}
             onCopyVideo={() => copyVideoFromUrl(fullscreenVideo)}
+            onEdit={() => openVideoEdit(fullscreenVideo, fullscreenVideoNodeId ?? undefined)}
+          />
+        </Suspense>
+      ) : null}
+
+      {videoEdit && canvasMode !== 'audit' ? (
+        <Suspense fallback={null}>
+          <VideoEditModalLazy
+            videoUrl={videoEdit.url}
+            onClose={() => setVideoEdit(null)}
+            onCaptureFrame={handleVideoEditFrame}
+            onCaptureClip={handleVideoEditClip}
           />
         </Suspense>
       ) : null}

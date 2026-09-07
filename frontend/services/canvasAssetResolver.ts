@@ -1,5 +1,6 @@
 import { getCanvasAssetBlobUrl } from './canvasAssetStore';
 import { getCodesonlineSavedKey } from './aiSettings';
+import { resolveVideoBlobMime } from './videoFileUtils';
 
 const urlCache = new Map<string, string>();
 const pending = new Map<string, Promise<string | null>>();
@@ -201,18 +202,24 @@ export async function fetchVideoBlobForBrowser(url: string): Promise<Blob> {
   if (t.startsWith('blob:') || t.startsWith('data:')) {
     const res = await fetch(t);
     if (!res.ok) throw new Error(`下载失败 (${res.status})`);
-    return res.blob();
+    const raw = await res.blob();
+    const mime = resolveVideoBlobMime(raw.type, t);
+    return raw.type === mime ? raw : new Blob([raw], { type: mime });
   }
   const fetchUrl = rewriteImageUrlForBrowserDisplay(t);
   const res = await fetch(fetchUrl, { mode: 'cors', credentials: 'omit' });
   if (!res.ok) throw new Error(`下载失败 (${res.status})`);
-  return res.blob();
+  const raw = await res.blob();
+  const mime = resolveVideoBlobMime(raw.type || res.headers.get('content-type'), t);
+  return raw.type === mime ? raw : new Blob([raw], { type: mime });
 }
 
 /** 复制视频到剪贴板；浏览器不支持视频文件时退化为复制链接 */
 export async function copyVideoSrcToClipboard(url: string): Promise<'file' | 'link'> {
   const blob = await fetchVideoBlobForBrowser(url);
-  const type = blob.type && blob.type.startsWith('video/') ? blob.type : 'video/mp4';
+  const type = blob.type && blob.type.startsWith('video/')
+    ? blob.type
+    : resolveVideoBlobMime(blob.type, url);
   const fileBlob = blob.type === type ? blob : blob.slice(0, blob.size, type);
   try {
     await navigator.clipboard.write([new ClipboardItem({ [type]: fileBlob })]);

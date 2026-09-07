@@ -7,12 +7,14 @@ export function useCanvasFullscreenImage(nodesRef: RefObject<CanvasNode[]>) {
   const [fullscreenNodeId, setFullscreenNodeId] = useState<string | null>(null);
   const [fullscreenImageIdx, setFullscreenImageIdx] = useState(0);
   const [fullscreenVideo, setFullscreenVideo] = useState<string | null>(null);
+  const [fullscreenVideoNodeId, setFullscreenVideoNodeId] = useState<string | null>(null);
   const [fsTransform, setFsTransform] = useState({ scale: 1, x: 0, y: 0 });
   const [fsContextMenu, setFsContextMenu] = useState<{ x: number; y: number } | null>(null);
 
   const closeFullscreen = useCallback(() => {
     setFullscreenImage(null);
     setFullscreenVideo(null);
+    setFullscreenVideoNodeId(null);
     setFsContextMenu(null);
   }, []);
 
@@ -40,11 +42,12 @@ export function useCanvasFullscreenImage(nodesRef: RefObject<CanvasNode[]>) {
     });
   }, []);
 
-  const openFullscreenVideo = useCallback((url: string) => {
+  const openFullscreenVideo = useCallback((url: string, sourceNodeId?: string) => {
     const t = (url || '').trim();
     if (!t) return;
     setFullscreenImage(null);
     setFullscreenVideo(t);
+    setFullscreenVideoNodeId(sourceNodeId ?? null);
     setFsContextMenu(null);
   }, []);
 
@@ -99,6 +102,7 @@ export function useCanvasFullscreenImage(nodesRef: RefObject<CanvasNode[]>) {
     fullscreenImage,
     setFullscreenImage,
     fullscreenVideo,
+    fullscreenVideoNodeId,
     fullscreenNodeId,
     fullscreenImageIdx,
     fsTransform,
