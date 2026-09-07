@@ -359,12 +359,16 @@ export const VideoEditModal = memo(function VideoEditModal({
     abortRef.current?.abort();
     const ac = new AbortController();
     abortRef.current = ac;
+    let copied = false;
     try {
       const blob = await captureVideoClipAsBlob(video, start, end, {
         signal: ac.signal,
         onProgress: setProgress,
       });
-      onCaptureClip(blob, start, end);
+      const mime = (blob.type || 'video/webm').split(';')[0].trim() || 'video/webm';
+      const typed = blob.type === mime ? blob : new Blob([blob], { type: mime });
+      onCaptureClip(typed, start, end);
+      copied = true;
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
         setError('已取消截取');
@@ -377,7 +381,8 @@ export const VideoEditModal = memo(function VideoEditModal({
       setPlaying(false);
       setPlaySelection(false);
     }
-  }, [canCapture, end, onCaptureClip, start]);
+    if (copied) onClose();
+  }, [canCapture, end, onCaptureClip, onClose, start]);
 
   const beginDrag = (kind: DragKind, e: React.PointerEvent) => {
     e.preventDefault();
@@ -421,7 +426,7 @@ export const VideoEditModal = memo(function VideoEditModal({
         <div className="flex items-center justify-between border-b border-[#2e2e2e] px-5 py-3">
           <div>
             <h2 className="text-base font-semibold text-white">视频编辑</h2>
-            <p className="mt-0.5 text-xs text-gray-400">拖动时间轴选取片段，或停在某一帧后截取画面</p>
+            <p className="mt-0.5 text-xs text-gray-400">拖动时间轴选取片段，截取后会在画布复制出一个视频预览节点</p>
           </div>
           <button
             type="button"

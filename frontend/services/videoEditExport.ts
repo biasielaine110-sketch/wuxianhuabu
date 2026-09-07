@@ -235,7 +235,14 @@ export async function captureVideoClipAsBlob(
       throw err;
     });
 
-    if (recorder.state === 'recording') recorder.stop();
+    if (recorder.state === 'recording') {
+      try {
+        recorder.requestData();
+      } catch {
+        /* ignore */
+      }
+      recorder.stop();
+    }
     const blob = await recorded;
     if (!blob.size) throw new Error('截取结果为空，请换一段时间再试');
     return blob;

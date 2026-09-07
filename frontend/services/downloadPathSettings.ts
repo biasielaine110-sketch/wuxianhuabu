@@ -297,22 +297,61 @@ function pickFilename(prefix: string, ext: string): string {
   return `${prefix}-${Date.now()}.${ext}`;
 }
 
+type SaveFilePickerWindow = Window & {
+  showSaveFilePicker: (opts: {
+    suggestedName?: string;
+    types?: { description: string; accept: Record<string, string[]> }[];
+  }) => Promise<FileSystemFileHandle>;
+};
+
+const VIDEO_SAVE_PICKER_TYPES = [
+  {
+    description: '视频',
+    accept: {
+      'video/webm': ['.webm'],
+      'video/mp4': ['.mp4'],
+    },
+  },
+];
+
+async function requestSaveFileHandle(
+  suggestedName: string,
+  types?: { description: string; accept: Record<string, string[]> }[],
+): Promise<FileSystemFileHandle | null> {
+  if (!supportsSaveFilePicker()) return null;
+  try {
+    return await (window as unknown as SaveFilePickerWindow).showSaveFilePicker({
+      suggestedName,
+      ...(types && types.length > 0 ? { types } : {}),
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** 在用户手势内弹出「另存为」，拿到文件句柄后再写入（截取片段等长耗时操作必须先拿句柄） */
+export async function requestVideoSaveFileHandle(
+  suggestedName: string,
+): Promise<FileSystemFileHandle | null> {
+  return requestSaveFileHandle(suggestedName, VIDEO_SAVE_PICKER_TYPES);
+}
+
+export async function writeBlobToFileHandle(
+  handle: FileSystemFileHandle,
+  blob: Blob,
+): Promise<void> {
+  const writable = await handle.createWritable();
+  await writable.write(blob);
+  await writable.close();
+}
+
 /** 未启用固定目录或不可写时：每次弹出「另存为」 */
 async function saveBlobWithPicker(blob: Blob, suggestedName: string): Promise<boolean> {
   if (!supportsSaveFilePicker()) return false;
   try {
-    const w = window as unknown as {
-      showSaveFilePicker: (opts: {
-        suggestedName?: string;
-        types?: { description: string; accept: Record<string, string[]> }[];
-      }) => Promise<FileSystemFileHandle>;
-    };
-    const handle = await w.showSaveFilePicker({
-      suggestedName,
-    });
-    const writable = await handle.createWritable();
-    await writable.write(blob);
-    await writable.close();
+    const handle = await requestSaveFileHandle(suggestedName);
+    if (!handle) return false;
+    await writeBlobToFileHandle(handle, blob);
     return true;
   } catch {
     return false;
@@ -401,16 +440,18 @@ export async function saveImageDownload(
   };
 }
 
-/** 从 URL 拉取视频 Blob 并保存（优先项目草稿目录，与图片下载同一套路径） */
-export async function saveVideoDownloadFromUrl(url: string): Promise<{ ok: boolean; message?: string }> {
-  const blob = await fetchVideoBlobForBrowser(url);
+/** 保存视频 Blob（优先项目草稿目录，与图片下载同一套路径） */
+export async function saveVideoBlobDownload(
+  blob: Blob,
+  options?: { suggestedName?: string; skipPicker?: boolean; sourceUrl?: string },
+): Promise<{ ok: boolean; message?: string }> {
   const { guessVideoExtFromMimeOrUrl } = await import('./videoFileUtils');
-  const ext = guessVideoExtFromMimeOrUrl(blob.type || '', url);
+  const ext = guessVideoExtFromMimeOrUrl(blob.type || '', options?.sourceUrl || options?.suggestedName || '');
   const typed =
     blob.type && blob.type.startsWith('video/')
       ? blob
       : new Blob([blob], { type: ext === 'mov' ? 'video/quicktime' : `video/${ext === 'mp4' ? 'mp4' : ext}` });
-  const filename = pickFilename('video', ext);
+  const filename = options?.suggestedName?.trim() || pickFilename('video', ext);
 
   const draftDir = await ensureDraftDownloadDirectoryWritable();
   if (draftDir) {
@@ -429,15 +470,15 @@ export async function saveVideoDownloadFromUrl(url: string): Promise<{ ok: boole
     if (dir && (await verifyDirWritable(dir))) {
       try {
         await writeBlobToDirectory(dir, filename, typed);
-        return { ok: true };
+        return { ok: true, message: '已保存到下载目录' };
       } catch (e) {
         console.warn('写入固定目录失败，尝试另存为', e);
       }
     }
   }
 
-  if (await saveBlobWithPicker(typed, filename)) {
-    return { ok: true };
+  if (!options?.skipPicker && (await saveBlobWithPicker(typed, filename))) {
+    return { ok: true, message: '片段已保存到所选文件' };
   }
   if (fallbackAnchorDownload(typed, filename)) {
     return {
@@ -450,4 +491,10 @@ export async function saveVideoDownloadFromUrl(url: string): Promise<{ ok: boole
     message:
       '保存失败：无法写入项目文件夹。请重新保存项目（Ctrl+S）以授权文件夹，或在设置中配置下载路径。',
   };
+}
+
+/** 从 URL 拉取视频 Blob 并保存（优先项目草稿目录，与图片下载同一套路径） */
+export async function saveVideoDownloadFromUrl(url: string): Promise<{ ok: boolean; message?: string }> {
+  const blob = await fetchVideoBlobForBrowser(url);
+  return saveVideoBlobDownload(blob, { sourceUrl: url });
 }

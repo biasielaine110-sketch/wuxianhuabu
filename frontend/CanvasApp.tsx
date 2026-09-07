@@ -71,6 +71,7 @@ import { computeNodeResizeFromPointer } from './canvas/canvasNodeResizeUtils';
 import { estimateCanvasBase64PayloadChars, canvasHistoryMaxSteps } from './canvas/canvasHistoryPayloadUtils';
 import { registerNodeBlobUrl, revokeNodeBlobUrls } from './canvas/canvasBlobUrlRegistry';
 import { formatVideoClock } from './services/videoEditExport';
+import { createVideoObjectUrl } from './services/videoFileUtils';
 import {
   buildVideoPreviewNode,
   buildVideoUpscaleJobFromPreview,
@@ -1872,9 +1873,14 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
       : undefined;
     const geom = placeNodeBesideVideoSource('videoPreview', videoEdit?.sourceNodeId);
     const newId = `video-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    const clipUrl = URL.createObjectURL(blob);
+    const mime = (blob.type || 'video/webm').split(';')[0].trim() || 'video/webm';
+    const ext = mime.includes('mp4') ? 'mp4' : 'webm';
+    const file = new File([blob], `clip-${formatVideoClock(startSec)}-${formatVideoClock(endSec)}.${ext}`.replace(/:/g, '-'), {
+      type: mime,
+    });
+    const clipUrl = createVideoObjectUrl(file);
     registerNodeBlobUrl(newId, clipUrl);
-    const clipDuration = Math.max(1, Math.round((endSec - startSec) * 10) / 10);
+    const clipDuration = Math.max(0.1, Math.round((endSec - startSec) * 10) / 10);
     const newNode = buildVideoPreviewNode({
       id: newId,
       videos: [clipUrl],
@@ -1891,7 +1897,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
       ? [{ id: `edge-${Date.now()}-${Math.floor(Math.random() * 1000)}`, sourceId: source.id, targetId: newId }]
       : [];
     appendNodesWithUndo([newNode], { edges, selectIds: [newId] });
-    notifyVideoEditResult('已截取片段到视频预览节点');
+    notifyVideoEditResult('已在画布复制截取片段');
   }, [appendNodesWithUndo, notifyVideoEditResult, placeNodeBesideVideoSource, videoEdit]);
 
   useLazyCanvasKeyboardShortcuts({
