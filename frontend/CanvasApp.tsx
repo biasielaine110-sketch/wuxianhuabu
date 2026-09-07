@@ -71,6 +71,12 @@ import { computeNodeResizeFromPointer } from './canvas/canvasNodeResizeUtils';
 import { estimateCanvasBase64PayloadChars, canvasHistoryMaxSteps } from './canvas/canvasHistoryPayloadUtils';
 import { registerNodeBlobUrl, revokeNodeBlobUrls } from './canvas/canvasBlobUrlRegistry';
 import { formatVideoClock } from './services/videoEditExport';
+import {
+  buildVideoPreviewNode,
+  buildVideoUpscaleJobFromPreview,
+  VIDEO_PREVIEW_NODE_HEIGHT,
+  VIDEO_PREVIEW_NODE_WIDTH,
+} from './canvas/spawnVideoPreviewNodes';
 import { buildCanvasNodeRenderOverlay } from './canvas/buildCanvasNodeRenderOverlay';
 import { useLazyRenderCanvasNode } from './canvas/useLazyRenderCanvasNode';
 import {
@@ -757,7 +763,10 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
   const handleResetNodeSize = useCallback((nodeId: string) => {
     const node = nodesRef.current.find(n => n.id === nodeId);
     if (!node) return;
-    const defaultSize = DEFAULT_NODE_SIZES[node.type];
+    const defaultSize =
+      node.type === 'video' && node.videoPreviewOnly
+        ? { width: VIDEO_PREVIEW_NODE_WIDTH, height: VIDEO_PREVIEW_NODE_HEIGHT }
+        : DEFAULT_NODE_SIZES[node.type];
     if (defaultSize) {
       handleUpdateNode(nodeId, { width: defaultSize.width, height: defaultSize.height });
     }
@@ -1790,8 +1799,11 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
       });
   }, []);
 
-  const placeNodeBesideVideoSource = useCallback((type: 'image' | 'video', sourceNodeId?: string) => {
-    const def = DEFAULT_NODE_SIZES[type] || { width: 960, height: 1056 };
+  const placeNodeBesideVideoSource = useCallback((type: 'image' | 'video' | 'videoPreview', sourceNodeId?: string) => {
+    const def =
+      type === 'videoPreview'
+        ? { width: VIDEO_PREVIEW_NODE_WIDTH, height: VIDEO_PREVIEW_NODE_HEIGHT }
+        : DEFAULT_NODE_SIZES[type] || { width: 960, height: 1056 };
     const source = sourceNodeId ? nodesRef.current.find((n) => n.id === sourceNodeId) : undefined;
     if (!source) {
       const rect = containerRef.current?.getBoundingClientRect();
@@ -1815,6 +1827,19 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
       downloadNoticeTimerRef.current = null;
     }, 2200);
   }, [setSaveSuccessMsg]);
+
+  const handleUpscaleVideoPreview = useCallback((nodeId: string) => {
+    const source = nodesRef.current.find((n) => n.id === nodeId);
+    if (!source || source.type !== 'video') return;
+    const urls = source.videos || [];
+    if (urls.length === 0) {
+      window.alert('当前视频预览节点没有可超分的视频');
+      return;
+    }
+    const { node: job, edge } = buildVideoUpscaleJobFromPreview(source);
+    appendNodesWithUndo([job], { edges: [edge], selectIds: [job.id] });
+    notifyVideoEditResult('已创建视频超分节点，请点击「生成视频」开始超分');
+  }, [appendNodesWithUndo, notifyVideoEditResult]);
 
   const handleVideoEditFrame = useCallback((pngDataUrl: string, timeSec: number) => {
     const source = videoEdit?.sourceNodeId
@@ -1845,37 +1870,28 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     const source = videoEdit?.sourceNodeId
       ? nodesRef.current.find((n) => n.id === videoEdit.sourceNodeId)
       : undefined;
-    const geom = placeNodeBesideVideoSource('video', videoEdit?.sourceNodeId);
+    const geom = placeNodeBesideVideoSource('videoPreview', videoEdit?.sourceNodeId);
     const newId = `video-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const clipUrl = URL.createObjectURL(blob);
     registerNodeBlobUrl(newId, clipUrl);
     const clipDuration = Math.max(1, Math.round((endSec - startSec) * 10) / 10);
-    const newNode: CanvasNode = {
+    const newNode = buildVideoPreviewNode({
       id: newId,
-      type: 'video',
+      videos: [clipUrl],
       x: geom.x,
       y: geom.y,
       width: geom.width,
       height: geom.height,
       prompt: `截取 ${formatVideoClock(startSec)}–${formatVideoClock(endSec)}`,
-      images: [],
-      aspectRatio: source?.aspectRatio || '16:9',
-      resolution: source?.resolution || '2k',
-      imageCount: 1,
-      model: source?.model || 'grok-video-1.5',
-      viewMode: 'single',
-      currentImageIndex: 0,
-      videos: [clipUrl],
-      currentVideoIndex: 0,
+      aspectRatio: source?.aspectRatio,
+      videoResolution: source?.videoResolution,
       videoDuration: clipDuration,
-      videoResolution: source?.videoResolution || '720p',
-      isGenerating: false,
-    };
+    });
     const edges: Edge[] = source
       ? [{ id: `edge-${Date.now()}-${Math.floor(Math.random() * 1000)}`, sourceId: source.id, targetId: newId }]
       : [];
     appendNodesWithUndo([newNode], { edges, selectIds: [newId] });
-    notifyVideoEditResult('已截取片段到视频节点');
+    notifyVideoEditResult('已截取片段到视频预览节点');
   }, [appendNodesWithUndo, notifyVideoEditResult, placeNodeBesideVideoSource, videoEdit]);
 
   useLazyCanvasKeyboardShortcuts({
@@ -1968,6 +1984,7 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
     openFullscreenFromBase64,
     openFullscreenVideo,
     openVideoEdit,
+    handleUpscaleVideoPreview,
     renderNodeErrorPanel,
     setSelectedIds,
     setNodes,

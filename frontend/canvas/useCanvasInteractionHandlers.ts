@@ -21,6 +21,7 @@ import { revokeNodeCanvasAssets } from '../services/canvasAssetCleanup';
 import { getDomSelectedText, captureTextPasteTarget, setPendingTextPasteTarget } from './domTextSelection';
 import { createVideoObjectUrl, isVideoFile } from '../services/videoFileUtils';
 import { registerNodeBlobUrl } from './canvasBlobUrlRegistry';
+import { buildVideoPreviewNode } from './spawnVideoPreviewNodes';
 
 export type CanvasContextMenu = {
   x: number;
@@ -676,7 +677,6 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
     }
 
     if (videoFiles.length > 0) {
-      const def = DEFAULT_NODE_SIZES.video || { width: 720, height: 840 };
       try {
         const newId = `video-${Date.now()}`;
         const urls = videoFiles.map((f) => {
@@ -690,27 +690,13 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
           videoFiles.length === 1
             ? stripName(videoFiles[0].name)
             : `已拖入 ${videoFiles.length} 个本地视频`;
-        const newNode: CanvasNode = {
+        const newNode = buildVideoPreviewNode({
           id: newId,
-          type: 'video',
-          x: mouseX - def.width / 2,
-          y: mouseY - def.height / 2,
-          width: def.width,
-          height: def.height,
-          prompt: promptLabel,
-          images: [],
-          aspectRatio: '16:9',
-          resolution: '2k',
-          imageCount: 1,
-          model: 'grok-video-1.5',
-          viewMode: 'single',
-          currentImageIndex: 0,
           videos: urls,
-          currentVideoIndex: 0,
-          videoDuration: 8,
-          videoResolution: '720p',
-          isGenerating: false,
-        };
+          x: mouseX - (960 / 2),
+          y: mouseY - (1056 / 2),
+          prompt: promptLabel,
+        });
         appendNodesWithUndo([newNode], { selectIds: [newNode.id] });
       } catch (err) {
         console.error(err);

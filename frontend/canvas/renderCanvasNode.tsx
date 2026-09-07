@@ -58,6 +58,7 @@ import {
 import type { CanvasNodeRenderState } from './canvasNodeRenderState';
 import { getNodeHeaderMeta } from './nodeHeaderMeta';
 import { isDeepWhiteUpscaler } from '../services/deepwhiteVideo';
+import { isVideoPreviewNode } from './spawnVideoPreviewNodes';
 
 const PanoramaNodeContent = lazy(() =>
   import('./PanoramaNodeContent').then((m) => ({ default: m.PanoramaNodeContent }))
@@ -119,7 +120,10 @@ export function renderCanvasNode(node: CanvasNode, s: CanvasNodeRenderState): Re
     s.openBigEditor(node.prompt || '', (v) => s.handleUpdateNode(node.id, { prompt: v }));
   };
 
-  const { headerIcon, headerTitle, borderColor, shadowColor } = getNodeHeaderMeta(node.type, isSelected);
+  const { headerIcon, headerTitle, borderColor, shadowColor } = getNodeHeaderMeta(node.type, isSelected, {
+    videoPreviewOnly: isVideoPreviewNode(node),
+  });
+  const videoPreviewOnly = isVideoPreviewNode(node);
 
 const images = node.images || [];
 const imageAssetIds = node.imageAssetIds;
@@ -203,6 +207,7 @@ return (
             onDownloadVideo={s.downloadVideoFromUrl}
             onOpenFullscreenVideo={s.openFullscreenVideo}
             onOpenVideoEdit={s.openVideoEdit}
+            onUpscaleVideo={videoPreviewOnly ? s.handleUpscaleVideoPreview : undefined}
           />
         </Suspense>
       )}
@@ -518,7 +523,7 @@ return (
       />
     </div>
 
-    {node.type === 'video' && isSelected && (
+    {node.type === 'video' && isSelected && !videoPreviewOnly && (
       <Suspense fallback={<HeavyNodeFallback label="加载视频参数…" />}>
         <VideoNodeSettingsPanel
           node={node}
@@ -543,7 +548,7 @@ return (
       />
     )}
       {/* Text Area - panoramaT2i 使用内置提示词，不显示输入框；视频节点未选中且有视频时隐藏 */}
-      {(node.type === 't2i' || node.type === 'i2i' || node.type === 'text' || (node.type === 'video' && isSelected)) && (
+      {(node.type === 't2i' || node.type === 'i2i' || node.type === 'text' || (node.type === 'video' && isSelected && !videoPreviewOnly)) && (
         <div
           className={`flex flex-col min-h-0 overflow-hidden ${
             node.type === 't2i' || node.type === 'i2i' ? 'flex-[3] basis-0' : 'flex-1'
@@ -753,7 +758,7 @@ return (
               onCancel={s.handleCancelGeneration}
             />
           )}
-          {node.type === 'video' && (
+          {node.type === 'video' && !videoPreviewOnly && (
             <NodeGenerateBar
               nodeId={node.id}
               variant="video"

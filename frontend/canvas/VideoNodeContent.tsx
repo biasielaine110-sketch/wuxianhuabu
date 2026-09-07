@@ -9,12 +9,14 @@ import {
   LoaderIcon,
   MaximizeIcon,
   ScissorsIcon,
+  SparklesIcon,
   VideoIcon,
 } from './canvasIcons';
 import { copyVideoSrcToClipboard, rewriteImageUrlForBrowserDisplay } from '../services/canvasAssetResolver';
 import { GenerationHoloOverlay } from './GenerationHoloOverlay';
 import { GenerationTimer } from './GenerationTimer';
 import { VideoContextMenu } from './VideoContextMenu';
+import { isVideoPreviewNode } from './spawnVideoPreviewNodes';
 
 export interface VideoNodeContentProps {
   node: CanvasNode;
@@ -30,6 +32,7 @@ export interface VideoNodeContentProps {
   onDownloadVideo: (url: string) => void;
   onOpenFullscreenVideo: (url: string, sourceNodeId?: string) => void;
   onOpenVideoEdit: (url: string, sourceNodeId?: string) => void;
+  onUpscaleVideo?: (nodeId: string) => void;
 }
 
 export function VideoNodeContent({
@@ -46,9 +49,12 @@ export function VideoNodeContent({
   onDownloadVideo,
   onOpenFullscreenVideo,
   onOpenVideoEdit,
+  onUpscaleVideo,
 }: VideoNodeContentProps) {
   const videoRootRef = useRef<HTMLDivElement>(null);
   const [previewMenu, setPreviewMenu] = useState<{ x: number; y: number } | null>(null);
+  const isPreview = isVideoPreviewNode(node);
+  const showChrome = isPreview || isSelected;
 
   const getVideoEl = () =>
     videoRootRef.current?.querySelector('video') as HTMLVideoElement | null;
@@ -74,10 +80,19 @@ export function VideoNodeContent({
     });
   }, [currentUrl]);
 
+  const toolBtnClass = isPreview
+    ? 'p-3 bg-black/70 hover:bg-black/90 rounded-xl text-white backdrop-blur-sm shadow-lg'
+    : 'p-4 bg-black/70 hover:bg-black/90 rounded-xl text-white backdrop-blur-sm shadow-lg';
+  const toolIconSize = isPreview ? 28 : 40;
+
   return (
     <div
       className={`w-full relative overflow-hidden group ${
-        isSelected ? 'h-[680px] shrink-0 border-b border-[#333] bg-[#2a2a2a]' : 'flex-1 min-h-0 border-b-0 bg-black'
+        isPreview
+          ? 'flex-1 min-h-[320px] border-b border-[#333] bg-[#2a2a2a]'
+          : isSelected
+            ? 'h-[680px] shrink-0 border-b border-[#333] bg-[#2a2a2a]'
+            : 'flex-1 min-h-0 border-b-0 bg-black'
       }`}
     >
       {node.isGenerating ? <GenerationHoloOverlay /> : null}
@@ -115,165 +130,165 @@ export function VideoNodeContent({
                   }
                 }
               }}
-              className={`w-full h-full object-contain bg-black ${isSelected ? '' : 'pointer-events-none'}`}
+              className={`w-full h-full object-contain bg-black ${showChrome ? '' : 'pointer-events-none'}`}
             />
-            {isSelected ? (
+            {showChrome ? (
               <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded opacity-50 hover:opacity-100">
-                {currentUrl?.includes('localhost:3107') ? '本地' : '远程'}
+                {currentUrl?.includes('localhost:3107') || currentUrl?.startsWith('blob:') ? '本地' : '远程'}
               </div>
             ) : null}
           </div>
-          {isSelected ? (
+          {showChrome ? (
             <>
-          <div className="absolute top-2 right-2 z-10 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            {videoUrls.length > 1 && (
-              <>
+              <div
+                className={`absolute top-2 right-2 z-10 flex gap-1 ${
+                  isPreview ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                } transition-opacity`}
+              >
+                {videoUrls.length > 1 && (
+                  <>
+                    <button
+                      type="button"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const next = (currentVideoIdx - 1 + videoUrls.length) % videoUrls.length;
+                        onUpdateNode(node.id, { currentVideoIndex: next });
+                      }}
+                      className="p-2 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
+                      title="上一条"
+                    >
+                      <ChevronLeftIcon size={20} />
+                    </button>
+                    <button
+                      type="button"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const next = (currentVideoIdx + 1) % videoUrls.length;
+                        onUpdateNode(node.id, { currentVideoIndex: next });
+                      }}
+                      className="p-2 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
+                      title="下一条"
+                    >
+                      <ChevronRightIcon size={20} />
+                    </button>
+                  </>
+                )}
                 <button
                   type="button"
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation();
-                    const next = (currentVideoIdx - 1 + videoUrls.length) % videoUrls.length;
-                    onUpdateNode(node.id, { currentVideoIndex: next });
+                    copyCurrentVideo();
                   }}
                   className="p-2 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
-                  title="上一条"
+                  title="复制视频"
                 >
-                  <ChevronLeftIcon size={20} />
+                  <CopyIcon size={20} />
                 </button>
                 <button
                   type="button"
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation();
-                    const next = (currentVideoIdx + 1) % videoUrls.length;
-                    onUpdateNode(node.id, { currentVideoIndex: next });
+                    if (currentUrl) onDownloadVideo(currentUrl);
                   }}
                   className="p-2 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
-                  title="下一条"
+                  title="下载视频"
                 >
-                  <ChevronRightIcon size={20} />
+                  <DownloadIcon size={20} />
                 </button>
-              </>
-            )}
-            <button
-              type="button"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                copyCurrentVideo();
-              }}
-              className="p-2 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
-              title="复制当前视频到剪贴板"
-            >
-              <CopyIcon size={20} />
-            </button>
-            <button
-              type="button"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (currentUrl) onDownloadVideo(currentUrl);
-              }}
-              className="p-2 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
-              title="下载当前视频"
-            >
-              <DownloadIcon size={20} />
-            </button>
-            <button
-              type="button"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (currentUrl) onOpenVideoEdit(currentUrl, node.id);
-              }}
-              className="p-2 bg-black/60 hover:bg-black/80 rounded text-white backdrop-blur-sm"
-              title="编辑视频：截取片段或单帧"
-            >
-              <ScissorsIcon size={20} />
-            </button>
-          </div>
-          <div className="absolute bottom-2 left-2 text-[10px] text-gray-400 bg-black/50 px-2 py-0.5 rounded">
-            {currentVideoIdx + 1} / {videoUrls.length}
-          </div>
-          <div className="absolute bottom-2 right-2 z-10 flex gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button
-              type="button"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                const videoEl = getVideoEl();
-                if (!videoEl) return;
-                if (videoEl.paused) videoEl.play();
-                else videoEl.pause();
-              }}
-              className="p-4 bg-black/70 hover:bg-black/90 rounded-xl text-white backdrop-blur-sm shadow-lg"
-              title="播放/暂停"
-            >
-              <VideoIcon size={40} />
-            </button>
-            <button
-              type="button"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (currentUrl) onOpenVideoEdit(currentUrl, node.id);
-              }}
-              className="p-4 bg-black/70 hover:bg-black/90 rounded-xl text-white backdrop-blur-sm shadow-lg"
-              title="编辑视频：截取片段或单帧"
-            >
-              <ScissorsIcon size={40} />
-            </button>
-            <button
-              type="button"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (currentUrl) onOpenFullscreenVideo(currentUrl, node.id);
-              }}
-              className="p-4 bg-black/70 hover:bg-black/90 rounded-xl text-white backdrop-blur-sm shadow-lg"
-              title="最大化"
-            >
-              <MaximizeIcon size={40} />
-            </button>
-            <button
-              type="button"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                const videoEl = getVideoEl();
-                if (videoEl) videoEl.muted = !videoEl.muted;
-              }}
-              className="p-4 bg-black/70 hover:bg-black/90 rounded-xl text-white backdrop-blur-sm shadow-lg"
-              title="静音/取消静音"
-            >
-              <AudioIcon size={40} />
-            </button>
-            <button
-              type="button"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                copyCurrentVideo();
-              }}
-              className="p-4 bg-black/70 hover:bg-black/90 rounded-xl text-white backdrop-blur-sm shadow-lg"
-              title="复制当前视频到剪贴板"
-            >
-              <CopyIcon size={40} />
-            </button>
-            <button
-              type="button"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (currentUrl) onDownloadVideo(currentUrl);
-              }}
-              className="p-4 bg-black/70 hover:bg-black/90 rounded-xl text-white backdrop-blur-sm shadow-lg"
-              title="下载当前视频"
-            >
-              <DownloadIcon size={40} />
-            </button>
-          </div>
+              </div>
+              <div className="absolute bottom-2 left-2 text-[10px] text-gray-400 bg-black/50 px-2 py-0.5 rounded">
+                {currentVideoIdx + 1} / {videoUrls.length}
+              </div>
+              <div
+                className={`absolute bottom-2 right-2 z-10 flex gap-2 ${
+                  isPreview ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                } transition-opacity`}
+              >
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const videoEl = getVideoEl();
+                    if (!videoEl) return;
+                    if (videoEl.paused) void videoEl.play();
+                    else videoEl.pause();
+                  }}
+                  className={toolBtnClass}
+                  title="播放/暂停"
+                >
+                  <VideoIcon size={toolIconSize} />
+                </button>
+                {isPreview && onUpscaleVideo ? (
+                  <button
+                    type="button"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onUpscaleVideo(node.id);
+                    }}
+                    className={toolBtnClass}
+                    title="视频超分"
+                  >
+                    <SparklesIcon size={toolIconSize} />
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (currentUrl) onOpenVideoEdit(currentUrl, node.id);
+                  }}
+                  className={toolBtnClass}
+                  title="视频剪辑"
+                >
+                  <ScissorsIcon size={toolIconSize} />
+                </button>
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (currentUrl) onOpenFullscreenVideo(currentUrl, node.id);
+                  }}
+                  className={toolBtnClass}
+                  title="最大化显示"
+                >
+                  <MaximizeIcon size={toolIconSize} />
+                </button>
+                {!isPreview ? (
+                  <button
+                    type="button"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const videoEl = getVideoEl();
+                      if (videoEl) videoEl.muted = !videoEl.muted;
+                    }}
+                    className={toolBtnClass}
+                    title="静音/取消静音"
+                  >
+                    <AudioIcon size={toolIconSize} />
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    copyCurrentVideo();
+                  }}
+                  className={toolBtnClass}
+                  title="复制视频"
+                >
+                  <CopyIcon size={toolIconSize} />
+                </button>
+              </div>
             </>
           ) : null}
         </>
@@ -304,7 +319,9 @@ export function VideoNodeContent({
               ) : null}
             </div>
           ) : (
-            <span className="relative z-[2]">生成后在此预览（链接约 24 小时内有效）</span>
+            <span className="relative z-[2]">
+              {isPreview ? '暂无视频' : '生成后在此预览（链接约 24 小时内有效）'}
+            </span>
           )}
         </div>
       )}
@@ -324,6 +341,14 @@ export function VideoNodeContent({
             setPreviewMenu(null);
             onOpenVideoEdit(currentUrl, node.id);
           }}
+          onUpscale={
+            isPreview && onUpscaleVideo
+              ? () => {
+                  setPreviewMenu(null);
+                  onUpscaleVideo(node.id);
+                }
+              : undefined
+          }
           onClose={() => setPreviewMenu(null)}
         />
       ) : null}

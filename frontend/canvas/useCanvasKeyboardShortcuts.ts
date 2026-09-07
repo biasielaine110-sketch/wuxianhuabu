@@ -11,6 +11,7 @@ import {
 import { collectImageFilesFromClipboardData } from './spawnImageNodes';
 import { createVideoObjectUrl, isVideoFile } from '../services/videoFileUtils';
 import { registerNodeBlobUrl } from './canvasBlobUrlRegistry';
+import { buildVideoPreviewNode } from './spawnVideoPreviewNodes';
 import {
   cloneImageSlotForNewNode,
   hasCanvasImagePayload,
@@ -91,7 +92,7 @@ function currentPreviewVideoUrl(node: CanvasNode): string {
   return (urls[idx] || '').trim();
 }
 
-/** C：把当前预览视频粘贴成新视频节点，落在画布鼠标位置 */
+/** C：把当前预览视频粘贴成新视频预览节点，落在画布鼠标位置 */
 function pasteVideoNodeAtCanvasMouse(
   d: CanvasKeyboardShortcutDeps,
   url: string,
@@ -100,28 +101,15 @@ function pasteVideoNodeAtCanvasMouse(
   const t = url.trim();
   if (!t) return;
   const mp = d.canvasMouseRef.current;
-  const def = d.DEFAULT_NODE_SIZES.video || { width: 1200, height: 1400 };
-  const newNode: CanvasNode = {
-    id: `video-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-    type: 'video',
-    x: mp.x - def.width / 2,
-    y: mp.y - def.height / 2,
-    width: def.width,
-    height: def.height,
-    prompt: source?.prompt || '',
-    images: [],
-    aspectRatio: source?.aspectRatio || '16:9',
-    resolution: source?.resolution || '2k',
-    imageCount: 1,
-    model: source?.model || 'grok-video-1.5',
-    viewMode: 'single',
-    currentImageIndex: 0,
+  const newNode = buildVideoPreviewNode({
     videos: [t],
-    currentVideoIndex: 0,
-    videoDuration: source?.videoDuration ?? 8,
-    videoResolution: source?.videoResolution || '720p',
-    isGenerating: false,
-  };
+    x: mp.x - 960 / 2,
+    y: mp.y - 1056 / 2,
+    prompt: source?.prompt || '',
+    aspectRatio: source?.aspectRatio,
+    videoResolution: source?.videoResolution,
+    videoDuration: source?.videoDuration,
+  });
   d.appendNodesWithUndo([newNode], { selectIds: [newNode.id] });
   if (d.fullscreenVideo) d.closeFullscreen();
 }
@@ -645,36 +633,21 @@ export function attachCanvasKeyboardShortcuts(
         e.preventDefault();
         d.lastPasteTimeRef.current = Date.now();
         const mp = d.canvasMouseRef.current;
-        const def = d.DEFAULT_NODE_SIZES.video || { width: 1200, height: 1400 };
         const newId = `video-${Date.now()}`;
         const urls = videoFiles.map((f) => {
           const url = createVideoObjectUrl(f);
           registerNodeBlobUrl(newId, url);
           return url;
         });
-        const newNode: CanvasNode = {
+        const newNode = buildVideoPreviewNode({
           id: newId,
-          type: 'video',
-          x: mp.x - def.width / 2,
-          y: mp.y - def.height / 2,
-          width: def.width,
-          height: def.height,
+          videos: urls,
+          x: mp.x - 960 / 2,
+          y: mp.y - 1056 / 2,
           prompt: videoFiles.length === 1
             ? (videoFiles[0].name.replace(/\.[^.]+$/i, '').trim() || '本地视频')
             : `已粘贴 ${videoFiles.length} 个本地视频`,
-          images: [],
-          aspectRatio: '16:9',
-          resolution: '2k',
-          imageCount: 1,
-          model: 'grok-video-1.5',
-          viewMode: 'single',
-          currentImageIndex: 0,
-          videos: urls,
-          currentVideoIndex: 0,
-          videoDuration: 8,
-          videoResolution: '720p',
-          isGenerating: false,
-        };
+        });
         d.appendNodesWithUndo([newNode], { selectIds: [newNode.id] });
         return;
       }

@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { CopyIcon, DownloadIcon, ScissorsIcon, XIcon } from './canvasIcons';
+import { CopyIcon, DownloadIcon, ScissorsIcon, SparklesIcon, XIcon } from './canvasIcons';
 
 export function VideoContextMenu({
   x,
@@ -8,6 +8,7 @@ export function VideoContextMenu({
   onCopy,
   onDownload,
   onEdit,
+  onUpscale,
   onClose,
   onDismiss,
 }: {
@@ -16,6 +17,7 @@ export function VideoContextMenu({
   onCopy: () => void;
   onDownload: () => void;
   onEdit?: () => void;
+  onUpscale?: () => void;
   onClose: () => void;
   /** 点击菜单外：默认与 onClose 相同；全屏时只关菜单不关全屏 */
   onDismiss?: () => void;
@@ -63,7 +65,19 @@ export function VideoContextMenu({
             onEdit();
           }}
         >
-          <ScissorsIcon size={16} /> 编辑视频
+          <ScissorsIcon size={16} /> 视频剪辑
+        </button>
+      ) : null}
+      {onUpscale ? (
+        <button
+          type="button"
+          className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-violet-600 hover:text-white flex items-center gap-2"
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            onUpscale();
+          }}
+        >
+          <SparklesIcon size={16} /> 视频超分
         </button>
       ) : null}
       <button
