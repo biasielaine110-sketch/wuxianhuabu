@@ -208,7 +208,17 @@ function isContentPolicyError(code: string, message: string): boolean {
   const blob = `${code} ${message}`.toLowerCase();
   return (
     code.toLowerCase() === 'content_policy' ||
-    /内容安全|content[_\s-]?policy|safety.?intercept|content.?filter|moderation/i.test(blob)
+    /内容安全|content[_\s-]?policy|safety.?intercept|content.?filter|moderation|safety review|blocked by safety/i.test(
+      blob
+    )
+  );
+}
+
+function formatImageSafetyBlockMessage(detail?: string): string {
+  const d = (detail || '').trim();
+  return (
+    `生图被内容安全拦截${d ? `：${d}` : '。'}` +
+    ' 请改成中性画面描述（人物、服装、场景、光线），不要把反推模板或含暴力/色情的对白拿去生图；也可换 DeepWhite / hfsy 通道。'
   );
 }
 
@@ -220,10 +230,7 @@ function formatOpenAiCompatHttpError(
 ): string {
   const parsed = parseOpenAiCompatErrorPayload(text);
   if (isContentPolicyError(parsed.code, parsed.message)) {
-    return (
-      `生图被内容安全拦截${parsed.message ? `：${parsed.message}` : '。'}` +
-      ' 请改写这一轮的画面描述（避免暴力血腥、色情、真人侵权等），不要把整段反推模板直接拿去生图；也可换一个生图通道重试。'
-    );
+    return formatImageSafetyBlockMessage(parsed.message);
   }
   const body = text.slice(0, 800);
   return `兼容接口错误 (${status}): ${body}${openAiCompatFailureHint(status, kind, fetchBase)}`;
@@ -1430,7 +1437,11 @@ async function toApisPollTaskToBase64(taskId: string, signal?: AbortSignal): Pro
       return fetchUrlAsBase64(url, signal, apiKey);
     }
     if (data.status === 'failed') {
-      throw new Error(`ToAPIs 生成失败: ${data.error?.message || JSON.stringify(data.error)}`);
+      const detail = data.error?.message || JSON.stringify(data.error);
+      if (isContentPolicyError('', String(detail || ''))) {
+        throw new Error(formatImageSafetyBlockMessage(String(detail)));
+      }
+      throw new Error(`ToAPIs 生成失败: ${detail}`);
     }
     await sleepInterruptible(3000, signal);
   }
