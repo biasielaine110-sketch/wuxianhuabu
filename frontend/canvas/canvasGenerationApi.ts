@@ -571,13 +571,25 @@ export function createCanvasGenerationApi(
             }
           }
         }
-        const fullImagePrompt = contextSummary
+        const MAX_IMAGE_PROMPT_CHARS = 1800;
+        let fullImagePrompt = contextSummary
           ? `${contextSummary}\n\n【本次生图要求】${imagePromptBody}`
           : imagePromptBody;
+        if (fullImagePrompt.length > MAX_IMAGE_PROMPT_CHARS) {
+          fullImagePrompt = fullImagePrompt.slice(0, MAX_IMAGE_PROMPT_CHARS - 3) + '...';
+        }
+        const paintIndices = (pickIndices === null ? slots.map((s) => s.n) : pickIndices).filter(
+          (n) => slots.find((s) => s.n === n)?.kind === 'image'
+        );
+        const paintRefs =
+          paintIndices.length > 0
+            ? (await resolveSlotImagesForIndices(slots, paintIndices)).base64s
+            : [];
+        const paintImages = [...paintRefs, ...msgImages];
         let generatedImages: string[];
-        if (genImages.length > 0) {
+        if (paintImages.length > 0) {
           generatedImages = await editExistingImage(
-            genImages,
+            paintImages,
             fullImagePrompt,
             imageCount,
             imageModel,

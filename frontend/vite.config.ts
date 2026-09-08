@@ -246,13 +246,37 @@ const toapisFileCdnProxy = {
     target: 'https://files.toapis.com',
     changeOrigin: true,
     secure: true,
+    timeout: 180_000,
+    proxyTimeout: 180_000,
     rewrite: (p: string) => p.replace(/^\/cdn-files-toapis/, ''),
+    configure(proxy) {
+      proxy.on('proxyReq', (proxyReq) => {
+        proxyReq.setHeader('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+        proxyReq.setHeader('Accept', 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8');
+      });
+    },
   },
   '/cdn-files-toapis-xyz': {
     target: 'https://files.toapis.xyz',
     changeOrigin: true,
     secure: true,
+    timeout: 180_000,
+    proxyTimeout: 180_000,
     rewrite: (p: string) => p.replace(/^\/cdn-files-toapis-xyz/, ''),
+    configure(proxy) {
+      proxy.on('proxyReq', (proxyReq) => {
+        proxyReq.setHeader('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+        proxyReq.setHeader('Accept', 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8');
+      });
+      proxy.on('error', (err, _req, res) => {
+        console.error('[vite proxy /cdn-files-toapis-xyz]', err);
+        const r = res as { headersSent?: boolean; writeHead?: (c: number, h?: unknown) => void; end?: (s?: string) => void };
+        if (r && !r.headersSent && typeof r.writeHead === 'function') {
+          r.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
+          r.end?.(`ToAPIs 图床代理错误: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      });
+    },
   },
   '/cdn-files-qixinai': {
     target: 'https://www.qixinai.net',

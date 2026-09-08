@@ -826,16 +826,27 @@ async function fetchUrlAsBase64(imageUrl: string, signal?: AbortSignal, bearerTo
     headers.Authorization = `Bearer ${bearerToken.trim()}`;
   }
   const res = await fetch(fetchUrl, { mode: 'cors', credentials: 'omit', signal, headers });
-  if (!res.ok) {
+  let okRes = res;
+  if (!res.ok && (res.status === 502 || res.status === 504 || res.status === 503) && fetchUrl !== absoluteUrl) {
+    try {
+      const retry = await fetch(absoluteUrl, { mode: 'cors', credentials: 'omit', signal });
+      if (retry.ok) okRes = retry;
+    } catch {
+      /* 仍用首次失败 */
+    }
+  }
+  if (!okRes.ok) {
     throw new Error(
-      `无法下载生成图 (${res.status})。` +
-        (fetchUrl !== imageUrl
+      `无法下载生成图 (${okRes.status})。` +
+        (okRes.status === 502 || okRes.status === 504
+          ? '上游图床或本地代理暂时失败，可换网络后重试，或改用其它生图通道。原始链接：'
+          : fetchUrl !== imageUrl
           ? '同源代理拉取失败：若为云智等网关，生成图 URL 常需携带与文生图相同的 Bearer Token（已自动附带）；仍 502 时请检查密钥权限或上游服务。原始链接：'
           : '若为跨域限制，请直接打开链接保存：') +
         absoluteUrl.slice(0, 200)
     );
   }
-  const blob = await res.blob();
+  const blob = await okRes.blob();
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {

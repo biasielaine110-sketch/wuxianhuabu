@@ -1,4 +1,4 @@
-import { useCallback, useRef, type RefObject, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useRef, type RefObject, type Dispatch, type SetStateAction, type WheelEvent as ReactWheelEvent } from 'react';
 import type { CanvasNode, Edge, NodeType, Transform } from '../types';
 import { useCanvasStore } from '../stores/canvasStore';
 import { defaultCanvasImageModel } from './canvasModelUtils';
@@ -190,7 +190,7 @@ export function useCanvasInteractionHandlers(opts: UseCanvasInteractionHandlersO
     addNodeAtCanvasPositionRef,
   } = opts;
 
-  const handleWheel = useCallback((e: React.WheelEvent) => {
+  const handleWheel = useCallback((e: WheelEvent | ReactWheelEvent) => {
     if (!containerRef.current || fullscreenImage) return;
     // 中键（bit 1 = 0b10）按下时浏览器可能派发 wheel（autoscroll），
     // 这种情况我们正在用 pointermove 做 pan，wheel zoom 会反向改 transform

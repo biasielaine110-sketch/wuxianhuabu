@@ -1519,6 +1519,16 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
 
   addNodeAtCanvasPositionRef.current = addNodeAtCanvasPosition;
 
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      handleWheel(e);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [handleWheel]);
+
   useCanvasGlobalPointerEvents({
     containerRef,
     transformRef,
@@ -2306,7 +2316,6 @@ export function CanvasApp({ onBackToHome }: CanvasAppProps) {
         id="canvas-container"
         ref={containerRef}
         className={`absolute inset-0 w-full h-full ${canvasMode === 'audit' ? 'hidden' : ''} ${activeTool === 'pan' ? 'cursor-grab active:cursor-grabbing' : activeTool === 'boxSelect' ? 'cursor-crosshair' : 'cursor-default'}`}
-        onWheel={handleWheel}
         onPointerDown={handleCanvasPointerDown}
         // 阻止鼠标中键 native drag / autoscroll：
         // 浏览器默认行为是切换为"四方向箭头" cursor 并向画布派发 wheel，
