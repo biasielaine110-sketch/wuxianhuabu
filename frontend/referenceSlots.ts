@@ -465,7 +465,14 @@ export function resolvePromptWithLinkedText(
   return { prompt: localRaw, usedLinkedAsPrimary: false };
 }
 
-const CHAT_VIDEO_FRAME_RATIOS = [0.08, 0.28, 0.5, 0.72, 0.92];
+/** 对话节点识别连入视频时抽取的关键帧数量 */
+export const CHAT_VIDEO_KEYFRAME_COUNT = 8;
+
+function chatVideoFrameRatios(count: number): number[] {
+  const n = Math.max(1, Math.min(12, count));
+  if (n === 1) return [0.12];
+  return Array.from({ length: n }, (_, i) => (i + 0.5) / n);
+}
 
 function captureVideoJpegBase64(v: HTMLVideoElement, maxEdge = 768, quality = 0.74): string | null {
   const w = v.videoWidth;
@@ -477,103 +484,150 @@ function captureVideoJpegBase64(v: HTMLVideoElement, maxEdge = 768, quality = 0.
   c.height = Math.max(1, Math.round(h * scale));
   const ctx = c.getContext('2d');
   if (!ctx) return null;
-  ctx.drawImage(v, 0, 0, c.width, c.height);
-  const data = c.toDataURL('image/jpeg', quality);
-  const i = data.indexOf(',');
-  return i >= 0 ? data.slice(i + 1) : null;
+  try {
+    ctx.drawImage(v, 0, 0, c.width, c.height);
+    const data = c.toDataURL('image/jpeg', quality);
+    const i = data.indexOf(',');
+    return i >= 0 ? data.slice(i + 1) : null;
+  } catch {
+    return null;
+  }
 }
 
-function extractJpegFramesFromPlayableSrc(
-  playSrc: string,
-  frameCount: number,
-  useCors: boolean
-): Promise<string[]> {
-  const count = Math.max(1, Math.min(frameCount, CHAT_VIDEO_FRAME_RATIOS.length));
+function waitVideoEvent(v: HTMLVideoElement, event: string, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      cleanup();
+      reject(new Error('timeout'));
+    }, timeoutMs);
+    const ok = () => {
+      window.clearTimeout(timer);
+      cleanup();
+      resolve();
+    };
+    const bad = () => {
+      window.clearTimeout(timer);
+      cleanup();
+      reject(new Error('video error'));
+    };
+    const cleanup = () => {
+      v.removeEventListener(event, ok);
+      v.removeEventListener('error', bad);
+    };
+    v.addEventListener(event, ok, { once: true });
+    v.addEventListener('error', bad, { once: true });
+  });
+}
+
+function seekVideoTo(v: HTMLVideoElement, timeSec: number): Promise<void> {
   return new Promise((resolve) => {
-    const v = document.createElement('video');
-    if (useCors) v.crossOrigin = 'anonymous';
-    v.muted = true;
-    v.playsInline = true;
-    v.preload = 'auto';
-    v.referrerPolicy = 'no-referrer';
-    const frames: string[] = [];
-    let settled = false;
-    let seekIndex = 0;
-    const done = (val: string[]) => {
-      if (settled) return;
-      settled = true;
-      try {
-        v.pause();
-        v.removeAttribute('src');
-        v.load();
-      } catch {
-        /* ignore */
-      }
-      resolve(val);
+    const target = Math.max(0, timeSec);
+    const already = Math.abs((v.currentTime || 0) - target) < 0.02;
+    const finish = () => resolve();
+    if (already && v.readyState >= 2) {
+      finish();
+      return;
+    }
+    const timer = window.setTimeout(finish, 2200);
+    const onSeeked = () => {
+      window.clearTimeout(timer);
+      v.removeEventListener('seeked', onSeeked);
+      finish();
     };
-    const t = window.setTimeout(() => done(frames), 18000);
-    const seekNext = () => {
-      if (settled) return;
-      const dur = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 1;
-      const ratios = count === 1 ? [Math.min(0.2, dur > 0 ? 0.05 : 0.05)] : CHAT_VIDEO_FRAME_RATIOS.slice(0, count);
-      if (seekIndex >= ratios.length) {
-        window.clearTimeout(t);
-        done(frames);
-        return;
-      }
-      try {
-        v.currentTime = Math.min(Math.max(0, dur * ratios[seekIndex]), Math.max(0, dur - 0.05));
-      } catch {
-        window.clearTimeout(t);
-        done(frames);
-      }
-    };
-    v.onerror = () => {
-      window.clearTimeout(t);
-      done(frames);
-    };
-    v.onseeked = () => {
-      const shot = captureVideoJpegBase64(v);
-      if (shot) frames.push(shot);
-      seekIndex += 1;
-      seekNext();
-    };
-    v.onloadeddata = () => {
-      seekNext();
-    };
-    v.src = playSrc;
+    v.addEventListener('seeked', onSeeked, { once: true });
     try {
-      v.load();
+      v.currentTime = target;
     } catch {
-      window.clearTimeout(t);
-      done(frames);
+      window.clearTimeout(timer);
+      v.removeEventListener('seeked', onSeeked);
+      finish();
     }
   });
 }
 
-/** 从视频 URL（含 blob:）截取多帧 JPEG base64（无 data: 前缀）；跨域失败时先拉 Blob 再截帧 */
-export async function videoUrlToJpegFrames(url: string, frameCount = 5): Promise<string[]> {
+async function extractJpegFramesFromPlayableSrc(
+  playSrc: string,
+  frameCount: number,
+  useCors: boolean
+): Promise<string[]> {
+  const count = Math.max(1, Math.min(12, frameCount));
+  const v = document.createElement('video');
+  if (useCors) v.crossOrigin = 'anonymous';
+  v.muted = true;
+  v.defaultMuted = true;
+  v.playsInline = true;
+  v.preload = 'auto';
+  v.referrerPolicy = 'no-referrer';
+  v.setAttribute('playsinline', 'true');
+  v.style.cssText = 'position:fixed;left:-9999px;top:0;width:32px;height:32px;opacity:0;pointer-events:none;';
+  document.body.appendChild(v);
+  const frames: string[] = [];
+  try {
+    v.src = playSrc;
+    try {
+      v.load();
+    } catch {
+      return [];
+    }
+    try {
+      await waitVideoEvent(v, 'loadedmetadata', 14000);
+    } catch {
+      return [];
+    }
+    try {
+      await v.play();
+      await new Promise((r) => window.setTimeout(r, 60));
+      v.pause();
+    } catch {
+      /* 自动播放被拦时仍可 seek 截帧 */
+    }
+    const dur = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 0;
+    const ratios = chatVideoFrameRatios(count);
+    for (const ratio of ratios) {
+      const t = dur > 0 ? Math.min(Math.max(0, dur * ratio), Math.max(0, dur - 0.04)) : 0;
+      await seekVideoTo(v, t);
+      await new Promise((r) => requestAnimationFrame(() => r(undefined)));
+      const shot = captureVideoJpegBase64(v);
+      if (shot) frames.push(shot);
+    }
+    return frames;
+  } finally {
+    try {
+      v.pause();
+      v.removeAttribute('src');
+      v.load();
+    } catch {
+      /* ignore */
+    }
+    v.remove();
+  }
+}
+
+/** 从视频 URL（含 blob:）截取多帧 JPEG base64（无 data: 前缀）；优先拉 Blob 再截帧，避免跨域污染画布 */
+export async function videoUrlToJpegFrames(
+  url: string,
+  frameCount = CHAT_VIDEO_KEYFRAME_COUNT
+): Promise<string[]> {
   const t = (url || '').trim();
   if (!t) return [];
-  const count = Math.max(1, Math.min(8, frameCount));
+  const count = Math.max(1, Math.min(12, frameCount));
   if (t.startsWith('blob:') || t.startsWith('data:')) {
     return extractJpegFramesFromPlayableSrc(t, count, false);
   }
-  const rewritten = rewriteImageUrlForBrowserDisplay(t);
-  let frames = await extractJpegFramesFromPlayableSrc(rewritten, count, true);
-  if (frames.length > 0) return frames;
   try {
     const blob = await fetchVideoBlobForBrowser(t);
     const blobUrl = URL.createObjectURL(blob);
     try {
-      frames = await extractJpegFramesFromPlayableSrc(blobUrl, count, false);
+      const frames = await extractJpegFramesFromPlayableSrc(blobUrl, count, false);
+      if (frames.length > 0) return frames;
     } finally {
       URL.revokeObjectURL(blobUrl);
     }
   } catch {
-    /* 外链不可读时由调用方退回文字链接 */
+    /* 回退为带 CORS 的直链截帧 */
   }
-  return frames;
+  const rewritten = rewriteImageUrlForBrowserDisplay(t);
+  return extractJpegFramesFromPlayableSrc(rewritten, count, true);
 }
 
 /** 从视频 URL 截取一帧为 JPEG base64（无 data: 前缀）；失败返回 null */
@@ -628,7 +682,7 @@ export async function resolveSlotImagesForIndices(
       continue;
     }
     if (s.kind === 'video' && s.videoUrl) {
-      const frames = await videoUrlToJpegFrames(s.videoUrl, 5);
+      const frames = await videoUrlToJpegFrames(s.videoUrl, CHAT_VIDEO_KEYFRAME_COUNT);
       if (frames.length > 0) base64s.push(...frames);
       else missing.push(num);
       continue;
@@ -672,7 +726,7 @@ export async function resolveSlotImagesForIndicesWithCompression(
       continue;
     }
     if (s.kind === 'video' && s.videoUrl) {
-      const frames = await videoUrlToJpegFrames(s.videoUrl, 5);
+      const frames = await videoUrlToJpegFrames(s.videoUrl, CHAT_VIDEO_KEYFRAME_COUNT);
       if (frames.length > 0) {
         for (const b of frames) {
           base64s.push(await compressImageBase64(b, maxSize));

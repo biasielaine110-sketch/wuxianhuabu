@@ -547,7 +547,11 @@ export async function manxueGeminiChatGenerate(
   const systemParts: string[] = [];
   const contents: Array<{
     role: 'user' | 'model';
-    parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }>;
+    parts: Array<
+      | { text: string }
+      | { inlineData: { mimeType: string; data: string } }
+      | { fileData: { fileUri: string; mimeType: string } }
+    >;
   }> = [];
   for (const turn of turns) {
     if (turn.role === 'system') {
@@ -559,10 +563,25 @@ export async function manxueGeminiChatGenerate(
       continue;
     }
     // user
-    const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
+    const parts: Array<
+      | { text: string }
+      | { inlineData: { mimeType: string; data: string } }
+      | { fileData: { fileUri: string; mimeType: string } }
+    > = [];
     const imgs: string[] = [];
     if (turn.imageBase64s?.length) imgs.push(...turn.imageBase64s);
     if (turn.imageBase64) imgs.push(turn.imageBase64);
+    for (const vu of turn.videoUrls || []) {
+      const uri = vu.trim();
+      if (!/^https?:\/\//i.test(uri)) continue;
+      const lower = uri.toLowerCase();
+      const mime = lower.includes('.webm')
+        ? 'video/webm'
+        : lower.includes('.mov')
+          ? 'video/quicktime'
+          : 'video/mp4';
+      parts.push({ fileData: { fileUri: uri, mimeType: mime } });
+    }
     for (const b64 of imgs) {
       const cleaned = b64.replace(/^data:[^;]+;base64,/, '').replace(/\s/g, '');
       const mime = sniffMimeFromBase64(cleaned);
@@ -5622,12 +5641,25 @@ export async function chatCompletionHistoryAtBase(
     body.max_tokens = 8192;
   }
 
-  const json = await postJsonAtBase<{
-    choices?: { message?: { content?: unknown; reasoning_content?: unknown } }[];
-  }>(base, '/chat/completions', body, key);
-  const out = extractTextFromOpenAiChatJson(json);
-  if (!out) throw new Error('对话接口未返回文本内容。');
-  return out;
+  const postChat = async (msgs: OpenAiChatMessage[]) => {
+    const json = await postJsonAtBase<{
+      choices?: { message?: { content?: unknown; reasoning_content?: unknown } }[];
+    }>(base, '/chat/completions', { ...body, messages: msgs }, key);
+    const out = extractTextFromOpenAiChatJson(json);
+    if (!out) throw new Error('对话接口未返回文本内容。');
+    return out;
+  };
+
+  const hasVideoPart = messages.some(
+    (m) => Array.isArray(m.content) && m.content.some((p) => p.type === 'video_url')
+  );
+  try {
+    return await postChat(messages);
+  } catch (err) {
+    if (!hasVideoPart) throw err;
+    const retryTurns = turns.map((t) => ({ ...t, videoUrls: undefined }));
+    return await postChat(turnsToOpenAiChatMessages(retryTurns));
+  }
 }
 
 /** 指定 Base URL 与密钥的对话（用于 DeepSeek 等与全局 OpenAI 兼容配置分离的场景） */

@@ -736,10 +736,25 @@ export const callGeminiChatWithHistory = async (
       if (t.role === 'assistant') {
         return { role: 'model' as const, parts: [{ text: t.content }] };
       }
-      const parts: Array<{ text: string } | { inlineData: { data: string; mimeType: string } }> = [];
+      const parts: Array<
+        | { text: string }
+        | { inlineData: { data: string; mimeType: string } }
+        | { fileData: { fileUri: string; mimeType: string } }
+      > = [];
       const imgs: string[] = [];
       if (t.imageBase64s?.length) imgs.push(...t.imageBase64s);
       if (t.imageBase64) imgs.push(t.imageBase64);
+      for (const vu of t.videoUrls || []) {
+        const uri = vu.trim();
+        if (!/^https?:\/\//i.test(uri)) continue;
+        const lower = uri.toLowerCase();
+        const mime = lower.includes('.webm')
+          ? 'video/webm'
+          : lower.includes('.mov')
+            ? 'video/quicktime'
+            : 'video/mp4';
+        parts.push({ fileData: { fileUri: uri, mimeType: mime } });
+      }
       for (const b64 of imgs) {
         parts.push({
           inlineData: { data: b64, mimeType: 'image/jpeg' },
@@ -749,16 +764,37 @@ export const callGeminiChatWithHistory = async (
       return { role: 'user' as const, parts };
     });
 
-    const response = await ai.models.generateContent({
-      model: resolveNativeGeminiChatModelId(modelName),
-      contents: contents as unknown,
-      config: {
-        responseModalities: [Modality.TEXT],
-      },
-    });
+    const runNative = async (payload: typeof contents) => {
+      const response = await ai.models.generateContent({
+        model: resolveNativeGeminiChatModelId(modelName),
+        contents: payload as unknown,
+        config: {
+          responseModalities: [Modality.TEXT],
+        },
+      });
+      const textParts = response.candidates?.[0]?.content?.parts?.filter((part) => part.text) || [];
+      return textParts.map((part) => part.text).join('');
+    };
 
-    const textParts = response.candidates?.[0]?.content?.parts?.filter((part) => part.text) || [];
-    const responseText = textParts.map((part) => part.text).join('');
+    const hasFileVideo = contents.some(
+      (c) =>
+        Array.isArray((c as { parts?: unknown[] }).parts) &&
+        (c as { parts: Array<{ fileData?: unknown }> }).parts.some((p) => !!p.fileData)
+    );
+    let responseText = '';
+    try {
+      responseText = await runNative(contents);
+    } catch (err) {
+      if (!hasFileVideo) throw err;
+      const withoutVideo = contents.map((c) => {
+        if (!('parts' in c) || !Array.isArray(c.parts)) return c;
+        return {
+          ...c,
+          parts: c.parts.filter((p) => !('fileData' in p && p.fileData)),
+        };
+      });
+      responseText = await runNative(withoutVideo);
+    }
 
     if (!responseText) {
       throw new Error('模型未返回有效响应');

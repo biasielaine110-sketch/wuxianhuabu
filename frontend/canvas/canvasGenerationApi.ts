@@ -32,6 +32,7 @@ import {
   resolveSlotImagesForIndices,
   resolveSlotAudios,
   publicHttpVideoUrlForChat,
+  CHAT_VIDEO_KEYFRAME_COUNT,
 } from '../referenceSlots';
 import {
   buildOriginalAspectPromptSuffix,
@@ -373,8 +374,7 @@ export function createCanvasGenerationApi(
         s.videoUrl &&
         (pickIndices === null || pickIndices.includes(s.n))
     );
-    const failedPublicVideoUrls = pickedVideoSlots
-      .filter((s) => missing.includes(s.n))
+    const publicVideoUrls = pickedVideoSlots
       .map((s) => publicHttpVideoUrlForChat(s.videoUrl || ''))
       .filter((u): u is string => !!u);
 
@@ -406,14 +406,22 @@ export function createCanvasGenerationApi(
 
       const contextParts: string[] = [];
       if (pickedVideoSlots.length > 0) {
+        const videoLabels = pickedVideoSlots
+          .map((s) => `@R${s.n}${s.label ? `（${s.label}）` : ''}`)
+          .join('、');
         contextParts.push(
-          `用户通过参考区提供了 ${pickedVideoSlots.length} 段视频。附图为按时间顺序抽取的关键帧，请据此识别视频中的人物、场景、动作、镜头与情节。`
+          `用户通过连线提供了 ${pickedVideoSlots.length} 段视频（${videoLabels}）。` +
+            `附图中对应位置是按时间顺序等间隔抽取的关键帧（每段约 ${CHAT_VIDEO_KEYFRAME_COUNT} 帧）。` +
+            `请把这些帧当作同一段连续镜头来理解：人物外貌、场景、动作变化、运镜与情节；不要只描述单张静帧。` +
+            (publicVideoUrls.length > 0
+              ? `同时已附上可解码的视频原片地址，若接口支持视频请结合整段视频作答。`
+              : '')
         );
       }
       if (refImages.length > 0 && pickedVideoSlots.length === 0) {
         contextParts.push(`用户通过参考区提供了 ${refImages.length} 张视觉参考（见附图，顺序与 @R 序号一致）。`);
       } else if (refImages.length > 0 && pickedVideoSlots.length > 0) {
-        const stillCount = Math.max(0, refImages.length - pickedVideoSlots.length * 5);
+        const stillCount = Math.max(0, refImages.length - pickedVideoSlots.length * CHAT_VIDEO_KEYFRAME_COUNT);
         if (stillCount > 0) {
           contextParts.push(`另外还有参考静帧图片（见附图）。`);
         }
@@ -576,7 +584,7 @@ export function createCanvasGenerationApi(
           content: fullPrompt,
           imageBase64: ([...refImages, ...msgImages].length) === 1 ? [...refImages, ...msgImages][0] : undefined,
           imageBase64s: ([...refImages, ...msgImages].length) > 1 ? [...refImages, ...msgImages] : undefined,
-          videoUrls: failedPublicVideoUrls.length > 0 ? failedPublicVideoUrls : undefined,
+          videoUrls: publicVideoUrls.length > 0 ? publicVideoUrls : undefined,
         },
       ];
 
