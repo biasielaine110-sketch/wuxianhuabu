@@ -58,6 +58,15 @@ const CHAT_FEATURE_BUTTON_TONE_CLASSES: Record<'green' | 'blue' | 'purple' | 'ro
 };
 
 const CHAT_FEATURE_BUTTON_SPECS: ChatFeatureButtonSpec[] = [
+  {
+    id: 'reverse-video-prompt',
+    presetKey: '反推视频提示词',
+    label: '反推视频提示词',
+    icon: 'video',
+    tone: 'green',
+    title:
+      '反推视频提示词：把视频节点连到对话窗口后点此填入反推模板，再发送。模型会根据成片与关键帧还原即梦 Seedance 2.0 可用的中文视频提示词。',
+  },
   // —— 玫红组（默认色）——
   {
     id: 'bbbb-universal-prompt',
@@ -959,7 +968,7 @@ export function ChatNodeContent({
           <div className="text-center text-gray-500 py-8" style={{ fontSize: chatFontScaled }}>
             {refSlots.length > 0 && (
               <div className="mt-2 text-cyan-400" style={{ fontSize: fs(Math.max(11, chatFontPx - 1)) }}>
-                已连接 {refSlots.length} 条参考（含图/视频）。连入视频后提问会抽取多帧并尽量把成片交给模型识别，也可用 @R 指定某一段
+                已连接 {refSlots.length} 条参考（含图/视频）。连入视频后可点「反推视频提示词」再发送；会抽关键帧并尽量抽出音轨识别台词。也可用 @R 指定某一段
               </div>
             )}
           </div>
@@ -1406,7 +1415,7 @@ export function ChatNodeContent({
             disabled={node.isGenerating}
             className="rounded bg-purple-600 hover:bg-purple-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white flex items-center justify-center px-3 py-0.5"
             style={{ width: 300, fontSize: fs(10) }}
-            title="AI生图"
+            title="同一轮既回复又生图：会在输入前加上 [生图]，发送后文字和图片出现在同一条消息里"
           >
             <ImageIcon size={fs(12)} />
             <span className="ml-1">AI生图</span>

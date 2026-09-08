@@ -23,6 +23,7 @@ import {
   generateCanvasVideoViaToApis,
   generateNewImage,
 } from '../services/geminiService';
+import { videoUrlToChatAudio } from '../services/videoChatAudio';
 import {
   buildIncomingRefSlots,
   parseRefPickIndices,
@@ -41,6 +42,15 @@ import {
   resolveI2iGenerationAspect,
 } from './i2iAspectRatio';
 import { useCanvasStore } from '../stores/canvasStore';
+
+/** 本轮是否要在对话回复的同时出图（避免长模板正文里的「生图」误触发） */
+function chatTurnWantsImages(raw: string): boolean {
+  const t = (raw || '').trim();
+  if (!t) return false;
+  if (t.startsWith('[生图]')) return true;
+  if (t.length > 400) return false;
+  return /(?:请)?(?:帮我)?(?:画|生成|出)(?:一张|一幅|几张)?(?:图|图片)|生一张图|AI生图/.test(t);
+}
 
 export type UseCanvasGenerationOptions = {
   setNodes: (updater: CanvasNode[] | ((prev: CanvasNode[]) => CanvasNode[])) => void;
@@ -477,96 +487,40 @@ export function createCanvasGenerationApi(
     );
 
     try {
-      // 生图模式：直接调用图片生成服务
-      if (isImageGenMode) {
-        if (!imageGenPrompt) {
-          setNodes((prev) =>
-            prev.map((n) =>
-              n.id === nodeId ? { ...n, isGenerating: false, error: '请在 [生图] 后填写要生成的图片描述' } : n
-            )
-          );
-          generationStartedAtRef.current.delete(nodeId);
-          return;
-        }
-        const imageModel = normalizeLegacyImageModelId((node as ChatNode).imageModel || 'gpt-image-2-codesonline');
-        const aspectRatio = (node as ChatNode).imageAspectRatio || '16:9';
-        const resolution = (node as ChatNode).imageResolution || '2k';
-        const imageQuality = (node as ChatNode).imageQuality || 'low';
-        const imageCount = 1;
-
-        // 构建带上下文的生图提示词（传递最近10轮对话摘要，最多2000字符）
-        const allCurrentMessages = (node.messages || []) as ChatMessage[];
-        const recentMessages = allCurrentMessages.slice(-20); // 最近20条消息（约10轮对话）
-        let contextSummary = '';
-        const MAX_CONTEXT_CHARS = 2000; // 限制上下文总字符数
-        if (recentMessages.length > 0) {
-          const userMsgs = recentMessages.filter(m => m.role === 'user').slice(-10);
-          if (userMsgs.length > 0) {
-            // 限制每个用户消息的显示长度
-            const truncatedMsgs = userMsgs.map(m => {
-              const content = typeof m.content === 'string' ? m.content : String(m.content);
-              return content.length > 300 ? content.slice(0, 300) + '...' : content;
-            });
-            contextSummary = `【对话上下文参考】最近对话：${truncatedMsgs.join(' → ')}`;
-            // 如果超出限制，截断
-            if (contextSummary.length > MAX_CONTEXT_CHARS) {
-              contextSummary = contextSummary.slice(0, MAX_CONTEXT_CHARS - 3) + '...';
-            }
-          }
-        }
-        const fullImagePrompt = contextSummary ? `${contextSummary}\n\n【本次生图要求】${imageGenPrompt}` : imageGenPrompt;
-
-        let generatedImages: string[];
-        if (genImages.length > 0) {
-          // 有参考图时，使用图生图（editExistingImage）而非纯文生图
-          generatedImages = await editExistingImage(
-            genImages,
-            fullImagePrompt,
-            imageCount,
-            imageModel,
-            aspectRatio,
-            resolution,
-            imageQuality,
-          );
-        } else {
-          // 无参考图时，使用纯文生图
-          generatedImages = await generateNewImage(
-            fullImagePrompt,
-            aspectRatio,
-            imageCount,
-            imageModel,
-            resolution,
-            imageQuality
-          );
-        }
-
-        generatedImages = await normalizeCanvasGenerationImages(generatedImages, {
-          signal: ac.signal,
-          bearerToken: imageModelBearerToken(imageModel),
-        });
-
-        const assistantMessage: ChatMessage = {
-          id: nextMsgId('assistant'),
-          role: 'assistant',
-          content: `已根据您的描述生成 ${generatedImages.length} 张图片：`,
-          images: generatedImages,
-        };
-
+      const wantImages = chatTurnWantsImages(inputText);
+      const imagePromptBody = (imageGenPrompt || strippedQuestion.replace(/^\[生图\]\s*/, '')).trim();
+      if (inputText.startsWith('[生图]') && !imagePromptBody) {
         setNodes((prev) =>
-          prev.map((n) => {
-            if (n.id !== nodeId) return n;
-            const ch = n as ChatNode;
-            const existingMsgs = (ch.messages || []) as ChatMessage[];
-            const MAX_CHAT_MESSAGES = 50;
-            const trimmedAfterUser = existingMsgs.length > MAX_CHAT_MESSAGES ? existingMsgs.slice(-MAX_CHAT_MESSAGES) : existingMsgs;
-            return { ...ch, messages: [...trimmedAfterUser, assistantMessage], isGenerating: false, prompt: '' } as CanvasNode;
-          })
+          prev.map((n) =>
+            n.id === nodeId ? { ...n, isGenerating: false, error: '请在 [生图] 后填写要生成的图片描述' } : n
+          )
         );
         generationStartedAtRef.current.delete(nodeId);
         return;
       }
 
-      // 普通对话模式
+      // 抽出成片音轨后再提交（界面已进入生成中）
+      let videoAudio: { data: string; mime: string; durationSec: number } | null = null;
+      if (pickedVideoSlots.length > 0) {
+        for (const slot of pickedVideoSlots.slice(0, 2)) {
+          if (!slot.videoUrl) continue;
+          try {
+            videoAudio = await videoUrlToChatAudio(slot.videoUrl);
+          } catch {
+            videoAudio = null;
+          }
+          if (videoAudio) break;
+        }
+      }
+      const audioNote = pickedVideoSlots.length
+        ? videoAudio
+          ? `\n\n已附上从成片抽出的音轨（约 ${Math.max(1, Math.round(videoAudio.durationSec))} 秒），必须听辨台词、旁白、环境音与动作音效，不要只看画面。`
+          : `\n\n未能抽出音轨（成片可能无声，或浏览器无法解码声音），不要编造对白。`
+        : '';
+      const imageTurnNote = wantImages
+        ? '\n\n【本轮同时生图】请用文字直接回答用户；配图由系统用对话窗口所选生图模型生成，不要在文字里用 markdown 贴图。'
+        : '';
+
       const apiTurns = [
         ...historyForApi.map((m) => {
           const imgs = m.role === 'user' && m.images?.length ? m.images : undefined;
@@ -581,21 +535,112 @@ export function createCanvasGenerationApi(
         }),
         {
           role: 'user' as const,
-          content: fullPrompt,
+          content: fullPrompt + audioNote + imageTurnNote,
           imageBase64: ([...refImages, ...msgImages].length) === 1 ? [...refImages, ...msgImages][0] : undefined,
           imageBase64s: ([...refImages, ...msgImages].length) > 1 ? [...refImages, ...msgImages] : undefined,
           videoUrls: publicVideoUrls.length > 0 ? publicVideoUrls : undefined,
+          audioBase64: videoAudio?.data,
+          audioMime: videoAudio?.mime,
         },
       ];
 
       const chatModel = normalizeDeepSeekChatModelId(node.model || DEFAULT_DEEPSEEK_CHAT_MODEL_ID).trim();
-      const response = await callGeminiChatWithHistory(apiTurns, chatModel);
+
+      const runChat = () => callGeminiChatWithHistory(apiTurns, chatModel);
+
+      const runImages = async (): Promise<string[]> => {
+        const imageModel = normalizeLegacyImageModelId((node as ChatNode).imageModel || 'gpt-image-2-codesonline');
+        const aspectRatio = (node as ChatNode).imageAspectRatio || '16:9';
+        const resolution = (node as ChatNode).imageResolution || '2k';
+        const imageQuality = (node as ChatNode).imageQuality || 'low';
+        const imageCount = 1;
+        const allCurrentMessages = (node.messages || []) as ChatMessage[];
+        const recentMessages = allCurrentMessages.slice(-20);
+        let contextSummary = '';
+        const MAX_CONTEXT_CHARS = 2000;
+        if (recentMessages.length > 0) {
+          const userMsgs = recentMessages.filter((m) => m.role === 'user').slice(-10);
+          if (userMsgs.length > 0) {
+            const truncatedMsgs = userMsgs.map((m) => {
+              const content = typeof m.content === 'string' ? m.content : String(m.content);
+              return content.length > 300 ? content.slice(0, 300) + '...' : content;
+            });
+            contextSummary = `【对话上下文参考】最近对话：${truncatedMsgs.join(' → ')}`;
+            if (contextSummary.length > MAX_CONTEXT_CHARS) {
+              contextSummary = contextSummary.slice(0, MAX_CONTEXT_CHARS - 3) + '...';
+            }
+          }
+        }
+        const fullImagePrompt = contextSummary
+          ? `${contextSummary}\n\n【本次生图要求】${imagePromptBody}`
+          : imagePromptBody;
+        let generatedImages: string[];
+        if (genImages.length > 0) {
+          generatedImages = await editExistingImage(
+            genImages,
+            fullImagePrompt,
+            imageCount,
+            imageModel,
+            aspectRatio,
+            resolution,
+            imageQuality,
+          );
+        } else {
+          generatedImages = await generateNewImage(
+            fullImagePrompt,
+            aspectRatio,
+            imageCount,
+            imageModel,
+            resolution,
+            imageQuality
+          );
+        }
+        return normalizeCanvasGenerationImages(generatedImages, {
+          signal: ac.signal,
+          bearerToken: imageModelBearerToken(imageModel),
+        });
+      };
+
+      let replyText = '';
+      let replyImages: string[] = [];
+      let imageError = '';
+      if (wantImages) {
+        const [chatSettled, imgSettled] = await Promise.allSettled([runChat(), runImages()]);
+        if (chatSettled.status === 'fulfilled') {
+          replyText = chatSettled.value.text || '';
+          if (chatSettled.value.images?.length) replyImages.push(...chatSettled.value.images);
+        }
+        if (imgSettled.status === 'fulfilled') {
+          replyImages.push(...imgSettled.value);
+        } else if (imgSettled.status === 'rejected') {
+          imageError = imgSettled.reason instanceof Error ? imgSettled.reason.message : String(imgSettled.reason || '生图失败');
+        }
+        if (!replyText && replyImages.length === 0) {
+          const chatErr =
+            chatSettled.status === 'rejected'
+              ? chatSettled.reason instanceof Error
+                ? chatSettled.reason.message
+                : String(chatSettled.reason || '对话失败')
+              : '生成失败';
+          throw new Error(chatErr);
+        }
+        if (!replyText && replyImages.length > 0) {
+          replyText = `已根据您的描述生成 ${replyImages.length} 张图片。`;
+        }
+        if (imageError) {
+          replyText = `${replyText}\n\n（生图未成功：${imageError}）`.trim();
+        }
+      } else {
+        const response = await runChat();
+        replyText = response.text;
+        if (response.images?.length) replyImages = response.images;
+      }
 
       const assistantMessage: ChatMessage = {
         id: nextMsgId('assistant'),
         role: 'assistant',
-        content: response.text,
-        ...(response.images?.length ? { images: response.images } : {}),
+        content: replyText,
+        ...(replyImages.length ? { images: replyImages } : {}),
       };
 
       setNodes((prev) =>

@@ -582,6 +582,15 @@ export async function manxueGeminiChatGenerate(
           : 'video/mp4';
       parts.push({ fileData: { fileUri: uri, mimeType: mime } });
     }
+    if (turn.audioBase64) {
+      const mime = (turn.audioMime || 'audio/wav').split(';')[0] || 'audio/wav';
+      parts.push({
+        inlineData: {
+          mimeType: mime.startsWith('audio/') ? mime : 'audio/wav',
+          data: turn.audioBase64.replace(/\s/g, ''),
+        },
+      });
+    }
     for (const b64 of imgs) {
       const cleaned = b64.replace(/^data:[^;]+;base64,/, '').replace(/\s/g, '');
       const mime = sniffMimeFromBase64(cleaned);
@@ -5427,6 +5436,9 @@ export type ChatCompletionHistoryTurn = {
   imageBase64s?: string[];
   /** 仅 user：公开视频 URL（OpenAI 兼容 video_url） */
   videoUrls?: string[];
+  /** 仅 user：成片音轨 */
+  audioBase64?: string;
+  audioMime?: string;
 };
 
 type OpenAiChatMessage = {
@@ -5436,9 +5448,18 @@ type OpenAiChatMessage = {
     | Array<
         | { type: 'image_url'; image_url: { url: string } }
         | { type: 'video_url'; video_url: { url: string } }
+        | { type: 'input_audio'; input_audio: { data: string; format: 'wav' | 'mp3' } }
+        | { type: 'audio_url'; audio_url: { url: string } }
         | { type: 'text'; text: string }
       >;
 };
+
+function audioFormatForOpenAi(mime?: string): 'wav' | 'mp3' | null {
+  const m = (mime || '').toLowerCase();
+  if (m.includes('wav')) return 'wav';
+  if (m.includes('mpeg') || m.includes('mp3')) return 'mp3';
+  return null;
+}
 
 function turnsToOpenAiChatMessages(turns: ChatCompletionHistoryTurn[]): OpenAiChatMessage[] {
   return turns.map((turn) => {
@@ -5452,14 +5473,26 @@ function turnsToOpenAiChatMessages(turns: ChatCompletionHistoryTurn[]): OpenAiCh
     if (turn.imageBase64s?.length) imgs.push(...turn.imageBase64s);
     if (turn.imageBase64) imgs.push(turn.imageBase64);
     const videos = (turn.videoUrls || []).filter((u) => /^https?:\/\//i.test((u || '').trim()));
-    if (imgs.length > 0 || videos.length > 0) {
+    const audioB64 = (turn.audioBase64 || '').replace(/\s/g, '');
+    if (imgs.length > 0 || videos.length > 0 || audioB64) {
       const parts: Array<
         | { type: 'image_url'; image_url: { url: string } }
         | { type: 'video_url'; video_url: { url: string } }
+        | { type: 'input_audio'; input_audio: { data: string; format: 'wav' | 'mp3' } }
+        | { type: 'audio_url'; audio_url: { url: string } }
         | { type: 'text'; text: string }
       > = [];
       for (const vu of videos) {
         parts.push({ type: 'video_url', video_url: { url: vu.trim() } });
+      }
+      if (audioB64) {
+        const mime = turn.audioMime || 'audio/wav';
+        const fmt = audioFormatForOpenAi(mime);
+        if (fmt) {
+          parts.push({ type: 'input_audio', input_audio: { data: audioB64, format: fmt } });
+        } else {
+          parts.push({ type: 'audio_url', audio_url: { url: `data:${mime};base64,${audioB64}` } });
+        }
       }
       for (const b64 of imgs) {
         parts.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } });
@@ -5653,12 +5686,28 @@ export async function chatCompletionHistoryAtBase(
   const hasVideoPart = messages.some(
     (m) => Array.isArray(m.content) && m.content.some((p) => p.type === 'video_url')
   );
+  const hasAudioPart = messages.some(
+    (m) =>
+      Array.isArray(m.content) &&
+      m.content.some((p) => p.type === 'input_audio' || p.type === 'audio_url')
+  );
   try {
     return await postChat(messages);
   } catch (err) {
-    if (!hasVideoPart) throw err;
-    const retryTurns = turns.map((t) => ({ ...t, videoUrls: undefined }));
-    return await postChat(turnsToOpenAiChatMessages(retryTurns));
+    if (!hasVideoPart && !hasAudioPart) throw err;
+    try {
+      const retryNoAudio = turns.map((t) => ({ ...t, audioBase64: undefined, audioMime: undefined }));
+      return await postChat(turnsToOpenAiChatMessages(retryNoAudio));
+    } catch (err2) {
+      if (!hasVideoPart) throw err2;
+      const retryBare = turns.map((t) => ({
+        ...t,
+        videoUrls: undefined,
+        audioBase64: undefined,
+        audioMime: undefined,
+      }));
+      return await postChat(turnsToOpenAiChatMessages(retryBare));
+    }
   }
 }
 

@@ -51,6 +51,8 @@ function toCompatHistoryTurn(t: ChatCompletionTurn) {
     imageBase64: t.role === 'user' ? t.imageBase64 : undefined,
     imageBase64s: t.role === 'user' ? t.imageBase64s : undefined,
     videoUrls: t.role === 'user' ? t.videoUrls : undefined,
+    audioBase64: t.role === 'user' ? t.audioBase64 : undefined,
+    audioMime: t.role === 'user' ? t.audioMime : undefined,
   };
 }
 
@@ -755,6 +757,12 @@ export const callGeminiChatWithHistory = async (
             : 'video/mp4';
         parts.push({ fileData: { fileUri: uri, mimeType: mime } });
       }
+      if (t.audioBase64) {
+        const mime = (t.audioMime || 'audio/wav').split(';')[0] || 'audio/wav';
+        parts.push({
+          inlineData: { data: t.audioBase64, mimeType: mime.startsWith('audio/') ? mime : 'audio/wav' },
+        });
+      }
       for (const b64 of imgs) {
         parts.push({
           inlineData: { data: b64, mimeType: 'image/jpeg' },
@@ -776,24 +784,42 @@ export const callGeminiChatWithHistory = async (
       return textParts.map((part) => part.text).join('');
     };
 
+    const isAudioInline = (p: { inlineData?: { mimeType?: string } }) =>
+      !!p.inlineData?.mimeType && p.inlineData.mimeType.startsWith('audio/');
+    const stripAv = (payload: typeof contents, opts: { video?: boolean; audio?: boolean }) =>
+      payload.map((c) => {
+        if (!('parts' in c) || !Array.isArray(c.parts)) return c;
+        return {
+          ...c,
+          parts: c.parts.filter((p) => {
+            if (opts.video && 'fileData' in p && p.fileData) return false;
+            if (opts.audio && isAudioInline(p)) return false;
+            return true;
+          }),
+        };
+      });
+
     const hasFileVideo = contents.some(
       (c) =>
         Array.isArray((c as { parts?: unknown[] }).parts) &&
         (c as { parts: Array<{ fileData?: unknown }> }).parts.some((p) => !!p.fileData)
     );
+    const hasAudio = contents.some(
+      (c) =>
+        Array.isArray((c as { parts?: unknown[] }).parts) &&
+        (c as { parts: Array<{ inlineData?: { mimeType?: string } }> }).parts.some((p) => isAudioInline(p))
+    );
     let responseText = '';
     try {
       responseText = await runNative(contents);
     } catch (err) {
-      if (!hasFileVideo) throw err;
-      const withoutVideo = contents.map((c) => {
-        if (!('parts' in c) || !Array.isArray(c.parts)) return c;
-        return {
-          ...c,
-          parts: c.parts.filter((p) => !('fileData' in p && p.fileData)),
-        };
-      });
-      responseText = await runNative(withoutVideo);
+      if (!hasFileVideo && !hasAudio) throw err;
+      try {
+        responseText = await runNative(stripAv(contents, { video: true }));
+      } catch (err2) {
+        if (!hasAudio) throw err2;
+        responseText = await runNative(stripAv(contents, { video: true, audio: true }));
+      }
     }
 
     if (!responseText) {

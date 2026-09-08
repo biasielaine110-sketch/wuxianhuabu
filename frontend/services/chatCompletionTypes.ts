@@ -6,6 +6,9 @@ export type ChatCompletionTurn = {
   imageBase64s?: string[];
   /** 仅 user：公开 http(s) 视频地址，供支持 video_url / Gemini fileData 的对话接口 */
   videoUrls?: string[];
+  /** 仅 user：从成片抽出的音轨（无 data: 前缀） */
+  audioBase64?: string;
+  audioMime?: string;
 };
 
 export type ChatCompletionResult = {
