@@ -44,6 +44,22 @@ import {
 import { useCanvasStore } from '../stores/canvasStore';
 
 /** 本轮是否要在对话回复的同时出图（避免长模板正文里的「生图」误触发） */
+function distillChatImagePrompt(raw: string): string {
+  let t = (raw || '').replace(/^\[生图\]\s*/, '').trim();
+  const userQ = t.match(/用户问题[：:]\s*([\s\S]+)$/);
+  if (userQ) t = userQ[1].replace(/^\[生图\]\s*/, '').trim();
+  const looksLikePreset =
+    t.length > 500 &&
+    (t.includes('【任务】') ||
+      t.includes('【角色定位】') ||
+      t.includes('根据我连入对话窗口的视频') ||
+      t.includes('【导演讲戏·分镜时间轴】'));
+  if (!t || looksLikePreset) {
+    return '根据对话中已识别的人物外貌、服饰、场景与构图，生成一张健康可发布的电影级静帧。画面干净，不要血腥、色情、违禁标识或写实名人脸。';
+  }
+  return t.slice(0, 1000);
+}
+
 function chatTurnWantsImages(raw: string): boolean {
   const t = (raw || '').trim();
   if (!t) return false;
@@ -488,7 +504,9 @@ export function createCanvasGenerationApi(
 
     try {
       const wantImages = chatTurnWantsImages(inputText);
-      const imagePromptBody = (imageGenPrompt || strippedQuestion.replace(/^\[生图\]\s*/, '')).trim();
+      const imagePromptBody = distillChatImagePrompt(
+        imageGenPrompt || strippedQuestion.replace(/^\[生图\]\s*/, '')
+      );
       if (inputText.startsWith('[生图]') && !imagePromptBody) {
         setNodes((prev) =>
           prev.map((n) =>
@@ -559,7 +577,16 @@ export function createCanvasGenerationApi(
         let contextSummary = '';
         const MAX_CONTEXT_CHARS = 2000;
         if (recentMessages.length > 0) {
-          const userMsgs = recentMessages.filter((m) => m.role === 'user').slice(-10);
+          const userMsgs = recentMessages
+            .filter((m) => m.role === 'user')
+            .slice(-10)
+            .filter((m) => {
+              const content = typeof m.content === 'string' ? m.content : String(m.content);
+              if (content.length > 400 && (content.includes('【任务】') || content.includes('【角色定位】'))) {
+                return false;
+              }
+              return true;
+            });
           if (userMsgs.length > 0) {
             const truncatedMsgs = userMsgs.map((m) => {
               const content = typeof m.content === 'string' ? m.content : String(m.content);
@@ -626,6 +653,14 @@ export function createCanvasGenerationApi(
           replyImages.push(...imgSettled.value);
         } else if (imgSettled.status === 'rejected') {
           imageError = imgSettled.reason instanceof Error ? imgSettled.reason.message : String(imgSettled.reason || '生图失败');
+        }
+        if (chatSettled.status === 'rejected' && replyImages.length > 0) {
+          const chatErr =
+            chatSettled.reason instanceof Error
+              ? chatSettled.reason.message
+              : String(chatSettled.reason || '对话失败');
+          if (!replyText) replyText = `已根据您的描述生成 ${replyImages.length} 张图片。`;
+          replyText = `${replyText}\n\n（文字对话未成功：${chatErr}）`;
         }
         if (!replyText && replyImages.length === 0) {
           const chatErr =

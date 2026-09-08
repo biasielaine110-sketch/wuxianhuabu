@@ -187,6 +187,48 @@ function isErgouFetchBase(base: string): boolean {
   return /ergou-api|ergouapi\.com/i.test(base);
 }
 
+function parseOpenAiCompatErrorPayload(text: string): { code: string; message: string } {
+  const raw = (text || '').trim();
+  try {
+    const json = JSON.parse(raw) as {
+      error?: { code?: unknown; message?: unknown; type?: unknown };
+      message?: unknown;
+      code?: unknown;
+    };
+    const err = json.error && typeof json.error === 'object' ? json.error : json;
+    const code = String(err.code || json.code || '').trim();
+    const message = String(err.message || json.message || '').trim();
+    return { code, message };
+  } catch {
+    return { code: '', message: raw.slice(0, 400) };
+  }
+}
+
+function isContentPolicyError(code: string, message: string): boolean {
+  const blob = `${code} ${message}`.toLowerCase();
+  return (
+    code.toLowerCase() === 'content_policy' ||
+    /内容安全|content[_\s-]?policy|safety.?intercept|content.?filter|moderation/i.test(blob)
+  );
+}
+
+function formatOpenAiCompatHttpError(
+  status: number,
+  text: string,
+  kind: 'generations-json' | 'image-edit',
+  fetchBase?: string
+): string {
+  const parsed = parseOpenAiCompatErrorPayload(text);
+  if (isContentPolicyError(parsed.code, parsed.message)) {
+    return (
+      `生图被内容安全拦截${parsed.message ? `：${parsed.message}` : '。'}` +
+      ' 请改写这一轮的画面描述（避免暴力血腥、色情、真人侵权等），不要把整段反推模板直接拿去生图；也可换一个生图通道重试。'
+    );
+  }
+  const body = text.slice(0, 800);
+  return `兼容接口错误 (${status}): ${body}${openAiCompatFailureHint(status, kind, fetchBase)}`;
+}
+
 function openAiCompatFailureHint(
   status: number,
   kind: 'generations-json' | 'image-edit',
@@ -827,7 +869,13 @@ async function fetchUrlAsBase64(imageUrl: string, signal?: AbortSignal, bearerTo
   }
   const res = await fetch(fetchUrl, { mode: 'cors', credentials: 'omit', signal, headers });
   let okRes = res;
-  if (!res.ok && (res.status === 502 || res.status === 504 || res.status === 503) && fetchUrl !== absoluteUrl) {
+  const skipDirectRetry = /files\.toapis\.(xyz|com)/i.test(absoluteUrl);
+  if (
+    !res.ok &&
+    (res.status === 502 || res.status === 504 || res.status === 503) &&
+    fetchUrl !== absoluteUrl &&
+    !skipDirectRetry
+  ) {
     try {
       const retry = await fetch(absoluteUrl, { mode: 'cors', credentials: 'omit', signal });
       if (retry.ok) okRes = retry;
@@ -4717,9 +4765,7 @@ async function postJsonAtBase<T>(base: string, path: string, body: unknown, apiK
   });
   const text = await res.text();
   if (!res.ok) {
-    throw new Error(
-      `兼容接口错误 (${res.status}): ${text.slice(0, 800)}${openAiCompatFailureHint(res.status, 'generations-json', fetchBase)}`
-    );
+    throw new Error(formatOpenAiCompatHttpError(res.status, text, 'generations-json', fetchBase));
   }
   try {
     return JSON.parse(text) as T;
@@ -5010,9 +5056,7 @@ async function editImagesAtOpenAiCompatibleBase(
       });
       const text = await res.text();
       if (!res.ok) {
-        throw new Error(
-          `图生图接口错误 (${res.status})${openAiCompatFailureHint(res.status, 'image-edit')}: ${text.slice(0, 800)}`
-        );
+        throw new Error(formatOpenAiCompatHttpError(res.status, text, 'image-edit', rewriteRemoteOpenAiCompatBaseForBrowserCors(baseNorm)));
       }
       return openAiStyleGenerationJsonToBase64(JSON.parse(text) as unknown, signal, apiKey, baseNorm);
     };

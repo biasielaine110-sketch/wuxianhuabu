@@ -15,6 +15,58 @@ function injectSitePasswordPlugin(password: string): Plugin {
   };
 }
 
+/** ToAPIs 图床 http-proxy 常 502；开发环境用 Node fetch 同源转发，避免浏览器 CORS */
+function toapisCdnFetchPlugin(): Plugin {
+  const routes: Array<[string, string]> = [
+    ['/cdn-files-toapis-xyz', 'https://files.toapis.xyz'],
+    ['/cdn-files-toapis', 'https://files.toapis.com'],
+  ];
+  const middleware = async (
+    req: { method?: string; url?: string },
+    res: { statusCode: number; setHeader: (k: string, v: string) => void; end: (b?: unknown) => void },
+    next: () => void
+  ) => {
+    const raw = req.url || '';
+    const method = (req.method || 'GET').toUpperCase();
+    const hit = routes.find(([prefix]) => raw === prefix || raw.startsWith(`${prefix}/`) || raw.startsWith(`${prefix}?`));
+    if (!hit || (method !== 'GET' && method !== 'HEAD')) {
+      next();
+      return;
+    }
+    const [prefix, origin] = hit;
+    const pathAndQuery = raw.slice(prefix.length) || '/';
+    try {
+      const upstream = await fetch(`${origin}${pathAndQuery.startsWith('/') ? pathAndQuery : `/${pathAndQuery}`}`, {
+        method,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+          Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+          Referer: `${origin}/`,
+        },
+        redirect: 'follow',
+      });
+      const buf = Buffer.from(await upstream.arrayBuffer());
+      res.statusCode = upstream.status;
+      res.setHeader('Content-Type', upstream.headers.get('content-type') || 'image/png');
+      res.setHeader('Cache-Control', 'public, max-age=600');
+      res.end(buf);
+    } catch (e) {
+      res.statusCode = 502;
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.end(`ToAPIs 图床拉取失败: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  return {
+    name: 'toapis-cdn-fetch',
+    configureServer(server) {
+      server.middlewares.use(middleware);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(middleware);
+    },
+  };
+}
+
 /** 浏览器常会请求 /favicon.ico，避免控制台 404 */
 function faviconFallbackPlugin(): Plugin {
   return {
@@ -669,9 +721,8 @@ const toapisFileCdnProxy = {
     secure: false,
     configure(proxy) {
       let jimengWarned = false;
-      proxy.on('error', (err, _req, res) => {
+      proxy.on('error', (err, req, res) => {
         // 同一次 dev server 启动内只提示一次，避免 ECONNREFUSED 反复触发把日志刷屏
-        // 让人误以为前端崩了。前端 JimengAuthProvider 已有 try/catch 兜底，不影响页面功能。
         if (!jimengWarned) {
           jimengWarned = true;
           console.warn('[vite proxy /api/jimeng] 即梦后端未启动 (npm start --prefix server)，本次 dev 会话内不再重复提示。');
@@ -679,7 +730,9 @@ const toapisFileCdnProxy = {
         }
         const r = res as { headersSent?: boolean; writeHead?: (c: number, h?: unknown) => void; end?: (s?: string) => void };
         if (r && !r.headersSent && typeof r.writeHead === 'function') {
-          r.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
+          const url = String((req as { url?: string }).url || '');
+          const softCheck = /\/session(?:\?|$)/.test(url) || /\/health(?:\?|$)/.test(url);
+          r.writeHead(softCheck ? 200 : 502, { 'Content-Type': 'application/json; charset=utf-8' });
           r.end?.(
             JSON.stringify({
               ok: false,
@@ -763,6 +816,7 @@ export default defineConfig(({ mode }) => {
       },
       plugins: [
         react(),
+        toapisCdnFetchPlugin(),
         injectSitePasswordPlugin(sitePassword),
         faviconFallbackPlugin(),
         aliyunMaasOssFetchPlugin(),

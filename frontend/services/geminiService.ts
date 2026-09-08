@@ -653,8 +653,43 @@ export const callGeminiChatWithHistory = async (
         }
       }
       if (!key) {
+        const oaKey = getOpenAiSavedKey().trim();
+        if (oaKey) {
+          const oaBase = getOpenAiBaseUrl();
+          const upstream = /toapis/i.test(oaBase) ? 'deepseek-v4-flash' : modelName;
+          return {
+            text: await chatCompletionHistoryAtBase(
+              oaBase,
+              oaKey,
+              upstream,
+              slice.map(toCompatHistoryTurn)
+            ),
+          };
+        }
+        const coKey = getCodesonlineChatSavedKey().trim();
+        if (coKey) {
+          return {
+            text: await chatCompletionHistoryAtBase(
+              '/codesonline-chat-api',
+              coKey,
+              resolveCodesonlineChatUpstreamModelId('gpt-5.5-codesonline'),
+              slice.map(toCompatHistoryTurn)
+            ),
+          };
+        }
+        const hfsyKey = getHfsySavedKey().trim();
+        if (hfsyKey) {
+          return {
+            text: await chatCompletionHistoryAtBase(
+              getHfsyBaseUrl(),
+              hfsyKey,
+              resolveHfsyChatUpstreamModelId('gpt-5.6-terra-hfsy'),
+              slice.map(toCompatHistoryTurn)
+            ),
+          };
+        }
         throw new Error(
-          '使用 DeepSeek 对话：请在「设置 → API」填写「DeepSeek API Key」；或将接口类型设为「OpenAI 兼容」并把 Base URL 设为 https://api.deepseek.com/v1 后填写同一密钥。'
+          '当前对话节点是 DeepSeek，但未填写 DeepSeek API Key。请在对话窗口换一个已配置密钥的模型（如 codesonline / ToAPIs / hfsy），或在「设置 → API」填写 DeepSeek Key。'
         );
       }
       return { text: await chatCompletionHistoryAtBase(
