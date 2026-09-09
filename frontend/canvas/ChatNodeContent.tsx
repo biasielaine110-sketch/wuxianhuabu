@@ -1378,8 +1378,10 @@ export function ChatNodeContent({
             </optgroup>
             <optgroup label="hfsyapi.cn">
               <option value="gpt-image-2-hfsy">GPT Image 2（hfsyapi.cn）</option>
+              <option value="gpt-image-2.5-hfsy">GPT Image 2.5（hfsyapi.cn）</option>
               <option value="gpt-image-2pro-hfsy">GPT Image 2 Pro（hfsyapi.cn）</option>
               <option value="gpt-image-2pro-4k-hfsy">GPT Image 2 Pro 4K（hfsyapi.cn）</option>
+              <option value="seedream-5.0-pro-hfsy">Seedream 5.0 Pro（hfsyapi.cn）</option>
               <option value="nano-banana-2-hfsy">Nano-Banana 2（hfsyapi.cn）</option>
               <option value="nano-banana-pro-hfsy">Nano-Banana Pro（hfsyapi.cn）</option>
               <option value="gemini-3.1-flash-image-preview-hfsy">Gemini 3.1 Flash Image Preview（hfsyapi.cn）</option>

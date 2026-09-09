@@ -10,6 +10,7 @@ export function isGptImage2CanvasModelId(id: string): boolean {
   return (
     id === 'gpt-image-2-codesonline' ||
     id === 'gpt-image-2-hfsy' ||
+    id === 'gpt-image-2.5-hfsy' ||
     id === 'gpt-image-2pro-hfsy' ||
     id === 'gpt-image-2' ||
     id === 'gpt-image-2-vip' ||
@@ -79,6 +80,7 @@ export function isToApisNanoBanana2Model(id: string): boolean {
 export function clampCanvasImageResolution(modelId: string, resolution?: string): string {
   const r = (resolution || '2k').toLowerCase().replace(/\s/g, '');
   if (isToApisNanoBanana2Model(modelId) && r === '4k') return '2k';
+  if ((modelId || '').trim() === 'seedream-5.0-pro-hfsy' && r === '4k') return '2k';
   if (isDeepWhiteImageModel(modelId)) return clampDeepWhiteImageResolution(modelId, r);
   return r || '2k';
 }

@@ -3447,12 +3447,14 @@ function resolveEditModel(modelName: string): string {
   return 'gpt-image-1';
 }
 
-function isHfsyImageModel(modelName: string): boolean {
+export function isHfsyImageModel(modelName: string): boolean {
   const m = (modelName || '').trim();
   return (
     m === 'gpt-image-2-hfsy' ||
+    m === 'gpt-image-2.5-hfsy' ||
     m === 'gpt-image-2pro-hfsy' ||
     m === 'gpt-image-2pro-4k-hfsy' ||
+    m === 'seedream-5.0-pro-hfsy' ||
     m === 'nano-banana-2-hfsy' ||
     m === 'nano-banana-pro-hfsy' ||
     m === 'gemini-3.1-flash-image-preview-hfsy' ||
@@ -3468,6 +3470,8 @@ function toHfsyImageModel(modelName: string): string {
   if (m === 'gemini-3-pro-image-preview-hfsy') return 'gemini-3-pro-image-preview';
   if (m === 'gpt-image-2pro-hfsy') return 'gpt-image-2pro';
   if (m === 'gpt-image-2pro-4k-hfsy') return 'gpt-image-2pro-4k';
+  if (m === 'gpt-image-2.5-hfsy') return 'gpt-image-2.5';
+  if (m === 'seedream-5.0-pro-hfsy') return 'seedream-5.0-pro';
   return 'gpt-image-2';
 }
 
@@ -3766,6 +3770,12 @@ function hfsyGptImage2Size(aspectRatio: string, pixelSize?: string, modelName?: 
     if (res === '4k') table = HFSY_GPT_IMAGE_2_4K_ASPECT_SIZES;
     else if (res === '1k') table = HFSY_GPT_IMAGE_2_ASPECT_SIZES;
     else table = HFSY_GPT_IMAGE_2_2K_ASPECT_SIZES;
+  } else if (m === 'seedream-5.0-pro-hfsy') {
+    // Seedream 5.0 Pro：按节点分辨率映射 1K/2K（4K 按 2K）
+    table = res === '1k' ? HFSY_GPT_IMAGE_2_ASPECT_SIZES : HFSY_GPT_IMAGE_2_2K_ASPECT_SIZES;
+  } else if (m === 'gpt-image-2.5-hfsy') {
+    // gpt-image-2.5：与 gpt-image-2 相同，仅 1K 档位
+    table = HFSY_GPT_IMAGE_2_ASPECT_SIZES;
   }
 
   return table[key] || table['1:1'];
